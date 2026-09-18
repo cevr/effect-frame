@@ -1,0 +1,25 @@
+{
+  "name": "@effect-frame/example-notes",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "bun build src/client.tsx --target browser --format esm --outdir dist",
+    "test": "bun test tests/",
+    "dev": "bun run src/server.ts",
+    "terminal": "bun run src/terminal.tsx"
+  },
+  "dependencies": {
+    "@effect-frame/actor": "workspace:*",
+    "@effect-frame/view": "workspace:*"
+  },
+  "devDependencies": {
+    "@happy-dom/global-registrator": "20.14.5",
+    "@opentui/core": "0.5.11",
+    "happy-dom": "20.14.5"
+  },
+  "peerDependencies": {
+    "effect": "catalog:"
+  }
+}

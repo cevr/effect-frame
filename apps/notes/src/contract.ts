@@ -1,0 +1,41 @@
+import { contract } from "@effect-frame/actor/client";
+import { Schema } from "effect";
+
+/**
+ * The notes contract. This file is browser safe: it imports only `effect`
+ * and the client entry of the actor package. The page, the terminal client,
+ * and the server all import it, so all three agree on one wire.
+ */
+
+export const Note = Schema.Struct({
+  id: Schema.String,
+  text: Schema.String,
+  done: Schema.Boolean,
+});
+export type Note = Schema.Schema.Type<typeof Note>;
+
+export const NotesKey = Schema.Struct({ tenant: Schema.String, list: Schema.String });
+export type NotesKey = Schema.Schema.Type<typeof NotesKey>;
+
+export const NotesSnapshot = Schema.Struct({ notes: Schema.Array(Note) });
+export type NotesSnapshot = Schema.Schema.Type<typeof NotesSnapshot>;
+
+export const Add = Schema.TaggedStruct("Add", { id: Schema.String, text: Schema.String });
+export const Toggle = Schema.TaggedStruct("Toggle", { id: Schema.String });
+export const Remove = Schema.TaggedStruct("Remove", { id: Schema.String });
+
+export const NotesMessage = Schema.Union([Add, Toggle, Remove]);
+export type NotesMessage = Schema.Schema.Type<typeof NotesMessage>;
+
+export const Notes = contract("Notes", {
+  version: 1,
+  key: NotesKey,
+  snapshot: NotesSnapshot,
+  message: NotesMessage,
+});
+
+/** The one list this example serves. */
+export const demoKey: NotesKey = { tenant: "demo", list: "inbox" };
+
+/** The id under which the server embeds the resume payload in the page. */
+export const resumeScriptId = "notes";

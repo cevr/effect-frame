@@ -1,0 +1,227 @@
+import { platformFetch, registerDom } from "./dom-setup.js";
+
+registerDom();
+
+import { serverOnly } from "@effect-frame/actor";
+import type { ActorTransport, Applied, SnapshotOf } from "@effect-frame/actor/client";
+import { CommandId, HttpTransport, ref, resumeCodec } from "@effect-frame/actor/client";
+import { Dom, mount, render } from "@effect-frame/view";
+import { make as makeTuiHost } from "@effect-frame/view/opentui";
+import type { TestRendererSetup } from "@opentui/core/testing";
+import { createTestRenderer } from "@opentui/core/testing";
+import { Effect, Layer, Option, Schema } from "effect";
+import { describe, expect, it } from "effect-bun-test";
+import { Notes, demoKey, resumeScriptId } from "../src/contract.js";
+import { inProcess } from "../src/notes.server.js";
+import { NotesPage } from "../src/page.js";
+import type { NotesRuntime, RunningServer } from "../src/server.js";
+import { makeRuntime, makeServer } from "../src/server.js";
+import { NotesTerminal } from "../src/terminal-view.js";
+
+/**
+ * The end-to-end proof. One contract, one real Bun server on a free port,
+ * and two live clients: a hydrated browser page and a terminal. Nothing is
+ * mocked: both clients talk HTTP to the same actor.
+ */
+
+const Resume = resumeCodec(Notes);
+const id = Schema.decodeSync(CommandId);
+
+/** happy-dom replaces `fetch`; the actor transport needs the real one. */
+const realFetch: HttpTransport.FetchLike = (input, init) => platformFetch(input, init);
+
+const transportTo = (url: string): Layer.Layer<ActorTransport> =>
+  HttpTransport.layer({
+    baseUrl: `${url}/actors`,
+    reconnect: HttpTransport.defaultReconnect,
+  }).pipe(Layer.provide(Layer.succeed(HttpTransport.Fetch, realFetch)));
+
+/** One host for the whole test: two servers over it share one set of actors. */
+const notesRuntime = Effect.acquireRelease(
+  Effect.sync((): NotesRuntime => makeRuntime(inProcess)),
+  (runtime) => Effect.promise(() => runtime.dispose()),
+);
+
+const serve = (runtime: NotesRuntime, port: number) =>
+  Effect.acquireRelease(
+    Effect.promise(() => makeServer({ port, runtime })),
+    (server) => Effect.promise(() => server.stop()),
+  );
+
+const fetchText = Effect.fn("test.fetchText")(function* (url: string) {
+  const response = yield* Effect.promise(() => platformFetch(url));
+  return yield* Effect.promise(() => response.text());
+});
+
+/** Put a server page into the document the way a browser would. */
+const install = (page: string) =>
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      document.body.innerHTML = page.slice(
+        page.indexOf("<main"),
+        page.indexOf('<script type="module"'),
+      );
+      return Option.getOrElse(Option.fromNullishOr(document.getElementById("app")), () =>
+        document.createElement("main"),
+      );
+    }),
+    () => Effect.sync(() => void (document.body.innerHTML = "")),
+  );
+
+const readResume = Effect.gen(function* () {
+  const embedded = Dom.readJsonScript(resumeScriptId);
+  return yield* Option.match(embedded, {
+    onNone: () => Effect.succeed(Option.none<Applied<SnapshotOf<typeof Notes>>>()),
+    onSome: (json) => Effect.map(Effect.orDie(Schema.decodeEffect(Resume)(json)), Option.some),
+  });
+});
+
+const hydratePage = Effect.fn("test.hydratePage")(function* (root: HTMLElement) {
+  const resume = yield* readResume;
+  const hydration = Dom.hydrate(root);
+  yield* mount(NotesPage, { key: demoKey, resume }, hydration.host, root);
+  yield* render;
+  return yield* hydration.finish;
+});
+
+const textOf = (root: HTMLElement, selector: string): string =>
+  Option.match(Option.fromNullishOr(root.querySelector(selector)), {
+    onNone: () => "",
+    onSome: (node) => Option.getOrElse(Option.fromNullishOr(node.textContent), () => ""),
+  });
+
+/** Flush the reactive graph, draw one terminal frame, and read it back. */
+const draw = Effect.fn("test.draw")(function* (setup: TestRendererSetup) {
+  yield* render;
+  yield* Effect.promise(() => setup.renderOnce());
+  return setup.captureCharFrame();
+});
+
+/** Wait until the page shows what the actor already committed. */
+const settle = Effect.fn("test.settle")(function* (check: Effect.Effect<boolean>) {
+  yield* Effect.repeat(Effect.andThen(Effect.sleep("25 millis"), render), {
+    while: () => Effect.map(check, (done) => !done),
+    times: 80,
+  });
+});
+
+describe("notes end to end", () => {
+  it.scopedLive("the server renders the page, the bundle, and the resume payload", () =>
+    Effect.gen(function* () {
+      const runtime = yield* notesRuntime;
+      const server = yield* serve(runtime, 0);
+
+      const page = yield* fetchText(server.url);
+      expect(page).toContain('<main id="app">');
+      expect(page).toContain('<ul id="list"></ul>');
+      expect(page).toContain('<p id="count">0</p>');
+      expect(page).toContain(`id="${resumeScriptId}"`);
+      expect(page).toContain('src="/client.js"');
+
+      const bundle = yield* fetchText(`${server.url}/client.js`);
+      expect(bundle.length).toBeGreaterThan(0);
+      expect(bundle).not.toContain(serverOnly);
+      expect(bundle).not.toContain("@effect-frame/actor/src/mailbox-store/MailboxStore");
+      expect(bundle).not.toContain("@effect-frame/actor/src/host/Authorizer");
+    }),
+  );
+
+  it.scopedLive("the browser hydrates the server page and follows a second client", () =>
+    Effect.gen(function* () {
+      const runtime = yield* notesRuntime;
+      const server = yield* serve(runtime, 0);
+      const page = yield* fetchText(server.url);
+      const root = yield* install(page);
+
+      // The port is only known once the server listens.
+      // oxlint-disable-next-line effect/noInlineProvide
+      const report = yield* Effect.provide(hydratePage(root), transportTo(server.url));
+      expect(report.mismatches).toEqual([]);
+
+      // oxlint-disable-next-line effect/noInlineProvide
+      const writer = yield* Effect.provide(ref(Notes, demoKey), transportTo(server.url));
+      yield* writer.call(
+        { _tag: "Add", id: "n1", text: "buy milk" },
+        { commandId: id("c1"), timeout: "2 seconds" },
+      );
+
+      yield* settle(Effect.sync(() => textOf(root, "#count") === "1"));
+      expect(textOf(root, "#list li span")).toBe("buy milk");
+      expect(textOf(root, "#count")).toBe("1");
+    }),
+  );
+
+  it.scopedLive("the terminal sees the same actor at the same revision", () =>
+    Effect.gen(function* () {
+      const runtime = yield* notesRuntime;
+      const server = yield* serve(runtime, 0);
+      const page = yield* fetchText(server.url);
+      const root = yield* install(page);
+
+      // oxlint-disable-next-line effect/noInlineProvide
+      const browser = yield* Effect.provide(
+        Effect.andThen(hydratePage(root), ref(Notes, demoKey)),
+        transportTo(server.url),
+      );
+
+      const setup: TestRendererSetup = yield* Effect.promise(() =>
+        createTestRenderer({ width: 60, height: 12 }),
+      );
+      yield* Effect.addFinalizer(() => Effect.sync(() => setup.renderer.destroy()));
+
+      // oxlint-disable-next-line effect/noInlineProvide
+      const terminal = yield* Effect.provide(
+        Effect.andThen(
+          mount(
+            NotesTerminal,
+            { key: demoKey, resume: Option.none() },
+            makeTuiHost(setup.renderer),
+            setup.renderer.root,
+          ),
+          ref(Notes, demoKey),
+        ),
+        transportTo(server.url),
+      );
+
+      yield* browser.call(
+        { _tag: "Add", id: "n2", text: "walk dog" },
+        { commandId: id("c2"), timeout: "2 seconds" },
+      );
+
+      const target = yield* browser.applied.get;
+      yield* settle(
+        Effect.map(terminal.applied.get, (applied) => applied.revision === target.revision),
+      );
+      const frame = yield* draw(setup);
+      expect(frame).toContain("walk dog");
+      expect(textOf(root, "#list li span")).toBe("walk dog");
+      expect(yield* terminal.applied.get).toEqual(yield* browser.applied.get);
+    }),
+  );
+
+  it.scopedLive("a restarted server keeps the actors and the page follows again", () =>
+    Effect.gen(function* () {
+      const runtime = yield* notesRuntime;
+      const first: RunningServer = yield* serve(runtime, 0);
+      const page = yield* fetchText(first.url);
+      const root = yield* install(page);
+
+      // oxlint-disable-next-line effect/noInlineProvide
+      const client = yield* Effect.provide(
+        Effect.andThen(hydratePage(root), ref(Notes, demoKey)),
+        transportTo(first.url),
+      );
+
+      yield* Effect.promise(() => first.stop());
+      yield* serve(runtime, first.port);
+
+      yield* client.call(
+        { _tag: "Add", id: "n3", text: "after restart" },
+        { commandId: id("c3"), timeout: "5 seconds" },
+      );
+
+      yield* settle(Effect.sync(() => textOf(root, "#count") === "1"));
+      expect(textOf(root, "#list li span")).toBe("after restart");
+    }),
+  );
+});

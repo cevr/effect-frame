@@ -19,6 +19,22 @@
         "typescript": "7.0.2",
       },
     },
+    "apps/notes": {
+      "name": "@effect-frame/example-notes",
+      "version": "0.0.0",
+      "dependencies": {
+        "@effect-frame/actor": "workspace:*",
+        "@effect-frame/view": "workspace:*",
+      },
+      "devDependencies": {
+        "@happy-dom/global-registrator": "20.14.5",
+        "@opentui/core": "0.5.11",
+        "happy-dom": "20.14.5",
+      },
+      "peerDependencies": {
+        "effect": "catalog:",
+      },
+    },
     "packages/actor": {
       "name": "@effect-frame/actor",
       "version": "0.0.0",
@@ -74,6 +90,8 @@
   },
   "packages": {
     "@effect-frame/actor": ["@effect-frame/actor@workspace:packages/actor"],
+
+    "@effect-frame/example-notes": ["@effect-frame/example-notes@workspace:apps/notes"],
 
     "@effect-frame/host-celld": ["@effect-frame/host-celld@workspace:packages/host-celld"],
 

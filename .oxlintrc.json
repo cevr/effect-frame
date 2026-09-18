@@ -122,6 +122,20 @@
         "effect/noGlobals": "off",
         "node/no-process-env": "off"
       }
+    },
+    {
+      "files": [
+        "apps/notes/src/server.ts",
+        "apps/notes/src/client.tsx",
+        "apps/notes/src/terminal.tsx",
+        "apps/notes/tests/**"
+      ],
+      "rules": {
+        "effect/noGlobals": "off",
+        "effect/noAsyncFunction": "off",
+        "effect/noNewPromise": "off",
+        "node/no-process-env": "off"
+      }
     }
   ],
   "ignorePatterns": [

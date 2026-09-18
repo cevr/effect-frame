@@ -12,7 +12,7 @@ import {
 } from "effect";
 import { Event, Machine, State } from "effect-machine";
 import { TestClock } from "effect/testing";
-import { describe, expect, it } from "effect-bun-test";
+import { describe, expect, it, yieldFibers } from "effect-bun-test";
 import { Behavior, CommandId, MailboxStore, durable } from "@effect-frame/actor";
 import type { DurableOptions } from "@effect-frame/actor";
 
@@ -215,6 +215,20 @@ describe("durable actor", () => {
       const latest = yield* store.latest;
       expect(Option.map(latest, (committed) => committed.revision)).toEqual(Option.some(2));
       expect(yield* store.pending).toEqual([]);
+    }),
+  );
+
+  withStore("a machine's initial state does not spend a revision", () =>
+    Effect.gen(function* () {
+      const store = yield* MailboxStore;
+      const upload = yield* durable(uploadOptions).pipe(Effect.provideService(Gate, gateThatOpens));
+      yield* yieldFibers;
+      expect(yield* store.latest).toEqual(Option.none());
+      const started = yield* upload.call(UploadEvent.Start({ file: "a.txt" }), {
+        commandId: id("c1"),
+        timeout: "1 second",
+      });
+      expect(started.revision).toBe(1);
     }),
   );
 

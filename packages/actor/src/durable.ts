@@ -79,13 +79,12 @@ export const durable = Effect.fn("Actor.durable")(function* <State, Message, R>(
   const closed = yield* Deferred.make<never, ActorStopped>();
   const signal = yield* Queue.unbounded<Wake<State>>();
   const wake = yield* PubSub.unbounded<StoredReceipt>();
+  // The behavior may emit the state it opened with. That is not a change:
+  // seed the dedupe with the encoded state the actor started from, so a
+  // fresh machine does not spend a revision on its initial state and a
+  // recovered one does not spend a revision on the state it restored.
   const lastEncoded = yield* Ref.make(
-    yield* Effect.map(store.latest, (latest) =>
-      Option.match(latest, {
-        onNone: () => Option.none<string>(),
-        onSome: (c) => Option.some(c.state),
-      }),
-    ),
+    Option.some(yield* Effect.orDie(encodeState(restored.state))),
   );
 
   const processCommand = Effect.fn("Actor.durable.processCommand")(function* (

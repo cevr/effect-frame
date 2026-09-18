@@ -143,3 +143,7 @@ _Avoid_: Requirement, test case, checklist item.
 **Durable work record**:
 Stored information from which unfinished actor work can resume after a host restart.
 _Avoid_: Persisted fiber.
+
+**Shown branch**:
+A conditional region of a view while its condition holds. A shown branch owns every node it and its descendants created, and owns its own subscriptions; hiding it ends both. A hidden branch does not exist: it holds no node and observes no source.
+_Avoid_: Hidden branch, cached branch.

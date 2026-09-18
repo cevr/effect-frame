@@ -176,12 +176,7 @@ describe("browser view", () => {
       const root = yield* makeRoot;
       const outer = yield* spawn(Behavior.value(true));
       const inner = yield* spawn(Behavior.value(false));
-      yield* mount(
-        NestedToggle,
-        { outer: outer.state, inner: inner.state },
-        Dom.host,
-        root,
-      );
+      yield* mount(NestedToggle, { outer: outer.state, inner: inner.state }, Dom.host, root);
       expect(root.querySelector("#title")).toBeNull();
 
       // The inner branch reveals and the outer branch hides in one update.
@@ -195,21 +190,35 @@ describe("browser view", () => {
       yield* render;
       expect(textOf(root, "#title")).toBe("t");
       expect(root.querySelectorAll("#title").length).toBe(1);
+
+      // The reverse order leaves nothing behind either.
+      yield* outer.call(Value.Set(false));
+      yield* inner.call(Value.Set(false));
+      yield* render;
+      expect(root.querySelector("#title")).toBeNull();
+      expect(root.querySelector("section")?.childNodes.length).toBe(0);
     }),
   );
 
-  it.scoped("a hidden Show branch stops its bindings and resumes them on show", () =>
+  it.scoped("a hidden Show branch keeps no source subscribed", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const open = yield* spawn(Behavior.value(true));
       const count = yield* spawn(Behavior.value(0));
+      // A plain counter: the projection is a pure function the stream runs,
+      // and counting its runs is what this test observes.
+      let reads = 0;
+      const counted = select(count.state, (n) => {
+        reads += 1;
+        return String(n);
+      });
       const Watched = View.make((_props: NoProps) =>
         Effect.gen(function* () {
           const view = yield* View.Context;
           return (
             <section>
               <Show when={open.state}>
-                <p id="watched">{view.bind(select(count.state, (n) => String(n)))}</p>
+                <p id="watched">{view.bind(counted)}</p>
               </Show>
             </section>
           );
@@ -222,12 +231,13 @@ describe("browser view", () => {
       yield* render;
       expect(root.querySelector("#watched")).toBeNull();
 
-      // The branch is gone, so this change writes to nothing.
+      // The branch's scope is closed, so its subscription projects nothing.
+      const before = reads;
       yield* count.call(Value.Set(7));
       yield* render;
-      expect(root.querySelector("#watched")).toBeNull();
+      expect(reads).toBe(before);
 
-      // Showing it again rebuilds the branch against the current value.
+      // Showing it again subscribes afresh, against the current value.
       yield* open.call(Value.Set(true));
       yield* render;
       expect(textOf(root, "#watched")).toBe("7");

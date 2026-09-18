@@ -1,6 +1,5 @@
 import type { Source } from "@effect-frame/actor";
-import type { Scope } from "effect";
-import { Effect, Match, Option, Predicate, Queue, Stream } from "effect";
+import { Effect, Exit, Match, Option, Predicate, Queue, Scope, Stream } from "effect";
 import type { Accessor } from "@solidjs/signals";
 import { createRenderEffect, createRoot, createSignal, flush } from "@solidjs/signals";
 import type { Cleanup, Host, PropertyValue, StaticProps } from "./host.js";
@@ -105,19 +104,31 @@ const anchorAfter = <HostNode>(
 // Tracking
 // ---------------------------------------------------------------------------
 
+/** What a build produced, and the closer for the scope it was built in. */
+interface Owned<A> {
+  readonly value: A;
+  readonly close: () => void;
+}
+
 /**
  * The tracker turns a `Source` into a reactive accessor. It is synchronous by
  * design: host nodes are built inside the Solid root, and a `For` row that
  * appears long after mount must plan its own body there.
  *
  * `track` reads the source's current value and forks its subscription into
- * the view scope, both through the context captured at mount. A source whose
- * `get` suspends cannot be bound, and saying so here keeps every later phase
- * free of Effects.
+ * whichever scope is current, through the context captured at mount. A source
+ * whose `get` suspends cannot be bound, and saying so here keeps every later
+ * phase free of Effects.
+ *
+ * `owned` runs a build under a fresh child scope and hands back the closer.
+ * Whatever that build tracks is subscribed in that child, so closing it ends
+ * exactly those subscriptions. A `Show` branch uses it; the mount root is the
+ * scope everything else falls back to.
  */
 interface Tracker {
   readonly track: <A>(source: Source<A>) => Accessor<A>;
   readonly register: (cleanup: Cleanup) => void;
+  readonly owned: <A>(build: () => A) => Owned<A>;
 }
 
 interface Renderer<HostNode> {
@@ -128,8 +139,13 @@ interface Renderer<HostNode> {
 const makeTracker = Effect.fn("View.makeTracker")(function* () {
   const cleanups: Array<Cleanup> = [];
   const context = yield* Effect.context<Scope.Scope>();
+  const mountScope = yield* Effect.scope;
   const runSync = Effect.runSyncWith(context);
   const runFork = Effect.runForkWith(context);
+
+  // The scope a subscription forks into. `owned` swaps it for the duration of
+  // one build, so a branch's subscriptions land in the branch's own scope.
+  let current: Scope.Scope = mountScope;
 
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
@@ -146,16 +162,27 @@ const makeTracker = Effect.fn("View.makeTracker")(function* () {
     }
     const cell = makeCell(source.get.pipe(runSync));
     runFork(
-      Effect.forkScoped(
+      Effect.forkIn(
         Stream.runForEach(source.changes, (value) => Effect.sync(() => cell.write(value))),
+        current,
       ),
     );
     return cell.read;
   };
 
+  const owned = <A>(build: () => A): Owned<A> => {
+    const outer = current;
+    const child = Scope.forkUnsafe(outer);
+    current = child;
+    const value = build();
+    current = outer;
+    return { value, close: () => void runFork(Scope.close(child, Exit.void)) };
+  };
+
   return {
     track,
     register: (cleanup: Cleanup) => void cleanups.push(cleanup),
+    owned,
   } satisfies Tracker;
 });
 
@@ -201,8 +228,13 @@ const plan = <HostNode>(renderer: Renderer<HostNode>, node: Node): Build<HostNod
         ),
       Element: (element) => planElement(renderer, element),
       For: (list) => planFor(renderer, list),
+      // The branch is planned lazily, inside the owner that shows it, so a
+      // hidden branch has tracked no source. `For` plans each row the same
+      // way, for the same reason.
       Show: (branch) =>
-        show(renderer.host, renderer.tracker.track(branch.when), plan(renderer, branch.children)),
+        show(renderer.tracker, renderer.host, renderer.tracker.track(branch.when), () =>
+          plan(renderer, branch.children),
+        ),
     }),
   );
 
@@ -256,30 +288,80 @@ const sequence =
     sync();
   };
 
+/**
+ * A branch that is currently drawn: the span it occupies and the reactive
+ * owner that keeps it live. Hidden is the absence of one, so there is no
+ * state describing a branch that has nodes but no owner, or the reverse.
+ */
+interface Branch<HostNode> {
+  readonly slot: Slot<HostNode>;
+  readonly dispose: () => void;
+}
+
+/**
+ * A branch exists only while it is shown. Showing plans and builds it inside
+ * its own reactive owner, exactly as a `For` row is built; hiding disposes
+ * that owner and removes the span it holds. The branch's own slot is the
+ * single record of what it owns, so a nested `Show` that reveals content
+ * underneath this one reports upward through `changed` and this slot stays
+ * true. Nothing survives a hide: a hidden branch holds no host node, keeps no
+ * source subscribed, and runs no binding.
+ */
 const show =
   <HostNode>(
+    tracker: Tracker,
     host: Host<HostNode>,
     when: Accessor<boolean>,
-    child: Build<HostNode>,
+    child: () => Build<HostNode>,
   ): Build<HostNode> =>
   (parent, slot, changed) => {
-    const inner: Slot<HostNode> = { nodes: [] };
-    const apply = (visible: boolean): void => {
-      if (visible) {
-        if (inner.nodes.length === 0) {
-          child(parent, inner, () => {});
-        }
-        slot.nodes = inner.nodes;
-        changed();
-        return;
-      }
-      for (const node of inner.nodes) {
+    let branch: Option.Option<Branch<HostNode>> = Option.none();
+
+    const build = (): Branch<HostNode> => {
+      const inner: Slot<HostNode> = { nodes: [] };
+      // One reactive owner and one Effect scope per shown branch: the render
+      // effects live in the first, the source subscriptions in the second.
+      const branchOwner = tracker.owned(() =>
+        createRoot((disposeBranch) => {
+          child()(parent, inner, () => {
+            slot.nodes = inner.nodes;
+            changed();
+          });
+          return disposeBranch;
+        }),
+      );
+      return {
+        slot: inner,
+        dispose: () => {
+          branchOwner.value();
+          branchOwner.close();
+        },
+      };
+    };
+
+    const tearDown = (shown: Branch<HostNode>): void => {
+      shown.dispose();
+      for (const node of shown.slot.nodes) {
         host.remove(parent, node);
       }
-      inner.nodes = [];
-      slot.nodes = [];
+    };
+
+    const apply = (visible: boolean): void => {
+      if (visible === Option.isSome(branch)) {
+        return;
+      }
+      if (visible) {
+        const shown = build();
+        branch = Option.some(shown);
+        slot.nodes = shown.slot.nodes;
+      } else {
+        Option.match(branch, { onNone: () => {}, onSome: tearDown });
+        branch = Option.none();
+        slot.nodes = [];
+      }
       changed();
     };
+
     apply(when());
     createRenderEffect(when, apply, { defer: true });
   };

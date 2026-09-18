@@ -160,9 +160,76 @@ The `@effect-frame/host-celld` package now runs these checks. The receipt for ev
 
 All ten assertions across these four rows passed. The store also passes the shared `MailboxStore` conformance suite over an in-memory SQLite fake, in `packages/host-celld/tests/storage-store.test.ts`.
 
+### Generic host proof
+
+Rows a to d use a hand-written counter Durable Object. They prove the store, not the framework wire. The generic host proof replaces that fixture with the shipped one.
+
+`packages/host-celld/src/frame-host.ts` exports `defineFrameHost`. It builds a Durable Object class from a list of `AnyImplementation` values. One object holds one actor instance, because the worker routes one address to one object. The class serves the generic actor wire and nothing else: `POST /send`, `POST /call`, `POST /snapshot`, and `GET /changes`. The client is the shipped `HttpTransport` and `ref`. No proof code knows the host is a Durable Object.
+
+The fixture is `packages/host-celld/fixture-contract/`. Its worker routes `/actors/:contract/:version/:key/<verb>` to the object named `contract@version/key` and rewrites the inner URL to the bare verb. It hosts two contracts. `Counter` is a reducer. `Upload` is a `Behavior.machine` whose `Uploading` state carries a `.task` that sleeps for a duration the state holds, so a kill during the sleep is a kill during machine work.
+
+The receipt for every row below is `packages/host-celld/scripts/contract-proof.ts`. Run it with `bun run proof:contract` in `packages/host-celld`. It is not in the default gate, like `proof:celld`. Both proofs share process control in `packages/host-celld/scripts/celld-process.ts`.
+
+| Row | Kill point or test                         | Result                                                                                                                                                 |
+| --- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| e   | Committed state and receipt across SIGKILL | A call commits at revision 1. SIGKILL, restart: the snapshot restores it, the retried ID returns the stored receipt, a new command reaches revision 2. |
+| f   | Same ID, different payload, over the wire  | The generic wire returns `CommandConflict` with status 409. The committed state does not change.                                                       |
+| g   | Kill during machine work                   | `Start` commits `Uploading`. SIGKILL 500 ms into a 4000 ms task. After a wake, the task runs again and commits `Done` one revision on.                 |
+| h   | `changes` event stream from the celld host | A subscriber receives the new revision as a server-sent event.                                                                                         |
+
+All twelve assertions across these four rows passed. The exact output:
+
+```
+celld binary: /Users/cvr/Developer/personal/effect-frame/.tools/celld/bin/celld
+proof dir:    <rift>/.proof/celld-contract
+
+rows:
+  PASS  e. a call over the generic wire commits and returns revision 1
+  PASS  e. after SIGKILL and restart the committed state is restored
+  PASS  e. the retried command ID returns the stored receipt and does not reapply
+  PASS  e. a new command after the restart reaches revision 2 and state 8
+  PASS  f. the same ID with a different payload is a typed CommandConflict
+  PASS  f. the rejected command left the committed state alone
+  PASS  g. the Start command commits Uploading
+  PASS  g. the wake snapshot shows the machine still in Uploading, work unfinished
+  PASS  g. machine work resumed after the restart and committed Done one revision on
+  PASS  g. Done arrived one full task run after the wake, so the work re-ran
+  PASS  g. the snapshot after the resume is Done, so the mailbox drained
+  PASS  h. the changes event stream delivers the new revision over the wire
+
+| row | check                                                            | result |
+| --- | ---------------------------------------------------------------- | ------ |
+| e   | a call over the generic wire commits and returns revision 1      | PASS   |
+| e   | after SIGKILL and restart the committed state is restored        | PASS   |
+| e   | the retried command ID returns the stored receipt and does not r | PASS   |
+| e   | a new command after the restart reaches revision 2 and state 8   | PASS   |
+| f   | the same ID with a different payload is a typed CommandConflict  | PASS   |
+| f   | the rejected command left the committed state alone              | PASS   |
+| g   | the Start command commits Uploading                              | PASS   |
+| g   | the wake snapshot shows the machine still in Uploading, work unf | PASS   |
+| g   | machine work resumed after the restart and committed Done one re | PASS   |
+| g   | Done arrived one full task run after the wake, so the work re-ra | PASS   |
+| g   | the snapshot after the resume is Done, so the mailbox drained    | PASS   |
+| h   | the changes event stream delivers the new revision over the wire | PASS   |
+
+all 12 checks passed
+```
+
+Row g is the destination proof. It measures the wall time, not only the end state. `Done` arrives at least one full task run after the wake. The task therefore ran again from the start. It did not resume a saved fiber, and it was not skipped.
+
+#### The wake obligation
+
+Machine work resumes on the next wake, not on its own. A wake is one of two things: the alarm an admission transaction armed, or any request the object receives. Row g uses the second: after the restart the proof sends one `snapshot` request, which is exactly the first request a reconnecting client sends. The object then opens the instance, restores `Uploading`, and re-enters the task.
+
+An idle-time heartbeat alarm is not implemented. An object whose machine sits mid-task, with no pending command and no client, stays dormant until something calls it. `alarm()` in `defineFrameHost` covers the armed case: the first request writes the address into a `hosted_address` row in the same storage, and the alarm reads that row back and opens the instance with no client request. Nothing arms a wake for mid-task machine work alone. State a heartbeat alarm as required work before this host serves unattended machine work.
+
+#### A machine spends one revision before any command
+
+`Behavior.machine` emits the state it hydrated on its `changes` stream when it opens. The durable actor commits that as an autonomous advance. A fresh machine therefore commits its initial state as revision 1, and the first command lands at revision 2. This is `packages/actor/src/durable.ts` behavior and predates this proof. Row g asserts the relations between revisions, not fixed numbers, so it measures recovery and not that starting cost. Decide whether that first advance should be suppressed before a machine contract ships.
+
 ### Still not executed
 
-The remaining matrix rows need a controlled external-effect service, a machine-step barrier, or a second process: kill during the state and receipt transaction, kill during a timer or async machine step, kill after external success and before a local checkpoint, a persisted failure result, alarm retry exhaustion, and a stale worker completion after a retry. SIGTERM graceful shutdown, hot reload, and hibernation are separate cases. Workflow recovery, SSR and hydration, OpenTUI, cloud deployment, and paid resource allocation remain unrun.
+Row g now covers a kill during an async machine step. The remaining matrix rows need a controlled external-effect service or a second process: kill during the state and receipt transaction, kill after external success and before a local checkpoint, a persisted failure result, alarm retry exhaustion, and a stale worker completion after a retry. An idle-time heartbeat alarm for mid-task machine work is not implemented, so a dormant object with no pending command and no client does not resume on its own. SIGTERM graceful shutdown, hot reload, and hibernation are separate cases. Workflow recovery, SSR and hydration, OpenTUI, cloud deployment, and paid resource allocation remain unrun.
 
 A local one-node proof covers process loss with the local disk retained. It does not prove machine loss, S3 consistency, follower failover, network partitions, or the Alchemy ECS deployment. No shared source cache was changed.
 

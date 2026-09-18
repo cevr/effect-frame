@@ -5,13 +5,18 @@ import { ActorTransport } from "../transport.js";
 import {
   AddressBody,
   CallBody,
+  QueryBody,
   SendBody,
   WireAddress,
+  WireApplied,
   WireError,
   WireProjection,
+  WireQueryError,
+  WireQueryValue,
   WireReceipt,
   eventPrefix,
   paths,
+  queryStatusOf,
   statusOf,
 } from "./wire.js";
 
@@ -34,9 +39,13 @@ const decodeBody = <S extends Schema.Codec<unknown, unknown>>(schema: S) => {
 const decodeSend = decodeBody(SendBody);
 const decodeCall = decodeBody(CallBody);
 const decodeAddress = decodeBody(AddressBody);
+const decodeQueryBody = decodeBody(QueryBody);
 const encodeReceipt = Schema.encodeEffect(Schema.fromJsonString(WireReceipt));
 const encodeProjection = Schema.encodeEffect(Schema.fromJsonString(WireProjection));
+const encodeApplied = Schema.encodeEffect(Schema.fromJsonString(WireApplied));
+const encodeQueryValue = Schema.encodeEffect(Schema.fromJsonString(WireQueryValue));
 const encodeError = Schema.encodeEffect(Schema.fromJsonString(WireError));
+const encodeQueryError = Schema.encodeEffect(Schema.fromJsonString(WireQueryError));
 const decodeQuery = Schema.decodeEffect(
   Schema.Struct({ ...WireAddress.fields, after: Schema.Finite }),
 );
@@ -56,6 +65,18 @@ const respond = <A>(
     Effect.flatMap((value) => Effect.map(Effect.orDie(encode(value)), (text) => json(200, text))),
     Effect.catch((error) =>
       Effect.map(Effect.orDie(encodeError(error)), (text) => json(statusOf(error), text)),
+    ),
+  );
+
+/** The query verb has its own failure union and its own status map. */
+const respondQuery = <A>(
+  result: Effect.Effect<A, WireQueryError>,
+  encode: (value: A) => Effect.Effect<string, Schema.SchemaError>,
+): Effect.Effect<Response> =>
+  result.pipe(
+    Effect.flatMap((value) => Effect.map(Effect.orDie(encode(value)), (text) => json(200, text))),
+    Effect.catch((error) =>
+      Effect.map(Effect.orDie(encodeQueryError(error)), (text) => json(queryStatusOf(error), text)),
     ),
   );
 
@@ -113,7 +134,13 @@ export const make: Effect.Effect<WebHandler, never, ActorTransport> = Effect.gen
     if (path.endsWith(paths.send)) {
       return decodeSend(request).pipe(
         Effect.flatMap((body) =>
-          respond(transport.send(body.address, body.commandId, body.payload), encodeReceipt),
+          respond(
+            Effect.map(
+              transport.send(body.address, body.commandId, body.payload, body.active),
+              (result) => ({ ...result.receipt, refreshed: result.refreshed }),
+            ),
+            encodeReceipt,
+          ),
         ),
         Effect.catch((reason) => Effect.succeed(badRequest(reason))),
       );
@@ -122,13 +149,28 @@ export const make: Effect.Effect<WebHandler, never, ActorTransport> = Effect.gen
       return decodeCall(request).pipe(
         Effect.flatMap((body) =>
           respond(
-            transport.call(
-              body.address,
-              body.commandId,
-              body.payload,
-              Duration.millis(body.timeoutMillis),
+            Effect.map(
+              transport.call(
+                body.address,
+                body.commandId,
+                body.payload,
+                Duration.millis(body.timeoutMillis),
+                body.active,
+              ),
+              (result) => ({ ...result.projection, refreshed: result.refreshed }),
             ),
-            encodeProjection,
+            encodeApplied,
+          ),
+        ),
+        Effect.catch((reason) => Effect.succeed(badRequest(reason))),
+      );
+    }
+    if (path.endsWith(paths.query)) {
+      return decodeQueryBody(request).pipe(
+        Effect.flatMap((body) =>
+          respondQuery(
+            Effect.map(transport.query(body.key), (result) => ({ key: body.key, result })),
+            encodeQueryValue,
           ),
         ),
         Effect.catch((reason) => Effect.succeed(badRequest(reason))),

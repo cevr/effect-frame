@@ -2,16 +2,19 @@ import { Context, Duration, Effect, Layer, Option, Ref, Schedule, Schema, Stream
 import type { Address } from "../contract.js";
 import type { TransportService } from "../transport.js";
 import { ActorTransport } from "../transport.js";
-import type { DurableReceipt } from "../vocabulary.js";
 import { Unreachable } from "../vocabulary.js";
 import {
   AddressBody,
   CallBody,
   CallWireError,
+  QueryBody,
   ReadWireError,
   SendBody,
   SendWireError,
+  WireApplied,
   WireProjection,
+  WireQueryError,
+  WireQueryValue,
   WireReceipt,
   eventPrefix,
   paths,
@@ -40,12 +43,16 @@ const decodeUnknownJson = <S extends Schema.Codec<unknown, unknown>>(schema: S) 
 
 const decodeReceipt = decodeUnknownJson(WireReceipt);
 const decodeProjection = decodeUnknownJson(WireProjection);
+const decodeApplied = decodeUnknownJson(WireApplied);
+const decodeQueryValue = decodeUnknownJson(WireQueryValue);
 const decodeSendError = decodeUnknownJson(SendWireError);
 const decodeCallError = decodeUnknownJson(CallWireError);
 const decodeReadError = decodeUnknownJson(ReadWireError);
+const decodeQueryError = decodeUnknownJson(WireQueryError);
 const encodeSend = Schema.encodeEffect(Schema.fromJsonString(SendBody));
 const encodeCall = Schema.encodeEffect(Schema.fromJsonString(CallBody));
 const encodeAddress = Schema.encodeEffect(Schema.fromJsonString(AddressBody));
+const encodeQuery = Schema.encodeEffect(Schema.fromJsonString(QueryBody));
 
 const make = Effect.fn("ActorTransport.http")(function* (options: HttpClientOptions) {
   const fetch = yield* Fetch;
@@ -71,19 +78,34 @@ const make = Effect.fn("ActorTransport.http")(function* (options: HttpClientOpti
       return yield* Effect.flatMap(decodeError(text), (error) => Effect.fail(error));
     });
 
-  const send: TransportService["send"] = (address, commandId, payload) =>
+  const send: TransportService["send"] = (address, commandId, payload, active) =>
     Effect.gen(function* () {
-      const body = yield* Effect.orDie(encodeSend({ address, commandId, payload }));
-      const receipt = yield* decodeReceipt(yield* post(paths.send, body, decodeSendError));
-      const durable: DurableReceipt = receipt;
-      return durable;
+      const body = yield* Effect.orDie(encodeSend({ address, commandId, payload, active }));
+      const wire = yield* decodeReceipt(yield* post(paths.send, body, decodeSendError));
+      return {
+        receipt: { commandId: wire.commandId, admitted: wire.admitted, committed: wire.committed },
+        refreshed: wire.refreshed,
+      };
     });
 
-  const call: TransportService["call"] = (address, commandId, payload, timeout) =>
+  const call: TransportService["call"] = (address, commandId, payload, timeout, active) =>
     Effect.gen(function* () {
       const timeoutMillis = Duration.toMillis(timeout);
-      const body = yield* Effect.orDie(encodeCall({ address, commandId, payload, timeoutMillis }));
-      return yield* decodeProjection(yield* post(paths.call, body, decodeCallError));
+      const body = yield* Effect.orDie(
+        encodeCall({ address, commandId, payload, timeoutMillis, active }),
+      );
+      const wire = yield* decodeApplied(yield* post(paths.call, body, decodeCallError));
+      return {
+        projection: { revision: wire.revision, snapshot: wire.snapshot },
+        refreshed: wire.refreshed,
+      };
+    });
+
+  const query: TransportService["query"] = (key) =>
+    Effect.gen(function* () {
+      const body = yield* Effect.orDie(encodeQuery({ key }));
+      const wire = yield* decodeQueryValue(yield* post(paths.query, body, decodeQueryError));
+      return wire.result;
     });
 
   const snapshot: TransportService["snapshot"] = (address) =>
@@ -148,7 +170,7 @@ const make = Effect.fn("ActorTransport.http")(function* (options: HttpClientOpti
       ),
     );
 
-  const transport: TransportService = { send, call, snapshot, changes };
+  const transport: TransportService = { send, call, snapshot, query, changes };
   return transport;
 });
 

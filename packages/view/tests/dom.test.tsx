@@ -1,6 +1,6 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { registerDom } from "./dom-setup.js";
 
-GlobalRegistrator.register();
+registerDom();
 
 import { Behavior, Value, modify, select, spawn } from "@effect-frame/actor";
 import type { LocalActorRef, SetValue, Source } from "@effect-frame/actor";

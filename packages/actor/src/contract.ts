@@ -21,6 +21,8 @@ export interface ActorContract<
   readonly key: Schema.fromJsonString<Key>;
   readonly snapshot: Schema.fromJsonString<Snapshot>;
   readonly message: Schema.fromJsonString<Message>;
+  /** The schemas as given, for embedding inside a larger document. */
+  readonly raw: { readonly key: Key; readonly snapshot: Snapshot; readonly message: Message };
 }
 
 export interface ContractOptions<Key extends Pure, Snapshot extends Pure, Message extends Pure> {
@@ -53,7 +55,21 @@ export const contract = <
   key: Schema.fromJsonString(options.key),
   snapshot: Schema.fromJsonString(options.snapshot),
   message: Schema.fromJsonString(options.message),
+  raw: { key: options.key, snapshot: options.snapshot, message: options.message },
 });
+
+/**
+ * The codec for a revisioned snapshot a server hands a client, so the
+ * client's reference can resume from it. One JSON string carries both.
+ */
+export type ResumeCodec<C extends AnyContract> = Schema.fromJsonString<
+  Schema.Struct<{ readonly revision: typeof Schema.Finite; readonly state: C["raw"]["snapshot"] }>
+>;
+
+export const resumeCodec = <C extends AnyContract>(definition: C): ResumeCodec<C> => {
+  const snapshot: C["raw"]["snapshot"] = definition.raw.snapshot;
+  return Schema.fromJsonString(Schema.Struct({ revision: Schema.Finite, state: snapshot }));
+};
 
 /** Where one actor instance lives on the wire. Every field is a string. */
 export interface Address {

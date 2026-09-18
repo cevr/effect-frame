@@ -16,3 +16,4 @@ export type {
   Tag,
 } from "./jsx-runtime.js";
 export * as Dom from "./hosts/dom.js";
+export * as Html from "./hosts/html.js";

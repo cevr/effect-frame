@@ -11,6 +11,7 @@ export { modify, spawn, type LocalActorRef } from "./actor.js";
 export * from "./vocabulary.js";
 export {
   contract,
+  resumeCodec,
   type ActorContract,
   type Address,
   type AnyContract,

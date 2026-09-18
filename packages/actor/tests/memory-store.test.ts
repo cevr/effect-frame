@@ -1,4 +1,4 @@
 import { MailboxStore } from "@effect-frame/actor";
-import { mailboxStoreConformance } from "./mailbox-store.conformance";
+import { mailboxStoreConformanceLayer } from "./mailbox-store.conformance";
 
-mailboxStoreConformance("memory", MailboxStore.layerMemory);
+mailboxStoreConformanceLayer("memory", MailboxStore.layerMemory);

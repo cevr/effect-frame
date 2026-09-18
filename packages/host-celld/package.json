@@ -1,0 +1,22 @@
+{
+  "name": "@effect-frame/host-celld",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "bun build src/index.ts --target browser --outdir dist --external effect --external effect-machine",
+    "test": "bun test tests/",
+    "fixture": "bun build fixture/index.ts --target browser --format esm --outfile fixture/worker.js",
+    "proof:celld": "bun scripts/crash-harness.ts"
+  },
+  "dependencies": {
+    "@effect-frame/actor": "workspace:*"
+  },
+  "peerDependencies": {
+    "effect": "catalog:"
+  }
+}

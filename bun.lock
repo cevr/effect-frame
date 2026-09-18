@@ -29,6 +29,16 @@
         "effect": "catalog:",
       },
     },
+    "packages/host-celld": {
+      "name": "@effect-frame/host-celld",
+      "version": "0.0.0",
+      "dependencies": {
+        "@effect-frame/actor": "workspace:*",
+      },
+      "peerDependencies": {
+        "effect": "catalog:",
+      },
+    },
     "tooling/checks": {
       "name": "@effect-frame/toolchain-checks",
       "version": "0.0.0",
@@ -43,6 +53,8 @@
   },
   "packages": {
     "@effect-frame/actor": ["@effect-frame/actor@workspace:packages/actor"],
+
+    "@effect-frame/host-celld": ["@effect-frame/host-celld@workspace:packages/host-celld"],
 
     "@effect-frame/toolchain-checks": ["@effect-frame/toolchain-checks@workspace:tooling/checks"],
 

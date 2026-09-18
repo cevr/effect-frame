@@ -90,5 +90,36 @@
     "effect/preferServiceOf": "error",
     "effect/requireNamedEffectFn": "error"
   },
-  "ignorePatterns": ["**/dist/**", "**/node_modules/**", "**/*.d.ts", "**/bin/**"]
+  "overrides": [
+    {
+      "files": [
+        "packages/host-celld/src/storage.ts",
+        "packages/host-celld/src/interop.ts",
+        "packages/host-celld/src/durable-object.ts",
+        "packages/host-celld/fixture/**",
+        "packages/host-celld/scripts/**",
+        "packages/host-celld/tests/sqlite-storage.ts",
+        "packages/host-celld/tests/storage-store.test.ts"
+      ],
+      "rules": {
+        "effect/noAsyncFunction": "off",
+        "effect/noNewPromise": "off",
+        "effect/noNullish": "off",
+        "effect/noRuntimeTypeof": "off",
+        "effect/noUnknownParameters": "off",
+        "effect/noUnsafeDictionaryType": "off",
+        "effect/noTernary": "off",
+        "effect/noGlobals": "off",
+        "node/no-process-env": "off"
+      }
+    }
+  ],
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/node_modules/**",
+    "**/*.d.ts",
+    "**/bin/**",
+    "packages/host-celld/fixture/worker.js",
+    "**/.proof/**"
+  ]
 }

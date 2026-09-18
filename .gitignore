@@ -8,3 +8,4 @@ dist/
 .celld/
 .DS_Store
 .tools/
+.proof/

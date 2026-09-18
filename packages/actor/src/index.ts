@@ -1,25 +1,4 @@
-export * as Behavior from "./behavior.js";
-export { Value } from "./behavior.js";
-export type { SetValue, Turn } from "./behavior.js";
-export {
-  ActorStopped,
-  CommandConflict,
-  CommandId,
-  Uncertain,
-  modify,
-  spawn,
-  type ActorKind,
-  type LocalActorRef,
-  type ActorRef,
-  type Admitted,
-  type Applied,
-  type CallError,
-  type CallOptions,
-  type DurableReceipt,
-  type Receipt,
-  type SendError,
-  type SendOptions,
-} from "./actor.js";
+export * from "./client.js";
 export {
   DurableHostConfig,
   durable,
@@ -34,4 +13,13 @@ export {
   type PendingCommand,
   type StoredReceipt,
 } from "./mailbox-store.js";
-export { select, type Source } from "./source.js";
+export {
+  implement,
+  implementTransparent,
+  serverOnly,
+  type ActorImplementation,
+  type AnyImplementation,
+  type HostedInstance,
+  type ImplementOptions,
+} from "./implement.js";
+export * as ActorHost from "./host.js";

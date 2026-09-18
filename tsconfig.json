@@ -126,7 +126,8 @@
     ],
     "paths": {
       "@effect-frame/toolchain-checks": ["./tooling/checks/src/codec-probe.ts"],
-      "@effect-frame/actor": ["./packages/actor/src/index.ts"]
+      "@effect-frame/actor": ["./packages/actor/src/index.ts"],
+      "@effect-frame/actor/client": ["./packages/actor/src/client.ts"]
     }
   },
   "include": [],

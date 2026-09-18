@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Option, Ref } from "effect";
-import type { CommandId } from "./actor.js";
-import { CommandConflict } from "./actor.js";
+import type { CommandId } from "./vocabulary.js";
+import { CommandConflict } from "./vocabulary.js";
 
 /** A command the actor accepted but has not committed. */
 export interface PendingCommand {

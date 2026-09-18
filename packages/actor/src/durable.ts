@@ -13,12 +13,12 @@ import {
   Stream,
   SubscriptionRef,
 } from "effect";
-import type { ActorRef, Applied, CommandId, DurableReceipt } from "./actor.js";
-import { ActorStopped, Uncertain } from "./actor.js";
+import type { ActorRef, Applied, CommandId, DurableReceipt } from "./vocabulary.js";
+import { ActorStopped, Uncertain } from "./vocabulary.js";
 import type { Behavior } from "./behavior.js";
 import type { PendingCommand, StoredReceipt } from "./mailbox-store.js";
 import { MailboxStore } from "./mailbox-store.js";
-import { fromSubscriptionRef } from "./source.js";
+import { fromSubscriptionRef, select } from "./source.js";
 
 export interface DurableOptions<State, Message, R> {
   readonly behavior: Behavior<State, Message, R>;
@@ -64,13 +64,18 @@ export const durable = Effect.fn("Actor.durable")(function* <State, Message, R>(
 
   const restored = yield* Effect.flatMap(store.latest, (latest) =>
     Option.match(latest, {
-      onNone: () => Effect.succeed(options.behavior.initial),
-      onSome: (committed) => Effect.orDie(decodeState(committed.state)),
+      onNone: () =>
+        Effect.succeed<Applied<State>>({ revision: 0, state: options.behavior.initial }),
+      onSome: (committed) =>
+        Effect.map(Effect.orDie(decodeState(committed.state)), (state): Applied<State> => ({
+          revision: committed.revision,
+          state,
+        })),
     }),
   );
 
-  const turn = yield* options.behavior.open(restored);
-  const state = yield* SubscriptionRef.make(restored);
+  const turn = yield* options.behavior.open(restored.state);
+  const applied = yield* SubscriptionRef.make(restored);
   const closed = yield* Deferred.make<never, ActorStopped>();
   const signal = yield* Queue.unbounded<Wake<State>>();
   const wake = yield* PubSub.unbounded<StoredReceipt>();
@@ -87,12 +92,12 @@ export const durable = Effect.fn("Actor.durable")(function* <State, Message, R>(
     command: PendingCommand,
   ) {
     const message = yield* Effect.orDie(decodeMessage(command.payload));
-    const current = yield* SubscriptionRef.get(state);
-    const next = yield* turn.apply(current, message);
+    const current = yield* SubscriptionRef.get(applied);
+    const next = yield* turn.apply(current.state, message);
     const encoded = yield* Effect.orDie(encodeState(next));
     const receipt = yield* store.commit(command.commandId, encoded);
     yield* Ref.set(lastEncoded, Option.some(encoded));
-    yield* SubscriptionRef.set(state, next);
+    yield* SubscriptionRef.set(applied, { revision: receipt.revision, state: next });
     yield* PubSub.publish(wake, receipt);
   });
 
@@ -104,9 +109,9 @@ export const durable = Effect.fn("Actor.durable")(function* <State, Message, R>(
     if (Option.isSome(previous) && previous.value === encoded) {
       return;
     }
-    yield* store.advance(encoded);
+    const committed = yield* store.advance(encoded);
     yield* Ref.set(lastEncoded, Option.some(encoded));
-    yield* SubscriptionRef.set(state, changed);
+    yield* SubscriptionRef.set(applied, { revision: committed.revision, state: changed });
   });
 
   /** Drain every pending command in admission order, then wait for a wake. */
@@ -204,9 +209,11 @@ export const durable = Effect.fn("Actor.durable")(function* <State, Message, R>(
     return yield* toApplied(outcome.value);
   });
 
+  const appliedSource = fromSubscriptionRef(applied);
   const ref: ActorRef<State, Message, "durable"> = {
     kind: "durable",
-    state: fromSubscriptionRef(state),
+    applied: appliedSource,
+    state: select(appliedSource, (committed) => committed.state),
     send,
     call,
   };

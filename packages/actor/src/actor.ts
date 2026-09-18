@@ -1,98 +1,9 @@
-import type { Duration, Option } from "effect";
-import { Deferred, Effect, Equal, Queue, Ref, Schema, Stream, SubscriptionRef } from "effect";
+import { Deferred, Effect, Equal, Queue, Ref, Stream, SubscriptionRef } from "effect";
 import type { Behavior, SetValue } from "./behavior.js";
 import { Value } from "./behavior.js";
-import type { Source } from "./source.js";
-import { fromSubscriptionRef } from "./source.js";
-
-// ---------------------------------------------------------------------------
-// Vocabulary
-// ---------------------------------------------------------------------------
-
-export const CommandId = Schema.String.pipe(Schema.brand("CommandId"));
-export type CommandId = Schema.Schema.Type<typeof CommandId>;
-
-/** The actor stopped before it processed the message. */
-export class ActorStopped extends Schema.TaggedError<ActorStopped>()("ActorStopped", {}) {}
-
-/** The same command ID arrived with a different payload. */
-export class CommandConflict extends Schema.TaggedError<CommandConflict>()("CommandConflict", {
-  commandId: CommandId,
-}) {}
-
-/**
- * The wait ended before a receipt arrived. The command may still commit.
- * Retry with the same command ID.
- */
-export class Uncertain extends Schema.TaggedError<Uncertain>()("Uncertain", {
-  commandId: CommandId,
-}) {}
-
-/** The result of one processed message. `revision` is the actor's monotonic clock. */
-export interface Applied<State> {
-  readonly revision: number;
-  readonly state: State;
-}
-
-/** Acceptance of a local message. `admitted` is the mailbox admission order. */
-export interface Admitted {
-  readonly admitted: number;
-}
-
-/**
- * Acceptance of a durable command. `committed` is present when the mailbox
- * already holds a receipt for this command ID.
- */
-export interface DurableReceipt {
-  readonly commandId: CommandId;
-  readonly admitted: number;
-  readonly committed: Option.Option<number>;
-}
-
-export type ActorKind = "local" | "durable";
-
-export interface SendOptions {
-  readonly local: void;
-  readonly durable: { readonly commandId: CommandId };
-}
-
-export interface Receipt {
-  readonly local: Admitted;
-  readonly durable: DurableReceipt;
-}
-
-export interface SendError {
-  readonly local: ActorStopped;
-  readonly durable: ActorStopped | CommandConflict;
-}
-
-export interface CallOptions {
-  readonly local: void;
-  readonly durable: { readonly commandId: CommandId; readonly timeout: Duration.Input };
-}
-
-export interface CallError {
-  readonly local: ActorStopped;
-  readonly durable: ActorStopped | CommandConflict | Uncertain;
-}
-
-/**
- * One reference type for local and durable actors. `Kind` selects the
- * receipt, option, and error types, so placement is visible in the type and
- * a durable reference cannot be called without a command ID and a timeout.
- */
-export interface ActorRef<State, Message, Kind extends ActorKind> {
-  readonly kind: Kind;
-  readonly state: Source<State>;
-  readonly send: (
-    message: Message,
-    options: SendOptions[Kind],
-  ) => Effect.Effect<Receipt[Kind], SendError[Kind]>;
-  readonly call: (
-    message: Message,
-    options: CallOptions[Kind],
-  ) => Effect.Effect<Applied<State>, CallError[Kind]>;
-}
+import { fromSubscriptionRef, select } from "./source.js";
+import type { ActorRef, Admitted, Applied } from "./vocabulary.js";
+import { ActorStopped } from "./vocabulary.js";
 
 // ---------------------------------------------------------------------------
 // Local actor
@@ -133,31 +44,33 @@ export const spawn = Effect.fn("Actor.spawn")(function* <State, Message, R>(
   behavior: Behavior<State, Message, R>,
 ) {
   const turn = yield* behavior.open(behavior.initial);
-  const state = yield* SubscriptionRef.make(behavior.initial);
-  const revision = yield* Ref.make(0);
+  const applied = yield* SubscriptionRef.make<Applied<State>>({
+    revision: 0,
+    state: behavior.initial,
+  });
   const admission = yield* Ref.make(0);
   const stopped = yield* Ref.make(false);
   const closed = yield* Deferred.make<never, ActorStopped>();
   const mailbox = yield* Queue.unbounded<Envelope<State, Message>>();
 
   const commitState = (next: State) =>
-    Effect.andThen(
-      Ref.updateAndGet(revision, (n) => n + 1),
-      (applied) => Effect.as(SubscriptionRef.set(state, next), applied),
-    );
+    SubscriptionRef.modify(applied, (current): readonly [Applied<State>, Applied<State>] => {
+      const committed = { revision: current.revision + 1, state: next };
+      return [committed, committed];
+    });
 
   const step = Effect.gen(function* () {
     const envelope = yield* Queue.take(mailbox);
-    const current = yield* SubscriptionRef.get(state);
+    const current = yield* SubscriptionRef.get(applied);
     if (envelope._tag === "Autonomous") {
-      if (!Equal.equals(envelope.state, current)) {
+      if (!Equal.equals(envelope.state, current.state)) {
         yield* commitState(envelope.state);
       }
       return;
     }
-    const next = yield* turn.apply(current, envelope.derive(current));
-    const applied = yield* commitState(next);
-    yield* Deferred.succeed(envelope.reply, { revision: applied, state: next });
+    const next = yield* turn.apply(current.state, envelope.derive(current.state));
+    const committed = yield* commitState(next);
+    yield* Deferred.succeed(envelope.reply, committed);
   });
 
   yield* Effect.addFinalizer(() =>
@@ -199,9 +112,11 @@ export const spawn = Effect.fn("Actor.spawn")(function* <State, Message, R>(
     return yield* awaitReply(reply);
   });
 
+  const appliedSource = fromSubscriptionRef(applied);
   const ref: LocalActorRef<State, Message> = {
     kind: "local",
-    state: fromSubscriptionRef(state),
+    applied: appliedSource,
+    state: select(appliedSource, (committed) => committed.state),
     send,
     call,
     derive,

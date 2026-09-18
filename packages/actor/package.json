@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "bun build src/index.ts --target browser --outdir dist --external effect --external effect-machine",
+    "build": "bun build src/index.ts src/client.ts --target browser --outdir dist --external effect --external effect-machine",
     "test": "bun test tests/"
   },
   "dependencies": {

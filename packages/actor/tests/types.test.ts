@@ -6,6 +6,7 @@ import type {
   Applied,
   CommandConflict,
   DurableReceipt,
+  RemoteFailure,
   SetValue,
   Uncertain,
 } from "@effect-frame/actor";
@@ -17,6 +18,7 @@ import type {
  */
 declare const local: ActorRef<number, SetValue<number>, "local">;
 declare const remote: ActorRef<number, SetValue<number>, "durable">;
+declare const wire: ActorRef<number, SetValue<number>, "remote">;
 declare const message: SetValue<number>;
 declare const commandId: DurableReceipt["commandId"];
 
@@ -48,6 +50,13 @@ const durableSendCanConflict: Equals<
   Effect.Effect<DurableReceipt, ActorStopped | CommandConflict>
 > = true;
 
+const wireCall = () => wire.call(message, { commandId, timeout: "1 second" });
+
+const remoteCallAddsTransportFailures: Equals<
+  ReturnType<typeof wireCall>,
+  Effect.Effect<Applied<number>, ActorStopped | CommandConflict | Uncertain | RemoteFailure>
+> = true;
+
 // @ts-expect-error a durable call requires a command ID and a timeout
 const _durableCallWithoutOptions = () => remote.call(message);
 
@@ -60,5 +69,6 @@ describe("reference types", () => {
     expect(localSendErrorIsStoppedOnly).toBe(true);
     expect(durableCallCanBeUncertain).toBe(true);
     expect(durableSendCanConflict).toBe(true);
+    expect(remoteCallAddsTransportFailures).toBe(true);
   });
 });

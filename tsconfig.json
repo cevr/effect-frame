@@ -129,7 +129,10 @@
       "@effect-frame/actor": ["./packages/actor/src/index.ts"],
       "@effect-frame/actor/client": ["./packages/actor/src/client.ts"],
       "@effect-frame/actor/testing": ["./packages/actor/src/testing/conformance.ts"],
-      "@effect-frame/host-celld": ["./packages/host-celld/src/index.ts"]
+      "@effect-frame/host-celld": ["./packages/host-celld/src/index.ts"],
+      "@effect-frame/view": ["./packages/view/src/index.ts"],
+      "@effect-frame/view/jsx-runtime": ["./packages/view/src/jsx-runtime.ts"],
+      "@effect-frame/view/opentui": ["./packages/view/src/hosts/opentui.ts"]
     }
   },
   "include": [],

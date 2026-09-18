@@ -1,7 +1,9 @@
 import { Effect, Option, Schema, Stream, SubscriptionRef } from "effect";
 import type { Address, AnyContract, KeyOf, MessageOf, SnapshotOf } from "./contract.js";
+import type { QueryKey } from "./query.js";
+import { QueryCache } from "./query-client.js";
 import { fromSubscriptionRef, select } from "./source.js";
-import type { Projection, TransportReadError } from "./transport.js";
+import type { Projection, Refreshed, TransportReadError } from "./transport.js";
 import { ActorTransport } from "./transport.js";
 import type { ActorRef, Applied, DurableCallOptions, DurableSendOptions } from "./vocabulary.js";
 
@@ -75,22 +77,65 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
     ),
   );
 
-  const send = (message: MessageOf<C>, sendOptions: DurableSendOptions) =>
-    Effect.flatMap(Effect.orDie(encodeMessage(message)), (payload) =>
-      transport.send(address, sendOptions.commandId, payload),
+  /**
+   * The caller's active query keys, read from the cache at command time.
+   * A client with no cache declares none and the reply refreshes nothing:
+   * the single-flight field is additive, never required.
+   */
+  const declareActive: Effect.Effect<ReadonlyArray<QueryKey>> = Effect.flatMap(
+    Effect.serviceOption(QueryCache),
+    (cache) =>
+      Option.match(cache, {
+        onNone: () => Effect.succeed<ReadonlyArray<QueryKey>>([]),
+        onSome: (service) => service.active,
+      }),
+  );
+
+  /**
+   * Marks dependent entries stale as the command leaves, then accepts the
+   * refreshed values the reply carried. The view shows stale content for
+   * the whole round trip instead of a gap.
+   */
+  const settle = (refreshed: ReadonlyArray<Refreshed>) =>
+    Effect.flatMap(Effect.serviceOption(QueryCache), (cache) =>
+      Option.match(cache, {
+        onNone: () => Effect.void,
+        onSome: (service) => service.apply(refreshed),
+      }),
     );
+
+  const markDependentsStale = Effect.flatMap(Effect.serviceOption(QueryCache), (cache) =>
+    Option.match(cache, {
+      onNone: () => Effect.void,
+      onSome: (service) => service.invalidate(contract.name),
+    }),
+  );
+
+  const send = (message: MessageOf<C>, sendOptions: DurableSendOptions) =>
+    Effect.gen(function* () {
+      const payload = yield* Effect.orDie(encodeMessage(message));
+      const active = yield* declareActive;
+      yield* markDependentsStale;
+      const result = yield* transport.send(address, sendOptions.commandId, payload, active);
+      yield* settle(result.refreshed);
+      return result.receipt;
+    });
 
   const call = (message: MessageOf<C>, callOptions: DurableCallOptions) =>
     Effect.gen(function* () {
       const payload = yield* Effect.orDie(encodeMessage(message));
-      const projection = yield* transport.call(
+      const active = yield* declareActive;
+      yield* markDependentsStale;
+      const result = yield* transport.call(
         address,
         callOptions.commandId,
         payload,
         callOptions.timeout,
+        active,
       );
-      const next = yield* decodeProjection(contract, projection);
+      const next = yield* decodeProjection(contract, result.projection);
       yield* SubscriptionRef.update(applied, (current) => newest(current, next));
+      yield* settle(result.refreshed);
       return next;
     });
 

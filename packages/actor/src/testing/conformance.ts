@@ -1,7 +1,7 @@
 import type { Layer, Scope } from "effect";
 import { Cause, Effect, Equal, Exit, Inspectable, Option, Schema } from "effect";
-import type { CommandConflict } from "../actor.js";
-import { CommandId } from "../actor.js";
+import type { CommandConflict } from "../vocabulary.js";
+import { CommandId } from "../vocabulary.js";
 import type { Appended, Committed, StoredReceipt } from "../mailbox-store.js";
 import { MailboxStore } from "../mailbox-store.js";
 

@@ -1,4 +1,4 @@
-import { Effect, Stream, SubscriptionRef } from "effect";
+import { Effect, Function, Stream, SubscriptionRef } from "effect";
 
 /**
  * A read-only reactive source. A view binds to it. A selector projects it.
@@ -14,7 +14,10 @@ export const fromSubscriptionRef = <A>(ref: SubscriptionRef.SubscriptionRef<A>):
   changes: SubscriptionRef.changes(ref),
 });
 
-export const select = <A, B>(source: Source<A>, project: (value: A) => B): Source<B> => ({
+export const select: {
+  <A, B>(project: (value: A) => B): (source: Source<A>) => Source<B>;
+  <A, B>(source: Source<A>, project: (value: A) => B): Source<B>;
+} = Function.dual(2, <A, B>(source: Source<A>, project: (value: A) => B): Source<B> => ({
   get: Effect.map(source.get, project),
   changes: Stream.map(source.changes, project),
-});
+}));

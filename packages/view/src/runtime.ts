@@ -144,7 +144,7 @@ const makeTracker = Effect.fn("View.makeTracker")(function* () {
     if (isSignalSource(source)) {
       return source[SignalBacked];
     }
-    const cell = makeCell(runSync(source.get));
+    const cell = makeCell(source.get.pipe(runSync));
     runFork(
       Effect.forkScoped(
         Stream.runForEach(source.changes, (value) => Effect.sync(() => cell.write(value))),

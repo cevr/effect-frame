@@ -1,5 +1,5 @@
 import type { Source } from "@effect-frame/actor";
-import { select as selectSource } from "@effect-frame/actor";
+import { select as selectSource } from "@effect-frame/actor/client";
 import { Context as ServiceMap, Effect, Option } from "effect";
 import type { HostEvent } from "./host.js";
 import type { Node } from "./jsx-runtime.js";

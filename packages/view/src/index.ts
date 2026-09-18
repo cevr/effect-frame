@@ -17,3 +17,20 @@ export type {
 } from "./jsx-runtime.js";
 export * as Dom from "./hosts/dom.js";
 export * as Html from "./hosts/html.js";
+
+// PROTOTYPE (ticket #16): readiness through context.
+export * as QueryState from "./query-state.js";
+export {
+  Await,
+  Errored,
+  ErroredScope,
+  Loading,
+  LoadingScope,
+  orErrored,
+  ready,
+  readyWithStale,
+  type AwaitProps,
+  type ErroredProps,
+  type LoadingProps,
+  type ReadyValue,
+} from "./readiness.js";

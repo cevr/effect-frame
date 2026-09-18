@@ -1,5 +1,6 @@
-import type { Host } from "@effect-frame/view";
-import { View, mount } from "@effect-frame/view";
+import type { Source } from "@effect-frame/actor";
+import type { ErroredScope, Host, LoadingScope, QueryState } from "@effect-frame/view";
+import { Loading, View, mount, orErrored, ready } from "@effect-frame/view";
 import type { Scope } from "effect";
 import { Context, Effect, Schema } from "effect";
 import { describe, expect, test } from "bun:test";
@@ -17,6 +18,9 @@ class Clock extends Context.Service<Clock, { readonly now: Effect.Effect<number>
 class Offline extends Schema.TaggedError<Offline>()("Offline", {}) {}
 
 declare const host: Host<string>;
+
+/** A query state source, as the Query primitive (#17) will hand one over. */
+declare const query: Source<QueryState.QueryState<string, string>>;
 
 /** A view with no input of its own still takes props: an empty record. */
 interface NoProps {
@@ -68,5 +72,96 @@ describe("view types", () => {
     expect(plainNeedsOnlyScope).toBe(true);
     expect(clockStaysVisible).toBe(true);
     expect(failureStaysVisible).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PROTOTYPE (ticket #16): readiness requirements
+// ---------------------------------------------------------------------------
+
+/**
+ * `ready` registers with a scope, so it requires one. The requirement is an
+ * ordinary Effect service, which makes "a read outside a readiness scope" a
+ * compile error rather than something the runtime has to detect and report.
+ */
+const readyOutsideAScope = View.make((_props: NoProps) =>
+  Effect.gen(function* () {
+    const view = yield* View.Context;
+    const title = yield* ready(query, "");
+    return <h1>{view.bind(title)}</h1>;
+  }),
+);
+
+/** Mounting it demands `LoadingScope`, which `mount` does not provide. */
+const readyNeedsLoadingScope: Equals<
+  ReturnType<typeof mountReadyOutside>,
+  Effect.Effect<void, never, LoadingScope | Scope.Scope>
+> = true;
+
+const mountReadyOutside = () => mount(readyOutsideAScope, noProps, host, "root");
+
+/**
+ * The ticket's central claim, stated as a type rather than as a suppressed
+ * error. `ready` with no `Loading` above it leaves `LoadingScope` in `R`, so
+ * the mount is *not* assignable to an Effect that needs only a `Scope`: an
+ * application cannot run it without providing the scope, and there is no
+ * runtime check anywhere that could have caught this instead.
+ *
+ * A `@ts-expect-error` would have been the direct way to write it, but the
+ * missing service is reported by `effect(missingEffectContext)`, a plugin
+ * diagnostic that `@ts-expect-error` does not suppress. Asserting the
+ * assignability is `false` proves the same thing and keeps the file clean.
+ */
+type RunnableWithoutScope = Effect.Effect<void, never, Scope.Scope>;
+
+const readyOutsideIsNotRunnable: Equals<
+  ReturnType<typeof mountReadyOutside> extends RunnableWithoutScope ? true : false,
+  false
+> = true;
+
+/** `Loading` discharges the scope it provides, and leaks nothing. */
+const wrapped = Loading({
+  fallback: <p>loading</p>,
+  children: Effect.gen(function* () {
+    const view = yield* View.Context;
+    const title = yield* ready(query, "");
+    return <h1>{view.bind(title)}</h1>;
+  }),
+});
+
+const loadingDischargesItsScope: Equals<
+  ReturnType<typeof mountWrapped>,
+  Effect.Effect<void, never, Scope.Scope>
+> = true;
+
+const mountWrapped = () => mount(wrapped, {}, host, "root");
+
+/**
+ * `orErrored` requires `ErroredScope` separately, so a `Loading` with no
+ * `Errored` above it still compiles. Only a query whose failure someone must
+ * show pays for an error boundary.
+ */
+const wrappedWithError = Loading({
+  fallback: <p>loading</p>,
+  children: Effect.gen(function* () {
+    const view = yield* View.Context;
+    const title = yield* ready(yield* orErrored(query), "");
+    return <h1>{view.bind(title)}</h1>;
+  }),
+});
+
+const orErroredKeepsItsOwnRequirement: Equals<
+  ReturnType<typeof mountWrappedWithError>,
+  Effect.Effect<void, never, ErroredScope | Scope.Scope>
+> = true;
+
+const mountWrappedWithError = () => mount(wrappedWithError, {}, host, "root");
+
+describe("readiness types", () => {
+  test("ready requires a scope the compiler must see provided", () => {
+    expect(readyNeedsLoadingScope).toBe(true);
+    expect(loadingDischargesItsScope).toBe(true);
+    expect(orErroredKeepsItsOwnRequirement).toBe(true);
+    expect(readyOutsideIsNotRunnable).toBe(true);
   });
 });

@@ -4,6 +4,25 @@ Date: 2026-09-18. Reconciled from the Codex design session (05:20–06:57 UTC) a
 
 These are interface sketches, not an implementation. `effect-frame/*` is a placeholder module path. `View`, `Actor`, `Behavior`, `Route`, and `MailboxStore` are proposed interfaces. Their code has not passed a type check. Domain schemas and small selectors are omitted where they do not affect the interface.
 
+## As built
+
+Updated 2026-09-18 after tickets #6 to #10 closed. The sketches below stay as the design record. This table says what the code does where it differs. Commits are on local `main`; nothing is pushed.
+
+| Sketch                                                              | Built                                                                                                                                                                       | Where                                                               |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `Actor.contract(name, { key, snapshot, messages: { Add: {...} } })` | `contract(name, { version, key, snapshot, message })` where `message` is a `Schema.Union` of `Schema.TaggedStruct` members; no generated constructors, no per-message error | `packages/actor/src/contract.ts`                                    |
+| `Actor.implement(Counter, { behavior, snapshot })`                  | `implement(contract, { behavior, state, snapshot })` and `implementTransparent(contract, behavior)`; `state` is the persisted codec, `snapshot` the public projection       | `packages/actor/src/implement.ts`                                   |
+| `Actor.durable(CounterLive)` at the call site                       | `ActorHost.layer({ implementations, store })`: the host decides placement, the implementation stays a value                                                                 | `packages/actor/src/host.ts`                                        |
+| `Actor.ref(Counter, id)` on the client                              | `ref(contract, key, { resume })` returns `ActorRef<Snapshot, Message, "remote">`; a third kind that adds `RemoteFailure` to the error set                                   | `packages/actor/src/ref.ts`, `vocabulary.ts`                        |
+| `ActorRef.state: Source<State>`                                     | plus `applied: Source<Applied<State>>` carrying the revision on every kind                                                                                                  | `packages/actor/src/vocabulary.ts`                                  |
+| `counter.call(Counter.Add({ amount: 1 }), { timeout })`             | `call(message, { commandId, timeout })`; the client generates the command id; local refs take no options                                                                    | `packages/actor/tests/types.test.ts`                                |
+| one wire, unspecified                                               | JSON verbs `send`, `call`, `snapshot` and a `text/event-stream` of revisions; typed failures as tagged JSON with a status; reconnect from the last revision                 | `packages/actor/src/http/*`                                         |
+| `Route.page({ server: { load, render }, client: { hydrate } })`     | not a primitive yet; composed from `Html.renderToString`, `Html.jsonScript`, `Dom.readJsonScript`, `Dom.hydrate`, `resumeCodec`                                             | `packages/view/src/hosts/html.ts`, `dom.ts`; `apps/notes`           |
+| `View.make` with `bind`, `select`, `event`, `submit`                | as sketched; `Host` is seven operations; `HostEvent { value, preventDefault }` is normalized by the host                                                                    | `packages/view/src/view.ts`, `host.ts`                              |
+| Solid 2 OpenTUI port                                                | not needed: the runtime owns its host interface and uses `@solidjs/signals` as a private scheduler                                                                          | `packages/view/src/runtime.ts`, `hosts/opentui.ts`                  |
+| `MailboxStore` with `claimNext`                                     | `next` (no claim token), `commit`, `advance` for autonomous transitions, `receipt`, `pending`, `latest`; eight-case conformance suite                                       | `packages/actor/src/mailbox-store.ts`, `src/testing/conformance.ts` |
+| celld as the proof host                                             | `StorageStore` over Durable Object SQL; SIGKILL and restart harness; generic Durable Object host over the same wire                                                         | `packages/host-celld`                                               |
+
 ## Superseded forms
 
 The original sketch document used forms that later turns rejected. Do not build these:

@@ -23,3 +23,4 @@ export {
   type ImplementOptions,
 } from "./implement.js";
 export * as ActorHost from "./host.js";
+export * as HttpServer from "./http/server.js";

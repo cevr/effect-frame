@@ -29,4 +29,6 @@ export {
   type TransportSendError,
   type TransportService,
 } from "./transport.js";
+export * as HttpTransport from "./http/client.js";
+export * as Wire from "./http/wire.js";
 export { select, type Source } from "./source.js";

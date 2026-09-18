@@ -63,8 +63,13 @@ export class ContractMismatch extends Schema.TaggedError<ContractMismatch>()("Co
   actual: Schema.Finite,
 }) {}
 
+/** The host could not be reached or answered outside the protocol. */
+export class Unreachable extends Schema.TaggedError<Unreachable>()("Unreachable", {
+  reason: Schema.String,
+}) {}
+
 /** Failures only a transport can raise. */
-export type RemoteFailure = Unauthorized | ContractMismatch | UnknownContract;
+export type RemoteFailure = Unauthorized | ContractMismatch | UnknownContract | Unreachable;
 
 /**
  * `local`: same process, no mailbox store. `durable`: this process over a

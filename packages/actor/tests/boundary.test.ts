@@ -31,6 +31,7 @@ describe("import boundary", () => {
       expect(text).not.toContain("@effect-frame/actor/src/mailbox-store/MailboxStore");
       expect(text).not.toContain("@effect-frame/actor/src/host/Authorizer");
       expect(text).not.toContain("@effect-frame/actor/src/durable/DurableHostConfig");
+      expect(text).not.toContain("method not allowed");
     }),
   );
 

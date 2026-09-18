@@ -74,6 +74,29 @@ const Toggle = View.make((props: ToggleProps) =>
   ),
 );
 
+interface NestedToggleProps {
+  readonly outer: Source<boolean>;
+  readonly inner: Source<boolean>;
+}
+
+/**
+ * An inner `Show` that is hidden while the outer one is visible. The outer
+ * branch owns whatever the inner branch later reveals.
+ */
+const NestedToggle = View.make((props: NestedToggleProps) =>
+  Effect.succeed(
+    <section>
+      <Show when={props.outer}>
+        <>
+          <Show when={props.inner}>
+            <h1 id="title">t</h1>
+          </Show>
+        </>
+      </Show>
+    </section>,
+  ),
+);
+
 const textOf = (root: HTMLElement, selector: string): string =>
   root.querySelector(selector)?.textContent ?? "";
 
@@ -145,6 +168,69 @@ describe("browser view", () => {
       yield* open.call(Value.Set(false));
       yield* render;
       expect(root.querySelector("#body")).toBeNull();
+    }),
+  );
+
+  it.scoped("Show removes what a nested Show revealed in the same update", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const outer = yield* spawn(Behavior.value(true));
+      const inner = yield* spawn(Behavior.value(false));
+      yield* mount(
+        NestedToggle,
+        { outer: outer.state, inner: inner.state },
+        Dom.host,
+        root,
+      );
+      expect(root.querySelector("#title")).toBeNull();
+
+      // The inner branch reveals and the outer branch hides in one update.
+      yield* inner.call(Value.Set(true));
+      yield* outer.call(Value.Set(false));
+      yield* render;
+      expect(root.querySelector("#title")).toBeNull();
+
+      // Showing the outer branch again draws the inner content exactly once.
+      yield* outer.call(Value.Set(true));
+      yield* render;
+      expect(textOf(root, "#title")).toBe("t");
+      expect(root.querySelectorAll("#title").length).toBe(1);
+    }),
+  );
+
+  it.scoped("a hidden Show branch stops its bindings and resumes them on show", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const open = yield* spawn(Behavior.value(true));
+      const count = yield* spawn(Behavior.value(0));
+      const Watched = View.make((_props: NoProps) =>
+        Effect.gen(function* () {
+          const view = yield* View.Context;
+          return (
+            <section>
+              <Show when={open.state}>
+                <p id="watched">{view.bind(select(count.state, (n) => String(n)))}</p>
+              </Show>
+            </section>
+          );
+        }),
+      );
+      yield* mount(Watched, noProps, Dom.host, root);
+      expect(textOf(root, "#watched")).toBe("0");
+
+      yield* open.call(Value.Set(false));
+      yield* render;
+      expect(root.querySelector("#watched")).toBeNull();
+
+      // The branch is gone, so this change writes to nothing.
+      yield* count.call(Value.Set(7));
+      yield* render;
+      expect(root.querySelector("#watched")).toBeNull();
+
+      // Showing it again rebuilds the branch against the current value.
+      yield* open.call(Value.Set(true));
+      yield* render;
+      expect(textOf(root, "#watched")).toBe("7");
     }),
   );
 

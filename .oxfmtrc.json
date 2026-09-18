@@ -3,5 +3,12 @@
   "singleQuote": false,
   "trailingComma": "all",
   "printWidth": 100,
-  "ignorePatterns": ["**/dist/**", "**/node_modules/**", "bun.lock", ".tools/**"]
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/node_modules/**",
+    "bun.lock",
+    ".tools/**",
+    ".proof/**",
+    "packages/host-celld/fixture/worker.js"
+  ]
 }

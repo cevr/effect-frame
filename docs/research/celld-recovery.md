@@ -131,9 +131,40 @@ Sources: [current exports](https://github.com/alchemy-run/alchemy/blob/b415ee69f
 
 ## Evidence and checks not run
 
-Executed: source reads, Git commit and tag checks, GitHub PR and release queries, tool-path and version checks, Docker daemon check, and npm package-version lookup. These are source and environment checks only.
+Executed as source and environment checks: source reads, Git commit and tag checks, GitHub PR and release queries, tool-path and version checks, Docker daemon check, and npm package-version lookup.
 
-Not executed: binary download, package install, celld startup, SIGKILL tests, alarm recovery, transaction rollback tests, workflow recovery, Effect adapter tests, SSR/hydration, OpenTUI, cloud deployment, or paid resource allocation. No shared source cache was changed. The research finding is complete; the runtime proof remains a release gate.
+### Executed against the running runtime
+
+The `@effect-frame/host-celld` package now runs these checks. The receipt for every row below is `packages/host-celld/scripts/crash-harness.ts`. Run it with `bun run proof:celld` in `packages/host-celld`. It is not in the default gate: it needs the binary and takes about 30 seconds.
+
+| Check                           | Result                                                                                                                  |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Binary download and startup     | celld 0.5.0 Darwin arm64 starts. `celld dev --no-watch --logs --port PORT <dir>` prints `ready  http://127.0.0.1:PORT`. |
+| Isolated state directory        | State lives at `<projectDir>/.celld/dev`. The harness copies the fixture into `.proof/celld` and never uses `--clean`.  |
+| SIGKILL and restart             | The launcher spawns one node child. SIGKILL on the child ends the launcher; it does not restart. The harness restarts.  |
+| SQL storage                     | `ctx.storage.sql.exec(query, ...params)` with `.toArray()` serves the mailbox schema.                                   |
+| Transaction commit and rollback | `ctx.storage.transaction(async txn => ...)` commits on resolve and rolls back on reject.                                |
+| Transaction-scoped `setAlarm`   | `await txn.setAlarm(ms)` inside the async transaction publishes the wake at commit, with the command row.               |
+| `alarm()` delivery              | The armed wake calls the object's `alarm()` after a restart, with no client request.                                    |
+| `no_bundle` worker              | `bun build --target browser --format esm` output loads under `"no_bundle": true`. esbuild is not needed.                |
+| `new_sqlite_classes`            | The migration needs `new_sqlite_classes`. `new_classes` is rejected.                                                    |
+
+### Crash matrix rows now proved
+
+| Row | Kill point or test                               | Result                                                                                                                   |
+| --- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| a   | After accepted response, before processing       | The send returns 202 with the command still pending. SIGKILL, restart: the armed alarm drains it with no client request. |
+| b   | After result commit, before HTTP response        | A retry with the same ID and payload returns the stored receipt at the same revision. The state does not change again.   |
+| c   | Concurrent duplicate commands, different payload | The same ID with a different payload returns `CommandConflict` and leaves the committed state alone.                     |
+| d   | Order of several admitted commands               | Three quick sends each apply once. The committed revision reaches 3 and the mailbox drains.                              |
+
+All ten assertions across these four rows passed. The store also passes the shared `MailboxStore` conformance suite over an in-memory SQLite fake, in `packages/host-celld/tests/storage-store.test.ts`.
+
+### Still not executed
+
+The remaining matrix rows need a controlled external-effect service, a machine-step barrier, or a second process: kill during the state and receipt transaction, kill during a timer or async machine step, kill after external success and before a local checkpoint, a persisted failure result, alarm retry exhaustion, and a stale worker completion after a retry. SIGTERM graceful shutdown, hot reload, and hibernation are separate cases. Workflow recovery, SSR and hydration, OpenTUI, cloud deployment, and paid resource allocation remain unrun.
+
+A local one-node proof covers process loss with the local disk retained. It does not prove machine loss, S3 consistency, follower failover, network partitions, or the Alchemy ECS deployment. No shared source cache was changed.
 
 ### Full local source paths
 

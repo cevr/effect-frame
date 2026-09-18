@@ -109,6 +109,13 @@
         "effect/noUnknownParameters": "off",
         "effect/noUnsafeDictionaryType": "off",
         "effect/noTernary": "off",
+        "effect/noNodeBuiltinImport": "off",
+        "effect/noAs": "off",
+        "no-await-in-loop": "off",
+        "effect/noThrowStatement": "off",
+        "effect/noNewError": "off",
+        "effect/noTryCatch": "off",
+        "effect/noSilentCatchAll": "off",
         "effect/noGlobals": "off",
         "node/no-process-env": "off"
       }

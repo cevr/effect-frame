@@ -9,3 +9,4 @@ dist/
 .DS_Store
 .tools/
 .proof/
+packages/host-celld/fixture/worker.js

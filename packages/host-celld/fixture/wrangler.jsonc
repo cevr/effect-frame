@@ -1,0 +1,10 @@
+{
+  "name": "effect-frame-host-celld-proof",
+  "main": "worker.js",
+  "compatibility_date": "2026-01-01",
+  "no_bundle": true,
+  "durable_objects": {
+    "bindings": [{ "name": "ACTOR", "class_name": "FrameActor" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["FrameActor"] }],
+}

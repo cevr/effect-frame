@@ -1,0 +1,17 @@
+{
+  "name": "@effect-frame/toolchain-checks",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/codec-probe.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "bun build src/codec-probe.ts --target browser --outdir dist",
+    "test": "bun test tests/"
+  },
+  "peerDependencies": {
+    "effect": "catalog:"
+  }
+}

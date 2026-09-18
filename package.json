@@ -1,0 +1,40 @@
+{
+  "name": "effect-frame",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "tooling/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "typecheck": "turbo run typecheck",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "gate": "concurrently -n type,style,build -c blue,yellow,cyan \"bun run typecheck\" \"bun run lint && bun run fmt:check\" \"bun run build\" && bun run test",
+    "prepare": "lefthook install && effect-tsgo patch"
+  },
+  "devDependencies": {
+    "@effect/tsgo": "^0.24.3",
+    "@types/bun": "1.4.2",
+    "@typescript/native-preview": "7.0.0-dev.20260707.2",
+    "concurrently": "10.0.5",
+    "effect": "catalog:",
+    "effect-bun-test": "0.3.0",
+    "lefthook": "2.1.14",
+    "oxfmt": "0.68.0",
+    "oxlint": "1.83.0",
+    "oxlint-plugin-effect": "0.12.1",
+    "turbo": "2.10.13",
+    "typescript": "7.0.2"
+  },
+  "packageManager": "bun@1.4.2",
+  "catalog": {
+    "effect": "4.0.0-rc.115",
+    "@effect/platform-bun": "4.0.0-rc.115"
+  }
+}

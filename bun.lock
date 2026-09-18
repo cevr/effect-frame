@@ -34,6 +34,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@effect-frame/actor": "workspace:*",
+        "effect-machine": "0.27.0",
       },
       "peerDependencies": {
         "effect": "catalog:",

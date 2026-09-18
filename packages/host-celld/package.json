@@ -11,10 +11,13 @@
     "build": "bun build src/index.ts --target browser --outdir dist --external effect --external effect-machine",
     "test": "bun test tests/",
     "fixture": "bun build fixture/index.ts --target browser --format esm --outfile fixture/worker.js",
-    "proof:celld": "bun scripts/crash-harness.ts"
+    "proof:celld": "bun scripts/crash-harness.ts",
+    "fixture:contract": "bun build fixture-contract/index.ts --target browser --format esm --outfile fixture-contract/worker.js",
+    "proof:contract": "bun scripts/contract-proof.ts"
   },
   "dependencies": {
-    "@effect-frame/actor": "workspace:*"
+    "@effect-frame/actor": "workspace:*",
+    "effect-machine": "0.27.0"
   },
   "peerDependencies": {
     "effect": "catalog:"

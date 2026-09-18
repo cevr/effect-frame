@@ -21,3 +21,9 @@ export {
   type Reply,
 } from "./frame-actor.js";
 export { FrameActor, type DurableObjectContext } from "./durable-object.js";
+export {
+  defineFrameHost,
+  type FrameHostClass,
+  type FrameHostInstance,
+  type FrameHostOptions,
+} from "./frame-host.js";

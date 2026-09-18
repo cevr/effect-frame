@@ -96,10 +96,13 @@
         "packages/host-celld/src/storage.ts",
         "packages/host-celld/src/interop.ts",
         "packages/host-celld/src/durable-object.ts",
+        "packages/host-celld/src/frame-host.ts",
+        "packages/host-celld/fixture-contract/**",
         "packages/host-celld/fixture/**",
         "packages/host-celld/scripts/**",
         "packages/host-celld/tests/sqlite-storage.ts",
-        "packages/host-celld/tests/storage-store.test.ts"
+        "packages/host-celld/tests/storage-store.test.ts",
+        "packages/host-celld/tests/frame-host.test.ts"
       ],
       "rules": {
         "effect/noAsyncFunction": "off",
@@ -127,6 +130,7 @@
     "**/*.d.ts",
     "**/bin/**",
     "packages/host-celld/fixture/worker.js",
-    "**/.proof/**"
+    "**/.proof/**",
+    "packages/host-celld/fixture-contract/worker.js"
   ]
 }

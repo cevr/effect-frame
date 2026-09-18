@@ -16,7 +16,6 @@ const counterOptions: DurableOptions<number, Add, never> = {
   behavior: counterBehavior,
   state: Schema.fromJsonString(Schema.Finite),
   message: Schema.fromJsonString(Add),
-  pollInterval: "100 millis",
 };
 
 const slowBehavior: Behavior.Behavior<number, Add> = {

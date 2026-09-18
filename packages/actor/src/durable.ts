@@ -1,5 +1,6 @@
 import type { Duration } from "effect";
 import {
+  Context,
   Deferred,
   Effect,
   Hash,
@@ -23,9 +24,21 @@ export interface DurableOptions<State, Message, R> {
   readonly state: Schema.Codec<State, string>;
   /** Encodes a message to the string the mailbox stores. */
   readonly message: Schema.Codec<Message, string>;
-  /** How long `call` sleeps between receipt polls when no wake arrives. */
+}
+
+export interface DurableHostSettings {
+  /** How long `call` sleeps between receipt polls when no early wake arrives. */
   readonly pollInterval: Duration.Input;
 }
+
+/**
+ * Host tuning for durable actors. A host adapter supplies it. Application
+ * code does not see it. The default suits an in-process store.
+ */
+export const DurableHostConfig = Context.Reference<DurableHostSettings>(
+  "@effect-frame/actor/src/durable/DurableHostConfig",
+  { defaultValue: () => ({ pollInterval: "100 millis" }) },
+);
 
 /**
  * Spawn a durable actor over the `MailboxStore` in context. On start it
@@ -37,6 +50,7 @@ export const durable = Effect.fn("Actor.durable")(function* <State, Message, R>(
   options: DurableOptions<State, Message, R>,
 ) {
   const store = yield* MailboxStore;
+  const host = yield* DurableHostConfig;
   const encodeState = Schema.encodeEffect(options.state);
   const decodeState = Schema.decodeEffect(options.state);
   const encodeMessage = Schema.encodeEffect(options.message);
@@ -117,7 +131,7 @@ export const durable = Effect.fn("Actor.durable")(function* <State, Message, R>(
       if (Option.isSome(stored)) {
         return stored;
       }
-      yield* Effect.raceFirst(PubSub.take(subscription), Effect.sleep(options.pollInterval));
+      yield* Effect.raceFirst(PubSub.take(subscription), Effect.sleep(host.pollInterval));
       return Option.none<StoredReceipt>();
     });
     const found = yield* Effect.repeat(poll(), { until: Option.isSome });

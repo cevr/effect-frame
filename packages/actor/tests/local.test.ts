@@ -1,7 +1,7 @@
 import { Effect, Exit, Fiber, Schema, Scope, Stream } from "effect";
 import { describe, expect, it, yieldFibers } from "effect-bun-test";
 import { Event, Machine, State } from "effect-machine";
-import { Behavior, Value, select, spawn } from "@effect-frame/actor";
+import { Behavior, Value, modify, select, spawn } from "@effect-frame/actor";
 
 const CounterState = State({
   Counting: { count: Schema.Finite },
@@ -39,6 +39,18 @@ describe("local actor", () => {
       const applied = yield* count.call(Value.Set(10));
       expect(applied).toEqual({ revision: 1, state: 10 });
       expect(yield* count.state.get).toBe(10);
+    }),
+  );
+
+  it.scoped("modify computes the Set inside the turn, so concurrent updates never lose one", () =>
+    Effect.gen(function* () {
+      const count = yield* spawn(Behavior.value(0));
+      yield* Effect.forEach(
+        Array.from({ length: 50 }, (_, index) => index),
+        () => modify(count, (n) => n + 1),
+        { concurrency: 10, discard: true },
+      );
+      expect(yield* count.state.get).toBe(50);
     }),
   );
 

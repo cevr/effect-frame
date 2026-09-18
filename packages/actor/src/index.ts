@@ -6,8 +6,10 @@ export {
   CommandConflict,
   CommandId,
   Uncertain,
+  modify,
   spawn,
   type ActorKind,
+  type LocalActorRef,
   type ActorRef,
   type Admitted,
   type Applied,
@@ -18,7 +20,12 @@ export {
   type SendError,
   type SendOptions,
 } from "./actor.js";
-export { durable, type DurableOptions } from "./durable.js";
+export {
+  DurableHostConfig,
+  durable,
+  type DurableHostSettings,
+  type DurableOptions,
+} from "./durable.js";
 export {
   MailboxStore,
   type Appended,

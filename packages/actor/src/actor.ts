@@ -1,6 +1,7 @@
 import type { Duration, Option } from "effect";
 import { Deferred, Effect, Queue, Ref, Schema, SubscriptionRef } from "effect";
-import type { Behavior } from "./behavior.js";
+import type { Behavior, SetValue } from "./behavior.js";
+import { Value } from "./behavior.js";
 import type { Source } from "./source.js";
 import { fromSubscriptionRef } from "./source.js";
 
@@ -98,8 +99,21 @@ export interface ActorRef<State, Message, Kind extends ActorKind> {
 // ---------------------------------------------------------------------------
 
 interface Envelope<State, Message> {
-  readonly message: Message;
+  /** Computes the message inside the turn, from the state the turn sees. */
+  readonly derive: (state: State) => Message;
   readonly reply: Deferred.Deferred<Applied<State>>;
+}
+
+/**
+ * A local reference adds `derive`: compute the message from the current state
+ * inside the actor's turn, so read and send cannot interleave with another
+ * message. The message still goes through the behavior. A durable reference
+ * has no `derive`, because a function cannot cross the durable boundary.
+ */
+export interface LocalActorRef<State, Message> extends ActorRef<State, Message, "local"> {
+  readonly derive: (
+    derive: (state: State) => Message,
+  ) => Effect.Effect<Applied<State>, ActorStopped>;
 }
 
 /**
@@ -121,7 +135,7 @@ export const spawn = Effect.fn("Actor.spawn")(function* <State, Message, R>(
   const step = Effect.gen(function* () {
     const envelope = yield* Queue.take(mailbox);
     const current = yield* SubscriptionRef.get(state);
-    const next = yield* turn.apply(current, envelope.message);
+    const next = yield* turn.apply(current, envelope.derive(current));
     const applied = yield* Ref.updateAndGet(revision, (n) => n + 1);
     yield* SubscriptionRef.set(state, next);
     yield* Deferred.succeed(envelope.reply, { revision: applied, state: next });
@@ -132,32 +146,51 @@ export const spawn = Effect.fn("Actor.spawn")(function* <State, Message, R>(
   );
   yield* Effect.forkScoped(Effect.forever(step));
 
-  const admit = Effect.fn("Actor.admit")(function* (message: Message) {
+  const admit = Effect.fn("Actor.admit")(function* (derive: (state: State) => Message) {
     const isStopped = yield* Ref.get(stopped);
     if (isStopped) {
       return yield* ActorStopped.make();
     }
     const reply = yield* Deferred.make<Applied<State>>();
     const admitted = yield* Ref.updateAndGet(admission, (n) => n + 1);
-    yield* Queue.offer(mailbox, { message, reply });
+    yield* Queue.offer(mailbox, { derive, reply });
     return { admitted, reply };
   });
 
+  const awaitReply = (reply: Deferred.Deferred<Applied<State>>) =>
+    Effect.raceFirst(Deferred.await(reply), Deferred.await(closed));
+
   const send = Effect.fn("Actor.send")(function* (message: Message) {
-    const { admitted } = yield* admit(message);
+    const { admitted } = yield* admit(() => message);
     return { admitted } satisfies Admitted;
   });
 
   const call = Effect.fn("Actor.call")(function* (message: Message) {
-    const { reply } = yield* admit(message);
-    return yield* Effect.raceFirst(Deferred.await(reply), Deferred.await(closed));
+    const { reply } = yield* admit(() => message);
+    return yield* awaitReply(reply);
   });
 
-  const ref: ActorRef<State, Message, "local"> = {
+  const derive = Effect.fn("Actor.derive")(function* (compute: (state: State) => Message) {
+    const { reply } = yield* admit(compute);
+    return yield* awaitReply(reply);
+  });
+
+  const ref: LocalActorRef<State, Message> = {
     kind: "local",
     state: fromSubscriptionRef(state),
     send,
     call,
+    derive,
   };
   return ref;
 });
+
+/**
+ * Update simple state from its current value inside one turn. Only a local
+ * reference to a `Behavior.value` actor has this. The message that reaches
+ * the behavior is still a plain `Set`.
+ */
+export const modify = <A>(
+  ref: LocalActorRef<A, SetValue<A>>,
+  update: (value: A) => A,
+): Effect.Effect<Applied<A>, ActorStopped> => ref.derive((value) => Value.Set(update(value)));

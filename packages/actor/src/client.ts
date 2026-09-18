@@ -22,10 +22,43 @@ export {
   type SnapshotOf,
 } from "./contract.js";
 export { ref, type RefOptions, type RemoteActorRef } from "./ref.js";
+// PROTOTYPE (ticket #17): the Query primitive's client half.
+export {
+  Failed,
+  Loading,
+  PolicyMissing,
+  QueryFailed,
+  QueryVersionMismatch,
+  Ready,
+  UnknownQuery,
+  canonicalize,
+  keyOf,
+  markStale,
+  query,
+  type AnyQuery,
+  type ArgsOf,
+  type QueryContract,
+  type QueryFailure,
+  type QueryKey,
+  type QueryOptions,
+  type QueryState,
+  type ResultOf,
+} from "./query.js";
+export {
+  QueryCache,
+  useQuery,
+  layer as queryCacheLayer,
+  type QueryCacheService,
+  type QueryEntry,
+} from "./query-client.js";
 export {
   ActorTransport,
   type Projection,
+  type ProjectionWithRefresh,
+  type ReceiptWithRefresh,
+  type Refreshed,
   type TransportCallError,
+  type TransportQueryError,
   type TransportReadError,
   type TransportSendError,
   type TransportService,

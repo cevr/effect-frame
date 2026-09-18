@@ -207,6 +207,15 @@
       }
     },
     {
+      "files": ["packages/actor/src/canonical-json.ts"],
+      "rules": {
+        "effect/noGlobals": "off",
+        "effect/noNullish": "off",
+        "effect/noRuntimeTypeof": "off",
+        "effect/noThrowStatement": "off"
+      }
+    },
+    {
       "files": ["apps/notes/src/server.ts"],
       "rules": {
         "effect/noAsyncFunction": "off",

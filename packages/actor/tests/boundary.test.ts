@@ -32,6 +32,10 @@ describe("import boundary", () => {
       expect(text).not.toContain("@effect-frame/actor/src/host/Authorizer");
       expect(text).not.toContain("@effect-frame/actor/src/durable/DurableHostConfig");
       expect(text).not.toContain("method not allowed");
+      // PROTOTYPE (ticket #17): the query host, its handlers, and its policy
+      // table are server code. The query contract and cache are not.
+      expect(text).not.toContain("@effect-frame/actor:query-server-only");
+      expect(text).not.toContain("@effect-frame/actor/src/query-host/QueryPolicies");
     }),
   );
 

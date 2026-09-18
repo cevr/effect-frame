@@ -1,5 +1,5 @@
-import type { Duration, Layer } from "effect";
-import { Effect, Schema, Scope, Stream } from "effect";
+import type { Duration } from "effect";
+import { Effect, Layer, Schema, Scope, Stream } from "effect";
 import type { Behavior } from "./behavior.js";
 import type { AnyContract, MessageOf, SnapshotOf } from "./contract.js";
 import { durable } from "./durable.js";
@@ -65,37 +65,48 @@ const openInstance =
     contract: C,
   ): OpenInstance<R> =>
   (store, scope) =>
-    Effect.gen(function* () {
-      const actor = yield* durable({
-        behavior: options.behavior,
-        state: options.state,
-        message: contract.message,
-      });
-      const encodeSnapshot = Schema.encodeEffect(contract.snapshot);
-      const project = (committed: { readonly revision: number; readonly state: State }) =>
-        Effect.map(
-          Effect.orDie(encodeSnapshot(options.snapshot(committed.state))),
-          (snapshot): Projection => ({ revision: committed.revision, snapshot }),
-        );
-      const decodeMessage = Schema.decodeEffect(contract.message);
-      const instance: HostedInstance = {
-        send: (commandId, payload) =>
-          Effect.flatMap(Effect.orDie(decodeMessage(payload)), (message) =>
-            actor.send(message, { commandId }),
-          ),
-        call: (commandId, payload, timeout) =>
-          Effect.flatMap(Effect.orDie(decodeMessage(payload)), (message) =>
-            Effect.flatMap(actor.call(message, { commandId, timeout }), project),
-          ),
-        snapshot: Effect.flatMap(actor.applied.get, project),
-        changes: (after) =>
-          Stream.mapEffect(
-            Stream.filter(actor.applied.changes, (committed) => committed.revision > after),
-            project,
-          ),
-      };
-      return instance;
-    }).pipe(Effect.provide(store), Effect.provideService(Scope.Scope, scope));
+    // The store's resources must live exactly as long as the instance, so the
+    // layer is built into the owning scope instead of a scope of its own.
+    Effect.flatMap(Layer.buildWithScope(store, scope), (services) =>
+      openWith(options, contract, scope).pipe(Effect.provideContext(services)),
+    );
+
+const openWith = <C extends AnyContract, State, R>(
+  options: ImplementOptions<C, State, R>,
+  contract: C,
+  scope: Scope.Scope,
+): Effect.Effect<HostedInstance, never, R | MailboxStore> =>
+  Effect.gen(function* () {
+    const actor = yield* durable({
+      behavior: options.behavior,
+      state: options.state,
+      message: contract.message,
+    });
+    const encodeSnapshot = Schema.encodeEffect(contract.snapshot);
+    const project = (committed: { readonly revision: number; readonly state: State }) =>
+      Effect.map(
+        Effect.orDie(encodeSnapshot(options.snapshot(committed.state))),
+        (snapshot): Projection => ({ revision: committed.revision, snapshot }),
+      );
+    const decodeMessage = Schema.decodeEffect(contract.message);
+    const instance: HostedInstance = {
+      send: (commandId, payload) =>
+        Effect.flatMap(Effect.orDie(decodeMessage(payload)), (message) =>
+          actor.send(message, { commandId }),
+        ),
+      call: (commandId, payload, timeout) =>
+        Effect.flatMap(Effect.orDie(decodeMessage(payload)), (message) =>
+          Effect.flatMap(actor.call(message, { commandId, timeout }), project),
+        ),
+      snapshot: Effect.flatMap(actor.applied.get, project),
+      changes: (after) =>
+        Stream.mapEffect(
+          Stream.filter(actor.applied.changes, (committed) => committed.revision > after),
+          project,
+        ),
+    };
+    return instance;
+  }).pipe(Effect.provideService(Scope.Scope, scope));
 
 export interface ImplementOptions<C extends AnyContract, State, R> {
   readonly behavior: Behavior<State, MessageOf<C>, R>;

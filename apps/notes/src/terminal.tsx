@@ -49,4 +49,6 @@ const transport = HttpTransport.layer({
   reconnect: HttpTransport.defaultReconnect,
 });
 
+// The terminal entry point: the one place the client transport is provided.
+// @effect-diagnostics-next-line strictEffectProvide:off
 await Effect.runPromise(Effect.scoped(Effect.provide(start, transport)));

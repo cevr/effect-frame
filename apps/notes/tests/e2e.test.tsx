@@ -36,6 +36,17 @@ const transportTo = (url: string): Layer.Layer<ActorTransport> =>
     reconnect: HttpTransport.defaultReconnect,
   }).pipe(Layer.provide(Layer.succeed(HttpTransport.Fetch, realFetch)));
 
+/**
+ * The client side of one test. A server's port is known only once it
+ * listens, so the transport cannot be the test's outer layer; this helper
+ * is the client's entry point instead, and the only place it is provided.
+ */
+const asClientOf =
+  (url: string) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, ActorTransport>> =>
+    // @effect-diagnostics-next-line strictEffectProvide:off
+    Effect.provide(effect, transportTo(url));
+
 /** One host for the whole test: two servers over it share one set of actors. */
 const notesRuntime = Effect.acquireRelease(
   Effect.sync((): NotesRuntime => makeRuntime(inProcess)),
@@ -133,13 +144,10 @@ describe("notes end to end", () => {
       const page = yield* fetchText(server.url);
       const root = yield* install(page);
 
-      // The port is only known once the server listens.
-      // oxlint-disable-next-line effect/noInlineProvide
-      const report = yield* Effect.provide(hydratePage(root), transportTo(server.url));
+      const report = yield* asClientOf(server.url)(hydratePage(root));
       expect(report.mismatches).toEqual([]);
 
-      // oxlint-disable-next-line effect/noInlineProvide
-      const writer = yield* Effect.provide(ref(Notes, demoKey), transportTo(server.url));
+      const writer = yield* asClientOf(server.url)(ref(Notes, demoKey));
       yield* writer.call(
         { _tag: "Add", id: "n1", text: "buy milk" },
         { commandId: id("c1"), timeout: "2 seconds" },
@@ -158,10 +166,8 @@ describe("notes end to end", () => {
       const page = yield* fetchText(server.url);
       const root = yield* install(page);
 
-      // oxlint-disable-next-line effect/noInlineProvide
-      const browser = yield* Effect.provide(
+      const browser = yield* asClientOf(server.url)(
         Effect.andThen(hydratePage(root), ref(Notes, demoKey)),
-        transportTo(server.url),
       );
 
       const setup: TestRendererSetup = yield* Effect.promise(() =>
@@ -169,8 +175,7 @@ describe("notes end to end", () => {
       );
       yield* Effect.addFinalizer(() => Effect.sync(() => setup.renderer.destroy()));
 
-      // oxlint-disable-next-line effect/noInlineProvide
-      const terminal = yield* Effect.provide(
+      const terminal = yield* asClientOf(server.url)(
         Effect.andThen(
           mount(
             NotesTerminal,
@@ -180,7 +185,6 @@ describe("notes end to end", () => {
           ),
           ref(Notes, demoKey),
         ),
-        transportTo(server.url),
       );
 
       yield* browser.call(
@@ -206,10 +210,8 @@ describe("notes end to end", () => {
       const page = yield* fetchText(first.url);
       const root = yield* install(page);
 
-      // oxlint-disable-next-line effect/noInlineProvide
-      const client = yield* Effect.provide(
+      const client = yield* asClientOf(first.url)(
         Effect.andThen(hydratePage(root), ref(Notes, demoKey)),
-        transportTo(first.url),
       );
 
       yield* Effect.promise(() => first.stop());

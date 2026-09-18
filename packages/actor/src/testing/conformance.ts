@@ -283,4 +283,7 @@ export const mailboxStoreConformance = Effect.fn("Conformance.mailboxStore")(fun
 
 /** Turns a layer that builds a fresh store into a factory the suite accepts. */
 export const factoryFromLayer = (layer: Layer.Layer<MailboxStore>): StoreFactory =>
+  // Each conformance case is its own entry point: it needs a fresh store with
+  // its own lifetime, so the layer is built here and nowhere higher.
+  // @effect-diagnostics-next-line strictEffectProvide:off
   Effect.provide(MailboxStore, layer);

@@ -129,6 +129,8 @@ const runCounter = <A>(
   // oxlint-disable-next-line effect/noInlineProvide
   Effect.runPromise(
     Effect.scoped(
+      // Each proof step is its own entry point: one process, one transport, one scope.
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(
         Effect.flatMap(Effect.orDie(counterRef(key)), use),
         transportFor(port, Counter.name, Counter.version, key),
@@ -257,6 +259,8 @@ const runUpload = <A>(
   // oxlint-disable-next-line effect/noInlineProvide
   Effect.runPromise(
     Effect.scoped(
+      // Each proof step is its own entry point: one process, one transport, one scope.
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(
         Effect.flatMap(Effect.orDie(ref(Upload, key)), use),
         transportFor(port, Upload.name, Upload.version, key),

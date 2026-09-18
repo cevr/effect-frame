@@ -44,4 +44,6 @@ const transport = HttpTransport.layer({
   reconnect: HttpTransport.defaultReconnect,
 });
 
+// The browser entry point: the one place the client transport is provided.
+// @effect-diagnostics-next-line strictEffectProvide:off
 Effect.runFork(Effect.scoped(Effect.provide(start, transport)));

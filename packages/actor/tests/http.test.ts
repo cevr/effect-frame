@@ -105,6 +105,20 @@ describe("http transport in process", () => {
   );
 });
 
+/**
+ * The client side of the socket test. The port is known only once the
+ * server listens, so the transport cannot be the test's outer layer; this
+ * helper is the client's entry point instead, and the only place it is provided.
+ */
+const asClientOf =
+  (baseUrl: string) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    // @effect-diagnostics-next-line strictEffectProvide:off
+    Effect.provide(
+      effect,
+      HttpTransport.layer({ baseUrl, reconnect: HttpTransport.defaultReconnect }),
+    );
+
 describe("http transport over a real socket", () => {
   it.scopedLive("a dropped connection reconnects from the last revision", () =>
     Effect.gen(function* () {
@@ -125,13 +139,8 @@ describe("http transport over a real socket", () => {
       const port = Option.getOrElse(Option.fromNullishOr(first.port), () => 0);
       const baseUrl = `http://127.0.0.1:${port}`;
 
-      const client = HttpTransport.layer({ baseUrl, reconnect: HttpTransport.defaultReconnect });
-      // The port is only known once the server listens, so the client layer
-      // cannot be the test's outer layer.
-      // oxlint-disable-next-line effect/noInlineProvide
-      const [reader, writer] = yield* Effect.provide(
+      const [reader, writer] = yield* asClientOf(baseUrl)(
         Effect.all([ref(Counter, alice), ref(Counter, alice)]),
-        client,
       );
 
       yield* writer.call(add(1), { commandId: id("c1"), timeout: "1 second" });

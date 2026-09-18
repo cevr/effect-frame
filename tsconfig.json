@@ -97,7 +97,7 @@
           "scopeInLayerEffect": "error",
           "serviceNotAsClass": "error",
           "strictBooleanExpressions": "off",
-          "strictEffectProvide": "off",
+          "strictEffectProvide": "error",
           "syncToSucceed": "error",
           "tryCatchInEffectGen": "off",
           "unknownInEffectCatch": "error",

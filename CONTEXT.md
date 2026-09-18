@@ -29,7 +29,7 @@ A message a client submits to an actor to change its state. Every state change i
 _Avoid_: Mutation, action, server function.
 
 **Rendering mode**:
-The place and time a view is turned into markup: on the client, on the server before hydration, on the server for every change, at build time, or on the server in reply to a plain form post.
+Where and when a route's view is turned into markup: on the client only, on the server before hydration, streamed from the server as its data settles, on the server for every change, or at build time. The destination route names it, and naming it is choosing a constructor rather than setting a field. A plain form post is not a mode: it is a command path that works under every mode that renders on a server.
 _Avoid_: Strategy, target.
 
 **Query state**:
@@ -131,6 +131,14 @@ _Avoid_: Server file, backend module, `"use server"`.
 **Browser entry**:
 A file a bundler compiles for a page. It is the root of the graph a browser downloads, and it is the only place the server/client boundary is measured.
 _Avoid_: Client file, frontend entry.
+
+**Proving example**:
+An application in this repository that exists to make one decision fail loudly when it stops being true. It holds the smallest set of features its own claims need, and it names what it deliberately does not hold.
+_Avoid_: Demo, sample app, playground.
+
+**Acceptance row**:
+One claim this system makes, the test that fails when the claim stops being true, and the decision that made the claim. A claim no decision made is not a row.
+_Avoid_: Requirement, test case, checklist item.
 
 **Durable work record**:
 Stored information from which unfinished actor work can resume after a host restart.

@@ -1,5 +1,5 @@
 import type { Duration, Option } from "effect";
-import { Deferred, Effect, Queue, Ref, Schema, SubscriptionRef } from "effect";
+import { Deferred, Effect, Equal, Queue, Ref, Schema, Stream, SubscriptionRef } from "effect";
 import type { Behavior, SetValue } from "./behavior.js";
 import { Value } from "./behavior.js";
 import type { Source } from "./source.js";
@@ -98,11 +98,19 @@ export interface ActorRef<State, Message, Kind extends ActorKind> {
 // Local actor
 // ---------------------------------------------------------------------------
 
-interface Envelope<State, Message> {
+interface MessageEnvelope<State, Message> {
+  readonly _tag: "Message";
   /** Computes the message inside the turn, from the state the turn sees. */
   readonly derive: (state: State) => Message;
   readonly reply: Deferred.Deferred<Applied<State>>;
 }
+
+interface AutonomousEnvelope<State> {
+  readonly _tag: "Autonomous";
+  readonly state: State;
+}
+
+type Envelope<State, Message> = MessageEnvelope<State, Message> | AutonomousEnvelope<State>;
 
 /**
  * A local reference adds `derive`: compute the message from the current state
@@ -132,12 +140,23 @@ export const spawn = Effect.fn("Actor.spawn")(function* <State, Message, R>(
   const closed = yield* Deferred.make<never, ActorStopped>();
   const mailbox = yield* Queue.unbounded<Envelope<State, Message>>();
 
+  const commitState = (next: State) =>
+    Effect.andThen(
+      Ref.updateAndGet(revision, (n) => n + 1),
+      (applied) => Effect.as(SubscriptionRef.set(state, next), applied),
+    );
+
   const step = Effect.gen(function* () {
     const envelope = yield* Queue.take(mailbox);
     const current = yield* SubscriptionRef.get(state);
+    if (envelope._tag === "Autonomous") {
+      if (!Equal.equals(envelope.state, current)) {
+        yield* commitState(envelope.state);
+      }
+      return;
+    }
     const next = yield* turn.apply(current, envelope.derive(current));
-    const applied = yield* Ref.updateAndGet(revision, (n) => n + 1);
-    yield* SubscriptionRef.set(state, next);
+    const applied = yield* commitState(next);
     yield* Deferred.succeed(envelope.reply, { revision: applied, state: next });
   });
 
@@ -145,6 +164,11 @@ export const spawn = Effect.fn("Actor.spawn")(function* <State, Message, R>(
     Ref.set(stopped, true).pipe(Effect.andThen(Deferred.fail(closed, ActorStopped.make()))),
   );
   yield* Effect.forkScoped(Effect.forever(step));
+  yield* Effect.forkScoped(
+    Stream.runForEach(turn.changes, (changed) =>
+      Queue.offer(mailbox, { _tag: "Autonomous", state: changed }),
+    ),
+  );
 
   const admit = Effect.fn("Actor.admit")(function* (derive: (state: State) => Message) {
     const isStopped = yield* Ref.get(stopped);
@@ -153,7 +177,7 @@ export const spawn = Effect.fn("Actor.spawn")(function* <State, Message, R>(
     }
     const reply = yield* Deferred.make<Applied<State>>();
     const admitted = yield* Ref.updateAndGet(admission, (n) => n + 1);
-    yield* Queue.offer(mailbox, { derive, reply });
+    yield* Queue.offer(mailbox, { _tag: "Message", derive, reply });
     return { admitted, reply };
   });
 

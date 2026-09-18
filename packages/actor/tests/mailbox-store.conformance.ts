@@ -83,6 +83,20 @@ export const mailboxStoreConformance = (name: string, layer: Layer.Layer<Mailbox
         expect(yield* store.pending).toEqual([]);
       }));
 
+    test("advance commits a state with no command and shares the revision clock", () =>
+      Effect.gen(function* () {
+        const store = yield* MailboxStore;
+        const first = yield* store.advance("s1");
+        expect(first).toEqual({ revision: 1, state: "s1" });
+        yield* store.append({ commandId: id("a"), payload: "1", payloadHash: 1 });
+        const receipt = yield* store.commit(id("a"), "s2");
+        expect(receipt.revision).toBe(2);
+        const third = yield* store.advance("s3");
+        expect(third.revision).toBe(3);
+        expect(yield* store.latest).toEqual(Option.some({ revision: 3, state: "s3" }));
+        expect(yield* store.pending).toEqual([]);
+      }));
+
     test("receipt is absent until commit and stable after it", () =>
       Effect.gen(function* () {
         const store = yield* MailboxStore;

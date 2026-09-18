@@ -61,6 +61,8 @@ export class MailboxStore extends Context.Service<
     readonly receipt: (commandId: CommandId) => Effect.Effect<Option.Option<StoredReceipt>>;
     readonly pending: Effect.Effect<ReadonlyArray<CommandId>>;
     readonly latest: Effect.Effect<Option.Option<Committed>>;
+    /** Commit a state the behavior reached on its own and advance the revision. No command, no receipt. */
+    readonly advance: (state: string) => Effect.Effect<Committed>;
   }
 >()("@effect-frame/actor/src/mailbox-store/MailboxStore") {
   static readonly layerMemory: Layer.Layer<MailboxStore> = Layer.effect(MailboxStore, makeMemory());
@@ -188,6 +190,16 @@ function makeMemory() {
 
     const latest = Effect.map(Ref.get(log), (current) => current.committed);
 
-    return MailboxStore.of({ append, next, commit, receipt, pending, latest });
+    const advance = (state: string) =>
+      Ref.modify(log, (current): readonly [Committed, Log] => {
+        const revision = Option.match(current.committed, {
+          onNone: () => 1,
+          onSome: (committed) => committed.revision + 1,
+        });
+        const committed: Committed = { revision, state };
+        return [committed, { ...current, committed: Option.some(committed) }];
+      });
+
+    return MailboxStore.of({ append, next, commit, receipt, pending, latest, advance });
   });
 }

@@ -7,14 +7,16 @@ import {
   Option,
   PubSub,
   Queue,
+  Ref,
   Schema,
   Scope,
+  Stream,
   SubscriptionRef,
 } from "effect";
 import type { ActorRef, Applied, CommandId, DurableReceipt } from "./actor.js";
 import { ActorStopped, Uncertain } from "./actor.js";
 import type { Behavior } from "./behavior.js";
-import type { StoredReceipt } from "./mailbox-store.js";
+import type { PendingCommand, StoredReceipt } from "./mailbox-store.js";
 import { MailboxStore } from "./mailbox-store.js";
 import { fromSubscriptionRef } from "./source.js";
 
@@ -25,6 +27,10 @@ export interface DurableOptions<State, Message, R> {
   /** Encodes a message to the string the mailbox stores. */
   readonly message: Schema.Codec<Message, string>;
 }
+
+type Wake<State> =
+  | { readonly _tag: "Admitted" }
+  | { readonly _tag: "Autonomous"; readonly state: State };
 
 export interface DurableHostSettings {
   /** How long `call` sleeps between receipt polls when no early wake arrives. */
@@ -66,27 +72,63 @@ export const durable = Effect.fn("Actor.durable")(function* <State, Message, R>(
   const turn = yield* options.behavior.open(restored);
   const state = yield* SubscriptionRef.make(restored);
   const closed = yield* Deferred.make<never, ActorStopped>();
-  const signal = yield* Queue.unbounded<number>();
+  const signal = yield* Queue.unbounded<Wake<State>>();
   const wake = yield* PubSub.unbounded<StoredReceipt>();
+  const lastEncoded = yield* Ref.make(
+    yield* Effect.map(store.latest, (latest) =>
+      Option.match(latest, {
+        onNone: () => Option.none<string>(),
+        onSome: (c) => Option.some(c.state),
+      }),
+    ),
+  );
 
-  const processNext = Effect.fn("Actor.durable.process")(function* () {
-    const pending = yield* store.next;
-    if (Option.isNone(pending)) {
-      yield* Queue.take(signal);
-      return;
-    }
-    const command = pending.value;
+  const processCommand = Effect.fn("Actor.durable.processCommand")(function* (
+    command: PendingCommand,
+  ) {
     const message = yield* Effect.orDie(decodeMessage(command.payload));
     const current = yield* SubscriptionRef.get(state);
     const next = yield* turn.apply(current, message);
     const encoded = yield* Effect.orDie(encodeState(next));
     const receipt = yield* store.commit(command.commandId, encoded);
+    yield* Ref.set(lastEncoded, Option.some(encoded));
     yield* SubscriptionRef.set(state, next);
     yield* PubSub.publish(wake, receipt);
   });
 
+  const processAutonomous = Effect.fn("Actor.durable.processAutonomous")(function* (
+    changed: State,
+  ) {
+    const encoded = yield* Effect.orDie(encodeState(changed));
+    const previous = yield* Ref.get(lastEncoded);
+    if (Option.isSome(previous) && previous.value === encoded) {
+      return;
+    }
+    yield* store.advance(encoded);
+    yield* Ref.set(lastEncoded, Option.some(encoded));
+    yield* SubscriptionRef.set(state, changed);
+  });
+
+  /** Drain every pending command in admission order, then wait for a wake. */
+  const processNext = Effect.fn("Actor.durable.process")(function* () {
+    const pending = yield* store.next;
+    if (Option.isSome(pending)) {
+      yield* processCommand(pending.value);
+      return;
+    }
+    const woken = yield* Queue.take(signal);
+    if (woken._tag === "Autonomous") {
+      yield* processAutonomous(woken.state);
+    }
+  });
+
   yield* Effect.addFinalizer(() => Deferred.fail(closed, ActorStopped.make()));
   yield* Effect.forkScoped(Effect.forever(processNext()));
+  yield* Effect.forkScoped(
+    Stream.runForEach(turn.changes, (changed) =>
+      Queue.offer(signal, { _tag: "Autonomous", state: changed }),
+    ),
+  );
 
   const toApplied = Effect.fn("Actor.durable.toApplied")(function* (receipt: StoredReceipt) {
     const decoded = yield* Effect.orDie(decodeState(receipt.state));
@@ -108,7 +150,7 @@ export const durable = Effect.fn("Actor.durable")(function* <State, Message, R>(
       payloadHash: Hash.string(payload),
     });
     if (appended._tag === "Admitted") {
-      yield* Queue.offer(signal, appended.admitted);
+      yield* Queue.offer(signal, { _tag: "Admitted" });
       return {
         commandId: sendOptions.commandId,
         admitted: appended.admitted,

@@ -1,4 +1,4 @@
-import { Effect, Exit, Fiber, Schema, Scope, Stream } from "effect";
+import { Effect, Exit, Fiber, Option, Schema, Scope, Stream } from "effect";
 import { describe, expect, it, yieldFibers } from "effect-bun-test";
 import { Event, Machine, State } from "effect-machine";
 import { Behavior, Value, modify, select, spawn } from "@effect-frame/actor";
@@ -21,6 +21,22 @@ const counterMachine = Machine.make({
     CounterState.Counting({ count: state.count + 1 }),
   )
   .on(CounterState.Counting, CounterEvent.Reset, () => CounterState.Counting({ count: 0 }));
+
+// A machine that moves on its own: Middle runs a task whose completion
+// advances to End with no external message.
+const StepState = State({ Start: {}, Middle: {}, End: {} });
+const StepEvent = Event({ Go: {}, Advance: {} });
+const stepMachine = Machine.make({
+  state: StepState,
+  event: StepEvent,
+  initial: StepState.Start,
+})
+  .on(StepState.Start, StepEvent.Go, () => StepState.Middle)
+  .on(StepState.Middle, StepEvent.Advance, () => StepState.End)
+  .task(StepState.Middle, () => Effect.void, {
+    onSuccess: () => StepEvent.Advance,
+    onFailure: () => StepEvent.Advance,
+  });
 
 interface Append {
   readonly _tag: "Append";
@@ -98,6 +114,18 @@ describe("local actor", () => {
       expect(applied.state).toEqual(CounterState.Counting({ count: 2 }));
       const reset = yield* counter.call(CounterEvent.Reset);
       expect(reset.state.count).toBe(0);
+    }),
+  );
+
+  it.scoped("a machine's own transition reaches the state source", () =>
+    Effect.gen(function* () {
+      const step = yield* spawn(Behavior.machine(stepMachine));
+      const applied = yield* step.call(StepEvent.Go);
+      expect(applied.state._tag).toBe("Middle");
+      const end = yield* Stream.runHead(
+        Stream.filter(step.state.changes, (state) => state._tag === "End"),
+      );
+      expect(Option.map(end, (state) => state._tag)).toEqual(Option.some("End"));
     }),
   );
 

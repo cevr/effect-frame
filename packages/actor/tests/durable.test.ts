@@ -1,4 +1,16 @@
-import { Effect, Exit, Fiber, Hash, Option, Schema, Scope } from "effect";
+import {
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Hash,
+  Option,
+  Schema,
+  Scope,
+  Stream,
+} from "effect";
+import { Event, Machine, State } from "effect-machine";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
 import { Behavior, CommandId, MailboxStore, durable } from "@effect-frame/actor";
@@ -23,8 +35,53 @@ const slowBehavior: Behavior.Behavior<number, Add> = {
   open: () =>
     Effect.succeed({
       apply: (state, message) => Effect.sleep("1 hour").pipe(Effect.as(state + message.amount)),
+      changes: Stream.empty,
     }),
 };
+
+// A machine whose work must survive a restart. The Uploading task waits on
+// an external gate. Recovery re-enters Uploading and runs the task again.
+const UploadState = State({
+  Idle: {},
+  Uploading: { file: Schema.String },
+  Done: { file: Schema.String },
+});
+
+const UploadEvent = Event({
+  Start: { file: Schema.String },
+  Finished: {},
+});
+
+class Gate extends Context.Service<Gate, { readonly open: Effect.Effect<void> }>()(
+  "@effect-frame/actor/tests/durable.test/Gate",
+) {}
+
+const uploadMachine = Machine.make({
+  state: UploadState,
+  event: UploadEvent,
+  initial: UploadState.Idle,
+})
+  .on(UploadState.Idle, UploadEvent.Start, ({ event }) =>
+    UploadState.Uploading({ file: event.file }),
+  )
+  .on(UploadState.Uploading, UploadEvent.Finished, ({ state }) =>
+    UploadState.Done({ file: state.file }),
+  )
+  .task(UploadState.Uploading, () => Effect.flatMap(Gate, (gate) => gate.open), {
+    onSuccess: () => UploadEvent.Finished,
+    onFailure: () => UploadEvent.Finished,
+  });
+
+const uploadOptions = {
+  behavior: Behavior.machine(uploadMachine),
+  state: Schema.fromJsonString(uploadMachine.stateSchema),
+  message: Schema.fromJsonString(uploadMachine.eventSchema),
+};
+
+const gateThatNeverOpens = Effect.map(Deferred.make<void>(), (latch) =>
+  Gate.of({ open: Deferred.await(latch) }),
+);
+const gateThatOpens = Gate.of({ open: Effect.void });
 
 const id = Schema.decodeSync(CommandId);
 const add = (amount: number): Add => ({ _tag: "Add", amount });
@@ -129,6 +186,35 @@ describe("durable actor", () => {
         timeout: "1 second",
       });
       expect(retried).toEqual({ revision: 1, state: 1 });
+    }),
+  );
+
+  withStore("machine work interrupted by a restart resumes and commits its own transition", () =>
+    Effect.gen(function* () {
+      const store = yield* MailboxStore;
+
+      const firstLife = yield* Scope.make();
+      const blocked = yield* gateThatNeverOpens;
+      const before = yield* durable(uploadOptions).pipe(
+        Effect.provideService(Gate, blocked),
+        Scope.provide(firstLife),
+      );
+      const started = yield* before.call(UploadEvent.Start({ file: "a.txt" }), {
+        commandId: id("c1"),
+        timeout: "1 second",
+      });
+      expect(started.revision).toBe(1);
+      expect(started.state._tag).toBe("Uploading");
+      yield* Scope.close(firstLife, Exit.void);
+
+      const after = yield* durable(uploadOptions).pipe(Effect.provideService(Gate, gateThatOpens));
+      const done = yield* Stream.runHead(
+        Stream.filter(after.state.changes, (state) => state._tag === "Done"),
+      );
+      expect(Option.map(done, (state) => state._tag)).toEqual(Option.some("Done"));
+      const latest = yield* store.latest;
+      expect(Option.map(latest, (committed) => committed.revision)).toEqual(Option.some(2));
+      expect(yield* store.pending).toEqual([]);
     }),
   );
 

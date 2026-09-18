@@ -1,5 +1,5 @@
 import type { Schema, Scope } from "effect";
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
 import { Machine } from "effect-machine";
 
 /**
@@ -9,6 +9,12 @@ import { Machine } from "effect-machine";
  */
 export interface Turn<State, Message> {
   readonly apply: (state: State, message: Message) => Effect.Effect<State>;
+  /**
+   * State changes the behavior makes on its own, with no message: a machine
+   * task completing, an immediate transition. The actor commits each one as
+   * a revision. A value or reducer never changes on its own.
+   */
+  readonly changes: Stream.Stream<State>;
 }
 
 /**
@@ -41,6 +47,7 @@ export const value = <A>(initial: A): Behavior<A, SetValue<A>> => ({
   open: () =>
     Effect.succeed({
       apply: (_state, message) => Effect.succeed(message.value),
+      changes: Stream.empty,
     }),
 });
 
@@ -57,6 +64,7 @@ export const reducer = <State, Message>(
   open: () =>
     Effect.succeed({
       apply: (state, message) => Effect.sync(() => options.reduce(state, message)),
+      changes: Stream.empty,
     }),
 });
 
@@ -86,6 +94,7 @@ export const machine = <
     yield* Effect.addFinalizer(() => actor.stop);
     return {
       apply: (_state, event) => Effect.map(actor.call(event), (result) => result.newState),
+      changes: actor.changes,
     };
   }),
 });

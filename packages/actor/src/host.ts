@@ -3,7 +3,11 @@ import { Context, Effect, Layer, Option, Semaphore, Stream } from "effect";
 import type { Address } from "./contract.js";
 import type { AnyImplementation, HostedInstance } from "./implement.js";
 import { MailboxStore } from "./mailbox-store.js";
-import type { TransportService } from "./transport.js";
+import type { QueryKey } from "./query.js";
+import { UnknownQuery } from "./query.js";
+import type { AnyQueryImplementation, QueryServing } from "./query-host.js";
+import { make as makeQueryServing } from "./query-host.js";
+import type { Refreshed, TransportService } from "./transport.js";
 import { ActorTransport } from "./transport.js";
 import type { RemoteFailure, Unauthorized } from "./vocabulary.js";
 import { ContractMismatch, UnknownContract } from "./vocabulary.js";
@@ -28,6 +32,13 @@ export interface HostOptions<R> {
   readonly implementations: ReadonlyArray<AnyImplementation<R>>;
   /** The mailbox store for one address. Defaults to a fresh in-memory store. */
   readonly store: (address: Address) => LayerType.Layer<MailboxStore>;
+  /**
+   * PROTOTYPE (ticket #17). The queries this host serves. They are built
+   * here and not in a layer beside this one, because a query handler reads
+   * actors through this host's own transport: a second host would open a
+   * second set of instances. Omit it and the host serves actors alone.
+   */
+  readonly queries?: ReadonlyArray<AnyQueryImplementation<R>>;
 }
 
 const addressKey = (address: Address) => `${address.contract}@${address.version}/${address.key}`;
@@ -95,18 +106,83 @@ const make = <R>(options: HostOptions<R>) =>
         return yield* open(address, implementation);
       });
 
+    /**
+     * The query half, once it exists. It is set after the transport object
+     * is made, because the handlers read actors through that same transport.
+     * One host, one knot, tied in one place.
+     */
+    let serving: Option.Option<QueryServing> = Option.none();
+
+    /**
+     * Single flight. The command has committed; now, in the same reply, the
+     * host reads the caller's active queries that declared a dependency on
+     * this contract. The scope is one command: only keys the caller sent,
+     * only queries that name this contract. A refresh that fails answers
+     * with its error, never with a failed command.
+     */
+    const refreshFor = (
+      contractName: string,
+      active: ReadonlyArray<QueryKey>,
+    ): Effect.Effect<ReadonlyArray<Refreshed>> => {
+      if (active.length === 0 || Option.isNone(serving)) {
+        return Effect.succeed([]);
+      }
+      const query = serving.value;
+      const stale = query.dependents(contractName, active);
+      if (stale.length === 0) {
+        return Effect.succeed([]);
+      }
+      return Effect.forEach(
+        stale,
+        (key) =>
+          query.get(key).pipe(
+            Effect.map((result): Refreshed => ({ _tag: "Refreshed", key, result })),
+            Effect.catch((error) =>
+              Effect.succeed<Refreshed>({ _tag: "RefreshFailed", key, error }),
+            ),
+          ),
+        { concurrency: stale.length },
+      );
+    };
+
     const transport: TransportService = {
-      send: (address, commandId, payload) =>
-        Effect.flatMap(resolve(address, "send"), (instance) => instance.send(commandId, payload)),
-      call: (address, commandId, payload, timeout) =>
+      send: (address, commandId, payload, active) =>
         Effect.flatMap(resolve(address, "send"), (instance) =>
-          instance.call(commandId, payload, timeout),
+          Effect.flatMap(instance.send(commandId, payload), (receipt) =>
+            Effect.map(refreshFor(address.contract, active), (refreshed) => ({
+              receipt,
+              refreshed,
+            })),
+          ),
+        ),
+      call: (address, commandId, payload, timeout, active) =>
+        Effect.flatMap(resolve(address, "send"), (instance) =>
+          Effect.flatMap(instance.call(commandId, payload, timeout), (projection) =>
+            Effect.map(refreshFor(address.contract, active), (refreshed) => ({
+              projection,
+              refreshed,
+            })),
+          ),
         ),
       snapshot: (address) =>
         Effect.flatMap(resolve(address, "read"), (instance) => instance.snapshot),
+      query: (key) =>
+        Option.match(serving, {
+          onNone: () => Effect.fail(UnknownQuery.make({ query: key.query })),
+          onSome: (query) => query.get(key),
+        }),
       changes: (address, after) =>
         Stream.unwrap(Effect.map(resolve(address, "read"), (instance) => instance.changes(after))),
     };
+
+    // Tie the knot: the handlers read actors through the transport above.
+    const queries = Option.getOrElse(
+      Option.fromNullishOr(options.queries),
+      (): ReadonlyArray<AnyQueryImplementation<R>> => [],
+    );
+    if (queries.length > 0) {
+      serving = Option.some(yield* makeQueryServing({ queries }, transport));
+    }
     return transport;
   });
 
@@ -120,5 +196,6 @@ export const layer = <R>(options: HostOptions<R>): LayerType.Layer<ActorTranspor
 
 export const layerMemory = <R>(
   implementations: ReadonlyArray<AnyImplementation<R>>,
+  queries?: ReadonlyArray<AnyQueryImplementation<R>>,
 ): LayerType.Layer<ActorTransport, never, R> =>
-  layer({ implementations, store: () => MailboxStore.layerMemory });
+  layer({ implementations, queries, store: () => MailboxStore.layerMemory });

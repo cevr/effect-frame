@@ -24,3 +24,14 @@ export {
 } from "./implement.js";
 export * as ActorHost from "./host.js";
 export * as HttpServer from "./http/server.js";
+// PROTOTYPE (ticket #17): the Query primitive's server half.
+export {
+  QueryPolicies,
+  implementQuery,
+  queryServerOnly,
+  type AnyQueryImplementation,
+  type QueryHostOptions,
+  type QueryImplementation,
+  type QueryPolicy,
+  type QueryServing,
+} from "./query-host.js";

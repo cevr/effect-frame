@@ -92,49 +92,132 @@
   },
   "overrides": [
     {
-      "files": [
-        "packages/host-celld/src/storage.ts",
-        "packages/host-celld/src/interop.ts",
-        "packages/host-celld/src/durable-object.ts",
-        "packages/host-celld/src/frame-host.ts",
-        "packages/host-celld/fixture-contract/**",
-        "packages/host-celld/fixture/**",
-        "packages/host-celld/scripts/**",
-        "packages/host-celld/tests/sqlite-storage.ts",
-        "packages/host-celld/tests/storage-store.test.ts",
-        "packages/host-celld/tests/frame-host.test.ts"
-      ],
+      "files": ["packages/host-celld/tests/sqlite-storage.ts"],
       "rules": {
         "effect/noAsyncFunction": "off",
         "effect/noNewPromise": "off",
         "effect/noNullish": "off",
         "effect/noRuntimeTypeof": "off",
-        "effect/noUnknownParameters": "off",
-        "effect/noUnsafeDictionaryType": "off",
-        "effect/noTernary": "off",
-        "effect/noNodeBuiltinImport": "off",
-        "effect/noAs": "off",
-        "no-await-in-loop": "off",
-        "effect/noThrowStatement": "off",
-        "effect/noNewError": "off",
-        "effect/noTryCatch": "off",
-        "effect/noSilentCatchAll": "off",
+        "effect/noUnknownParameters": "off"
+      }
+    },
+    {
+      "files": ["packages/host-celld/fixture-contract/index.ts"],
+      "rules": {
+        "effect/noAsyncFunction": "off",
+        "effect/noNullish": "off",
+        "effect/noUnknownParameters": "off"
+      }
+    },
+    {
+      "files": ["packages/host-celld/fixture/index.ts"],
+      "rules": {
+        "effect/noAsyncFunction": "off",
+        "effect/noNullish": "off",
+        "effect/noUnknownParameters": "off"
+      }
+    },
+    {
+      "files": ["packages/host-celld/src/durable-object.ts"],
+      "rules": {
+        "effect/noAsyncFunction": "off",
+        "effect/noUnknownParameters": "off"
+      }
+    },
+    {
+      "files": ["packages/host-celld/src/frame-host.ts"],
+      "rules": {
+        "effect/noAsyncFunction": "off",
         "effect/noGlobals": "off",
+        "effect/noUnknownParameters": "off"
+      }
+    },
+    {
+      "files": ["packages/host-celld/src/interop.ts"],
+      "rules": {
+        "effect/noAsyncFunction": "off",
+        "effect/noNewPromise": "off",
+        "effect/noRuntimeTypeof": "off"
+      }
+    },
+    {
+      "files": ["packages/host-celld/src/storage.ts"],
+      "rules": {
+        "effect/noUnsafeDictionaryType": "off"
+      }
+    },
+    {
+      "files": ["packages/host-celld/tests/storage-store.test.ts"],
+      "rules": {
+        "effect/noAsyncFunction": "off",
+        "effect/noNewPromise": "off"
+      }
+    },
+    {
+      "files": ["packages/host-celld/tests/frame-host.test.ts"],
+      "rules": {
+        "effect/noGlobals": "off",
+        "effect/noUnknownParameters": "off"
+      }
+    },
+    {
+      "files": ["packages/host-celld/scripts/contract-proof.ts"],
+      "rules": {
+        "effect/noAsyncFunction": "off",
+        "effect/noGlobals": "off",
+        "effect/noNodeBuiltinImport": "off",
+        "effect/noTryCatch": "off",
+        "effect/noUnknownParameters": "off"
+      }
+    },
+    {
+      "files": ["packages/host-celld/scripts/crash-harness.ts"],
+      "rules": {
+        "effect/noAs": "off",
+        "effect/noAsyncFunction": "off",
+        "effect/noGlobals": "off",
+        "effect/noNewError": "off",
+        "effect/noNewPromise": "off",
+        "effect/noNodeBuiltinImport": "off",
+        "effect/noNullish": "off",
+        "effect/noRuntimeTypeof": "off",
+        "effect/noTernary": "off",
+        "effect/noThrowStatement": "off",
+        "effect/noTryCatch": "off",
+        "effect/noUnknownParameters": "off",
+        "no-await-in-loop": "off",
         "node/no-process-env": "off"
       }
     },
     {
-      "files": [
-        "apps/notes/src/server.ts",
-        "apps/notes/src/client.tsx",
-        "apps/notes/src/terminal.tsx",
-        "apps/notes/tests/**"
-      ],
+      "files": ["packages/host-celld/scripts/celld-process.ts"],
       "rules": {
-        "effect/noGlobals": "off",
         "effect/noAsyncFunction": "off",
+        "effect/noGlobals": "off",
+        "effect/noNewError": "off",
         "effect/noNewPromise": "off",
+        "effect/noNodeBuiltinImport": "off",
+        "effect/noNullish": "off",
+        "effect/noRuntimeTypeof": "off",
+        "effect/noTernary": "off",
+        "effect/noThrowStatement": "off",
+        "effect/noTryCatch": "off",
+        "no-await-in-loop": "off",
         "node/no-process-env": "off"
+      }
+    },
+    {
+      "files": ["apps/notes/src/server.ts"],
+      "rules": {
+        "effect/noAsyncFunction": "off",
+        "effect/noGlobals": "off"
+      }
+    },
+    {
+      "files": ["apps/notes/src/terminal.tsx"],
+      "rules": {
+        "effect/noAsyncFunction": "off",
+        "effect/noGlobals": "off"
       }
     }
   ],

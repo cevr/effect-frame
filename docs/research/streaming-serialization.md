@@ -116,7 +116,7 @@ Source: `packages/seroval/src/core/Serializer.ts:41` and `:54`.
 Solid's streaming SSR builds the serializer with `onData: payload => sink.data(payload)`.
 The document sink writes each payload into a `<script>` tag.
 Solid batches tasks in a microtask so several resolutions coalesce into one `<script>`.
-Sources: `packages/web/src/server.ts:2108`; `:2279`; `:2192` (the `pushTask` microtask batching comment).
+Sources: `packages/web/src/server.ts:2108`; `:2279`; `:1988` (the microtask batching comment).
 
 Solid batches pre-shell stubs into one seroval write under the key `$B`.
 A spreader task then copies each entry to its real `_$HY.r` key and deletes `$B`.

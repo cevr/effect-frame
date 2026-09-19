@@ -4,7 +4,8 @@ Repository: [Effect Frame](https://github.com/cevr/effect-frame).
 Maps:
 
 - Closed: [First release: explicit actors across browser, terminal, and durable celld](https://github.com/cevr/effect-frame/issues/1).
-- Active: [Progressive layer: queries, router, rendering modes, and seven proving examples](https://github.com/cevr/effect-frame/issues/11).
+- Closed: [Progressive layer: queries, router, rendering modes, and seven proving examples](https://github.com/cevr/effect-frame/issues/11).
+- Active: [Build map: the seven proving examples on main](https://github.com/cevr/effect-frame/issues/33). Its tickets are `wayfinder:task` and execute; see the map's Notes.
 
 ## Wayfinding operations
 
@@ -16,13 +17,13 @@ The assignee is the claim. Assign a ticket to `cevr` before work.
 Read the map:
 
 ```sh
-gh issue view 11 --repo cevr/effect-frame
+gh issue view 33 --repo cevr/effect-frame
 ```
 
 List its children:
 
 ```sh
-gh api --paginate repos/cevr/effect-frame/issues/11/sub_issues
+gh api --paginate repos/cevr/effect-frame/issues/33/sub_issues
 ```
 
 For each open, unassigned child, query its blockers:
@@ -37,7 +38,7 @@ Do not treat an assigned ticket as available.
 Create all child tickets before adding dependency edges:
 
 ```sh
-gh issue create --repo cevr/effect-frame --parent 11 --label wayfinder:research --title TITLE --body-file QUESTION_FILE
+gh issue create --repo cevr/effect-frame --parent 33 --label wayfinder:task --title TITLE --body-file QUESTION_FILE
 gh issue edit CHILD_NUMBER --repo cevr/effect-frame --add-blocked-by BLOCKER_NUMBER
 gh issue edit CHILD_NUMBER --repo cevr/effect-frame --add-assignee cevr
 ```

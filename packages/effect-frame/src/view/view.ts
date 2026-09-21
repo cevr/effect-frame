@@ -57,6 +57,8 @@ export interface Capabilities {
   readonly submit: (handler: Handler) => Prepared;
 }
 
+export { list, type ListOptions } from "./control.js";
+
 export class Context extends ServiceMap.Service<Context, Capabilities>()(
   "effect-frame/src/view/view/Context",
 ) {}

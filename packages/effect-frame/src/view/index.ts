@@ -3,6 +3,7 @@ export {
   For,
   Show,
   type ForProps,
+  type ListOptions,
   type ShowIfProps,
   type ShowProps,
   type ShowWhenProps,

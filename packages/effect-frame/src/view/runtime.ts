@@ -1,7 +1,15 @@
 import type { Source } from "effect-frame/actor";
-import { Effect, Exit, Match, Option, Predicate, Queue, Scope, Stream } from "effect";
+import { Effect, Exit, Fiber, Match, Option, Predicate, Queue, Scope, Stream } from "effect";
 import type { Accessor } from "@solidjs/signals";
-import { createRenderEffect, createRoot, createSignal, flush, untrack } from "@solidjs/signals";
+import {
+  createRenderEffect,
+  createRoot,
+  createSignal,
+  flush,
+  getOwner,
+  runWithOwner,
+  untrack,
+} from "@solidjs/signals";
 import type { Cleanup, Host, PropertyValue, StaticProps } from "./host.js";
 import type { ElementNode, ForNode, Node, PropValue, ShowNode } from "./jsx-runtime.js";
 import type { Bound, Prepared, View } from "./view.js";
@@ -141,7 +149,15 @@ interface Owned<A> {
 interface Tracker {
   readonly track: <A>(source: Source<A>) => Accessor<A>;
   readonly register: (cleanup: Cleanup) => void;
-  readonly owned: <A>(build: () => A) => Owned<A>;
+  readonly owned: <A>(build: (scope: Scope.Scope) => A) => Owned<A>;
+  /** Run a build with `scope` current, for work that lands after `owned` returned. */
+  readonly within: <A>(scope: Scope.Scope, build: () => A) => A;
+  /**
+   * Run an Effect on a fiber of its own, in the context captured at mount,
+   * and interrupt it when `scope` closes. The fiber starts at once: an
+   * effect with no suspension completes before this returns.
+   */
+  readonly run: (effect: Effect.Effect<unknown>, scope: Scope.Scope) => void;
 }
 
 interface Renderer<HostNode> {
@@ -183,12 +199,17 @@ const makeTracker = Effect.fn("View.makeTracker")(function* () {
     return cell.read;
   };
 
-  const owned = <A>(build: () => A): Owned<A> => {
+  const within = <A>(scope: Scope.Scope, build: () => A): A => {
     const outer = current;
-    const child = Scope.forkUnsafe(outer);
-    current = child;
+    current = scope;
     const value = build();
     current = outer;
+    return value;
+  };
+
+  const owned = <A>(build: (scope: Scope.Scope) => A): Owned<A> => {
+    const child = Scope.forkUnsafe(current);
+    const value = within(child, () => build(child));
     return { value, close: () => void runFork(Scope.close(child, Exit.void)) };
   };
 
@@ -196,6 +217,8 @@ const makeTracker = Effect.fn("View.makeTracker")(function* () {
     track,
     register: (cleanup: Cleanup) => void cleanups.push(cleanup),
     owned,
+    within,
+    run: (effect, scope) => void Fiber.runIn(runFork(effect), scope),
   } satisfies Tracker;
 });
 
@@ -524,6 +547,13 @@ interface Row<HostNode, Item> {
  * the row in place and keeps its host nodes. Every row plans its own body,
  * inside its own reactive owner, so a row created long after mount builds
  * exactly like the first one.
+ *
+ * A row's body comes from an Effect run in the row's scope. A setup that
+ * completes at once builds its nodes before `createRow` returns, so the
+ * list is whole when the mount returns; one that suspends builds when it
+ * lands, under the row's own owner and scope, and then reorders the list so
+ * the late row takes its place. The row's scope closing interrupts a setup
+ * still in flight.
  */
 const planFor = <HostNode, Item>(
   renderer: Renderer<HostNode>,
@@ -544,15 +574,31 @@ const buildFor =
     const createRow = (item: Item): Row<HostNode, Item> => {
       const rowSlot: Slot<HostNode> = { nodes: [] };
       const cell = makeCell(item);
+      let built = false;
+      let late = false;
       // One reactive owner and one Effect scope per row, as for a `Show`
       // branch: whatever the row's body subscribes to ends with the row.
-      const rowOwner = tracker.owned(() =>
+      const rowOwner = tracker.owned((scope) =>
         createRoot((disposeRow) => {
-          // Untracked for the reason a `Show` branch is: the build's reads are
-          // first values, not dependencies of the list's own effect.
-          untrack(() =>
-            plan(renderer, node.render(signalSource(cell.read)))(parent, rowSlot, () => {}),
+          const owner = getOwner();
+          const build = (tree: Node): void =>
+            tracker.within(scope, () =>
+              runWithOwner(owner, () => {
+                // Untracked for the reason a `Show` branch is: the build's
+                // reads are first values, not dependencies of the list's own
+                // effect.
+                untrack(() => plan(renderer, tree)(parent, rowSlot, () => {}));
+                built = true;
+                if (late) {
+                  reorder();
+                }
+              }),
+            );
+          tracker.run(
+            Effect.map(Scope.provide(node.setup(signalSource(cell.read)), scope), build),
+            scope,
           );
+          late = !built;
           return disposeRow;
         }),
       );

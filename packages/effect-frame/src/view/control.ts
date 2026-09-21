@@ -1,5 +1,5 @@
 import type { Source } from "effect-frame/actor";
-import { Option, Predicate } from "effect";
+import { Context, Effect, Option, Predicate, Scope } from "effect";
 import type { ForNode, Node, ShowNode } from "./jsx-runtime.js";
 import { Empty } from "./jsx-runtime.js";
 
@@ -20,8 +20,44 @@ export const For = <Item>(props: ForProps<Item>): ForNode<Item> => ({
   _tag: "For",
   each: props.each,
   keyBy: props.keyBy,
-  render: props.children,
+  setup: (item) => Effect.succeed(props.children(item)),
 });
+
+export interface ListOptions<Item, R> {
+  readonly each: Source<ReadonlyArray<Item>>;
+  readonly keyBy: (item: Item) => string;
+  /**
+   * One setup per row, run in a scope of its own that closes when the row
+   * leaves: a row may spawn actors, follow queries and add finalizers, as a
+   * view's setup does. It cannot fail, because a row has no place to return
+   * a failure to; handle errors inside it.
+   */
+  readonly setup: (item: Source<Item>) => Effect.Effect<Node, never, R | Scope.Scope>;
+}
+
+/**
+ * A keyed list whose rows run a setup. It is an Effect rather than a JSX
+ * element because a row's requirements must be met somewhere, and a JSX
+ * tree carries no `R`: `list` captures the context it is yielded in and
+ * runs each row's setup there, so the enclosing view's `R` names what the
+ * rows need. `const rows = yield* View.list({...}); return <ul>{rows}</ul>`.
+ */
+export const list = <Item, R>(
+  options: ListOptions<Item, R>,
+): Effect.Effect<ForNode<Item>, never, Exclude<R, Scope.Scope>> =>
+  Effect.map(Effect.context<Exclude<R, Scope.Scope>>(), (captured) => {
+    // The row runs in its own scope, which the runtime provides; the parent's
+    // scope must not travel with the rest of the context, or a row's
+    // finalizers would outlive the row.
+    const context = Context.omit(Scope.Scope)(captured);
+    // Providing `Exclude<R, Scope>` to an effect that needs `R | Scope`
+    // leaves `Scope`, which the checker cannot reduce for a generic `R`, so
+    // the assertion states what the arithmetic already means.
+    const setup = (item: Source<Item>) => Effect.provide(options.setup(item), context);
+    // oxlint-disable-next-line effect/noAs
+    const rows = setup as ForNode<Item>["setup"];
+    return { _tag: "For", each: options.each, keyBy: options.keyBy, setup: rows };
+  });
 
 /** The plain form: a boolean source, shown while it is `true`. */
 export interface ShowProps {

@@ -1,4 +1,5 @@
 import type { Source } from "effect-frame/actor";
+import type { Effect, Scope } from "effect";
 import { Option, Predicate } from "effect";
 import type { Bound, Prepared } from "./view.js";
 
@@ -41,13 +42,18 @@ export interface ElementNode {
 
 /**
  * A keyed list. Each row receives a read-only source for its own item, so
- * replacing an item under the same key updates that row in place.
+ * replacing an item under the same key updates that row in place. A row's
+ * body is an Effect run in the row's own scope, which closes when the row
+ * leaves; `For` wraps a plain render in `Effect.succeed`, and `View.list`
+ * runs a real setup there.
  */
-export interface ForNode<Item> {
+export interface ForNode<Item = unknown> {
   readonly _tag: "For";
   readonly each: Source<ReadonlyArray<Item>>;
-  readonly keyBy: (item: Item) => string;
-  readonly render: (item: Source<Item>) => Node;
+  // Method signatures, as on `ShowNode`: a `ForNode<Task>` is a
+  // `ForNode<unknown>`, which is all the tree needs to know.
+  keyBy(item: Item): string;
+  setup(item: Source<Item>): Effect.Effect<Node, never, Scope.Scope>;
 }
 
 /**
@@ -66,7 +72,7 @@ export interface ShowNode<A = unknown> {
 }
 
 /** Control flow in the tree. `control.ts` builds it; `runtime.ts` reads it. */
-export type ControlNode = ForNode<never> | ShowNode<unknown>;
+export type ControlNode = ForNode<unknown> | ShowNode<unknown>;
 
 export const Empty: EmptyNode = { _tag: "Empty" };
 

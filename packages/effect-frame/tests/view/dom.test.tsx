@@ -2,10 +2,10 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Behavior, Value, modify, select, spawn } from "effect-frame/actor";
+import { Behavior, Cell, Value, modify, select, spawn } from "effect-frame/actor";
 import type { LocalActorRef, SetValue, Source } from "effect-frame/actor";
 import { Dom, For, Show, View, mount, render } from "effect-frame/view";
-import { Effect, Exit, Option, Ref, Scope, Stream } from "effect";
+import { Deferred, Effect, Exit, Option, Ref, Scope, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 /** A view with no input of its own still takes props: an empty record. */
@@ -501,6 +501,141 @@ describe("row sources", () => {
       yield* render;
       expect(titles(root)).toEqual(["BETA"]);
       expect(yield* Ref.get(ended)).toBe(1);
+    }),
+  );
+});
+
+interface CountedRowsProps {
+  readonly tasks: Source<ReadonlyArray<Task>>;
+  /** Bumped by a row's finalizer, so a test can see a row's scope close. */
+  readonly closed: Ref.Ref<number>;
+}
+
+/**
+ * Rows with a setup of their own: each keeps a cell that counts its clicks,
+ * reads `View.Context` itself, and registers a finalizer in the row scope.
+ */
+const CountedRows = View.make((props: CountedRowsProps) =>
+  Effect.gen(function* () {
+    const rows = yield* View.list({
+      each: props.tasks,
+      keyBy: (task: Task) => task.id,
+      setup: (task: Source<Task>) =>
+        Effect.gen(function* () {
+          const view = yield* View.Context;
+          const clicks = yield* Cell.make(0);
+          yield* Effect.addFinalizer(() => Ref.update(props.closed, (n) => n + 1));
+          return (
+            <li>
+              <span class="title">{view.bind(task, (value) => value.title)}</span>
+              <button class="tap" onClick={view.event(() => clicks.update((n) => n + 1))}>
+                {view.bind(clicks.state, String)}
+              </button>
+            </li>
+          );
+        }),
+    });
+    return <ul>{rows}</ul>;
+  }),
+);
+
+interface LateRowsProps {
+  readonly tasks: Source<ReadonlyArray<Task>>;
+  /** The row with this id waits for the gate before it has a body. */
+  readonly slow: string;
+  readonly gate: Deferred.Deferred<void>;
+}
+
+/** One row's setup suspends: it must land in its place, not at the end. */
+const LateRows = View.make((props: LateRowsProps) =>
+  Effect.gen(function* () {
+    const rows = yield* View.list({
+      each: props.tasks,
+      keyBy: (task: Task) => task.id,
+      setup: (task: Source<Task>) =>
+        Effect.gen(function* () {
+          const view = yield* View.Context;
+          const current = yield* task.get;
+          if (current.id === props.slow) {
+            yield* Deferred.await(props.gate);
+          }
+          return <li>{view.bind(task, (value) => value.title)}</li>;
+        }),
+    });
+    return <ul>{rows}</ul>;
+  }),
+);
+
+describe("rows with a setup", () => {
+  it.scoped("each row keeps its own state, and a row that leaves closes its scope", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const closed = yield* Ref.make(0);
+      const tasks = yield* spawn(
+        Behavior.value<ReadonlyArray<Task>>([
+          { id: "a", title: "alpha" },
+          { id: "b", title: "beta" },
+        ]),
+      );
+      yield* mount(CountedRows, { tasks: tasks.state, closed }, Dom.host, root);
+      expect(titles(root)).toEqual(["alpha0", "beta0"]);
+
+      const taps = root.querySelectorAll("button.tap");
+      taps[1]?.dispatchEvent(new Event("click"));
+      taps[1]?.dispatchEvent(new Event("click"));
+      yield* render;
+      expect(titles(root)).toEqual(["alpha0", "beta2"]);
+
+      // Reordering keeps each row's state with its key.
+      yield* setTasks(tasks, [
+        { id: "b", title: "BETA" },
+        { id: "a", title: "alpha" },
+      ]);
+      expect(titles(root)).toEqual(["BETA2", "alpha0"]);
+      expect(yield* Ref.get(closed)).toBe(0);
+
+      yield* setTasks(tasks, [{ id: "a", title: "alpha" }]);
+      expect(titles(root)).toEqual(["alpha0"]);
+      expect(yield* Ref.get(closed)).toBe(1);
+    }),
+  );
+
+  it.scoped("a row whose setup suspends lands in its place when it completes", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const gate = yield* Deferred.make<void>();
+      const tasks = yield* spawn(
+        Behavior.value<ReadonlyArray<Task>>([
+          { id: "a", title: "alpha" },
+          { id: "b", title: "beta" },
+          { id: "c", title: "gamma" },
+        ]),
+      );
+      yield* mount(LateRows, { tasks: tasks.state, slow: "b", gate }, Dom.host, root);
+      expect(titles(root)).toEqual(["alpha", "gamma"]);
+
+      yield* Deferred.succeed(gate, void 0);
+      yield* render;
+      expect(titles(root)).toEqual(["alpha", "beta", "gamma"]);
+    }),
+  );
+
+  it.scoped("closing the mount interrupts a row setup still in flight", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const gate = yield* Deferred.make<void>();
+      const tasks = yield* spawn(Behavior.value<ReadonlyArray<Task>>([{ id: "b", title: "beta" }]));
+      const scope = yield* Scope.make();
+      yield* Scope.provide(
+        mount(LateRows, { tasks: tasks.state, slow: "b", gate }, Dom.host, root),
+        scope,
+      );
+      expect(titles(root)).toEqual([]);
+
+      yield* Scope.close(scope, Exit.void);
+      yield* Deferred.succeed(gate, void 0);
+      yield* render;
+      expect(titles(root)).toEqual([]);
     }),
   );
 });

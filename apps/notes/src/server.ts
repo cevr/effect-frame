@@ -31,6 +31,9 @@ const buildClient = Effect.fn("Notes.buildClient")(function* () {
       target: "browser",
       format: "esm",
       minify: false,
+      // The package scripts pass --conditions=source; an in-process build
+      // must say so itself, or it resolves the package through dist.
+      conditions: ["source"],
     }),
   );
   if (!result.success) {

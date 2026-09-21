@@ -136,9 +136,13 @@ interface Request {
  * the route's own requirements are met where the router was mounted.
  * `Router` is provided to every route's view.
  */
-export const mount = Effect.fn("Router.mount")(function* <R, HostNode>(
+export const mount: <R, HostNode>(
   options: MountOptions<R, HostNode>,
-) {
+) => Effect.Effect<
+  RouterService,
+  never,
+  Exclude<Exclude<Exclude<R, Router>, View.Context>, Scope.Scope> | Location | Scope.Scope
+> = Effect.fn("Router.mount")(function* <R, HostNode>(options: MountOptions<R, HostNode>) {
   const location = yield* Location;
   const scope = yield* Effect.scope;
   const fallback = notFoundRoute(options.notFound);

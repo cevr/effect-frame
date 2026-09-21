@@ -97,10 +97,13 @@ export class ErroredScope extends ServiceMap.Service<ErroredScope, Registry>()(
  * `R` carries `LoadingScope`, so calling this outside a `Loading` does not
  * compile. Pair it with `orErrored` to route the failure as well.
  */
-export const ready = Effect.fn("Readiness.ready")(function* <Value, Error>(
+export const ready: <Value, Error>(
   state: Source<QueryState<Value, Error>>,
   fallback: Value,
-) {
+) => Effect.Effect<Source<Value>, never, LoadingScope> = Effect.fn("Readiness.ready")(function* <
+  Value,
+  Error,
+>(state: Source<QueryState<Value, Error>>, fallback: Value) {
   const shared = yield* registerLoading(state);
   const first = yield* shared.get;
   return yield* holdSome(valueOr(first, fallback), Stream.map(shared.changes, valueOf));
@@ -117,9 +120,11 @@ export const ready = Effect.fn("Readiness.ready")(function* <Value, Error>(
  * the tree. The alternative — `ready` requiring both — made every `Loading`
  * leak `ErroredScope` to its own caller, which the compiler caught.
  */
-export const orErrored = Effect.fn("Readiness.orErrored")(function* <Value, Error>(
+export const orErrored: <Value, Error>(
   state: Source<QueryState<Value, Error>>,
-) {
+) => Effect.Effect<Source<QueryState<Value, Error>>, never, ErroredScope> = Effect.fn(
+  "Readiness.orErrored",
+)(function* <Value, Error>(state: Source<QueryState<Value, Error>>) {
   const erroredScope = yield* ErroredScope;
   const initial = yield* state.get;
   yield* erroredScope.register({
@@ -156,10 +161,12 @@ const registerLoading = Effect.fn("Readiness.registerLoading")(function* <Value,
  * on screen and the flag is available; a view that wants to dim itself binds
  * this instead of losing the information.
  */
-export const readyWithStale = Effect.fn("Readiness.readyWithStale")(function* <Value, Error>(
+export const readyWithStale: <Value, Error>(
   state: Source<QueryState<Value, Error>>,
   fallback: Value,
-) {
+) => Effect.Effect<Source<ReadyValue<Value>>, never, LoadingScope> = Effect.fn(
+  "Readiness.readyWithStale",
+)(function* <Value, Error>(state: Source<QueryState<Value, Error>>, fallback: Value) {
   const shared = yield* registerLoading(state);
   const initial = yield* shared.get;
   return yield* holdSome<ReadyValue<Value>>(

@@ -78,9 +78,12 @@ export interface FakeQuery<Value, Error> {
   readonly reject: (error: Error) => Effect.Effect<void>;
 }
 
-export const fakeQuery = Effect.fn("QueryState.fakeQuery")(function* <Value, Error>(
-  initial: QueryState<Value, Error> = loading<Value, Error>(),
-) {
+export const fakeQuery: <Value, Error>(
+  initial?: QueryState<Value, Error>,
+) => Effect.Effect<FakeQuery<Value, Error>> = Effect.fn("QueryState.fakeQuery")(function* <
+  Value,
+  Error,
+>(initial: QueryState<Value, Error> = loading<Value, Error>()) {
   const ref = yield* SubscriptionRef.make(initial);
   const source: Source<QueryState<Value, Error>> = {
     get: SubscriptionRef.get(ref),

@@ -14,22 +14,19 @@
   "type": "module",
   "exports": {
     ".": {
-      "import": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.js"
-      }
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     },
     "./client": {
-      "import": {
-        "types": "./dist/client.d.ts",
-        "default": "./dist/client.js"
-      }
+      "source": "./src/client.ts",
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
     },
     "./testing": {
-      "import": {
-        "types": "./dist/testing/conformance.d.ts",
-        "default": "./dist/testing/conformance.js"
-      }
+      "source": "./src/testing/conformance.ts",
+      "types": "./dist/testing/conformance.d.ts",
+      "default": "./dist/testing/conformance.js"
     }
   },
   "publishConfig": {
@@ -38,7 +35,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "bun --bun tsdown",
-    "test": "bun test tests/"
+    "test": "bun test --conditions=source tests/"
   },
   "dependencies": {
     "effect-machine": "0.27.0"

@@ -14,28 +14,24 @@
   "type": "module",
   "exports": {
     ".": {
-      "import": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.js"
-      }
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     },
     "./jsx-runtime": {
-      "import": {
-        "types": "./dist/jsx-runtime.d.ts",
-        "default": "./dist/jsx-runtime.js"
-      }
+      "source": "./src/jsx-runtime.ts",
+      "types": "./dist/jsx-runtime.d.ts",
+      "default": "./dist/jsx-runtime.js"
     },
     "./jsx-dev-runtime": {
-      "import": {
-        "types": "./dist/jsx-runtime.d.ts",
-        "default": "./dist/jsx-runtime.js"
-      }
+      "source": "./src/jsx-runtime.ts",
+      "types": "./dist/jsx-runtime.d.ts",
+      "default": "./dist/jsx-runtime.js"
     },
     "./opentui": {
-      "import": {
-        "types": "./dist/hosts/opentui.d.ts",
-        "default": "./dist/hosts/opentui.js"
-      }
+      "source": "./src/hosts/opentui.ts",
+      "types": "./dist/hosts/opentui.d.ts",
+      "default": "./dist/hosts/opentui.js"
     }
   },
   "publishConfig": {
@@ -44,7 +40,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "bun --bun tsdown",
-    "test": "bun test tests/"
+    "test": "bun test --conditions=source tests/"
   },
   "dependencies": {
     "@effect-frame/actor": "0.0.0",

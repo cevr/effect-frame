@@ -4,8 +4,8 @@ export default defineConfig({
   entry: ["src/**/*.ts"],
   format: "esm",
   dts: {
-    // The root tsconfig maps @effect-frame/* to sibling sources for the editor.
-    // Published types must reach siblings through their built dist instead.
+    // Published types resolve sibling packages through their built dist, not
+    // the "source" condition the workspace uses in the editor and in tests.
     tsconfig: "tsconfig.build.json",
   },
   clean: true,

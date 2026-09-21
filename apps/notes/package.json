@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "bun build src/client.tsx --target browser --format esm --outdir dist",
-    "test": "bun test tests/",
-    "dev": "bun run src/server.ts",
-    "terminal": "bun run src/terminal.tsx"
+    "build": "bun build --conditions=source src/client.tsx --target browser --format esm --outdir dist",
+    "test": "bun test --conditions=source tests/",
+    "dev": "bun run --conditions=source src/server.ts",
+    "terminal": "bun run --conditions=source src/terminal.tsx"
   },
   "dependencies": {
     "@effect-frame/actor": "workspace:*",

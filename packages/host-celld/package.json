@@ -8,12 +8,12 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "bun build src/index.ts --target browser --outdir dist --external effect --external effect-machine",
-    "test": "bun test tests/",
-    "fixture": "bun build fixture/index.ts --target browser --format esm --outfile fixture/worker.js",
-    "proof:celld": "bun scripts/crash-harness.ts",
-    "fixture:contract": "bun build fixture-contract/index.ts --target browser --format esm --outfile fixture-contract/worker.js",
-    "proof:contract": "bun scripts/contract-proof.ts"
+    "build": "bun build --conditions=source src/index.ts --target browser --outdir dist --external effect --external effect-machine",
+    "test": "bun test --conditions=source tests/",
+    "fixture": "bun build --conditions=source fixture/index.ts --target browser --format esm --outfile fixture/worker.js",
+    "proof:celld": "bun --conditions=source scripts/crash-harness.ts",
+    "fixture:contract": "bun build --conditions=source fixture-contract/index.ts --target browser --format esm --outfile fixture-contract/worker.js",
+    "proof:contract": "bun --conditions=source scripts/contract-proof.ts"
   },
   "dependencies": {
     "@effect-frame/actor": "workspace:*",

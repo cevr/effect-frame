@@ -1,5 +1,29 @@
 # effect-frame
 
+## 0.3.0
+
+### Minor Changes
+
+- [`47cdfb0`](https://github.com/cevr/effect-frame/commit/47cdfb06f6dbc209085a0b6cb8e46d99178b3f5d) Thanks [@cevr](https://github.com/cevr)! - Attached behaviours and `Portal`. An element takes `attach={...}`: one or more behaviours, each an Effect given the host node (`Dom.attach((element) => Effect)`, `Tui.attach`), run once the node is in the document, in the scope of the branch or row that owns the element, so a listener, an observer, or a fiber the behaviour opened ends when the element leaves. There is no node reference. The server host never runs a behaviour. `<Portal into={node}>` draws children under another host node, owned by the branch that opened it. Hosts gain one operation, `attach`.
+
+- [`e3ddec5`](https://github.com/cevr/effect-frame/commit/e3ddec54ede6d73bb77e79f9a44ad426e87a8f72) Thanks [@cevr](https://github.com/cevr)! - Add declared batched query contracts with per-key states, HTTP batching, authorization isolation, and single-flight refresh support.
+
+- [`841a233`](https://github.com/cevr/effect-frame/commit/841a2331f1d046c6bb1fae152c3ebd4d9da4b8e6) Thanks [@cevr](https://github.com/cevr)! - Composable DOM behaviours: `Dom.focus(options)`, `Dom.scrollIntoView(options)`, and `Dom.observeSize(onSize)` are attachments a view lists on an element, `attach={[Dom.scrollIntoView({ block: "nearest" }), Dom.focus()]}`, each run once the element is in the document and ended with it. `Dom.afterPaint` is the Effect a behaviour yields when it needs layout first.
+
+- [`c40ed46`](https://github.com/cevr/effect-frame/commit/c40ed46709abd122d78f2da64cb3f799f258c6dc) Thanks [@cevr](https://github.com/cevr)! - `Match`: exhaustive control over a source of a tagged union. `<Match on={state} cases={{ Idle: () => ..., Running: (s) => ... }} />` takes the case table of Effect's `Match.tagsExhaustive`, draws one branch, hands each case a source of its own member, and updates a kept tag in place. `Query` is now one `Match` over `QueryState`. `QueryState.match` takes the same case shape (`Ready: (state) => ...`, not `(value, stale)`) and has a curried form, `match(cases)`, that builds its matcher once for hot paths; `tests/perf/match.bench.ts` records why.
+
+- [`ccf6470`](https://github.com/cevr/effect-frame/commit/ccf6470b26e461df5f65e3872c0f01286955f51d) Thanks [@cevr](https://github.com/cevr)! - Add scoped `Source.debounce`, `Source.throttle`, and `Source.mapEffect` derivations.
+
+- [`8946cbf`](https://github.com/cevr/effect-frame/commit/8946cbf73f994a980b732889af6d834e80dc0db6) Thanks [@cevr](https://github.com/cevr)! - Typed links. `link(route, params, search)` yields a `Link` in a view's setup: the live href printed through the route's own Schemas, `active` (a source, `true` while the document is on that route), and separate `go` (push) and `replace` effects. `<Link link={l} replace class>` draws it as an anchor with a real `href` and `aria-current="page"`. `router.current` is a source of the current match (route name and URL), and `isActive(router, route)` derives from it.
+
+- [`dd95567`](https://github.com/cevr/effect-frame/commit/dd95567ad5d4d51ec6ecf49db87d3c6269a1c0fd) Thanks [@cevr](https://github.com/cevr)! - Schema-driven route search state: omitted defaults, encoded key mapping, repeated values with lossless empty-array markers, string literal and union fields, serialized functional updates, retained keys, and separate push and replace navigation.
+
+- [`c5917f5`](https://github.com/cevr/effect-frame/commit/c5917f51c84d9f993069c6f1c465d4efbcbdb73b) Thanks [@cevr](https://github.com/cevr)! - A view is a function. `View.make` is removed: a view is `(props) => Effect<Node, E, R>`, and a named view is `Effect.fn("Name")(function* (props) { ... })`. Compose a child with `yield* Child(props)`. `Loading`, `Errored`, and `Await` are now plain views: call them with their props and `yield*` the result. `View.list` names its row view `row`, not `setup`. `Route.spa` is renamed `Route.client`.
+
+### Patch Changes
+
+- [`a9d6665`](https://github.com/cevr/effect-frame/commit/a9d666500e0fb39c433a771d6f5c40f7967334bd) Thanks [@cevr](https://github.com/cevr)! - A keyed list (`For`, `View.list`) now moves only the rows whose position changed. Before, every emission re-inserted every row's nodes, which moved them in the document and dropped focus, selection, and scroll inside a row that had not moved.
+
 ## 0.2.0
 
 ### Minor Changes

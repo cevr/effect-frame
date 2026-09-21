@@ -115,17 +115,19 @@ it passes the same suite and the recovery harness rows.
 
 ## Delivery sequence
 
-| Step | Content                                                                                 | State                                              |
-| ---- | --------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| 1    | actor core: behaviors, local and durable references, in-memory store, conformance suite | done (`536304f`, `11487f3`, `dd2a269`)             |
-| 2    | client and server boundary: contract, implement, in-process host, remote reference      | done (`4bc7973`)                                   |
-| 3    | HTTP transport with revision stream and reconnect                                       | done (`1227f3a`)                                   |
-| 4    | view runtime with DOM and OpenTUI hosts                                                 | done (`eafdef5`)                                   |
-| 5    | server render, snapshot transfer, hydration                                             | done (`5942fdb`)                                   |
-| 6    | celld host: storage store, Durable Object, crash harness                                | done (`83fc70d`); generic host in progress         |
-| 7    | end-to-end example and acceptance matrix                                                | in progress                                        |
-| 8    | Cloudflare and Rivet stores against the conformance suite; Alchemy stack example        | not started; needs accounts, so out of this effort |
-| 9    | npm release                                                                             | not approved                                       |
+| Step | Content                                                                                     | State                                                                         |
+| ---- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| 1    | actor core: behaviors, local and durable references, in-memory store, conformance suite     | done (`536304f`, `11487f3`, `dd2a269`)                                        |
+| 2    | client and server boundary: contract, implement, in-process host, remote reference          | done (`4bc7973`)                                                              |
+| 3    | HTTP transport with revision stream and reconnect                                           | done (`1227f3a`)                                                              |
+| 4    | view runtime with DOM and OpenTUI hosts                                                     | done (`eafdef5`)                                                              |
+| 5    | server render, snapshot transfer, hydration                                                 | done (`5942fdb`)                                                              |
+| 6    | celld host: storage store, Durable Object, crash harness                                    | done (`83fc70d`); generic host in progress                                    |
+| 7    | end-to-end example and acceptance matrix                                                    | in progress                                                                   |
+| 7a   | query primitive and cache (#17, #28), readiness through context (#16), Show ownership (#26) | done on `build/egw-search` (`638104c`, `5914524`, `12636d2`)                  |
+| 7b   | leaf router: route codec, navigation, browser location (#18, SPA mode only)                 | done on `build/egw-search` (`6259e4a`); layouts, SSR and streaming modes open |
+| 8    | Cloudflare and Rivet stores against the conformance suite; Alchemy stack example            | not started; needs accounts, so out of this effort                            |
+| 9    | npm release                                                                                 | not approved                                                                  |
 
 Each step landed on `main` with the gate green and a linked decision on its
 ticket. Steps 8 and 9 stay open on the map as out of scope for this effort.

@@ -350,6 +350,14 @@ Rows this ticket restates are listed once under the deciding ticket.
 | A generated field cannot carry a decoding default                                                | type test: `Schema.withDecodingDefault` over a `Generated` field does not compile                                                                                                                                                     | Open   |
 | A form-bound message with an unmarked missing field does not compile                             | type test, extending #21 §1.5's three refusals; type test — the `Uint8Array` fixture and an unmarked generated field each refuse `Form.codec`                                                                                         | Open   |
 
+### Define time-based and Effect-derived sources ([#57](https://github.com/cevr/effect-frame/issues/57))
+
+| Claim                                                                                              | Proof                                                                                                                                                                           | Status |
+| -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| A debounced source emits its current value, delays changes, and hides pending values               | `packages/effect-frame/tests/actor/source.test.ts` — "debounce emits the seed and only the latest quiet value"; "does not lose a change made between the read and registration" | Proven |
+| A throttled source emits immediately, shapes later values, and closes with its scope               | `packages/effect-frame/tests/actor/source.test.ts` — "throttle emits the first value and shapes later values"; "time-based work ends with its owner scope"                      | Proven |
+| An Effect-derived source cancels replaced work and exposes Loading, stale Ready, and Failed states | `packages/effect-frame/tests/actor/source.test.ts` — "starts loading, cancels old work, carries stale data, and fails"                                                          | Proven |
+
 ## What "not in the gate" means
 
 `packages/host-celld/scripts/crash-harness.ts` and `scripts/contract-proof.ts` need the celld 0.5.0 binary and take about a minute together. They run with `bun run proof:celld` and `bun run proof:contract` in the `@effect-frame/host-celld` package. Both passed on 2026-09-18 against `main` at `ed076c6`: 10 of 10 and 12 of 12 checks. CI does not run it. Its rows are proven against the real host, but a regression does not turn `bun run gate` red.

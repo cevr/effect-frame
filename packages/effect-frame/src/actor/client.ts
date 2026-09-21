@@ -78,5 +78,16 @@ export {
 } from "./transport.js";
 export * as HttpTransport from "./http/client.js";
 export * as Wire from "./http/wire.js";
-export { Source, all, on, select, zip, type AllValues, type ValueOf } from "./source.js";
+export {
+  Source,
+  all,
+  debounce,
+  mapEffect,
+  on,
+  select,
+  throttle,
+  zip,
+  type AllValues,
+  type ValueOf,
+} from "./source.js";
 export * as Cell from "./cell.js";

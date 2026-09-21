@@ -117,6 +117,8 @@ Ask: `Route.client(name, { leave: Effect<boolean, never, R> })`, asked in the Tr
 
 Ask: `Source.debounce(source, duration)`, `Source.throttle`, and `Source.mapEffect(source, f)` that yields `Source<QueryState<B, E>>`, all scoped. The `Query` control then draws a local computation the same way it draws a server read.
 
+Resolution: the source seed comes from the first pull of one continuous `changes` stream, so a change between a separate read and subscription cannot be dropped. `debounce` delays changes and `throttle` rate-limits without conflating later values, using the Effect Stream clock. `mapEffect` starts in `Loading`, interrupts replaced work, carries the last `Ready` value as stale, and turns expected failures into `Failed`.
+
 ### B10. Exhaustive control over a tagged union
 
 `Show` with `is` narrows two ways. `Query` matches three fixed tags. A machine state with five tags needs five `Show`s or a `select` to a string.

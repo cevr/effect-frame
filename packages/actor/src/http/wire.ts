@@ -21,7 +21,7 @@ import {
  *   POST {base}/snapshot  AddressBody  -> WireProjection | WireError
  *   GET  {base}/changes?contract&version&key&after -> text/event-stream
  *
- * PROTOTYPE (ticket #17) adds the query verbs and the single-flight field:
+ * The Query primitive (#17) adds the query verbs and the single-flight field:
  *
  *   POST {base}/query     QueryBody    -> WireQueryValue | WireQueryError
  *   POST {base}/send      SendBody   + active[] -> WireReceipt    + refreshed[]

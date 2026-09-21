@@ -5,7 +5,7 @@ import type { Unauthorized, Unreachable } from "./vocabulary.js";
 export { canonicalize } from "./canonical-json.js";
 
 /**
- * PROTOTYPE (ticket #17). The client-safe half of the Query primitive: the
+ * The client-safe half of the Query primitive (#17): the
  * contract, the cache key, and the wire vocabulary a command reply needs.
  * This module must stay safe to ship to a browser. It never imports a host,
  * a store, or an implementation. `tests/boundary.test.ts` proves that.

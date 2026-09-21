@@ -22,7 +22,7 @@ export {
   type SnapshotOf,
 } from "./contract.js";
 export { ref, type RefOptions, type RemoteActorRef } from "./ref.js";
-// PROTOTYPE (ticket #17): the Query primitive's client half.
+// The Query primitive's client half (#17, #28).
 export {
   Failed,
   Loading,
@@ -46,8 +46,10 @@ export {
 } from "./query.js";
 export {
   QueryCache,
+  followQuery,
   useQuery,
   layer as queryCacheLayer,
+  type FollowedQuery,
   type QueryCacheService,
   type QueryEntry,
 } from "./query-client.js";

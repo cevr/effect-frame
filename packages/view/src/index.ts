@@ -18,7 +18,7 @@ export type {
 export * as Dom from "./hosts/dom.js";
 export * as Html from "./hosts/html.js";
 
-// PROTOTYPE (ticket #16): readiness through context.
+// Readiness through context (#16).
 export * as QueryState from "./query-state.js";
 export {
   Await,

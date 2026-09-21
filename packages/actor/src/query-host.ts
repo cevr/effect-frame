@@ -13,7 +13,7 @@ import {
 } from "./query.js";
 
 /**
- * PROTOTYPE (ticket #17). The server half of the Query primitive. This
+ * The server half of the Query primitive (#17). This
  * module is server-only: it holds handlers and the policy table. It never
  * reaches the client entry.
  */

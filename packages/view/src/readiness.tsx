@@ -9,7 +9,7 @@ import type { View } from "./view.js";
 import { make as makeView } from "./view.js";
 
 /**
- * PROTOTYPE (ticket #16). Readiness through context.
+ * Readiness through context (#16).
  *
  * A readiness scope is a region of a view that shows a fallback until every
  * query it was given has a first value, and afterwards keeps showing content

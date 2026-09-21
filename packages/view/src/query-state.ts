@@ -1,15 +1,16 @@
-import type { Source } from "@effect-frame/actor";
+import type { QueryState as ActorQueryState, Source } from "@effect-frame/actor";
 import { Effect, Match, Schema, Stream, SubscriptionRef } from "effect";
 
 /**
- * PROTOTYPE (ticket #16). What a client can observe about a query at one
- * moment: loading, ready with a value that may be stale, or failed with an
- * error. Never two of these at once.
+ * What a client can observe about a query at one moment (#16): loading,
+ * ready with a value that may be stale, or failed with an error. Never two
+ * of these at once. The type is the actor package's `QueryState`: the Query
+ * primitive (#17) produces it and readiness consumes it, so there is one
+ * union and no drift between them.
  *
- * The union is a Schema so a server render can serialize a pending query and
- * the client can resume it, the way `resumeCodec` carries an actor snapshot.
- * The Query primitive itself is ticket #17; this module only models the
- * state a query is observed through, plus a fake source for the tests.
+ * The union is also a Schema so a server render can serialize a pending
+ * query and the client can resume it, the way `resumeCodec` carries an actor
+ * snapshot. The fake source at the end drives the readiness tests.
  */
 
 export const Loading = Schema.TaggedStruct("Loading", {});
@@ -31,15 +32,8 @@ export const QueryState = <Value extends Schema.Top, Error extends Schema.Top>(
   error: Error,
 ) => Schema.Union([Loading, Ready(value), Failed(error)]);
 
-/**
- * The type a view matches. It is written structurally rather than as
- * `Schema.Schema.Type<ReturnType<typeof QueryState>>` so a consumer names
- * its value and error types directly.
- */
-export type QueryState<Value, Error> =
-  | { readonly _tag: "Loading" }
-  | { readonly _tag: "Ready"; readonly value: Value; readonly stale: boolean }
-  | { readonly _tag: "Failed"; readonly error: Error };
+/** The type a view matches. One union, shared with the Query primitive. */
+export type QueryState<Value, Error> = ActorQueryState<Value, Error>;
 
 export const loading = <Value, Error>(): QueryState<Value, Error> => ({ _tag: "Loading" });
 

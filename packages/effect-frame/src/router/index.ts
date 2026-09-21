@@ -21,6 +21,7 @@ export type {
   Part,
   PathRecord,
   RouteNavigation,
+  RouteInstance,
   RouteDefinition,
   RouteProps,
   Route as RouteOf,

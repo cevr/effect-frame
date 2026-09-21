@@ -13,7 +13,7 @@ import {
   Stream,
   SubscriptionRef,
 } from "effect";
-import type { AnyRoute, Entered, RouteNavigation, UrlUpdater } from "./route.js";
+import type { AnyRoute, Entered, RouteInstance, RouteNavigation, UrlUpdater } from "./route.js";
 
 /**
  * The router (#18 §7). The URL is the state: the router holds nothing about
@@ -93,6 +93,7 @@ const notFoundRoute = <R>(view: View.View<NotFoundProps, never, R>): AnyRoute<R>
   enter: (url) =>
     Option.some(
       Effect.map(SubscriptionRef.make(url), (current): Entered<R> => ({
+        instance: { _tag: "RouteInstance" },
         setup: view({
           url: { get: SubscriptionRef.get(current), changes: SubscriptionRef.changes(current) },
         }),
@@ -131,6 +132,7 @@ type Request =
   | {
       readonly operation: "push" | "replace";
       readonly href: string | UrlUpdater;
+      readonly instance: Option.Option<RouteInstance>;
       readonly done: Deferred.Deferred<Exit.Exit<void, never>>;
     }
   | {
@@ -187,10 +189,14 @@ export const mount: <R, HostNode>(
       });
     });
 
-  const enqueue = (operation: "push" | "replace", href: string | UrlUpdater) =>
+  const enqueue = (
+    operation: "push" | "replace",
+    href: string | UrlUpdater,
+    instance?: RouteInstance,
+  ) =>
     Effect.gen(function* () {
       const done = yield* Deferred.make<Exit.Exit<void, never>>();
-      yield* submit({ operation, href, done });
+      yield* submit({ operation, href, instance: Option.fromNullishOr(instance), done });
     });
 
   const enqueuePop = () =>
@@ -219,8 +225,8 @@ export const mount: <R, HostNode>(
   };
 
   const navigation: RouteNavigation = {
-    navigate: service.navigate,
-    replace: service.replace,
+    navigate: (href, instance) => enqueue("push", href, instance),
+    replace: (href, instance) => enqueue("replace", href, instance),
   };
 
   const nameOf = (url: URL): string =>
@@ -250,6 +256,13 @@ export const mount: <R, HostNode>(
 
   const process = (request: Request) =>
     Effect.gen(function* () {
+      if (
+        request.operation !== "pop" &&
+        Option.isSome(request.instance) &&
+        (Option.isNone(mounted) || mounted.value.entered.instance !== request.instance.value)
+      ) {
+        return;
+      }
       const base = yield* location.current;
       const current = new URL(base.href);
       let href: string;

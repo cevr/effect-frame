@@ -72,7 +72,7 @@ const Book = Route.client("book", {
 });
 ```
 
-`href` omits values equal to `withDefault` and decoding fills them. `Schema.encodeKeys` keeps the decoded field name while changing the URL key. `Route.search` accepts only object fields that encode to strings or string arrays, and it prints fields in encoded Schema order. A custom `SearchRecord` codec remains valid; its emitted record order is kept for serializers such as a two-pane workspace.
+`href` omits values equal to `withDefault` and decoding fills them. `Schema.encodeKeys` keeps the decoded field name while changing the URL key. `Route.search` accepts fixed Struct fields that encode to strings, string literals, all-string unions, or arrays of those values, and it prints fields in encoded Schema order. An empty typed array uses one explicit `~` value; values beginning with `~` are doubled, so omission, `[]`, and `[""]` stay distinct. Dynamic Record schemas and arrays with non-string members are rejected. A custom `SearchRecord` codec remains valid and keeps its emitted record order for serializers such as a two-pane workspace.
 
 The view receives `props.href(params, search)`, `props.updateSearch(update)`, and `props.replaceSearch(update)`. A functional update runs against the latest canonical URL when its queued operation executes. The router serializes URL computation, history mutation, and route publication, so concurrent updates do not overwrite each other. `updateSearch` pushes and `replaceSearch` replaces. A typed `link` accepts the same decoded value or updater. `retain` carries declared decoded keys across routes only when the caller omits them; an explicit caller value, including a default value that encodes to omission, wins.
 
@@ -113,7 +113,7 @@ Ask: `Route.client(name, { leave: Effect<boolean, never, R> })`, asked in the Tr
 
 ### B9. Sources that involve time or Effects
 
-`select` and `zip` are synchronous. A typeahead needs debounce. An async validation needs a derived source that runs an Effect. Solid has `createResource`; the frame would route this through a query, which is wrong for a local computation.
+`select` and `zip` are synchronous. A typeahead needs debounce. An async validation needs a derived source that runs an Effect. Local async work belongs in Source combinators because it is a local computation, not a server read.
 
 Solid 2 RC.9 handles async computations with a Promise-returning `createMemo` and `<Loading>`, rather than the removed `createResource`. Ask: `Source.debounce(source, duration)`, `Source.throttle`, and `Source.mapEffect(source, f)` that yields `Source<QueryState<B, E>>`, all scoped. The `Query` control then draws a local computation the same way it draws a server read.
 

@@ -54,6 +54,38 @@ const Defaults = Route.search(
   }).pipe(Schema.encodeKeys({ page: "p" })),
 );
 
+const EmptyDefault = Route.search(
+  Schema.Struct({ panes: Schema.Array(Schema.String).pipe(Route.withDefault([])) }),
+);
+
+const LiteralSearch = Route.search(
+  Schema.Struct({
+    scope: Schema.Literals(["all", "books"]),
+    scopes: Schema.Array(Schema.Literals(["all", "books"])),
+  }),
+);
+
+// @ts-expect-error a default must be accepted by the schema it decorates
+const wrongArrayDefault = () => Schema.Array(Schema.String).pipe(Route.withDefault(1));
+void wrongArrayDefault;
+
+const validUnionDefault = (value: "all" | "books") =>
+  Schema.Literals(["all", "books"]).pipe(Route.withDefault(value));
+void validUnionDefault;
+
+const wrongUnionDefault = (value: string | number) =>
+  // @ts-expect-error a default union cannot include a value outside the schema
+  Schema.String.pipe(Route.withDefault(value));
+void wrongUnionDefault;
+
+const wrongSearchFields = () => {
+  // @ts-expect-error numeric array fields are outside Route.search's URL vocabulary
+  Route.search(Schema.Struct({ values: Schema.Array(Schema.Finite) }));
+  // @ts-expect-error numeric tuple fields are outside Route.search's URL vocabulary
+  Route.search(Schema.Struct({ values: Schema.Tuple([Schema.Finite]) }));
+};
+void wrongSearchFields;
+
 const capturedSearch: Array<unknown> = [];
 const DefaultsView = <Params, Search>(props: Route.RouteProps<Params, Search>) =>
   Effect.gen(function* () {
@@ -68,6 +100,20 @@ const defaults = Route.client("defaults", {
   view: DefaultsView,
 });
 
+const emptyDefaults = Route.client("empty-defaults", {
+  path: "/empty-defaults",
+  params: Nothing,
+  search: EmptyDefault,
+  view: Blank,
+});
+
+const literals = Route.client("literals", {
+  path: "/literals",
+  params: Nothing,
+  search: LiteralSearch,
+  view: Blank,
+});
+
 const tenant = Route.client("tenant", {
   path: "/tenant/:id",
   params: Schema.Struct({ id: Schema.String }),
@@ -79,6 +125,20 @@ const tenant = Route.client("tenant", {
     }),
   ),
   retain: ["tenant", "page"],
+  view: Blank,
+});
+
+const remappedTenant = Route.client("remapped-tenant", {
+  path: "/remapped-tenant/:id",
+  params: Schema.Struct({ id: Schema.String }),
+  search: Route.search(
+    Schema.Struct({
+      tenant: Schema.optionalKey(Schema.String),
+      section: Schema.String,
+      page: Schema.FiniteFromString.pipe(Route.withDefault(1)),
+    }).pipe(Schema.encodeKeys({ tenant: "t", page: "p" })),
+  ),
+  retain: ["tenant"],
   view: Blank,
 });
 
@@ -239,6 +299,16 @@ describe("route", () => {
       expect(defaults.href({ id: "1" }, { page: 2, panes: ["one", "two"] })).toBe(
         "/defaults/1?p=2&panes=one&panes=two",
       );
+      expect(defaults.href({ id: "1" }, { page: 1, panes: [] })).toBe("/defaults/1?panes=%7E");
+      expect(defaults.href({ id: "1" }, { page: 1, panes: [""] })).toBe("/defaults/1?panes=");
+      expect(
+        Schema.decodeUnknownOption(Defaults)(Route.readSearch(new URLSearchParams("panes=~"))),
+      ).toEqual(Option.some({ page: 1, panes: [] }));
+      expect(
+        Schema.decodeUnknownOption(Defaults)(Route.readSearch(new URLSearchParams("panes="))),
+      ).toEqual(Option.some({ page: 1, panes: [""] }));
+      expect(emptyDefaults.href({}, { panes: [] })).toBe("/empty-defaults");
+      expect(Schema.decodeUnknownOption(EmptyDefault)({})).toEqual(Option.some({ panes: [] }));
 
       const entered = yield* Option.getOrThrow(
         defaults.enter(new URL("http://app.test/defaults/1")),
@@ -267,6 +337,22 @@ describe("route", () => {
           },
         ),
       ).toBe("/workspace-filters?q=first&filters=rank&q2=second&filters2=date");
+      expect(defaults.href({ id: "1" }, { page: 1, panes: ["~", "~~", ""] })).toBe(
+        "/defaults/1?panes=%7E%7E&panes=%7E%7E%7E&panes=",
+      );
+      expect(
+        Schema.decodeUnknownOption(Defaults)(
+          Route.readSearch(new URLSearchParams("panes=~~&panes=~~~&panes=")),
+        ),
+      ).toEqual(Option.some({ page: 1, panes: ["~", "~~", ""] }));
+      expect(literals.href({}, { scope: "books", scopes: ["all", "books"] })).toBe(
+        "/literals?scope=books&scopes=all&scopes=books",
+      );
+      expect(
+        Schema.decodeUnknownOption(LiteralSearch)(
+          Route.readSearch(new URLSearchParams("scope=books&scopes=all&scopes=books")),
+        ),
+      ).toEqual(Option.some({ scope: "books", scopes: ["all", "books"] }));
     }),
   );
 
@@ -276,6 +362,20 @@ describe("route", () => {
       expect(tenant.hrefAt(current, { id: "2" }, { section: "main", page: 1 })).toBe(
         "/tenant/2?tenant=acme&section=main",
       );
+      expect(
+        tenant.hrefAt(
+          new URL("http://app.test/other?tenant=acme&page=oops"),
+          { id: "2" },
+          { section: "main", page: 1 },
+        ),
+      ).toBe("/tenant/2?tenant=acme&section=main");
+      expect(
+        remappedTenant.hrefAt(
+          new URL("http://app.test/other?t=acme&p=oops"),
+          { id: "2" },
+          { section: "main", page: 1 },
+        ),
+      ).toBe("/remapped-tenant/2?t=acme&section=main");
       expect(
         tenant.hrefAt(current, { id: "2" }, { tenant: "other", section: "main", page: 1 }),
       ).toBe("/tenant/2?tenant=other&section=main");
@@ -299,6 +399,7 @@ describe("route", () => {
   it.live("refuses search fields that cannot be URL strings", () =>
     Effect.sync(() => {
       expect(() => Route.search(Schema.Struct({ enabled: Schema.Boolean }))).toThrow();
+      expect(() => Route.search(Schema.Record(Schema.String, Schema.String))).toThrow();
     }),
   );
 

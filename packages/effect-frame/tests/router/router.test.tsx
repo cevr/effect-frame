@@ -289,6 +289,21 @@ describe("router", () => {
     }),
   );
 
+  it.scoped("a disposed route action cannot mutate a later route instance", () =>
+    Effect.gen(function* () {
+      const { location, router, root } = yield* start("http://app.test/books/1");
+      const stale = updateBookSearch;
+      const staleReplace = replaceBookSearch;
+      yield* router.navigate("/");
+      yield* router.navigate("/books/2?q=new");
+      yield* stale((previous) => ({ q: `${previous.q}-stale` }));
+      yield* staleReplace((previous) => ({ q: `${previous.q}-replace-stale` }));
+      yield* render;
+      expect(textOf(root, "#book-search")).toBe("new");
+      expect(location.history).toEqual(["push /", "push /books/2?q=new"]);
+    }),
+  );
+
   it.scoped("navigating to the current URL is not a move", () =>
     Effect.gen(function* () {
       const { location, router } = yield* start("http://app.test/books/1");

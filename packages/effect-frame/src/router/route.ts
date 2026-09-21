@@ -1,7 +1,7 @@
 import type { Source } from "effect-frame/actor";
 import { select } from "effect-frame/actor/client";
 import type { Node, View } from "effect-frame/view";
-import type { Scope } from "effect";
+import type { SchemaAST, Scope } from "effect";
 import { Effect, Option, Predicate, Result, Schema, SchemaGetter, SubscriptionRef } from "effect";
 
 /**
@@ -203,10 +203,15 @@ export type SearchCodec = Schema.Codec<unknown, SearchRecord>;
 /** A URL-level updater that is evaluated after earlier queued mutations. */
 export type UrlUpdater = (current: URL) => string;
 
+/** Internal identity carried by actions from one mounted route instance. */
+export interface RouteInstance {
+  readonly _tag: "RouteInstance";
+}
+
 /** The router operations a mounted route gives to its own view. */
 export interface RouteNavigation {
-  readonly navigate: (href: string | UrlUpdater) => Effect.Effect<void>;
-  readonly replace: (href: string | UrlUpdater) => Effect.Effect<void>;
+  readonly navigate: (href: string | UrlUpdater, owner?: RouteInstance) => Effect.Effect<void>;
+  readonly replace: (href: string | UrlUpdater, owner?: RouteInstance) => Effect.Effect<void>;
 }
 
 /** A functional update over one route's decoded search value. */
@@ -221,8 +226,10 @@ export type SearchUpdater<Search> = (previous: Search) => Search;
  * source of both parsing and printing.
  */
 export const withDefault =
-  <A>(defaultValue: A) =>
-  <S extends Schema.ConstraintCodec<A | Readonly<A>, unknown, never, never>>(schema: S) => {
+  <const Default>(defaultValue: Default) =>
+  <S extends Schema.ConstraintCodec<unknown, unknown, never, never>>(
+    schema: S & ([Default] extends [S["Type"]] ? unknown : never),
+  ) => {
     const encodedDefault = Schema.encodeUnknownSync(schema)(defaultValue);
     const equivalent = Schema.toEquivalence(Schema.toEncoded(schema));
     return Schema.optionalKey(Schema.toEncoded(schema)).pipe(
@@ -241,13 +248,42 @@ export const withDefault =
   };
 
 interface SearchField {
+  readonly decodedName: string;
   readonly name: string;
   readonly array: boolean;
 }
 
 const searchKeyOrders = new WeakMap<object, ReadonlyArray<string>>();
+const searchFieldDefinitions = new WeakMap<object, ReadonlyArray<SearchField>>();
 type SearchEncodedValue = string | ReadonlyArray<string> | number | boolean;
 type SearchEncodedObject = Partial<Record<string, SearchEncodedValue>>;
+
+/**
+ * A repeated URL key has no representation for an empty array. A single
+ * marker fills that gap, and values beginning with the marker are escaped so
+ * the marker cannot collide with a user value. Scalar fields and custom
+ * SearchRecord codecs do not use this representation.
+ */
+const emptyArrayMarker = "~";
+
+const encodeArrayValue = (value: string): string => {
+  if (value.startsWith(emptyArrayMarker)) {
+    return `${emptyArrayMarker}${value}`;
+  }
+  return value;
+};
+
+const decodeArrayValues = (values: ReadonlyArray<string>): ReadonlyArray<string> => {
+  if (values.length === 1 && values[0] === emptyArrayMarker) {
+    return [];
+  }
+  return values.map((value) => {
+    if (value.startsWith(`${emptyArrayMarker}${emptyArrayMarker}`)) {
+      return value.slice(emptyArrayMarker.length);
+    }
+    return value;
+  });
+};
 
 /** Lift a struct codec into the URL's repeated-key search record. */
 export const search = <S extends Schema.ConstraintCodec<object, SearchEncodedObject, never, never>>(
@@ -264,7 +300,18 @@ export const search = <S extends Schema.ConstraintCodec<object, SearchEncodedObj
     result,
     fields.map((field) => field.name),
   );
+  searchFieldDefinitions.set(result, fields);
   return result;
+};
+
+const isStringEncodedAst = (ast: SchemaAST.AST): boolean => {
+  if (ast._tag === "String") {
+    return true;
+  }
+  if (ast._tag === "Literal") {
+    return Predicate.isString(ast.literal);
+  }
+  return ast._tag === "Union" && ast.types.length > 0 && ast.types.every(isStringEncodedAst);
 };
 
 const searchFields = (schema: Schema.Constraint): ReadonlyArray<SearchField> => {
@@ -275,8 +322,13 @@ const searchFields = (schema: Schema.Constraint): ReadonlyArray<SearchField> => 
       SearchSchemaRejected.make({ reason: "Route.search requires an object Schema" }),
     );
   }
+  if (decoded.indexSignatures.length > 0 || encoded.indexSignatures.length > 0) {
+    return Option.getOrThrowWith(Option.none(), () =>
+      SearchSchemaRejected.make({ reason: "Route.search requires a fixed Struct Schema" }),
+    );
+  }
   const fields: Array<SearchField> = [];
-  for (const [index] of decoded.propertySignatures.entries()) {
+  for (const [index, decodedProperty] of decoded.propertySignatures.entries()) {
     const encodedProperty = Option.fromNullishOr(encoded.propertySignatures[index]);
     if (Option.isNone(encodedProperty)) {
       return Option.getOrThrowWith(Option.none(), () =>
@@ -284,16 +336,24 @@ const searchFields = (schema: Schema.Constraint): ReadonlyArray<SearchField> => 
       );
     }
     const field = encodedProperty.value;
-    if (field.type._tag === "String") {
-      fields.push({ name: String(field.name), array: false });
+    if (isStringEncodedAst(field.type)) {
+      fields.push({
+        decodedName: String(decodedProperty.name),
+        name: String(field.name),
+        array: false,
+      });
       continue;
     }
-    if (
-      field.type._tag === "Arrays" &&
-      field.type.rest.every((element) => element._tag === "String")
-    ) {
-      fields.push({ name: String(field.name), array: true });
-      continue;
+    if (field.type._tag === "Arrays") {
+      const elements = [...field.type.elements, ...field.type.rest];
+      if (elements.every(isStringEncodedAst)) {
+        fields.push({
+          decodedName: String(decodedProperty.name),
+          name: String(field.name),
+          array: true,
+        });
+        continue;
+      }
     }
     return Option.getOrThrowWith(Option.none(), () =>
       SearchSchemaRejected.make({
@@ -302,6 +362,60 @@ const searchFields = (schema: Schema.Constraint): ReadonlyArray<SearchField> => 
     );
   }
   return fields;
+};
+
+const searchFieldNames = (
+  fields: ReadonlyArray<SearchField>,
+  decodedNames: ReadonlyArray<string>,
+): ReadonlySet<string> => {
+  const names = new Set(decodedNames);
+  return new Set(fields.filter((field) => names.has(field.decodedName)).map((field) => field.name));
+};
+
+const retainedSearchRecord = (
+  current: SearchRecord,
+  caller: SearchRecord,
+  fields: Option.Option<ReadonlyArray<SearchField>>,
+  callerKeys: ReadonlySet<string>,
+  retained: ReadonlyArray<string>,
+): SearchRecord => {
+  const record: Record<string, ReadonlyArray<string>> = Object.create(null);
+  Option.match(fields, {
+    onNone: () => {
+      for (const [key, values] of Object.entries(current)) {
+        record[key] = values;
+      }
+    },
+    onSome: (available) => {
+      const retainedNames = searchFieldNames(available, retained);
+      for (const key of retainedNames) {
+        Option.match(Option.fromNullishOr(available.find((candidate) => candidate.name === key)), {
+          onNone: () => {},
+          onSome: (field) => {
+            if (!callerKeys.has(field.decodedName) && Object.hasOwn(current, key)) {
+              Option.match(Option.fromNullishOr(current[key]), {
+                onNone: () => {},
+                onSome: (values) => {
+                  record[key] = values;
+                },
+              });
+            }
+          },
+        });
+      }
+    },
+  });
+  for (const [key, values] of Object.entries(caller)) {
+    record[key] = values;
+  }
+  return record;
+};
+
+const callerKeys = <Value>(value: Value): ReadonlySet<string> => {
+  if (Predicate.isObject(value)) {
+    return new Set(Object.keys(value));
+  }
+  return new Set();
 };
 
 const decodeFields = (
@@ -314,13 +428,13 @@ const decodeFields = (
       onNone: () => {},
       onSome: (values) => {
         if (field.array) {
-          decoded[field.name] = values;
+          decoded[field.name] = decodeArrayValues(values);
           return;
         }
         Option.match(Option.fromNullishOr(values[0]), {
           onNone: () => {},
-          onSome: (value) => {
-            decoded[field.name] = value;
+          onSome: (fieldValue) => {
+            decoded[field.name] = fieldValue;
           },
         });
       },
@@ -335,11 +449,15 @@ const encodeFields = (
 ): SearchRecord => {
   const encoded: Record<string, Array<string>> = Object.create(null);
   for (const field of fields) {
-    Option.match(Option.fromNullishOr(value[field.name]), {
+    Option.match(Option.fromNullishOr(Reflect.get(value, field.name)), {
       onNone: () => {},
       onSome: (fieldValue) => {
         if (field.array && Array.isArray(fieldValue)) {
-          encoded[field.name] = fieldValue.map(String);
+          if (fieldValue.length === 0) {
+            encoded[field.name] = [emptyArrayMarker];
+          } else {
+            encoded[field.name] = fieldValue.map((element) => encodeArrayValue(String(element)));
+          }
           return;
         }
         encoded[field.name] = [String(fieldValue)];
@@ -383,6 +501,8 @@ export interface RouteDefinition<Params extends ParamsCodec, Search extends Sear
  * different shapes in one list.
  */
 export interface Entered<R> {
+  /** Identity for actions created by this mounted route instance. */
+  readonly instance?: RouteInstance;
   readonly setup: Effect.Effect<Node, never, R | Scope.Scope>;
   readonly update: (url: URL) => Effect.Effect<boolean>;
 }
@@ -456,10 +576,14 @@ export const client = <
     }
     const callerRecord = encodeSearch(searchValue);
     const currentRecord = readSearch(current.searchParams);
-    const previous = Option.getOrElse(
-      decodeSearch(mergeSearch(currentRecord, callerRecord)),
-      () => searchValue,
+    const retainedRecord = retainedSearchRecord(
+      currentRecord,
+      callerRecord,
+      Option.fromNullishOr(searchFieldDefinitions.get(definition.search)),
+      callerKeys(searchValue),
+      retainedKeys.value,
     );
+    const previous = Option.getOrElse(decodeSearch(retainedRecord), () => searchValue);
     return href(params, retainSearch(previous, searchValue, retainedKeys.value));
   };
 
@@ -471,6 +595,7 @@ export const client = <
   const enter = (url: URL, routeNavigation: RouteNavigation = unavailable) =>
     Option.map(parse(url), (decoded) =>
       Effect.map(SubscriptionRef.make(decoded), (current): Entered<R> => {
+        const instance: RouteInstance = { _tag: "RouteInstance" };
         const source: Source<Decoded<Params["Type"], Search["Type"]>> = {
           get: SubscriptionRef.get(current),
           changes: SubscriptionRef.changes(current),
@@ -481,26 +606,31 @@ export const client = <
             search: select(source, (value) => value.search),
             href,
             updateSearch: (update) =>
-              routeNavigation.navigate((latest) =>
-                Option.match(parse(latest), {
-                  onNone: () => latest.href,
-                  onSome: (currentValue) => {
-                    const nextSearch = update(currentValue.search);
-                    return `${href(currentValue.params, nextSearch)}${latest.hash}`;
-                  },
-                }),
+              routeNavigation.navigate(
+                (latest) =>
+                  Option.match(parse(latest), {
+                    onNone: () => latest.href,
+                    onSome: (currentValue) => {
+                      const nextSearch = update(currentValue.search);
+                      return `${href(currentValue.params, nextSearch)}${latest.hash}`;
+                    },
+                  }),
+                instance,
               ),
             replaceSearch: (update) =>
-              routeNavigation.replace((latest) =>
-                Option.match(parse(latest), {
-                  onNone: () => latest.href,
-                  onSome: (currentValue) => {
-                    const nextSearch = update(currentValue.search);
-                    return `${href(currentValue.params, nextSearch)}${latest.hash}`;
-                  },
-                }),
+              routeNavigation.replace(
+                (latest) =>
+                  Option.match(parse(latest), {
+                    onNone: () => latest.href,
+                    onSome: (currentValue) => {
+                      const nextSearch = update(currentValue.search);
+                      return `${href(currentValue.params, nextSearch)}${latest.hash}`;
+                    },
+                  }),
+                instance,
               ),
           }),
+          instance,
           update: (next) =>
             Option.match(parse(next), {
               onNone: () => Effect.succeed(false),
@@ -547,15 +677,4 @@ const retainSearch = <Search>(
     }
   }
   return retained;
-};
-
-const mergeSearch = (current: SearchRecord, caller: SearchRecord): SearchRecord => {
-  const merged: Record<string, ReadonlyArray<string>> = Object.create(null);
-  for (const [key, values] of Object.entries(current)) {
-    merged[key] = values;
-  }
-  for (const [key, values] of Object.entries(caller)) {
-    merged[key] = values;
-  }
-  return merged;
 };

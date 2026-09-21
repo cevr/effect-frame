@@ -39,6 +39,15 @@ Its README command `pnpm bench` **no longer resolves**: the repository was
 restructured into a pnpm workspace whose root manifest declares only `format`.
 The runnable path is the `packages/node` build-then-run pair. See R1 and R3.
 
+**Solid 2 is already measured there**, as the adapter named `x-reactivity`,
+which imports `@solidjs/signals`. The row labelled `SolidJS` is Solid 1. Do not
+add a second Solid 2 adapter without checking this. See R7.
+
+**Trust the krausest code over its README.** The README is wrong about the
+warmup counts, wrong about the driver being chromedriver, and stale about the
+memory metrics and the `npm run index` script. Each is corrected in place below,
+against `webdriver-ts/src/`. See K8 and K9.
+
 ## Source versions
 
 | Source                           | Pinned revision or tag                                    | Meaning                                                           |
@@ -61,27 +70,36 @@ See K0 and K2.
 
 ### Measured operations
 
-The README lists nine duration benchmarks. Read the warmup counts carefully;
-they differ per operation. See K1.
+The README lists nine duration benchmarks. **The README's warmup column is
+wrong**: it claims "no warmup" for create, create many, append and clear, but
+`webdriver-ts/src/benchmarksCommon.ts` sets `warmupCount: 5` on every CPU
+benchmark and `warmupCount: 3` on partial update. Trust the code. The table
+below gives both. See K1 and K8.
 
-| Operation                  | What it measures                                         | Warmup       |
-| -------------------------- | -------------------------------------------------------- | ------------ |
-| create rows                | Create 1,000 rows after page load.                       | none         |
-| replace all rows           | Replace all 1,000 rows of the table.                     | 5 iterations |
-| partial update             | Update the text of every 10th row, table of 10,000 rows. | 5 iterations |
-| select row                 | Highlight a row in response to a click.                  | 5 iterations |
-| swap rows                  | Swap 2 rows on a table of 1,000 rows.                    | 5 iterations |
-| remove row                 | Remove a row from a table of 1,000 rows.                 | 5 iterations |
-| create many rows           | Create 10,000 rows.                                      | none         |
-| append rows to large table | Add 1,000 rows to a table of 10,000 rows.                | none         |
-| clear rows                 | Clear the table **filled with 10,000 rows**.             | none         |
+| Operation                  | What it measures                                         | README says  | Code says |
+| -------------------------- | -------------------------------------------------------- | ------------ | --------- |
+| create rows                | Create 1,000 rows after page load.                       | no warmup    | 5         |
+| replace all rows           | Replace all 1,000 rows of the table.                     | 5 iterations | 5         |
+| partial update             | Update the text of every 10th row, table of 10,000 rows. | 5 iterations | **3**     |
+| select row                 | Highlight a row in response to a click.                  | 5 iterations | 5         |
+| swap rows                  | Swap 2 rows on a table of 1,000 rows.                    | 5 iterations | 5         |
+| remove row                 | Remove a row from a table of 1,000 rows.                 | 5 iterations | 5         |
+| create many rows           | Create 10,000 rows.                                      | no warmup    | 5         |
+| append rows to large table | Add 1,000 rows to a table of 10,000 rows.                | no warmup    | 5         |
+| clear rows                 | Clear the table **filled with 10,000 rows**.             | no warmup    | 5         |
 
-It also reports five memory metrics (ready, run, update, replace, repeated
-clear) and five startup metrics (startup time, plus the Lighthouse metrics
-consistently interactive, script bootup time, main thread work cost, and total
-byte weight). Duration is measured including rendering time, from Chrome
-timeline entries. Since Chrome 118 the overall score is a **weighted geometric
-mean**. See K1.
+The README also lists five memory metrics, but **three of them are commented out
+in the code**: `_23` (update 1k, 5 cycles), `_24` (replace 1k, 5 cycles) and
+`_26` (run memory 10k). Only `_21 ready memory`, `_22 run memory` and `_25`
+(creating and clearing 1k rows, 5 cycles) are active. The five startup metrics
+are startup time plus the Lighthouse metrics consistently interactive, script
+bootup time, main thread work cost, and total byte weight. Duration is measured
+including rendering time, from Chrome timeline entries. Since Chrome 118 the
+overall score is a **weighted geometric mean**. See K1 and K8.
+
+Default iteration counts, from `webdriver-ts/src/common.ts`: **15** CPU
+iterations per benchmark, and 1 each for memory, startup and size. `--count N`
+overrides CPU, memory and startup together. See K8.
 
 ### Keyed versus non-keyed
 
@@ -120,6 +138,15 @@ framework directory, used when the build does not emit to `dist/`. See K4.
 Build output: `npm run zip` includes `dist/` and `package-lock.json` per
 framework by default; declare anything else with `includeInBuild`. See K4.
 
+The README documents only `frameworkVersion`, `frameworkVersionFromPackage`,
+`frameworkHomeURL`, `language`, `customURL`, `useShadowRoot` and
+`includeInBuild`. Further fields are real but undocumented: `FrameworkData` in
+`webdriver-ts/src/common.ts` declares `useRowShadowRoot`, `shadowRootName`,
+`buttonsInShadowRoot`, `startLogicEventName` and `issues: number[]`, and
+`repoURL` is used by the shipped `solid` and `octane` manifests. A `type` field
+appears in neither the README nor any manifest inspected here — treat it as
+non-existent until shown otherwise. See K4, K6 and K8.
+
 The `index.html` must link the shared stylesheet
 `<link href="/css/currentStyle.css" rel="stylesheet" />`, must not use shadow
 DOM (it blocks the global Bootstrap CSS and is "a real pain for webdriver"), and
@@ -131,10 +158,26 @@ into `<table class="table table-hover table-striped test-data">`, inside
 resetting only on page reload. Do not change the ids — the automated
 benchmarking relies on them. See K4.
 
+Two further `index.html` requirements are easy to miss and both cost you:
+
+- **Preload the glyphicon**, or "you will get terrible performance":
+  `<span class="preloadicon glyphicon glyphicon-remove" aria-hidden="true"></span>`.
+- **The rendered HTML must be byte-identical to vanillajs**, including every
+  `aria-hidden` attribute. Otherwise the implementation "is considered erroneous
+  and will be marked with issue #634".
+
+See K4.
+
 Contribution rules also require fixed version numbers (no ranges), locally
 listed npm dependencies, use of the root `css` Bootstrap, and no committed
 result files. Validate with `npm run rebuild-ci keyed/<name>` from the root.
-See K4.
+Note the existing `keyed/solid` entry violates the fixed-version rule with caret
+ranges throughout, so it is not a clean template. See K4 and K6.
+
+Style choices that attach a "note" to your published results: over-optimization,
+`requestAnimationFrame` in client code (#796), manual DOM manipulation (#772),
+per-row selection flags rather than one selection reference (#800), and explicit
+event delegation in client code (#801). See K4.
 
 ### Running one framework locally
 
@@ -176,11 +219,21 @@ npm run results
 # open http://localhost:8080/webdriver-ts-results/dist/index.html
 ```
 
-The runner is **chromedriver-based** (`webdriver-ts`), measuring each operation
-from Chrome's timeline — not puppeteer and not playwright. Keep the Chrome
-window visible: otherwise paint events can be skipped, producing wrong results.
-Per-run JSON lands in `webdriver-ts/results/`, one file per framework and
-benchmark, for example `results/vanillajs-keyed_01_run1k.json`. See K3.
+**The default driver is Puppeteer, not chromedriver.** The README's section 2.4
+says "using chromedriver", but the code contradicts it: `common.ts` declares
+`enum BenchmarkRunner { PUPPETEER, PLAYWRIGHT, WEBDRIVER_CDP,
+WEBDRIVER_AFTERFRAME }` and sets `BENCHMARK_RUNNER: BenchmarkRunner.PUPPETEER`,
+and `benchmarkRunner.ts` declares `.default("runner", "puppeteer")`. All four
+drivers are selectable with `--runner`; `chromedriver`, `playwright`,
+`puppeteer-core` and `selenium-webdriver` are all installed dependencies. The
+directory is still named `webdriver-ts` for historical reasons, and there is no
+`puppeteer-ts` directory. `webdriver-ts-results` is the React app that renders
+the table. Trust the code over the README prose here. See K8 and K9.
+
+Keep the Chrome window visible: otherwise paint events can be skipped, producing
+wrong results. Per-run JSON lands in `webdriver-ts/results/`, one file per
+framework and benchmark, for example `results/vanillajs-keyed_01_run1k.json`.
+See K3.
 
 Useful selectors, run from `webdriver-ts`. See K3.
 
@@ -199,12 +252,17 @@ The repository tags a release per Chrome version. Tags present include
 run drives **Chrome 152**. Contributions may target "the latest stable chrome"
 for web features and language level. See K5 and K4.
 
-**Time per run is not documented in the README.** The sample result committed to
-the README shows `"values":[154.821,135.532,141.022]` for `01_run1k` — three
-measured values, so that benchmark ran three times. The README states no total
-wall-clock figure for one framework across all benchmarks, and none is derived
-here. Running all frameworks (`npm run rebuild-all`, then `npm run bench-all`)
-is described only as "not for the faint at heart". See K3.
+Run cost, as the README states it: **one framework takes "a couple of minutes"**
+— "The benchmark runner will open and close Chrome multiple times. The whole
+thing will take a couple of minutes." Running **every** framework takes
+"currently about 12 hours on my machine". Those are the only two wall-clock
+figures published; no per-benchmark breakdown exists, and none is derived here.
+See K3.
+
+The pinned `chromedriver` dependency on master is `150.0.1`, which suggests
+master currently drives Chrome 150 even though the newest published run is
+Chrome 152. That is an inference from a dependency pin, not a stated fact. See
+K9.
 
 ## 2. js-reactivity-benchmark (milomg)
 
@@ -269,6 +327,15 @@ appending an entry to both `frameworkInfo` and `allFrameworks`:
 carries the in-repo comment "solid can't testPullCounts because batch executes
 all leaf nodes even if unread". Add the library to `devDependencies` of
 `packages/core/package.json`. See R5 and R2.
+
+**Solid 2's reactivity is already in this benchmark, under a misleading name.**
+The adapter called `x-reactivity` imports from `@solidjs/signals` — that is
+Solid 2's signal core, not a third-party library — and `packages/core` declares
+`"@solidjs/signals": "^0.10.2"`. Its `effect` uses the two-function Solid 2
+signature, `createEffect(fn, () => {})`, and its `withBatch` is `fn(); flush();`.
+So the `SolidJS` row in the published charts is Solid 1, and the `x-reactivity`
+row is Solid 2. Check this before adding any Solid 2 adapter: a duplicate would
+measure what is already measured. See R7.
 
 The shipped Solid adapter shows the expected shape, including how `withBuild`
 installs the disposer:
@@ -467,10 +534,17 @@ Not performed: no benchmark was run, no repository was cloned, no dependency was
 installed, and no timing was measured. Every duration and ratio quoted here is
 a figure the upstream source publishes, not a measurement made for this ticket.
 
-Not established: the wall-clock cost of one krausest framework run; the Chrome
-and Node versions behind Octane's published table; whether the four-command
-`js-reactivity-benchmark` sequence completes; and what `solidjs.com` renders at
-runtime.
+Not established: the Chrome and Node versions behind Octane's published table;
+whether the four-command `js-reactivity-benchmark` sequence completes; what
+`solidjs.com` renders at runtime; the exact geomean implementation in Octane's
+`benchmarks/bench.mjs` and `benchmarks/lib/`, which were not read; and whether
+the krausest metadata field `type` exists at all — it appears in no README text
+and in no manifest inspected here. The fields `issues` and `useRowShadowRoot`
+are undocumented in the README but real: both are declared on `FrameworkData` in
+`webdriver-ts/src/common.ts`, as is `repoURL` usage in practice.
+
+The krausest README's own wall-clock figures ("a couple of minutes" for one
+framework, "about 12 hours" for all) are quoted, not measured here.
 
 ## Primary source inventory
 
@@ -482,6 +556,8 @@ runtime.
 - **K5 — Chrome version tags.** `https://api.github.com/repos/krausest/js-framework-benchmark/tags` returned `chrome152`, `chrome150`, `chrome148`, `chrome146`, `chrome145`, `chrome144`, `chrome143`, `chrome142`. Archive notes in the README reference [chrome 152 results](https://krausest.github.io/js-framework-benchmark/2026/chrome152.html).
 - **K6 — Directory listings and manifests.** `https://api.github.com/repos/krausest/js-framework-benchmark/contents/frameworks/keyed` and `.../non-keyed`. [octane package.json](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/octane/package.json), [solid package.json](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/solid/package.json), [solid-store package.json](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/solid-store/package.json), [s2 package.json](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/s2/package.json).
 - **K7 — Octane entry contents.** `https://api.github.com/repos/krausest/js-framework-benchmark/contents/frameworks/keyed/octane` returned `index.html`, `package-lock.json`, `package.json`, `src`, `vite.config.js`. [index.html](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/octane/index.html).
+- **K8 — Runner defaults, iteration counts, warmup counts, disabled memory benchmarks.** [webdriver-ts/src/common.ts](https://github.com/krausest/js-framework-benchmark/blob/master/webdriver-ts/src/common.ts): `enum BenchmarkRunner`, `BENCHMARK_RUNNER: BenchmarkRunner.PUPPETEER`, `NUM_ITERATIONS_FOR_BENCHMARK_CPU: 15`, and the mem/startup/size counts of 1. [webdriver-ts/src/benchmarksCommon.ts](https://github.com/krausest/js-framework-benchmark/blob/master/webdriver-ts/src/benchmarksCommon.ts): `warmupCount: 5` on every CPU benchmark, `warmupCount: 3` on partial update, and the commented-out `_23`, `_24`, `_26` memory benchmarks.
+- **K9 — CLI defaults and installed drivers.** [webdriver-ts/src/benchmarkRunner.ts](https://github.com/krausest/js-framework-benchmark/blob/master/webdriver-ts/src/benchmarkRunner.ts): `.string("runner").default("runner", "puppeteer")` and the `args.count` override. [webdriver-ts/package.json](https://github.com/krausest/js-framework-benchmark/blob/master/webdriver-ts/package.json): `chromedriver 150.0.1`, `playwright 1.61.1`, `puppeteer-core 25.3.0`, `selenium-webdriver 4.45.0`, `lighthouse 13.4.0`.
 - **S1 — Solid's cited benchmark.** [solidjs/solid README](https://github.com/solidjs/solid/blob/main/README.md), lines linking `https://krausest.github.io/js-framework-benchmark/current.html` in the feature list and the performance paragraph.
 - **S2 — solidjs.com shell.** `https://www.solidjs.com/` returned 3,584 bytes with zero occurrences of "benchmark"; client-rendered, so unverifiable by fetch.
 - **O0 — Octane repository.** <https://github.com/octanejs/octane>. [README](https://github.com/octanejs/octane/blob/main/README.md) — describes Octane as the successor to Inferno, status beta; contains no performance-benchmark section.
@@ -498,4 +574,5 @@ runtime.
 - **R3 — Workspace manifests.** [root package.json](https://github.com/milomg/js-reactivity-benchmark/blob/main/package.json) (only `format`), [packages/core/package.json](https://github.com/milomg/js-reactivity-benchmark/blob/main/packages/core/package.json), [packages/node/package.json](https://github.com/milomg/js-reactivity-benchmark/blob/main/packages/node/package.json), [packages/web/package.json](https://github.com/milomg/js-reactivity-benchmark/blob/main/packages/web/package.json).
 - **R4 — Adapter interface and Solid adapter.** [util/reactiveFramework.ts](https://github.com/milomg/js-reactivity-benchmark/blob/main/packages/core/src/util/reactiveFramework.ts), [frameworks/solid.ts](https://github.com/milomg/js-reactivity-benchmark/blob/main/packages/core/src/frameworks/solid.ts).
 - **R5 — Registration point.** [frameworksList.ts](https://github.com/milomg/js-reactivity-benchmark/blob/main/packages/core/src/frameworksList.ts): `frameworkInfo` and `allFrameworks`, plus the `testPullCounts` comment on the Solid entry.
+- **R7 — `x-reactivity` is Solid 2.** [frameworks/xReactivity.ts](https://github.com/milomg/js-reactivity-benchmark/blob/main/packages/core/src/frameworks/xReactivity.ts) imports `flush, createEffect, createMemo, createRoot, createSignal` from `@solidjs/signals`, with `createEffect(fn, () => {})` and `withBatch: (fn) => { fn(); flush(); }`. The dependency `"@solidjs/signals": "^0.10.2"` is declared in [packages/core/package.json](https://github.com/milomg/js-reactivity-benchmark/blob/main/packages/core/package.json).
 - **R6 — Node entry output.** [packages/node/src/index.ts](https://github.com/milomg/js-reactivity-benchmark/blob/main/packages/node/src/index.ts): `runTests(frameworkInfo, logPerfResult)` with a header row and two-decimal times.

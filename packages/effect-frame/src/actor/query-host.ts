@@ -11,6 +11,7 @@ import {
   QueryVersionMismatch,
   UnknownQuery,
   canonicalize,
+  publicPolicy,
 } from "./query.js";
 
 /**
@@ -91,15 +92,19 @@ export interface QueryPolicy {
 }
 
 /**
- * The policy table. There is no default: a host that provides no table
- * refuses every query, because a query names a policy the host must find.
- * This is the allow-all default removed, made structural.
+ * The policy table. `"public"` is resolved by every host and allows every
+ * read; a table entry of that name replaces it. Every other name a query
+ * uses must be in the table, or the host refuses the query: there is no
+ * allow-all default for a name the host does not know.
  */
 export interface PolicyTable {
   readonly [name: string]: QueryPolicy;
 }
 
 const noPolicies: PolicyTable = {};
+
+/** The built-in `"public"` policy: every read is allowed. */
+export const allowAll: QueryPolicy = { check: () => Effect.void };
 
 export const QueryPolicies = Context.Reference<PolicyTable>(
   "effect-frame/src/actor/query-host/QueryPolicies",
@@ -186,9 +191,13 @@ export const make = <R>(
       key: QueryKey,
     ): Effect.Effect<void, PolicyMissing | Unauthorized> => {
       const named = implementation.contract.policy;
-      // A query names a policy. If the host cannot resolve that name, it
-      // refuses: silence here would be the allow-all default returning.
-      return Option.match(Option.fromNullishOr(policies[named]), {
+      // A query names a policy. The table wins, then the one built-in name.
+      // Any other name the host cannot resolve is refused: silence here
+      // would be an allow-all default for a policy nobody wrote.
+      const found = Option.orElse(Option.fromNullishOr(policies[named]), () =>
+        Option.filter(Option.some(allowAll), () => named === publicPolicy),
+      );
+      return Option.match(found, {
         onNone: () => Effect.fail(PolicyMissing.make({ query: key.query, policy: named })),
         onSome: (policy) => policy.check(key),
       });

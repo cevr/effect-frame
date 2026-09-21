@@ -30,8 +30,12 @@ export const Authorizer = Context.Reference<AuthorizerService>(
 
 export interface HostOptions<R> {
   readonly implementations: ReadonlyArray<AnyImplementation<R>>;
-  /** The mailbox store for one address. Defaults to a fresh in-memory store. */
-  readonly store: (address: Address) => LayerType.Layer<MailboxStore>;
+  /**
+   * The mailbox store for one address. Omitted, every actor gets a fresh
+   * in-memory store: right for a host that serves queries alone or for a
+   * test, and a host whose actors must survive a restart names its store.
+   */
+  readonly store?: (address: Address) => LayerType.Layer<MailboxStore>;
   /**
    * PROTOTYPE (ticket #17). The queries this host serves. They are built
    * here and not in a layer beside this one, because a query handler reads
@@ -56,6 +60,7 @@ const make = <R>(options: HostOptions<R>) =>
       ]),
     );
     const instances = new Map<string, HostedInstance>();
+    const store = options.store ?? (() => MailboxStore.layerMemory);
 
     const lookup = (address: Address) =>
       Option.match(Option.fromNullishOr(byName.get(address.contract)), {
@@ -88,7 +93,7 @@ const make = <R>(options: HostOptions<R>) =>
           // The host is the boundary: each instance gets the host's context.
           // oxlint-disable-next-line effect/noInlineProvide
           const instance = yield* Effect.provide(
-            implementation.open(options.store(address), hostScope),
+            implementation.open(store(address), hostScope),
             context,
           );
           instances.set(key, instance);
@@ -197,5 +202,4 @@ export const layer = <R>(options: HostOptions<R>): LayerType.Layer<ActorTranspor
 export const layerMemory = <R>(
   implementations: ReadonlyArray<AnyImplementation<R>>,
   queries?: ReadonlyArray<AnyQueryImplementation<R>>,
-): LayerType.Layer<ActorTransport, never, R> =>
-  layer({ implementations, queries, store: () => MailboxStore.layerMemory });
+): LayerType.Layer<ActorTransport, never, R> => layer({ implementations, queries });

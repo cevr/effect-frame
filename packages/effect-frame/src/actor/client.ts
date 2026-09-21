@@ -35,6 +35,7 @@ export {
   canonicalize,
   keyOf,
   markStale,
+  publicPolicy,
   query,
   type AnyQuery,
   type ArgsOf,

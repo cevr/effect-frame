@@ -116,13 +116,13 @@ const TopSku = query("TopSku", {
   depends: [OrderBook],
 });
 
-/** Reads nothing an actor owns, so no commit refreshes it. */
+/**
+ * Reads nothing an actor owns, so no commit refreshes it. It names no
+ * version, policy or dependency: the defaults are 1, `"public"` and none.
+ */
 const ExchangeRate = query("ExchangeRate", {
-  version: 1,
   args: Schema.Struct({ pair: Schema.String }),
   result: Schema.Struct({ rate: Schema.Finite }),
-  policy: "public",
-  depends: [],
 });
 
 /** Counts server reads, so a test can prove one read served two declarations. */
@@ -200,10 +200,8 @@ const tenantMember: QueryPolicy = {
   },
 };
 
-const policies = Layer.succeed(
-  QueryPolicies,
-  QueryPolicies.of({ "tenant-member": tenantMember, public: { check: () => Effect.void } }),
-);
+/** Names only the policy the host does not know. `"public"` is built in. */
+const policies = Layer.succeed(QueryPolicies, QueryPolicies.of({ "tenant-member": tenantMember }));
 
 const acmeOnly = Layer.succeed(ActorHost.Authorizer, {
   authorize: (address: Address) => {
@@ -269,6 +267,14 @@ const valueOf = <A, E>(state: QueryState<A, E>): Option.Option<A> => {
 };
 
 describe("Query: the Dashboard shape", () => {
+  it.effect("a contract that names no version, policy or dependency gets the defaults", () =>
+    Effect.sync(() => {
+      expect(ExchangeRate.version).toBe(1);
+      expect(ExchangeRate.policy).toBe("public");
+      expect(ExchangeRate.depends).toEqual([]);
+    }),
+  );
+
   withDashboard("one command reply refreshes the two queries that declared the dependency", () =>
     Effect.gen(function* () {
       const revenue = yield* useQuery(Revenue, acme);

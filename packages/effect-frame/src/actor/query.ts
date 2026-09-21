@@ -34,9 +34,10 @@ export interface QueryContract<
   readonly args: Schema.fromJsonString<Args>;
   readonly result: Schema.fromJsonString<Result>;
   /**
-   * The policy the host resolves before serving this query. A query without
-   * one cannot be declared: the type requires the field, and the host
-   * refuses a name it cannot resolve. There is no allow-all default.
+   * The policy the host resolves before serving this query. `"public"` is
+   * built into every host and allows every read; any other name must be
+   * found in the host's `QueryPolicies` table, or the host refuses the
+   * query. A contract that names no policy is public.
    */
   readonly policy: Policy;
   /** Actor contract names. A commit to any of them marks this query stale. */
@@ -45,42 +46,69 @@ export interface QueryContract<
   readonly raw: { readonly args: Args; readonly result: Result };
 }
 
-export interface QueryOptions<Args extends Pure, Result extends Pure, Policy extends string> {
-  readonly version: number;
+export interface QueryOptions<
+  Args extends Pure,
+  Result extends Pure,
+  Policy extends string = "public",
+> {
+  /** Defaults to 1. */
+  readonly version?: number;
   /** Selects one cached value. Include the tenant so a policy can read it. */
   readonly args: Args;
   readonly result: Result;
-  /** Named, never inline: the host owns the rule, the contract owns the name. */
-  readonly policy: Policy;
+  /**
+   * Named, never inline: the host owns the rule, the contract owns the name.
+   * Defaults to `"public"`, the one policy every host resolves.
+   */
+  readonly policy?: Policy;
   /**
    * The actor contracts this query reads from, as contracts rather than
-   * strings, so a rename cannot silently break the dependency edge.
+   * strings, so a rename cannot silently break the dependency edge. Defaults
+   * to none: no commit marks the query stale.
    */
-  readonly depends: ReadonlyArray<{ readonly name: string }>;
+  readonly depends?: ReadonlyArray<{ readonly name: string }>;
 }
+
+/** The policy name every host resolves: it allows every read. */
+export const publicPolicy = "public";
 
 export type AnyQuery = QueryContract<string, Pure, Pure, string>;
 
 export type ArgsOf<Q extends AnyQuery> = Q["args"]["Type"];
 export type ResultOf<Q extends AnyQuery> = Q["result"]["Type"];
 
-export const query = <
+/**
+ * Two signatures, so the contract's `Policy` is exactly what was written:
+ * `"public"` when nothing was, and the given name otherwise. One signature
+ * with a default type parameter would need a cast to say the same thing.
+ */
+export function query<const Name extends string, Args extends Pure, Result extends Pure>(
+  name: Name,
+  options: Omit<QueryOptions<Args, Result, never>, "policy">,
+): QueryContract<Name, Args, Result, "public">;
+export function query<
   const Name extends string,
   Args extends Pure,
   Result extends Pure,
   const Policy extends string,
 >(
   name: Name,
-  options: QueryOptions<Args, Result, Policy>,
-): QueryContract<Name, Args, Result, Policy> => ({
-  name,
-  version: options.version,
-  args: Schema.fromJsonString(options.args),
-  result: Schema.fromJsonString(options.result),
-  policy: options.policy,
-  depends: options.depends.map((dependency) => dependency.name),
-  raw: { args: options.args, result: options.result },
-});
+  options: QueryOptions<Args, Result, Policy> & { readonly policy: Policy },
+): QueryContract<Name, Args, Result, Policy>;
+export function query<const Name extends string, Args extends Pure, Result extends Pure>(
+  name: Name,
+  options: QueryOptions<Args, Result, string>,
+): QueryContract<Name, Args, Result, string> {
+  return {
+    name,
+    version: options.version ?? 1,
+    args: Schema.fromJsonString(options.args),
+    result: Schema.fromJsonString(options.result),
+    policy: options.policy ?? publicPolicy,
+    depends: (options.depends ?? []).map((dependency) => dependency.name),
+    raw: { args: options.args, result: options.result },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Cache key

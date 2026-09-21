@@ -27,6 +27,7 @@ export * as HttpServer from "./http/server.js";
 // The Query primitive's server half (#17).
 export {
   QueryPolicies,
+  allowAll,
   implementQuery,
   queryServerOnly,
   type AnyQueryImplementation,

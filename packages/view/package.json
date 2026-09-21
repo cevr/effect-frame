@@ -1,21 +1,53 @@
 {
   "name": "@effect-frame/view",
   "version": "0.0.0",
-  "private": true,
+  "private": false,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cevr/effect-frame.git",
+    "directory": "packages/view"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./jsx-runtime": "./src/jsx-runtime.ts",
-    "./jsx-dev-runtime": "./src/jsx-runtime.ts",
-    "./opentui": "./src/hosts/opentui.ts"
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./jsx-runtime": {
+      "import": {
+        "types": "./dist/jsx-runtime.d.ts",
+        "default": "./dist/jsx-runtime.js"
+      }
+    },
+    "./jsx-dev-runtime": {
+      "import": {
+        "types": "./dist/jsx-runtime.d.ts",
+        "default": "./dist/jsx-runtime.js"
+      }
+    },
+    "./opentui": {
+      "import": {
+        "types": "./dist/hosts/opentui.d.ts",
+        "default": "./dist/hosts/opentui.js"
+      }
+    }
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "bun build src/index.ts --target browser --outdir dist --external effect --external @opentui/core --external @solidjs/signals",
+    "build": "bun --bun tsdown",
     "test": "bun test tests/"
   },
   "dependencies": {
-    "@effect-frame/actor": "workspace:*",
+    "@effect-frame/actor": "0.0.0",
     "@solidjs/signals": "2.0.0-rc.8"
   },
   "devDependencies": {
@@ -25,7 +57,7 @@
   },
   "peerDependencies": {
     "@opentui/core": "0.5.11",
-    "effect": "catalog:"
+    "effect": "^4.0.0-rc.115"
   },
   "peerDependenciesMeta": {
     "@opentui/core": {

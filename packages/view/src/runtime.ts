@@ -334,12 +334,17 @@ const show =
       const inner: Slot<HostNode> = { nodes: [] };
       // One reactive owner and one Effect scope per shown branch: the render
       // effects live in the first, the source subscriptions in the second.
+      // Building reads every source it binds, for the first value. Those
+      // reads are deliberate and do not subscribe this branch's `when`
+      // effect to them, so the build runs untracked.
       const branchOwner = tracker.owned(() =>
         createRoot((disposeBranch) => {
-          child()(parent, inner, () => {
-            slot.nodes = inner.nodes;
-            changed();
-          });
+          untrack(() =>
+            child()(parent, inner, () => {
+              slot.nodes = inner.nodes;
+              changed();
+            }),
+          );
           return disposeBranch;
         }),
       );
@@ -518,7 +523,11 @@ const buildFor =
       // branch: whatever the row's body subscribes to ends with the row.
       const rowOwner = tracker.owned(() =>
         createRoot((disposeRow) => {
-          plan(renderer, node.render(signalSource(cell.read)))(parent, rowSlot, () => {});
+          // Untracked for the reason a `Show` branch is: the build's reads are
+          // first values, not dependencies of the list's own effect.
+          untrack(() =>
+            plan(renderer, node.render(signalSource(cell.read)))(parent, rowSlot, () => {}),
+          );
           return disposeRow;
         }),
       );

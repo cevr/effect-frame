@@ -6,6 +6,7 @@ Maps:
 - Closed: [First release: explicit actors across browser, terminal, and durable celld](https://github.com/cevr/effect-frame/issues/1).
 - Closed: [Progressive layer: queries, router, rendering modes, and seven proving examples](https://github.com/cevr/effect-frame/issues/11).
 - Active: [Build map: the seven proving examples on main](https://github.com/cevr/effect-frame/issues/33). Its tickets are `wayfinder:task` and execute; see the map's Notes.
+- Active: [DX round 2: refs, typed links, URL state, fields, batching, route boundaries, sources, Match, inspection, benchmarks](https://github.com/cevr/effect-frame/issues/47). A decision map; read `~/Developer/personal/dotfiles/principles/` before grilling a ticket.
 
 ## Wayfinding operations
 

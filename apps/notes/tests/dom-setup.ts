@@ -15,6 +15,8 @@ const platformWeb = {
   Request: globalThis.Request,
   Response: globalThis.Response,
   Headers: globalThis.Headers,
+  AbortController: globalThis.AbortController,
+  AbortSignal: globalThis.AbortSignal,
   URL: globalThis.URL,
   ReadableStream: globalThis.ReadableStream,
 };

@@ -8,12 +8,14 @@ import {
   CallBody,
   CallWireError,
   QueryBody,
+  QueryBatchBody,
   ReadWireError,
   SendBody,
   SendWireError,
   WireApplied,
   WireProjection,
   WireQueryError,
+  WireQueryBatch,
   WireQueryValue,
   WireReceipt,
   eventPrefix,
@@ -49,26 +51,29 @@ const decodeSendError = decodeUnknownJson(SendWireError);
 const decodeCallError = decodeUnknownJson(CallWireError);
 const decodeReadError = decodeUnknownJson(ReadWireError);
 const decodeQueryError = decodeUnknownJson(WireQueryError);
+const decodeQueryBatch = decodeUnknownJson(WireQueryBatch);
 const encodeSend = Schema.encodeEffect(Schema.fromJsonString(SendBody));
 const encodeCall = Schema.encodeEffect(Schema.fromJsonString(CallBody));
 const encodeAddress = Schema.encodeEffect(Schema.fromJsonString(AddressBody));
 const encodeQuery = Schema.encodeEffect(Schema.fromJsonString(QueryBody));
+const encodeQueryBatch = Schema.encodeEffect(Schema.fromJsonString(QueryBatchBody));
 
 const make = Effect.fn("ActorTransport.http")(function* (options: HttpClientOptions) {
   const fetch = yield* Fetch;
 
   const post = <E>(path: string, body: string, decodeError: (text: string) => Effect.Effect<E>) =>
     Effect.gen(function* () {
-      const response = yield* Effect.tryPromise({
-        try: () =>
+      const received = yield* Effect.tryPromise({
+        try: (signal) =>
           fetch(`${options.baseUrl}${path}`, {
             method: "POST",
             headers: { "content-type": "application/json" },
             body,
-          }),
+            signal,
+          }).then((response) => response.text().then((text) => ({ response, text }))),
         catch: unreachable,
       });
-      const text = yield* Effect.tryPromise({ try: () => response.text(), catch: unreachable });
+      const { response, text } = received;
       if (response.ok) {
         return text;
       }
@@ -106,6 +111,12 @@ const make = Effect.fn("ActorTransport.http")(function* (options: HttpClientOpti
       const body = yield* Effect.orDie(encodeQuery({ key }));
       const wire = yield* decodeQueryValue(yield* post(paths.query, body, decodeQueryError));
       return wire.result;
+    });
+
+  const queryBatch: TransportService["queryBatch"] = (keys) =>
+    Effect.gen(function* () {
+      const body = yield* Effect.orDie(encodeQueryBatch({ keys }));
+      return yield* decodeQueryBatch(yield* post(paths.queryBatch, body, decodeQueryError));
     });
 
   const snapshot: TransportService["snapshot"] = (address) =>
@@ -170,7 +181,7 @@ const make = Effect.fn("ActorTransport.http")(function* (options: HttpClientOpti
       ),
     );
 
-  const transport: TransportService = { send, call, snapshot, query, changes };
+  const transport: TransportService = { send, call, snapshot, query, queryBatch, changes };
   return transport;
 });
 

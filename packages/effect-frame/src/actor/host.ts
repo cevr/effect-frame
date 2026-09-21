@@ -47,6 +47,12 @@ export interface HostOptions<R> {
 
 const addressKey = (address: Address) => `${address.contract}@${address.version}/${address.key}`;
 
+const unknownQueryRefresh = (key: QueryKey): Refreshed => ({
+  _tag: "RefreshFailed",
+  key,
+  error: UnknownQuery.make({ query: key.query }),
+});
+
 const make = <R>(options: HostOptions<R>) =>
   Effect.gen(function* () {
     const hostScope = yield* Effect.scope;
@@ -137,17 +143,7 @@ const make = <R>(options: HostOptions<R>) =>
       if (stale.length === 0) {
         return Effect.succeed([]);
       }
-      return Effect.forEach(
-        stale,
-        (key) =>
-          query.get(key).pipe(
-            Effect.map((result): Refreshed => ({ _tag: "Refreshed", key, result })),
-            Effect.catch((error) =>
-              Effect.succeed<Refreshed>({ _tag: "RefreshFailed", key, error }),
-            ),
-          ),
-        { concurrency: stale.length },
-      );
+      return query.batch(stale);
     };
 
     const transport: TransportService = {
@@ -175,6 +171,11 @@ const make = <R>(options: HostOptions<R>) =>
         Option.match(serving, {
           onNone: () => Effect.fail(UnknownQuery.make({ query: key.query })),
           onSome: (query) => query.get(key),
+        }),
+      queryBatch: (keys) =>
+        Option.match(serving, {
+          onNone: () => Effect.succeed(keys.map(unknownQueryRefresh)),
+          onSome: (query) => query.batch(keys),
         }),
       changes: (address, after) =>
         Stream.unwrap(Effect.map(resolve(address, "read"), (instance) => instance.changes(after))),

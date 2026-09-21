@@ -74,6 +74,10 @@ export interface TransportService {
   readonly snapshot: (address: Address) => Effect.Effect<Projection, TransportReadError>;
   /** Reads one query value. The host resolves the policy before the handler runs. */
   readonly query: (key: QueryKey) => Effect.Effect<string, TransportQueryError>;
+  /** Reads one declared batched contract in one request. */
+  readonly queryBatch: (
+    keys: ReadonlyArray<QueryKey>,
+  ) => Effect.Effect<ReadonlyArray<Refreshed>, TransportQueryError>;
   /**
    * Every revision after `after`, in order, starting with the latest one if
    * it is newer than `after`. A client resumes with the revision it holds.

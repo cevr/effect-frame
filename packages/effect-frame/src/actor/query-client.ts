@@ -6,6 +6,8 @@ import {
   Exit,
   Layer,
   Option,
+  Request,
+  RequestResolver,
   Schema,
   Scope,
   Stream,
@@ -16,6 +18,65 @@ import { Failed, Loading, Ready, canonicalize, keyOf, markStale } from "./query.
 import type { Source } from "./source.js";
 import type { Refreshed } from "./transport.js";
 import { ActorTransport } from "./transport.js";
+import { Unreachable } from "./vocabulary.js";
+
+interface BatchedQueryRequest extends Request.Request<string, QueryFailure> {
+  readonly _tag: "BatchedQueryRequest";
+  readonly key: QueryKey;
+  /** Completes when the owning cache read closes, so a fully abandoned batch can abort. */
+  readonly released: Deferred.Deferred<void>;
+}
+
+const BatchedQueryRequest = Request.tagged<BatchedQueryRequest>("BatchedQueryRequest");
+type BatchedQueryResolver = RequestResolver.RequestResolver<BatchedQueryRequest>;
+
+/**
+ * RequestResolver collects requests until `Effect.yieldNow`, so every open
+ * made in one scheduler turn joins one `/query/batch` call. The resolver is
+ * keyed by transport below: a cache that serves more than one client runtime
+ * must never send a later batch through the first runtime's transport.
+ */
+const makeBatchedQueryResolver = (transport: ActorTransport["Service"]): BatchedQueryResolver =>
+  RequestResolver.make((entries) =>
+    Effect.raceFirst(
+      transport.queryBatch(entries.map((entry) => entry.request.key)).pipe(
+        Effect.flatMap((results) =>
+          Effect.sync(() => {
+            const byKey = new Map(results.map((result) => [keyOf(result.key), result]));
+            for (const entry of entries) {
+              const result = Option.fromNullishOr(byKey.get(keyOf(entry.request.key)));
+              if (Option.isNone(result)) {
+                entry.completeUnsafe(
+                  Exit.fail(
+                    Unreachable.make({ reason: `query batch omitted ${keyOf(entry.request.key)}` }),
+                  ),
+                );
+              } else if (result.value._tag === "Refreshed") {
+                entry.completeUnsafe(Exit.succeed(result.value.result));
+              } else {
+                entry.completeUnsafe(Exit.fail(result.value.error));
+              }
+            }
+          }),
+        ),
+      ),
+      Effect.andThen(
+        Effect.forEach(entries, (entry) => Deferred.await(entry.request.released), {
+          concurrency: 16,
+          discard: true,
+        }),
+        Effect.interrupt,
+      ),
+    ).pipe(
+      Effect.catch((error) =>
+        Effect.sync(() => {
+          for (const entry of entries) {
+            entry.completeUnsafe(Exit.fail(error));
+          }
+        }),
+      ),
+    ),
+  );
 
 /**
  * The client half of the Query primitive (#17, lifetime per #28): a cache
@@ -119,6 +180,7 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
   contract: AnyQuery,
   key: QueryKey,
   transport: ActorTransport["Service"],
+  batchResolver: Option.Option<BatchedQueryResolver>,
 ) {
   const scope = yield* Scope.make();
   const state = yield* SubscriptionRef.make<QueryState<string, QueryFailure>>(Loading());
@@ -134,7 +196,11 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
       generation += 1;
       return SubscriptionRef.set(state, Ready(encoded, false));
     });
-  const reject = (error: QueryFailure) => SubscriptionRef.set(state, Failed(error));
+  const reject = (error: QueryFailure) =>
+    Effect.suspend(() => {
+      generation += 1;
+      return SubscriptionRef.set(state, Failed(error));
+    });
 
   // The latch clears before the value is published, never after: a caller
   // that sees the new value and asks again must start a new read, not join
@@ -152,7 +218,18 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
         }
         return clear;
       });
-    return transport.query(key).pipe(
+    const request = Option.match(batchResolver, {
+      onNone: () => transport.query(key),
+      onSome: (resolver) =>
+        Effect.gen(function* () {
+          const released = yield* Deferred.make<void>();
+          return yield* Effect.ensuring(
+            Effect.request(BatchedQueryRequest({ key, released }), resolver),
+            Deferred.succeed(released, void 0),
+          );
+        }),
+    });
+    return request.pipe(
       Effect.flatMap((encoded) => commit(accept(encoded))),
       Effect.catch((error) => reject(error).pipe(commit)),
     );
@@ -224,6 +301,31 @@ const entryOf = <Q extends AnyQuery>(
 const make = (): Effect.Effect<QueryCacheService> =>
   Effect.sync(() => {
     const slots = new Map<string, CacheSlot>();
+    const batchResolvers = new Map<
+      AnyQuery,
+      Map<ActorTransport["Service"], BatchedQueryResolver>
+    >();
+
+    const batchResolverFor = (contract: AnyQuery, transport: ActorTransport["Service"]) => {
+      if (contract.mode === "single") {
+        return Option.none<BatchedQueryResolver>();
+      }
+      const byTransport = Option.getOrElse(
+        Option.fromNullishOr(batchResolvers.get(contract)),
+        () => {
+          const created = new Map<ActorTransport["Service"], BatchedQueryResolver>();
+          batchResolvers.set(contract, created);
+          return created;
+        },
+      );
+      const existing = Option.fromNullishOr(byTransport.get(transport));
+      if (Option.isSome(existing)) {
+        return existing;
+      }
+      const created = makeBatchedQueryResolver(transport);
+      byTransport.set(transport, created);
+      return Option.some(created);
+    };
 
     const acquire = (contract: AnyQuery, key: QueryKey) =>
       Effect.gen(function* () {
@@ -236,7 +338,12 @@ const make = (): Effect.Effect<QueryCacheService> =>
           return existing.value;
         }
         const transport = yield* ActorTransport;
-        const created = yield* makeSlot(contract, key, transport);
+        const created = yield* makeSlot(
+          contract,
+          key,
+          transport,
+          batchResolverFor(contract, transport),
+        );
         created.count = 1;
         slots.set(id, created);
         yield* Effect.forkIn(created.refresh, created.scope);

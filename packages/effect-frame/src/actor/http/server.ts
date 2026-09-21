@@ -6,12 +6,14 @@ import {
   AddressBody,
   CallBody,
   QueryBody,
+  QueryBatchBody,
   SendBody,
   WireAddress,
   WireApplied,
   WireError,
   WireProjection,
   WireQueryError,
+  WireQueryBatch,
   WireQueryValue,
   WireReceipt,
   eventPrefix,
@@ -40,10 +42,12 @@ const decodeSend = decodeBody(SendBody);
 const decodeCall = decodeBody(CallBody);
 const decodeAddress = decodeBody(AddressBody);
 const decodeQueryBody = decodeBody(QueryBody);
+const decodeQueryBatchBody = decodeBody(QueryBatchBody);
 const encodeReceipt = Schema.encodeEffect(Schema.fromJsonString(WireReceipt));
 const encodeProjection = Schema.encodeEffect(Schema.fromJsonString(WireProjection));
 const encodeApplied = Schema.encodeEffect(Schema.fromJsonString(WireApplied));
 const encodeQueryValue = Schema.encodeEffect(Schema.fromJsonString(WireQueryValue));
+const encodeQueryBatch = Schema.encodeEffect(Schema.fromJsonString(WireQueryBatch));
 const encodeError = Schema.encodeEffect(Schema.fromJsonString(WireError));
 const encodeQueryError = Schema.encodeEffect(Schema.fromJsonString(WireQueryError));
 const decodeQuery = Schema.decodeEffect(
@@ -173,6 +177,12 @@ export const make: Effect.Effect<WebHandler, never, ActorTransport> = Effect.gen
             encodeQueryValue,
           ),
         ),
+        Effect.catch((reason) => Effect.succeed(badRequest(reason))),
+      );
+    }
+    if (path.endsWith(paths.queryBatch)) {
+      return decodeQueryBatchBody(request).pipe(
+        Effect.flatMap((body) => respondQuery(transport.queryBatch(body.keys), encodeQueryBatch)),
         Effect.catch((reason) => Effect.succeed(badRequest(reason))),
       );
     }

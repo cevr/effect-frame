@@ -30,6 +30,7 @@ import {
  * The Query primitive (#17) adds the query verbs and the single-flight field:
  *
  *   POST {base}/query     QueryBody    -> WireQueryValue | WireQueryError
+ *   POST {base}/query/batch QueryBatchBody -> WireQueryBatch | WireQueryError
  *   POST {base}/send      SendBody   + active[] -> WireReceipt    + refreshed[]
  *   POST {base}/call      CallBody   + active[] -> WireProjection + refreshed[]
  *
@@ -56,6 +57,9 @@ export const WireQueryKey = Schema.Struct({
 });
 
 export const QueryBody = Schema.Struct({ key: WireQueryKey });
+
+/** One request may carry keys from several contracts; the host groups valid keys by implementation. */
+export const QueryBatchBody = Schema.Struct({ keys: Schema.Array(WireQueryKey) });
 
 /** One query result as the wire carries it: the key it answers and the encoded value. */
 export const WireQueryValue = Schema.Struct({
@@ -84,6 +88,10 @@ export const WireRefreshed = Schema.Union([
   Schema.TaggedStruct("RefreshFailed", { key: WireQueryKey, error: WireQueryError }),
 ]);
 export type WireRefreshed = Schema.Schema.Type<typeof WireRefreshed>;
+
+/** One aligned result per input key. Failures stay attached to their key. */
+export const WireQueryBatch = Schema.Array(WireRefreshed);
+export type WireQueryBatch = Schema.Schema.Type<typeof WireQueryBatch>;
 
 /**
  * `active` is optional on the wire and defaults to empty. A client built
@@ -213,6 +221,7 @@ export const paths = {
   snapshot: "/snapshot",
   changes: "/changes",
   query: "/query",
+  queryBatch: "/query/batch",
 } satisfies Record<string, string>;
 
 export const eventPrefix = "data: ";

@@ -28,10 +28,13 @@ export interface QueryContract<
   Args extends Pure,
   Result extends Pure,
   Policy extends string,
+  Mode extends QueryMode = "single",
 > {
   readonly name: Name;
   /** Bumped when `args` or `result` changes incompatibly. */
   readonly version: number;
+  /** Whether the host reads one key or resolves a declared batch of keys. */
+  readonly mode: Mode;
   readonly args: Schema.fromJsonString<Args>;
   readonly result: Schema.fromJsonString<Result>;
   /**
@@ -73,7 +76,11 @@ export interface QueryOptions<
 /** The policy name every host resolves: it allows every read. */
 export const publicPolicy = "public";
 
-export type AnyQuery = QueryContract<string, Pure, Pure, string>;
+export type QueryMode = "single" | "batched";
+
+export type SingleQuery = QueryContract<string, Pure, Pure, string, "single">;
+export type BatchedQuery = QueryContract<string, Pure, Pure, string, "batched">;
+export type AnyQuery = QueryContract<string, Pure, Pure, string, QueryMode>;
 
 export type ArgsOf<Q extends AnyQuery> = Q["args"]["Type"];
 export type ResultOf<Q extends AnyQuery> = Q["result"]["Type"];
@@ -83,10 +90,30 @@ export type ResultOf<Q extends AnyQuery> = Q["result"]["Type"];
  * `"public"` when nothing was, and the given name otherwise. One signature
  * with a default type parameter would need a cast to say the same thing.
  */
+const makeQuery = <
+  const Name extends string,
+  Args extends Pure,
+  Result extends Pure,
+  const Mode extends QueryMode,
+>(
+  name: Name,
+  options: QueryOptions<Args, Result, string>,
+  mode: Mode,
+): QueryContract<Name, Args, Result, string, Mode> => ({
+  name,
+  version: options.version ?? 1,
+  mode,
+  args: Schema.fromJsonString(options.args),
+  result: Schema.fromJsonString(options.result),
+  policy: options.policy ?? publicPolicy,
+  depends: (options.depends ?? []).map((dependency) => dependency.name),
+  raw: { args: options.args, result: options.result },
+});
+
 export function query<const Name extends string, Args extends Pure, Result extends Pure>(
   name: Name,
   options: Omit<QueryOptions<Args, Result, never>, "policy">,
-): QueryContract<Name, Args, Result, "public">;
+): QueryContract<Name, Args, Result, "public", "single">;
 export function query<
   const Name extends string,
   Args extends Pure,
@@ -95,20 +122,40 @@ export function query<
 >(
   name: Name,
   options: QueryOptions<Args, Result, Policy> & { readonly policy: Policy },
-): QueryContract<Name, Args, Result, Policy>;
+): QueryContract<Name, Args, Result, Policy, "single">;
 export function query<const Name extends string, Args extends Pure, Result extends Pure>(
   name: Name,
   options: QueryOptions<Args, Result, string>,
-): QueryContract<Name, Args, Result, string> {
-  return {
-    name,
-    version: options.version ?? 1,
-    args: Schema.fromJsonString(options.args),
-    result: Schema.fromJsonString(options.result),
-    policy: options.policy ?? publicPolicy,
-    depends: (options.depends ?? []).map((dependency) => dependency.name),
-    raw: { args: options.args, result: options.result },
-  };
+): QueryContract<Name, Args, Result, string, "single"> {
+  return makeQuery(name, options, "single");
+}
+
+/**
+ * Declares that this query is served by one resolver for a collected set of
+ * arguments. The server implementation is still supplied separately with
+ * `Query.batched`; keeping the marker on the client contract makes the
+ * transport choice visible to a reader and to the cache.
+ */
+export namespace query {
+  export function batched<const Name extends string, Args extends Pure, Result extends Pure>(
+    name: Name,
+    options: Omit<QueryOptions<Args, Result, never>, "policy">,
+  ): QueryContract<Name, Args, Result, "public", "batched">;
+  export function batched<
+    const Name extends string,
+    Args extends Pure,
+    Result extends Pure,
+    const Policy extends string,
+  >(
+    name: Name,
+    options: QueryOptions<Args, Result, Policy> & { readonly policy: Policy },
+  ): QueryContract<Name, Args, Result, Policy, "batched">;
+  export function batched<const Name extends string, Args extends Pure, Result extends Pure>(
+    name: Name,
+    options: QueryOptions<Args, Result, string>,
+  ): QueryContract<Name, Args, Result, string, "batched"> {
+    return makeQuery(name, options, "batched");
+  }
 }
 
 // ---------------------------------------------------------------------------

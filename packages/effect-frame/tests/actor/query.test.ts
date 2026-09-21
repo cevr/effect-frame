@@ -16,12 +16,14 @@ import {
   Behavior,
   CommandId,
   HttpServer,
+  Query,
   QueryPolicies,
   implementQuery,
   implementTransparent,
 } from "effect-frame/actor";
 import {
   HttpTransport,
+  ActorTransport,
   QueryCache,
   Unauthorized,
   contract,
@@ -134,6 +136,24 @@ const Counted = query("Counted", {
   depends: [OrderBook],
 });
 
+/** A declared batch query used by the wire, cache, authorization, and refresh rows. */
+const BatchedLookup = query.batched("BatchedLookup", {
+  version: 1,
+  args: Schema.Struct({ tenant: Schema.String, id: Schema.Finite }),
+  result: Schema.Struct({ id: Schema.Finite, round: Schema.Finite }),
+  policy: "tenant-member",
+  depends: [OrderBook],
+});
+
+/** A chronology probe: its first read waits while a command refresh fails. */
+const Chronology = query.batched("Chronology", {
+  version: 1,
+  args: Schema.Struct({ tenant: Schema.String, id: Schema.Finite }),
+  result: Schema.Finite,
+  policy: "tenant-member",
+  depends: [OrderBook],
+});
+
 /** A query whose policy name no host resolves. The host must refuse it. */
 const Unpoliced = query("Unpoliced", {
   version: 1,
@@ -190,6 +210,64 @@ const CountedLive = implementQuery(Counted, () =>
   }),
 );
 
+let batchCalls = 0;
+let lastBatchIds: ReadonlyArray<number> = [];
+const batchGate = { current: Option.none<Deferred.Deferred<void>>() };
+const batchStarted = { current: Option.none<Deferred.Deferred<void>>() };
+const BatchedLookupLive = Query.batched(BatchedLookup, {
+  resolve: (args) =>
+    Effect.gen(function* () {
+      const started = batchStarted.current;
+      if (Option.isSome(started)) {
+        yield* Deferred.succeed(started.value, void 0);
+      }
+      const gate = batchGate.current;
+      if (Option.isSome(gate)) {
+        yield* Deferred.await(gate.value);
+      }
+      batchCalls += 1;
+      const round = batchCalls;
+      lastBatchIds = args.map((arg) => arg.id);
+      const values = new Set(lastBatchIds);
+      return (arg: (typeof args)[number]) => {
+        if (arg.id < 0 || !values.has(arg.id)) {
+          return Effect.fail(`no row for ${arg.id}`);
+        }
+        return Effect.succeed({ id: arg.id, round });
+      };
+    }),
+});
+
+interface ChronologyControl {
+  readonly firstStarted: Deferred.Deferred<void>;
+  readonly firstGate: Deferred.Deferred<void>;
+  readonly firstFinished: Deferred.Deferred<void>;
+  calls: number;
+}
+
+const chronologyControl = { current: Option.none<ChronologyControl>() };
+
+const ChronologyLive = Query.batched(Chronology, {
+  resolve: () =>
+    Effect.gen(function* () {
+      const control = chronologyControl.current;
+      if (Option.isNone(control)) {
+        return () => Effect.succeed(1);
+      }
+      const call = control.value.calls;
+      control.value.calls += 1;
+      if (call === 0) {
+        yield* Deferred.succeed(control.value.firstStarted, void 0);
+        yield* Effect.ensuring(
+          Deferred.await(control.value.firstGate),
+          Deferred.succeed(control.value.firstFinished, void 0),
+        );
+        return () => Effect.succeed(1);
+      }
+      return () => Effect.fail("refresh failed");
+    }),
+});
+
 /** Only the acme tenant may read a tenant-scoped query. */
 const tenantMember: QueryPolicy = {
   check: (key) => {
@@ -223,15 +301,30 @@ const acme = { tenant: "acme" };
 
 const hostLayer = ActorHost.layerMemory(
   [OrderBookLive, HeartbeatLive],
-  [RevenueLive, TopSkuLive, ExchangeRateLive, UnpolicedLive, CountedLive],
+  [
+    RevenueLive,
+    TopSkuLive,
+    ExchangeRateLive,
+    UnpolicedLive,
+    CountedLive,
+    BatchedLookupLive,
+    ChronologyLive,
+  ],
 ).pipe(Layer.provide(acmeOnly), Layer.provide(policies));
+
+let batchRequests = 0;
 
 const inProcess = Layer.unwrap(
   Effect.gen(function* () {
     const server = yield* HttpServer.make;
     const context = yield* Effect.context<never>();
     const run = Effect.runPromiseWith(context);
-    const fetch: HttpTransport.FetchLike = (input, init) => run(server(new Request(input, init)));
+    const fetch: HttpTransport.FetchLike = (input, init) => {
+      if (input.endsWith("/query/batch")) {
+        batchRequests += 1;
+      }
+      return run(server(new Request(input, init)));
+    };
     return HttpTransport.layer({
       baseUrl: "http://actors.test/actors",
       reconnect: HttpTransport.defaultReconnect,
@@ -272,6 +365,7 @@ describe("Query: the Dashboard shape", () => {
       expect(ExchangeRate.version).toBe(1);
       expect(ExchangeRate.policy).toBe("public");
       expect(ExchangeRate.depends).toEqual([]);
+      expect(BatchedLookup.mode).toBe("batched");
     }),
   );
 
@@ -545,6 +639,203 @@ describe("Query: the Dashboard shape", () => {
       yield* Effect.yieldNow;
       expect((yield* followed.state.get)._tag).toBe("Loading");
       expect(yield* cache.active).toEqual([]);
+    }),
+  );
+});
+
+describe("Query: declared batches", () => {
+  withDashboard("coalesces one scheduler turn and shares duplicate keys", () =>
+    Effect.gen(function* () {
+      const beforeRequests = batchRequests;
+      const beforeCalls = batchCalls;
+      const first = yield* useQuery(BatchedLookup, { ...acme, id: 1 });
+      const duplicate = yield* useQuery(BatchedLookup, { ...acme, id: 1 });
+      const second = yield* useQuery(BatchedLookup, { ...acme, id: 2 });
+      yield* Effect.all([settledEntry(first), settledEntry(duplicate), settledEntry(second)], {
+        concurrency: "unbounded",
+      });
+
+      expect(keyOf(first.key)).toBe(keyOf(duplicate.key));
+      expect(yield* first.state.get).toEqual(yield* duplicate.state.get);
+      expect(yield* first.state.get).toEqual({
+        _tag: "Ready",
+        value: { id: 1, round: beforeCalls + 1 },
+        stale: false,
+      });
+      expect(yield* second.state.get).toEqual({
+        _tag: "Ready",
+        value: { id: 2, round: beforeCalls + 1 },
+        stale: false,
+      });
+      expect(batchRequests - beforeRequests).toBe(1);
+      expect(batchCalls - beforeCalls).toBe(1);
+    }),
+  );
+
+  withDashboard("keeps success and per-key failure in one batch", () =>
+    Effect.gen(function* () {
+      const beforeRequests = batchRequests;
+      const beforeCalls = batchCalls;
+      const success = yield* useQuery(BatchedLookup, { ...acme, id: 3 });
+      const failure = yield* useQuery(BatchedLookup, { ...acme, id: -1 });
+      yield* Effect.all([settledEntry(success), settledEntry(failure)], {
+        concurrency: "unbounded",
+      });
+
+      expect(yield* success.state.get).toEqual({
+        _tag: "Ready",
+        value: { id: 3, round: beforeCalls + 1 },
+        stale: false,
+      });
+      const failed = yield* failure.state.get;
+      expect(failed._tag).toBe("Failed");
+      if (failed._tag === "Failed") {
+        expect(failed.error._tag).toBe("QueryFailed");
+      }
+      expect(batchRequests - beforeRequests).toBe(1);
+      expect(batchCalls - beforeCalls).toBe(1);
+    }),
+  );
+
+  withDashboard("isolates invalid, stale-version, and unauthorized keys", () =>
+    Effect.gen(function* () {
+      const beforeRequests = batchRequests;
+      const beforeCalls = batchCalls;
+      const transport = yield* ActorTransport;
+      const results = yield* transport.queryBatch([
+        { query: "BatchedLookup", version: 1, args: '{"id":1,"tenant":"acme"}' },
+        { query: "BatchedLookup", version: 1, args: '{"id":"bad","tenant":"acme"}' },
+        { query: "BatchedLookup", version: 1, args: '{"id":2,"tenant":"other"}' },
+        { query: "BatchedLookup", version: 2, args: '{"id":3,"tenant":"acme"}' },
+      ]);
+
+      expect(results).toHaveLength(4);
+      expect(results.map((result) => result._tag)).toEqual([
+        "Refreshed",
+        "RefreshFailed",
+        "RefreshFailed",
+        "RefreshFailed",
+      ]);
+      expect(lastBatchIds).toEqual([1]);
+      if (results[0]?._tag === "Refreshed") {
+        expect(results[0].result).toContain('"id":1');
+      }
+      if (results[1]?._tag === "RefreshFailed") {
+        expect(results[1].error._tag).toBe("InvalidQueryArgs");
+      }
+      if (results[2]?._tag === "RefreshFailed") {
+        expect(results[2].error._tag).toBe("Unauthorized");
+      }
+      if (results[3]?._tag === "RefreshFailed") {
+        expect(results[3].error._tag).toBe("QueryVersionMismatch");
+      }
+      expect(batchRequests - beforeRequests).toBe(1);
+      expect(batchCalls - beforeCalls).toBe(1);
+    }),
+  );
+
+  withDashboard("cancelling one key leaves another live key in the batch", () =>
+    Effect.gen(function* () {
+      const firstScope = yield* Scope.make();
+      const secondScope = yield* Scope.make();
+      const gate = yield* Deferred.make<void>();
+      const started = yield* Deferred.make<void>();
+      const beforeCalls = batchCalls;
+      batchGate.current = Option.some(gate);
+      batchStarted.current = Option.some(started);
+
+      yield* Effect.ensuring(
+        Effect.gen(function* () {
+          yield* Scope.provide(useQuery(BatchedLookup, { ...acme, id: 4 }), firstScope);
+          const second = yield* Scope.provide(
+            useQuery(BatchedLookup, { ...acme, id: 5 }),
+            secondScope,
+          );
+          yield* Deferred.await(started);
+          yield* Scope.close(firstScope, Exit.void);
+          yield* Deferred.succeed(gate, void 0);
+          yield* settledEntry(second);
+          expect(yield* second.state.get).toEqual({
+            _tag: "Ready",
+            value: { id: 5, round: beforeCalls + 1 },
+            stale: false,
+          });
+          expect(batchCalls - beforeCalls).toBe(1);
+        }),
+        Effect.gen(function* () {
+          batchGate.current = Option.none();
+          batchStarted.current = Option.none();
+          yield* Scope.close(firstScope, Exit.void);
+          yield* Scope.close(secondScope, Exit.void);
+        }),
+      );
+    }),
+  );
+
+  withDashboard("refreshes all active dependent keys through one batch resolver", () =>
+    Effect.gen(function* () {
+      const first = yield* useQuery(BatchedLookup, { ...acme, id: 6 });
+      const second = yield* useQuery(BatchedLookup, { ...acme, id: 7 });
+      yield* Effect.all([settledEntry(first), settledEntry(second)], { concurrency: "unbounded" });
+      const beforeCalls = batchCalls;
+      const book = yield* ref(OrderBook, acme);
+      yield* book.call(
+        { _tag: "PlaceOrder", sku: "batch-refresh", amount: 1 },
+        { commandId: id("batch-refresh"), timeout: "1 second" },
+      );
+
+      expect(batchCalls - beforeCalls).toBe(1);
+      expect(yield* first.state.get).toEqual({
+        _tag: "Ready",
+        value: { id: 6, round: beforeCalls + 1 },
+        stale: false,
+      });
+      expect(yield* second.state.get).toEqual({
+        _tag: "Ready",
+        value: { id: 7, round: beforeCalls + 1 },
+        stale: false,
+      });
+    }),
+  );
+
+  withDashboard("a command refresh failure supersedes an older read still in flight", () =>
+    Effect.gen(function* () {
+      const firstStarted = yield* Deferred.make<void>();
+      const firstGate = yield* Deferred.make<void>();
+      const firstFinished = yield* Deferred.make<void>();
+      chronologyControl.current = Option.some({
+        firstStarted,
+        firstGate,
+        firstFinished,
+        calls: 0,
+      });
+
+      yield* Effect.ensuring(
+        Effect.gen(function* () {
+          const chronology = yield* useQuery(Chronology, { ...acme, id: 1 });
+          yield* Deferred.await(firstStarted);
+          const book = yield* ref(OrderBook, acme);
+          yield* book.call(
+            { _tag: "PlaceOrder", sku: "chronology", amount: 1 },
+            { commandId: id("chronology-failure"), timeout: "1 second" },
+          );
+
+          const failed = yield* chronology.state.get;
+          expect(failed._tag).toBe("Failed");
+          if (failed._tag === "Failed") {
+            expect(failed.error._tag).toBe("QueryFailed");
+          }
+
+          yield* Deferred.succeed(firstGate, void 0);
+          yield* Deferred.await(firstFinished);
+          yield* Effect.yieldNow;
+          expect(yield* chronology.state.get).toEqual(failed);
+        }),
+        Effect.gen(function* () {
+          chronologyControl.current = Option.none();
+          yield* Deferred.succeed(firstGate, void 0);
+        }),
+      );
     }),
   );
 });

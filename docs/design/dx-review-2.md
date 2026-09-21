@@ -31,7 +31,7 @@ Ask: `command("name", { args, result, policy, affects: [Contracts or queries] })
 
 `View.list` now lets every row open a query. SvelteKit `query.batch` groups same-tick calls into one request and hands the resolver an array. Without it, a list of 50 rows is 50 HTTP round trips.
 
-Ask: a declared variant, not a transport trick. `Query.batched(contract, { resolve: (args[]) => Effect<(arg) => Result> })`. The client cache coalesces opens within one tick into one wire call. The contract says it is batchable, so the reader knows.
+The frame now has a declared variant. `query.batched(name, { args, result, policy, depends })` marks the client contract, and `Query.batched(contract, { resolve })` supplies one server resolver. The resolver receives all valid, authorized arguments and returns one per-argument Effect, so one key can fail without discarding its neighbors. The client cache uses Effect `RequestResolver`; its default `Effect.yieldNow` delay collects opens made in one scheduler turn, then sends `POST /actors/query/batch` once. The response is aligned to the input keys and carries a `Refreshed` or `RefreshFailed` result for each key. Command single-flight refreshes use the same host batch path.
 
 ### B3. Typed links and typed navigation
 
@@ -115,7 +115,7 @@ Ask: `Route.client(name, { leave: Effect<boolean, never, R> })`, asked in the Tr
 
 `select` and `zip` are synchronous. A typeahead needs debounce. An async validation needs a derived source that runs an Effect. Solid has `createResource`; the frame would route this through a query, which is wrong for a local computation.
 
-Ask: `Source.debounce(source, duration)`, `Source.throttle`, and `Source.mapEffect(source, f)` that yields `Source<QueryState<B, E>>`, all scoped. The `Query` control then draws a local computation the same way it draws a server read.
+Solid 2 RC.9 handles async computations with a Promise-returning `createMemo` and `<Loading>`, rather than the removed `createResource`. Ask: `Source.debounce(source, duration)`, `Source.throttle`, and `Source.mapEffect(source, f)` that yields `Source<QueryState<B, E>>`, all scoped. The `Query` control then draws a local computation the same way it draws a server read.
 
 Resolution: the source seed comes from the first pull of one continuous `changes` stream, so a change between a separate read and subscription cannot be dropped. `debounce` delays changes and `throttle` rate-limits without conflating later values, using the Effect Stream clock. `mapEffect` starts in `Loading`, interrupts replaced work, carries the last `Ready` value as stale, and turns expected failures into `Failed`.
 

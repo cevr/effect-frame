@@ -28,8 +28,12 @@ _Avoid_: Loader, read model, actor snapshot.
 A message a client submits to an actor to change its state. Every state change in Effect Frame is a command; there is no second mutation path.
 _Avoid_: Mutation, action, server function.
 
+**View**:
+A function from props to an Effect that produces a node tree once, in a scope that owns everything the setup opened. A view is composed by yielding it inside another view's setup, never by placing it as a JSX tag; a JSX tag is a synchronous function or an intrinsic name.
+_Avoid_: Component, widget, render function.
+
 **Rendering mode**:
-Where and when a route's view is turned into markup: on the client only, on the server before hydration, streamed from the server as its data settles, on the server for every change, or at build time. The destination route names it, and naming it is choosing a constructor rather than setting a field. A plain form post is not a mode: it is a command path that works under every mode that renders on a server.
+Where and when a route's view is turned into markup: on the client only (`Route.client`), on the server before hydration, streamed from the server as its data settles, on the server for every change, or at build time. The destination route names it, and naming it is choosing a constructor rather than setting a field. A plain form post is not a mode: it is a command path that works under every mode that renders on a server.
 _Avoid_: Strategy, target.
 
 **Query state**:

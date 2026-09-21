@@ -10,7 +10,8 @@ import { describe, expect, it } from "effect-bun-test";
 
 const Nothing = Schema.Struct({});
 
-const Blank = (_props: Route.RouteProps<unknown, unknown>) => Effect.succeed(<span />);
+const Blank = <Params, Search>(_props: Route.RouteProps<Params, Search>) =>
+  Effect.succeed(<span />);
 
 /** `?q=a&q=b` → `{ q: "a" }`, and `{ q: "" }` prints no query at all. */
 const Query = Route.SearchRecord.pipe(
@@ -45,6 +46,117 @@ const files = Route.client("files", {
   search: Nothing,
   view: Blank,
 });
+
+const Defaults = Route.search(
+  Schema.Struct({
+    page: Schema.FiniteFromString.pipe(Route.withDefault(1)),
+    panes: Schema.Array(Schema.String).pipe(Route.withDefault(["all"])),
+  }).pipe(Schema.encodeKeys({ page: "p" })),
+);
+
+const capturedSearch: Array<unknown> = [];
+const DefaultsView = <Params, Search>(props: Route.RouteProps<Params, Search>) =>
+  Effect.gen(function* () {
+    capturedSearch.push(yield* props.search.get);
+    return <span />;
+  });
+
+const defaults = Route.client("defaults", {
+  path: "/defaults/:id",
+  params: Schema.Struct({ id: Schema.String }),
+  search: Defaults,
+  view: DefaultsView,
+});
+
+const tenant = Route.client("tenant", {
+  path: "/tenant/:id",
+  params: Schema.Struct({ id: Schema.String }),
+  search: Route.search(
+    Schema.Struct({
+      tenant: Schema.optionalKey(Schema.String),
+      section: Schema.String,
+      page: Schema.FiniteFromString.pipe(Route.withDefault(1)),
+    }),
+  ),
+  retain: ["tenant", "page"],
+  view: Blank,
+});
+
+const Workspace = Route.SearchRecord.pipe(
+  Schema.decodeTo(Schema.Struct({ panes: Schema.Array(Schema.String) }), {
+    decode: SchemaGetter.transform((record) => ({
+      panes: Option.getOrElse(Option.fromNullishOr(record["workspace"]), () => []),
+    })),
+    encode: SchemaGetter.transform((search): Route.SearchRecord => ({
+      workspace: [...search.panes],
+    })),
+  }),
+);
+
+const workspace = Route.client("workspace", {
+  path: "/workspace",
+  params: Nothing,
+  search: Workspace,
+  view: Blank,
+});
+
+const suffixOf = (index: number): string => {
+  if (index === 0) {
+    return "";
+  }
+  return String(index + 1);
+};
+
+const WorkspaceWithFilters = Route.SearchRecord.pipe(
+  Schema.decodeTo(
+    Schema.Struct({
+      panes: Schema.Array(Schema.Struct({ q: Schema.String, filters: Schema.String })),
+    }),
+    {
+      decode: SchemaGetter.transform((record) => ({
+        panes: ["", ""].map((_, index) => {
+          const suffix = suffixOf(index);
+          return {
+            q: Option.getOrElse(
+              Option.flatMap(Option.fromNullishOr(record[`q${suffix}`]), (values) =>
+                Option.fromNullishOr(values[0]),
+              ),
+              () => "",
+            ),
+            filters: Option.getOrElse(
+              Option.flatMap(Option.fromNullishOr(record[`filters${suffix}`]), (values) =>
+                Option.fromNullishOr(values[0]),
+              ),
+              () => "",
+            ),
+          };
+        }),
+      })),
+      encode: SchemaGetter.transform((search): Route.SearchRecord => {
+        const encoded: Record<string, Array<string>> = {};
+        for (const [index, pane] of search.panes.entries()) {
+          const suffix = suffixOf(index);
+          encoded[`q${suffix}`] = [pane.q];
+          encoded[`filters${suffix}`] = [pane.filters];
+        }
+        return encoded;
+      }),
+    },
+  ),
+);
+
+const workspaceWithFilters = Route.client("workspaceWithFilters", {
+  path: "/workspace-filters",
+  params: Nothing,
+  search: WorkspaceWithFilters,
+  view: Blank,
+});
+
+const Filters = Schema.Struct({
+  filter: Schema.Struct({ sort: Schema.String }).pipe(Route.withDefault({ sort: "rank" })),
+});
+const encodedFilterDefault = Schema.encodeSync(Filters)({ filter: { sort: "rank" } });
+const encodedFilterOther = Schema.encodeSync(Filters)({ filter: { sort: "date" } });
 
 const matches = (route: Route.AnyRoute<never>, href: string): boolean =>
   Option.isSome(route.enter(new URL(href, "http://app.test")));
@@ -118,6 +230,82 @@ describe("route", () => {
   it.live("a segment the browser cannot decode does not match", () =>
     Effect.sync(() => {
       expect(matches(book, "/books/%E0%A4%A")).toBe(false);
+    }),
+  );
+
+  it.live("fills omitted defaults and omits equal scalar and array defaults", () =>
+    Effect.gen(function* () {
+      expect(defaults.href({ id: "1" }, { page: 1, panes: ["all"] })).toBe("/defaults/1");
+      expect(defaults.href({ id: "1" }, { page: 2, panes: ["one", "two"] })).toBe(
+        "/defaults/1?p=2&panes=one&panes=two",
+      );
+
+      const entered = yield* Option.getOrThrow(
+        defaults.enter(new URL("http://app.test/defaults/1")),
+      );
+      yield* Effect.scoped(entered.setup);
+      expect(capturedSearch).toEqual([{ page: 1, panes: ["all"] }]);
+    }),
+  );
+
+  it.live("remaps keys, preserves repeated values, and prints in schema order", () =>
+    Effect.sync(() => {
+      expect(defaults.href({ id: "1" }, { page: 2, panes: ["one", "two"] })).toBe(
+        "/defaults/1?p=2&panes=one&panes=two",
+      );
+      expect(workspace.href({}, { panes: ["first", "second"] })).toBe(
+        "/workspace?workspace=first&workspace=second",
+      );
+      expect(
+        workspaceWithFilters.href(
+          {},
+          {
+            panes: [
+              { q: "first", filters: "rank" },
+              { q: "second", filters: "date" },
+            ],
+          },
+        ),
+      ).toBe("/workspace-filters?q=first&filters=rank&q2=second&filters2=date");
+    }),
+  );
+
+  it.live("retains decoded keys across routes and lets explicit values clear defaults", () =>
+    Effect.sync(() => {
+      const current = new URL("http://app.test/other?tenant=acme&page=4");
+      expect(tenant.hrefAt(current, { id: "2" }, { section: "main", page: 1 })).toBe(
+        "/tenant/2?tenant=acme&section=main",
+      );
+      expect(
+        tenant.hrefAt(current, { id: "2" }, { tenant: "other", section: "main", page: 1 }),
+      ).toBe("/tenant/2?tenant=other&section=main");
+      expect(tenant.hrefAt(current, { id: "2" }, { section: "main", page: 1 })).toBe(
+        "/tenant/2?tenant=acme&section=main",
+      );
+    }),
+  );
+
+  it.live("builds search records without prototype-key collisions", () =>
+    Effect.sync(() => {
+      const record = Route.readSearch(
+        new URLSearchParams("__proto__=x&constructor=y&constructor=z"),
+      );
+      expect(Object.getPrototypeOf(record)).toBeNull();
+      expect(record["__proto__"]).toEqual(["x"]);
+      expect(record["constructor"]).toEqual(["y", "z"]);
+    }),
+  );
+
+  it.live("refuses search fields that cannot be URL strings", () =>
+    Effect.sync(() => {
+      expect(() => Route.search(Schema.Struct({ enabled: Schema.Boolean }))).toThrow();
+    }),
+  );
+
+  it.live("uses Schema equivalence for allocated structured defaults", () =>
+    Effect.sync(() => {
+      expect(encodedFilterDefault).toEqual({});
+      expect(encodedFilterOther).toEqual({ filter: { sort: "date" } });
     }),
   );
 });

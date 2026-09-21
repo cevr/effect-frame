@@ -35,20 +35,48 @@ Ask: a declared variant, not a transport trick. `Query.batched(contract, { resol
 
 ### B3. Typed links and typed navigation
 
-The frame has `route.href(params, search)`, which is total and typed. The router takes a printed string. TanStack's `Link` is the feature people cite: `to` is typed, a refactor cannot break it, and the link knows when it is active.
+The frame has `route.href(params, search)`, which is total and typed. The router takes a printed string. The implementation keeps that small boundary and composes typed links on top of it.
 
-Ask:
+```tsx
+const next = yield * link(Book, { id: "5" }, { q: "" });
+const later = yield * link(Book, { id: "5" }, (previous) => ({ q: `${previous.q}x` }));
+yield * next.go; // push
+yield * next.replace; // replace
+<Link link={later} replace>
+  next
+</Link>;
+```
 
-- `Link` node: `<Link to={route} params={…} search={…} activeClass="on">`, which renders `href`, `aria-current`, and an `active: Source<boolean>`.
-- `router.navigate(route, params, search, options)` overload beside the string form.
-- `router.current: Source<Match>` and `Route.isActive(route): Source<boolean>`.
-- `preload: "intent"` on `Link`, which opens the route's declared data on hover once #18 lands.
+`link(route, params, search)` returns `{ href, active, go, replace }`. `href` is a live `Source<string>`, so a functional search link follows later URL changes. `go` and `replace` use the same URL updater as the anchor's normal click. `<Link>` renders a real anchor with `href` and `aria-current`; the delegated router listener leaves modified and middle clicks to the browser. `router.current` and `isActive(router, route)` are sources.
+
+The #50 resolution rejects a `router.navigate(route, params, search)` overload. It duplicates `route.href(...)` and `link(...).go`, and it would make the router own route typing that already belongs to the route. The router keeps `navigate(href)` and `replace(href)` as its two operations. Intent preload remains out of scope until declared route data exists in #18.
 
 ### B4. Search params as state, with updaters and retention
 
-egw-search wrote `toWorkspaceString` by hand and rebuilt the whole search record on every toggle. TanStack gives `navigate({ search: (prev) => ({ ...prev, page: 2 }) })` and search middleware that keeps keys across navigations.
+egw-search wrote `toWorkspaceString` by hand and rebuilt the whole search record on every toggle. The route Schema now owns the URL spelling, including defaults, remapped keys, repeated values, and custom codecs.
 
-Ask: `router.navigate(route, { search: (previous) => next })` and a route-level `retain: ["tenant"]` list. Both are values the reader can see.
+```ts
+const Search = Route.search(
+  Schema.Struct({
+    page: Schema.FiniteFromString.pipe(Route.withDefault(1)),
+    pane: Schema.Array(Schema.String),
+  }).pipe(Schema.encodeKeys({ page: "p" })),
+);
+
+const Book = Route.client("book", {
+  path: "/books/:id",
+  params: Schema.Struct({ id: Schema.String }),
+  search: Search,
+  retain: ["page"],
+  view: BookView,
+});
+```
+
+`href` omits values equal to `withDefault` and decoding fills them. `Schema.encodeKeys` keeps the decoded field name while changing the URL key. `Route.search` accepts only object fields that encode to strings or string arrays, and it prints fields in encoded Schema order. A custom `SearchRecord` codec remains valid; its emitted record order is kept for serializers such as a two-pane workspace.
+
+The view receives `props.href(params, search)`, `props.updateSearch(update)`, and `props.replaceSearch(update)`. A functional update runs against the latest canonical URL when its queued operation executes. The router serializes URL computation, history mutation, and route publication, so concurrent updates do not overwrite each other. `updateSearch` pushes and `replaceSearch` replaces. A typed `link` accepts the same decoded value or updater. `retain` carries declared decoded keys across routes only when the caller omits them; an explicit caller value, including a default value that encodes to omission, wins.
+
+Rate limiting has no router option. A view composes the source it navigates from with the time-based Source combinators in #57.
 
 ### B5. Fields: a form derived from a schema
 

@@ -7,23 +7,19 @@ import {
   Effect,
   Exit,
   Option,
+  Predicate,
   Queue,
   Scope,
   Stream,
   SubscriptionRef,
 } from "effect";
-import type { AnyRoute, Entered } from "./route.js";
+import type { AnyRoute, Entered, RouteNavigation, UrlUpdater } from "./route.js";
 
 /**
  * The router (#18 §7). The URL is the state: the router holds nothing about
  * "where we are" beyond what the location reports, so a reload, a link, and
  * a back navigation are one code path.
  */
-
-export interface NavigateOptions {
-  /** Replace the current history entry instead of pushing one. */
-  readonly replace?: boolean;
-}
 
 /** One movement of the document, as the views may observe it. */
 export interface Navigation {
@@ -41,9 +37,11 @@ export interface RouterService {
   /**
    * Move to a printed href. It cannot fail: a URL no route matches shows
    * the not-found view. An href equal to the current one is not a move.
-   * A typed move prints its href with `route.href`, or is a `Route.link`.
+   * A typed move prints its href with `route.href`, or uses `link`.
    */
-  readonly navigate: (href: string, options?: NavigateOptions) => Effect.Effect<void>;
+  readonly navigate: (href: string | UrlUpdater) => Effect.Effect<void>;
+  /** Replace the current history entry with a printed href. */
+  readonly replace: (href: string | UrlUpdater) => Effect.Effect<void>;
   /** Every navigation, the current one first. */
   readonly navigations: Source<Navigation>;
   /** The route the document is on, by name, with its URL. */
@@ -113,24 +111,32 @@ const resolve = <R>(
   routes: ReadonlyArray<AnyRoute<R>>,
   fallback: AnyRoute<R>,
   url: URL,
+  navigation?: RouteNavigation,
 ): Resolved<R> => {
   for (const route of routes) {
-    const entered = route.enter(url);
+    const entered = route.enter(url, navigation);
     if (Option.isSome(entered)) {
       return { route, enter: entered.value };
     }
   }
   return {
     route: fallback,
-    enter: Option.getOrElse(fallback.enter(url), () => Effect.die("not-found did not match")),
+    enter: Option.getOrElse(fallback.enter(url, navigation), () =>
+      Effect.die("not-found did not match"),
+    ),
   };
 };
 
-interface Request {
-  readonly url: URL;
-  readonly kind: Navigation["kind"];
-  readonly done: Deferred.Deferred<void>;
-}
+type Request =
+  | {
+      readonly operation: "push" | "replace";
+      readonly href: string | UrlUpdater;
+      readonly done: Deferred.Deferred<Exit.Exit<void, never>>;
+    }
+  | {
+      readonly operation: "pop";
+      readonly done: Deferred.Deferred<Exit.Exit<void, never>>;
+    };
 
 /**
  * Mount a route tree on a host. The Scope owns the router; each shown route
@@ -157,28 +163,45 @@ export const mount: <R, HostNode>(
   const fallback = notFoundRoute(options.notFound);
   const initial = yield* location.current;
   const navigations = yield* SubscriptionRef.make<Navigation>({ url: initial, kind: "initial" });
-  const nameOf = (url: URL): string => resolve(options.routes, fallback, url).route.name;
   const requests = yield* Queue.unbounded<Request>();
+  const pending = new Set<Request>();
+  let closed = false;
   let mounted: Option.Option<Mounted<R>> = Option.none();
 
+  const submit = (request: Request) =>
+    Effect.gen(function* () {
+      if (closed) {
+        return;
+      }
+      pending.add(request);
+      const offered = yield* Queue.offer(requests, request);
+      if (!offered) {
+        pending.delete(request);
+        yield* Deferred.succeed(request.done, Exit.succeed(void 0));
+        return;
+      }
+      const outcome = yield* Deferred.await(request.done);
+      yield* Exit.match(outcome, {
+        onFailure: (cause) => Effect.failCause(cause),
+        onSuccess: () => Effect.void,
+      });
+    });
+
+  const enqueue = (operation: "push" | "replace", href: string | UrlUpdater) =>
+    Effect.gen(function* () {
+      const done = yield* Deferred.make<Exit.Exit<void, never>>();
+      yield* submit({ operation, href, done });
+    });
+
+  const enqueuePop = () =>
+    Effect.gen(function* () {
+      const done = yield* Deferred.make<Exit.Exit<void, never>>();
+      yield* submit({ operation: "pop", done });
+    });
+
   const service: RouterService = {
-    navigate: (href, navigateOptions) =>
-      Effect.gen(function* () {
-        const base = yield* location.current;
-        const url = new URL(href, base);
-        if (url.href === base.href) {
-          return;
-        }
-        const done = yield* Deferred.make<void>();
-        if (navigateOptions?.replace === true) {
-          yield* location.replace(url);
-          yield* Queue.offer(requests, { url, kind: "replace", done });
-        } else {
-          yield* location.push(url);
-          yield* Queue.offer(requests, { url, kind: "push", done });
-        }
-        yield* Deferred.await(done);
-      }),
+    navigate: (href) => enqueue("push", href),
+    replace: (href) => enqueue("replace", href),
     navigations: {
       get: SubscriptionRef.get(navigations),
       changes: SubscriptionRef.changes(navigations),
@@ -195,9 +218,17 @@ export const mount: <R, HostNode>(
     },
   };
 
+  const navigation: RouteNavigation = {
+    navigate: service.navigate,
+    replace: service.replace,
+  };
+
+  const nameOf = (url: URL): string =>
+    resolve(options.routes, fallback, url, navigation).route.name;
+
   const show = (url: URL) =>
     Effect.gen(function* () {
-      const target = resolve(options.routes, fallback, url);
+      const target = resolve(options.routes, fallback, url, navigation);
       if (Option.isSome(mounted) && mounted.value.route === target.route) {
         yield* mounted.value.entered.update(url);
         return;
@@ -217,21 +248,64 @@ export const mount: <R, HostNode>(
   const move = (url: URL, kind: Navigation["kind"]) =>
     Effect.andThen(SubscriptionRef.set(navigations, { url, kind }), show(url));
 
-  yield* show(initial);
-  yield* Effect.forkScoped(
-    Stream.runForEach(Stream.fromQueue(requests), (request) =>
-      Effect.andThen(move(request.url, request.kind), Deferred.succeed(request.done, void 0)),
-    ),
-  );
-  yield* Effect.forkScoped(
-    Stream.runForEach(location.pops, (url) =>
-      Effect.flatMap(Deferred.make<void>(), (done) =>
-        Queue.offer(requests, { url, kind: "pop", done }),
+  const process = (request: Request) =>
+    Effect.gen(function* () {
+      const base = yield* location.current;
+      const current = new URL(base.href);
+      let href: string;
+      if (request.operation === "pop") {
+        href = current.href;
+      } else if (isUrlUpdater(request.href)) {
+        href = request.href(current);
+      } else {
+        href = request.href;
+      }
+      const url = new URL(href, base);
+      if (request.operation !== "pop" && url.href === base.href) {
+        return;
+      }
+      if (request.operation === "push") {
+        yield* location.push(url);
+      } else if (request.operation === "replace") {
+        yield* location.replace(url);
+      }
+      yield* move(url, request.operation);
+    }).pipe(
+      Effect.exit,
+      Effect.flatMap((outcome) =>
+        Effect.andThen(
+          Deferred.succeed(request.done, outcome),
+          Effect.sync(() => {
+            pending.delete(request);
+          }),
+        ),
       ),
-    ),
+    );
+
+  yield* show(initial);
+  yield* Effect.addFinalizer(() =>
+    Effect.gen(function* () {
+      closed = true;
+      const waiting = Array.from(pending);
+      pending.clear();
+      yield* Effect.forEach(
+        waiting,
+        (request) => Deferred.succeed(request.done, Exit.succeed(void 0)),
+        {
+          discard: true,
+        },
+      );
+      yield* Queue.shutdown(requests);
+    }),
   );
+  yield* Effect.forkScoped(
+    Stream.runForEach(Stream.fromQueue(requests), (request) => process(request)),
+  );
+  yield* Effect.forkScoped(Stream.runForEach(location.pops, () => enqueuePop()));
   return service;
 });
+
+const isUrlUpdater = (href: string | UrlUpdater): href is UrlUpdater => Predicate.isFunction(href);
 
 // ---------------------------------------------------------------------------
 // The browser
@@ -283,8 +357,8 @@ const followable = (event: MouseEvent): Option.Option<HTMLAnchorElement> => {
  * One delegated click handler at the root. It intercepts a click only when
  * the browser would have followed a same-origin link in this tab; a middle
  * click, a modifier, `target="_blank"`, a download, and another origin are
- * all left to the browser. There is no link component: the anchor is an
- * anchor.
+ * all left to the browser. A typed Link attaches its queued action to the
+ * anchor; this listener handles ordinary anchors and keeps that same policy.
  *
  * The decision and `preventDefault` happen inside the listener, on the
  * browser's own call: a stream would deliver the event after the browser
@@ -294,7 +368,7 @@ export const followLinks = Effect.fn("Router.followLinks")(function* (
   root: EventTarget,
   router: RouterService,
 ) {
-  const hrefs = yield* Queue.unbounded<string>();
+  const hrefs = yield* Queue.unbounded<{ readonly href: string; readonly replace: boolean }>();
   const listener = (event: Event) => {
     if (!(event instanceof MouseEvent)) {
       return;
@@ -303,7 +377,10 @@ export const followLinks = Effect.fn("Router.followLinks")(function* (
       onNone: () => {},
       onSome: (anchor) => {
         event.preventDefault();
-        Queue.offerUnsafe(hrefs, anchor.href);
+        Queue.offerUnsafe(hrefs, {
+          href: anchor.href,
+          replace: anchor.getAttribute("data-frame-replace") === "true",
+        });
       },
     });
   };
@@ -317,6 +394,11 @@ export const followLinks = Effect.fn("Router.followLinks")(function* (
       }),
   );
   yield* Effect.forkScoped(
-    Stream.runForEach(Stream.fromQueue(hrefs), (href) => router.navigate(href)),
+    Stream.runForEach(Stream.fromQueue(hrefs), (request) => {
+      if (request.replace) {
+        return router.replace(request.href);
+      }
+      return router.navigate(request.href);
+    }),
   );
 });

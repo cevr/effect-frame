@@ -1,5 +1,5 @@
 export * as Route from "./route.js";
-export { Link, isActive, link, type LinkProps } from "./link.js";
+export { Link, isActive, link, type LinkProps, type LinkSearch } from "./link.js";
 export type { Link as RouteLink } from "./link.js";
 export {
   Location,
@@ -11,7 +11,6 @@ export {
   type Match,
   type MountOptions,
   type Navigation,
-  type NavigateOptions,
   type NotFoundProps,
   type RouterService,
 } from "./router.js";
@@ -21,10 +20,13 @@ export type {
   ParamsCodec,
   Part,
   PathRecord,
+  RouteNavigation,
   RouteDefinition,
   RouteProps,
   Route as RouteOf,
   SearchCodec,
   SearchRecord,
+  SearchUpdater,
   TemplateRejected,
+  UrlUpdater,
 } from "./route.js";

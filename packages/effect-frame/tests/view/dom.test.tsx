@@ -100,6 +100,21 @@ const NestedToggle = View.make((props: NestedToggleProps) =>
 const textOf = (root: HTMLElement, selector: string): string =>
   root.querySelector(selector)?.textContent ?? "";
 
+/** A child asks for the capabilities itself; nothing passes them down. */
+const Child = View.make((_props: NoProps) =>
+  Effect.gen(function* () {
+    const view = yield* View.Context;
+    const label = yield* spawn(Behavior.value("child"));
+    return <em id="child">{view.bind(label.state)}</em>;
+  }),
+);
+
+const Parent = View.make((_props: NoProps) =>
+  Effect.gen(function* () {
+    return <div>{yield* Child.setup(noProps)}</div>;
+  }),
+);
+
 interface HitsProps {
   readonly hits: Source<ReadonlyArray<string>>;
 }
@@ -207,6 +222,14 @@ describe("browser view", () => {
       yield* open.call(Value.Set(false));
       yield* render;
       expect(root.querySelector("#body")).toBeNull();
+    }),
+  );
+
+  it.scoped("a child view reads View.Context from the parent's setup", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      yield* mount(Parent, noProps, Dom.host, root);
+      expect(textOf(root, "#child")).toBe("child");
     }),
   );
 

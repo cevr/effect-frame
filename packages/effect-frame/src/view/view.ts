@@ -44,7 +44,14 @@ export interface Capabilities {
   };
   /** Project a source into another source. Both stay explicit inputs. */
   readonly select: <A, B>(source: Source<A>, project: (value: A) => B) => Source<B>;
-  /** Run the handler's Effect in the view scope when the host fires. */
+  /**
+   * Run the handler's Effect in the view scope when the host fires.
+   *
+   * The handler runs on a fiber of its own, so a write it makes lands after
+   * the host's callback has returned: a script that fires an event and reads
+   * an actor in the same tick reads the old value. The write is observable
+   * once the runtime has yielded (`render` in a test).
+   */
   readonly event: (handler: Handler) => Prepared;
   /** `event`, but the host suppresses its default action first. */
   readonly submit: (handler: Handler) => Prepared;
@@ -58,6 +65,11 @@ export class Context extends ServiceMap.Service<Context, Capabilities>()(
  * A view: one setup Effect per mounted identity. Setup runs once. State
  * updates never run it again. `E` and `R` stay visible to the mounting
  * application, and `Scope` owns every resource setup opens.
+ *
+ * `Context` is in scope for every setup, the root's and each child's: a
+ * parent composes a child with `yield* Child.setup(props)`, which runs in
+ * the parent's own context, so the child asks for `View.Context` itself
+ * and never receives the capabilities through its props.
  */
 export interface View<Props, E, R> {
   readonly setup: (props: Props) => Effect.Effect<Node, E, R>;

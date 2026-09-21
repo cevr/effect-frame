@@ -64,7 +64,7 @@ const Nothing = Schema.Struct({});
 
 let homeMounts = 0;
 
-const Home = View.make((_props: Route.RouteProps<unknown, unknown>) =>
+const Home = (_props: Route.RouteProps<unknown, unknown>) =>
   Effect.gen(function* () {
     const router = yield* Router;
     homeMounts += 1;
@@ -78,19 +78,16 @@ const Home = View.make((_props: Route.RouteProps<unknown, unknown>) =>
         </button>
       </section>
     );
-  }),
-);
+  });
 
-const Book = View.make((props: Route.RouteProps<{ readonly id: string }, unknown>) =>
-  Effect.succeed(<h1 id="book">{View.bind(props.params, (params) => params.id)}</h1>),
-);
+const Book = (props: Route.RouteProps<{ readonly id: string }, unknown>) =>
+  Effect.succeed(<h1 id="book">{View.bind(props.params, (params) => params.id)}</h1>);
 
-const NotFound = View.make((props: { readonly url: Source<URL> }) =>
-  Effect.succeed(<p id="missing">{View.bind(props.url, (url) => url.pathname)}</p>),
-);
+const NotFound = (props: { readonly url: Source<URL> }) =>
+  Effect.succeed(<p id="missing">{View.bind(props.url, (url) => url.pathname)}</p>);
 
-const home = Route.spa("home", { path: "/", params: Nothing, search: Nothing, view: Home });
-const book = Route.spa("book", {
+const home = Route.client("home", { path: "/", params: Nothing, search: Nothing, view: Home });
+const book = Route.client("book", {
   path: "/books/:id",
   params: Schema.Struct({ id: Schema.String }),
   search: Nothing,

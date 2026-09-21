@@ -32,17 +32,16 @@ declare const noProps: NoProps;
 type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
-const Plain = View.make((_props: NoProps) => Effect.succeed(<p>plain</p>));
+const Plain = (_props: NoProps) => Effect.succeed(<p>plain</p>);
 
-const NeedsClock = View.make((_props: NoProps) =>
+const NeedsClock = (_props: NoProps) =>
   Effect.gen(function* () {
     const clock = yield* Clock;
     const now = yield* clock.now;
     return <p onClick={View.event(() => Effect.void)}>{String(now)}</p>;
-  }),
-);
+  });
 
-const MayFail = View.make((_props: NoProps) => Effect.fail(Offline.make()));
+const MayFail = (_props: NoProps) => Effect.fail(Offline.make());
 
 const mountPlain = () => mount(Plain, noProps, host, "root");
 const mountNeedsClock = () => mount(NeedsClock, noProps, host, "root");
@@ -83,12 +82,11 @@ describe("view types", () => {
  * ordinary Effect service, which makes "a read outside a readiness scope" a
  * compile error rather than something the runtime has to detect and report.
  */
-const readyOutsideAScope = View.make((_props: NoProps) =>
+const readyOutsideAScope = (_props: NoProps) =>
   Effect.gen(function* () {
     const title = yield* ready(query, "");
     return <h1>{View.bind(title)}</h1>;
-  }),
-);
+  });
 
 /** Mounting it demands `LoadingScope`, which `mount` does not provide. */
 const readyNeedsLoadingScope: Equals<
@@ -131,7 +129,7 @@ const loadingDischargesItsScope: Equals<
   Effect.Effect<void, never, Scope.Scope>
 > = true;
 
-const mountWrapped = () => mount(wrapped, {}, host, "root");
+const mountWrapped = () => mount(() => wrapped, {}, host, "root");
 
 /**
  * `orErrored` requires `ErroredScope` separately, so a `Loading` with no
@@ -151,7 +149,7 @@ const orErroredKeepsItsOwnRequirement: Equals<
   Effect.Effect<void, never, ErroredScope | Scope.Scope>
 > = true;
 
-const mountWrappedWithError = () => mount(wrappedWithError, {}, host, "root");
+const mountWrappedWithError = () => mount(() => wrappedWithError, {}, host, "root");
 
 describe("readiness types", () => {
   test("ready requires a scope the compiler must see provided", () => {

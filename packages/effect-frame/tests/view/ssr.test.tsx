@@ -56,7 +56,7 @@ interface PageProps {
   readonly onClose: Effect.Effect<void>;
 }
 
-const NotePage = View.make((props: PageProps) =>
+const NotePage = (props: PageProps) =>
   Effect.gen(function* () {
     const note = yield* ref(Note, props.key, { resume: props.resume });
     yield* Effect.addFinalizer(() => props.onClose);
@@ -66,8 +66,7 @@ const NotePage = View.make((props: PageProps) =>
         <p id="count">{View.bind(note.state, (state) => state.count)}</p>
       </article>
     );
-  }),
-);
+  });
 
 const server = (key: string) =>
   Effect.gen(function* () {

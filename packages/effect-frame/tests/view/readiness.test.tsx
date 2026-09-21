@@ -74,13 +74,14 @@ describe("readiness through context", () => {
       const root = yield* makeRoot;
       const query = yield* QueryState.fakeQuery<string, string>();
 
-      const Page = Loading({
-        fallback: <p id="pending">loading</p>,
-        children: Effect.gen(function* () {
-          const title = yield* ready(query.source, "");
-          return <h1 id="title">{View.bind(title)}</h1>;
-        }),
-      });
+      const Page = () =>
+        Loading({
+          fallback: <p id="pending">loading</p>,
+          children: Effect.gen(function* () {
+            const title = yield* ready(query.source, "");
+            return <h1 id="title">{View.bind(title)}</h1>;
+          }),
+        });
 
       yield* mountScoped(Page, root);
       expect(textOf(root, "#pending")).toBe("loading");
@@ -98,18 +99,19 @@ describe("readiness through context", () => {
       const root = yield* makeRoot;
       const query = yield* QueryState.fakeQuery<string, string>();
 
-      const Page = Loading({
-        fallback: <p id="pending">loading</p>,
-        children: Effect.gen(function* () {
-          const title = yield* readyWithStale(query.source, "");
-          return (
-            <section>
-              <h1 id="title">{View.bind(title, (state: ReadyValue<string>) => state.value)}</h1>
-              <span id="stale">{View.bind(title, (state) => String(state.stale))}</span>
-            </section>
-          );
-        }),
-      });
+      const Page = () =>
+        Loading({
+          fallback: <p id="pending">loading</p>,
+          children: Effect.gen(function* () {
+            const title = yield* readyWithStale(query.source, "");
+            return (
+              <section>
+                <h1 id="title">{View.bind(title, (state: ReadyValue<string>) => state.value)}</h1>
+                <span id="stale">{View.bind(title, (state) => String(state.stale))}</span>
+              </section>
+            );
+          }),
+        });
 
       yield* mountScoped(Page, root);
       yield* query.resolve("Alpha");
@@ -137,19 +139,20 @@ describe("readiness through context", () => {
       const left = yield* QueryState.fakeQuery<string, string>();
       const right = yield* QueryState.fakeQuery<string, string>();
 
-      const Page = Loading({
-        fallback: <p id="pending">loading</p>,
-        children: Effect.gen(function* () {
-          const a = yield* ready(left.source, "");
-          const b = yield* ready(right.source, "");
-          return (
-            <section>
-              <span id="a">{View.bind(a)}</span>
-              <span id="b">{View.bind(b)}</span>
-            </section>
-          );
-        }),
-      });
+      const Page = () =>
+        Loading({
+          fallback: <p id="pending">loading</p>,
+          children: Effect.gen(function* () {
+            const a = yield* ready(left.source, "");
+            const b = yield* ready(right.source, "");
+            return (
+              <section>
+                <span id="a">{View.bind(a)}</span>
+                <span id="b">{View.bind(b)}</span>
+              </section>
+            );
+          }),
+        });
 
       yield* mountScoped(Page, root);
       expect(textOf(root, "#pending")).toBe("loading");
@@ -174,21 +177,22 @@ describe("readiness through context", () => {
       // `Errored` outside, `Loading` inside: the order a reader expects.
       // #26 made this order leave content behind; a shown branch now owns
       // its nodes, so either order holds.
-      const Page = Errored({
-        fallback: (error) => (
-          <p id="failed">{bound(error, (found) => Option.getOrElse(found, () => "?"))}</p>
-        ),
-        children: Effect.gen(function* () {
-          const inner = Loading({
-            fallback: <p id="pending">loading</p>,
-            children: Effect.gen(function* () {
-              const title = yield* ready(yield* orErrored(query.source), "");
-              return <h1 id="title">{View.bind(title)}</h1>;
-            }),
-          });
-          return yield* inner.setup({});
-        }),
-      });
+      const Page = () =>
+        Errored({
+          fallback: (error) => (
+            <p id="failed">{bound(error, (found) => Option.getOrElse(found, () => "?"))}</p>
+          ),
+          children: Effect.gen(function* () {
+            const inner = Loading({
+              fallback: <p id="pending">loading</p>,
+              children: Effect.gen(function* () {
+                const title = yield* ready(yield* orErrored(query.source), "");
+                return <h1 id="title">{View.bind(title)}</h1>;
+              }),
+            });
+            return yield* inner;
+          }),
+        });
 
       yield* mountScoped(Page, root);
       expect(textOf(root, "#pending")).toBe("loading");
@@ -222,25 +226,26 @@ describe("readiness through context", () => {
       const outer = yield* QueryState.fakeQuery<string, string>();
       const inner = yield* QueryState.fakeQuery<string, string>();
 
-      const Page = Loading({
-        fallback: <p id="outer-pending">outer</p>,
-        children: Effect.gen(function* () {
-          const header = yield* ready(outer.source, "");
-          const nested = Loading({
-            fallback: <p id="inner-pending">inner</p>,
-            children: Effect.gen(function* () {
-              const body = yield* ready(inner.source, "");
-              return <p id="body">{View.bind(body)}</p>;
-            }),
-          });
-          return (
-            <section>
-              <h1 id="header">{View.bind(header)}</h1>
-              {yield* nested.setup({})}
-            </section>
-          );
-        }),
-      });
+      const Page = () =>
+        Loading({
+          fallback: <p id="outer-pending">outer</p>,
+          children: Effect.gen(function* () {
+            const header = yield* ready(outer.source, "");
+            const nested = Loading({
+              fallback: <p id="inner-pending">inner</p>,
+              children: Effect.gen(function* () {
+                const body = yield* ready(inner.source, "");
+                return <p id="body">{View.bind(body)}</p>;
+              }),
+            });
+            return (
+              <section>
+                <h1 id="header">{View.bind(header)}</h1>
+                {yield* nested}
+              </section>
+            );
+          }),
+        });
 
       yield* mountScoped(Page, root);
       expect(textOf(root, "#outer-pending")).toBe("outer");
@@ -265,7 +270,7 @@ describe("readiness through context", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const query = yield* QueryState.fakeQuery<string, string>();
-      const Page = View.make(() =>
+      const Page = () =>
         Effect.succeed(
           <Query
             state={query.source}
@@ -277,8 +282,7 @@ describe("readiness through context", () => {
             )}
             failed={(error) => <p id="q-failed">{bound(error, (text) => text)}</p>}
           />,
-        ),
-      );
+        );
 
       yield* mountScoped(Page, root);
       expect(textOf(root, "#q-loading")).toBe("loading");
@@ -306,14 +310,17 @@ describe("readiness through context", () => {
       const root = yield* makeRoot;
       const query = yield* QueryState.fakeQuery<string, string>();
 
-      const Page = Await({
-        query: query.source,
-        loading: <p id="await-loading">loading</p>,
-        ready: (value: Source<ReadyValue<string>>) => (
-          <h1 id="await-ready">{bound(value, (state) => state.value)}</h1>
-        ),
-        failed: (error: Source<string>) => <p id="await-failed">{bound(error, (text) => text)}</p>,
-      });
+      const Page = () =>
+        Await({
+          query: query.source,
+          loading: <p id="await-loading">loading</p>,
+          ready: (value: Source<ReadyValue<string>>) => (
+            <h1 id="await-ready">{bound(value, (state) => state.value)}</h1>
+          ),
+          failed: (error: Source<string>) => (
+            <p id="await-failed">{bound(error, (text) => text)}</p>
+          ),
+        });
 
       yield* mountScoped(Page, root);
       expect(textOf(root, "#await-loading")).toBe("loading");
@@ -338,20 +345,21 @@ describe("readiness through context", () => {
       );
       const second = yield* QueryState.fakeQuery<string, string>();
 
-      const Page = Loading({
-        fallback: <p id="pending">loading</p>,
-        children: Effect.gen(function* () {
-          const a = yield* ready(first.source, "");
-          // A second query registers after the first already had a value.
-          const b = yield* ready(second.source, "");
-          return (
-            <section>
-              <span id="a">{View.bind(a)}</span>
-              <span id="b">{View.bind(b)}</span>
-            </section>
-          );
-        }),
-      });
+      const Page = () =>
+        Loading({
+          fallback: <p id="pending">loading</p>,
+          children: Effect.gen(function* () {
+            const a = yield* ready(first.source, "");
+            // A second query registers after the first already had a value.
+            const b = yield* ready(second.source, "");
+            return (
+              <section>
+                <span id="a">{View.bind(a)}</span>
+                <span id="b">{View.bind(b)}</span>
+              </section>
+            );
+          }),
+        });
 
       yield* mountScoped(Page, root);
       // The first query already had a value, but the second has not, so the
@@ -371,13 +379,14 @@ describe("readiness on the server", () => {
   it.scoped("a server render draws the fallback for a query with no value yet", () =>
     Effect.gen(function* () {
       const query = yield* QueryState.fakeQuery<string, string>();
-      const Page = Loading({
-        fallback: <p id="pending">loading</p>,
-        children: Effect.gen(function* () {
-          const title = yield* ready(query.source, "");
-          return <h1 id="title">{View.bind(title)}</h1>;
-        }),
-      });
+      const Page = () =>
+        Loading({
+          fallback: <p id="pending">loading</p>,
+          children: Effect.gen(function* () {
+            const title = yield* ready(query.source, "");
+            return <h1 id="title">{View.bind(title)}</h1>;
+          }),
+        });
 
       const html = yield* Html.renderToString(Page, {});
       // Streaming SSR is the row that will hold this scope open and resolve
@@ -392,13 +401,14 @@ describe("readiness on the server", () => {
       const query = yield* QueryState.fakeQuery<string, string>(
         QueryState.ready<string, string>("Alpha"),
       );
-      const Page = Loading({
-        fallback: <p id="pending">loading</p>,
-        children: Effect.gen(function* () {
-          const title = yield* ready(query.source, "");
-          return <h1 id="title">{View.bind(title)}</h1>;
-        }),
-      });
+      const Page = () =>
+        Loading({
+          fallback: <p id="pending">loading</p>,
+          children: Effect.gen(function* () {
+            const title = yield* ready(query.source, "");
+            return <h1 id="title">{View.bind(title)}</h1>;
+          }),
+        });
 
       const html = yield* Html.renderToString(Page, {});
       expect(html).toContain('<h1 id="title">Alpha</h1>');

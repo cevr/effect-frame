@@ -72,7 +72,7 @@ TanStack `beforeLoad` redirects before a route renders. `pendingComponent` and `
 
 Ask:
 
-- `Route.spa(name, { before: Effect<Continue | Redirect, never, R> })`. A typed outcome, run in the Transition before setup.
+- `Route.client(name, { before: Effect<Continue | Redirect, never, R> })`. A typed outcome, run in the Transition before setup.
 - `errored: (error: Source<E>) => Node` on the route, so `view` may be `View<…, E, R>`.
 - `pending: { after: Duration, atLeast: Duration, node }` for declared data.
 - `View.attempt(setup, fallback)` for a boundary inside a view tree. `View.list` rows carry `never` today, so each row handles its own errors with no helper.
@@ -81,7 +81,7 @@ Ask:
 
 TanStack `useBlocker` stops navigation with an unsaved draft. `lazyRouteComponent` splits code. The frame has neither. Both are small once named.
 
-Ask: `Route.spa(name, { leave: Effect<boolean, never, R> })`, asked in the Transition. `View.lazy(() => import("./page.js"))`, which is one `Effect.promise` inside a setup.
+Ask: `Route.client(name, { leave: Effect<boolean, never, R> })`, asked in the Transition. `View.lazy(() => import("./page.js"))`, which is one `Effect.promise` inside a setup.
 
 ### B9. Sources that involve time or Effects
 

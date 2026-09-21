@@ -4,8 +4,6 @@ import { Show } from "./control.js";
 import type { Node } from "./jsx-runtime.js";
 import type { QueryState } from "./query-state.js";
 import { held } from "./query-state.js";
-import type { View } from "./view.js";
-import { make as makeView } from "./view.js";
 
 /**
  * Readiness through context (#16).
@@ -328,20 +326,18 @@ const derive = <A,>(
  */
 export const Loading = <E, R>(
   props: LoadingProps<E, R>,
-): View<Record<string, never>, E, Exclude<R, LoadingScope>> =>
-  makeView(() =>
-    Effect.gen(function* () {
-      const registry = yield* makeRegistry;
-      const pending = yield* pendingOf(registry);
-      const content = yield* Effect.provideService(props.children, LoadingScope, registry);
-      return (
-        <>
-          <Show when={pending}>{props.fallback}</Show>
-          <Show when={select(pending, (value) => !value)}>{content}</Show>
-        </>
-      );
-    }),
-  );
+): Effect.Effect<Node, E, Exclude<R, LoadingScope>> =>
+  Effect.gen(function* () {
+    const registry = yield* makeRegistry;
+    const pending = yield* pendingOf(registry);
+    const content = yield* Effect.provideService(props.children, LoadingScope, registry);
+    return (
+      <>
+        <Show when={pending}>{props.fallback}</Show>
+        <Show when={select(pending, (value) => !value)}>{content}</Show>
+      </>
+    );
+  });
 
 export interface LoadingProps<E, R> {
   readonly fallback: Node;
@@ -365,21 +361,19 @@ export interface ErroredProps<E, R> {
  */
 export const Errored = <E, R>(
   props: ErroredProps<E, R>,
-): View<Record<string, never>, E, Exclude<R, ErroredScope>> =>
-  makeView(() =>
-    Effect.gen(function* () {
-      const registry = yield* makeRegistry;
-      const failure = yield* derive(registry, firstFailure);
-      const failed = select(failure, Option.isSome);
-      const content = yield* Effect.provideService(props.children, ErroredScope, registry);
-      return (
-        <>
-          <Show when={failed}>{props.fallback(failure)}</Show>
-          <Show when={select(failed, (value) => !value)}>{content}</Show>
-        </>
-      );
-    }),
-  );
+): Effect.Effect<Node, E, Exclude<R, ErroredScope>> =>
+  Effect.gen(function* () {
+    const registry = yield* makeRegistry;
+    const failure = yield* derive(registry, firstFailure);
+    const failed = select(failure, Option.isSome);
+    const content = yield* Effect.provideService(props.children, ErroredScope, registry);
+    return (
+      <>
+        <Show when={failed}>{props.fallback(failure)}</Show>
+        <Show when={select(failed, (value) => !value)}>{content}</Show>
+      </>
+    );
+  });
 
 // ---------------------------------------------------------------------------
 // Query and Await
@@ -433,21 +427,19 @@ export interface AwaitProps<Value, Error> {
  */
 export const Await = <Value, Error>(
   props: AwaitProps<Value, Error>,
-): View<Record<string, never>, never, never> =>
-  makeView(() =>
-    Effect.succeed(
-      <Query
-        state={props.query}
-        loading={props.loading}
-        failed={props.failed}
-        ready={(value, stale) =>
-          props.ready(
-            select(Source.all({ value, stale }), (both) => ({
-              value: both.value,
-              stale: both.stale,
-            })),
-          )
-        }
-      />,
-    ),
+): Effect.Effect<Node, never, never> =>
+  Effect.succeed(
+    <Query
+      state={props.query}
+      loading={props.loading}
+      failed={props.failed}
+      ready={(value, stale) =>
+        props.ready(
+          select(Source.all({ value, stale }), (both) => ({
+            value: both.value,
+            stale: both.stale,
+          })),
+        )
+      }
+    />,
   );

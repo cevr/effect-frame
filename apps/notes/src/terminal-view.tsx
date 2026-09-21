@@ -26,7 +26,7 @@ const line = (note: Note): string => {
   return `[ ] ${note.text}`;
 };
 
-export const NotesTerminal = View.make((props: NotesTerminalProps) =>
+export const NotesTerminal = (props: NotesTerminalProps) =>
   Effect.gen(function* () {
     const notes = yield* ref(Notes, props.key, { resume: props.resume });
     const draft = yield* spawn(Behavior.value(""));
@@ -54,5 +54,4 @@ export const NotesTerminal = View.make((props: NotesTerminalProps) =>
         />
       </box>
     );
-  }),
-);
+  });

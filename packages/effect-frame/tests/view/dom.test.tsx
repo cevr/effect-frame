@@ -18,7 +18,7 @@ const noProps: NoProps = { _tag: "NoProps" };
 /** A fresh detached root for each mount, so one test never sees another's nodes. */
 const makeRoot = Effect.sync(() => document.createElement("main"));
 
-const Counter = View.make((_props: NoProps) =>
+const Counter = (_props: NoProps) =>
   Effect.gen(function* () {
     const count = yield* spawn(Behavior.value(0));
     return (
@@ -34,8 +34,7 @@ const Counter = View.make((_props: NoProps) =>
         </button>
       </div>
     );
-  }),
-);
+  });
 
 interface Task {
   readonly id: string;
@@ -46,29 +45,27 @@ interface ListProps {
   readonly tasks: Source<ReadonlyArray<Task>>;
 }
 
-const TaskList = View.make((props: ListProps) =>
+const TaskList = (props: ListProps) =>
   Effect.succeed(
     <ul>
       <For each={props.tasks} keyBy={(task: Task) => task.id}>
         {(task: Source<Task>) => <li>{View.bind(task, (value) => value.title)}</li>}
       </For>
     </ul>,
-  ),
-);
+  );
 
 interface ToggleProps {
   readonly open: Source<boolean>;
 }
 
-const Toggle = View.make((props: ToggleProps) =>
+const Toggle = (props: ToggleProps) =>
   Effect.succeed(
     <section>
       <Show when={props.open}>
         <p id="body">visible</p>
       </Show>
     </section>,
-  ),
-);
+  );
 
 interface NestedToggleProps {
   readonly outer: Source<boolean>;
@@ -79,7 +76,7 @@ interface NestedToggleProps {
  * An inner `Show` that is hidden while the outer one is visible. The outer
  * branch owns whatever the inner branch later reveals.
  */
-const NestedToggle = View.make((props: NestedToggleProps) =>
+const NestedToggle = (props: NestedToggleProps) =>
   Effect.succeed(
     <section>
       <Show when={props.outer}>
@@ -90,25 +87,22 @@ const NestedToggle = View.make((props: NestedToggleProps) =>
         </>
       </Show>
     </section>,
-  ),
-);
+  );
 
 const textOf = (root: HTMLElement, selector: string): string =>
   root.querySelector(selector)?.textContent ?? "";
 
 /** A child asks for the capabilities itself; nothing passes them down. */
-const Child = View.make((_props: NoProps) =>
+const Child = (_props: NoProps) =>
   Effect.gen(function* () {
     const label = yield* spawn(Behavior.value("child"));
     return <em id="child">{View.bind(label.state)}</em>;
-  }),
-);
+  });
 
-const Parent = View.make((_props: NoProps) =>
+const Parent = (_props: NoProps) =>
   Effect.gen(function* () {
-    return <div>{yield* Child.setup(noProps)}</div>;
-  }),
-);
+    return <div>{yield* Child(noProps)}</div>;
+  });
 
 interface HitsProps {
   readonly hits: Source<ReadonlyArray<string>>;
@@ -118,30 +112,28 @@ interface HitsProps {
  * The narrowing form: the branch reads a source of the tested value, which
  * exists only while the test holds, and the fallback draws otherwise.
  */
-const Hits = View.make((props: HitsProps) =>
+const Hits = (props: HitsProps) =>
   Effect.succeed(
     <section>
       <Show when={props.hits} is={(xs) => xs.length > 0} fallback={<p id="none">no hits</p>}>
         {(xs) => <p id="first">{View.bind(select(xs, (found) => found[0] ?? ""))}</p>}
       </Show>
     </section>,
-  ),
-);
+  );
 
 interface OptionalProps {
   readonly name: Source<Option.Option<string>>;
 }
 
 /** A type predicate narrows the branch's source to the `Some`. */
-const Optional = View.make((props: OptionalProps) =>
+const Optional = (props: OptionalProps) =>
   Effect.succeed(
     <section>
       <Show when={props.name} is={Option.isSome<string>}>
         {(some) => <b id="name">{View.bind(select(some, (found) => found.value))}</b>}
       </Show>
     </section>,
-  ),
-);
+  );
 
 describe("browser view", () => {
   it.scoped("a bound source writes its first value and then every change", () =>
@@ -305,15 +297,14 @@ describe("browser view", () => {
         reads += 1;
         return String(n);
       });
-      const Watched = View.make((_props: NoProps) =>
+      const Watched = (_props: NoProps) =>
         Effect.succeed(
           <section>
             <Show when={open.state}>
               <p id="watched">{View.bind(counted)}</p>
             </Show>
           </section>,
-        ),
-      );
+        );
       yield* mount(Watched, noProps, Dom.host, root);
       expect(textOf(root, "#watched")).toBe("0");
 
@@ -338,13 +329,12 @@ describe("browser view", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const seen = yield* Ref.make<ReadonlyArray<string>>([]);
-      const Echo = View.make((_props: NoProps) =>
+      const Echo = (_props: NoProps) =>
         Effect.succeed(
           <button id="say" onClick={View.event(() => Ref.update(seen, (all) => [...all, "hi"]))}>
             say
           </button>,
-        ),
-      );
+        );
       yield* mount(Echo, noProps, Dom.host, root);
       root.querySelector("#say")?.dispatchEvent(new Event("click"));
       yield* render;
@@ -356,13 +346,12 @@ describe("browser view", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const sent = yield* Ref.make(false);
-      const Form = View.make((_props: NoProps) =>
+      const Form = (_props: NoProps) =>
         Effect.succeed(
           <form id="form" onSubmit={View.submit(() => Ref.set(sent, true))}>
             <button>go</button>
           </form>,
-        ),
-      );
+        );
       yield* mount(Form, noProps, Dom.host, root);
 
       const event = new Event("submit", { cancelable: true });
@@ -379,14 +368,13 @@ describe("browser view", () => {
       const finished = yield* Ref.make(false);
       const spawned = yield* Ref.make<ReadonlyArray<LocalActorRef<number, SetValue<number>>>>([]);
 
-      const Owned = View.make((_props: NoProps) =>
+      const Owned = (_props: NoProps) =>
         Effect.gen(function* () {
           const count = yield* spawn(Behavior.value(0));
           yield* Ref.update(spawned, (all) => [...all, count]);
           yield* Effect.addFinalizer(() => Ref.set(finished, true));
           return <p id="owned">owned</p>;
-        }),
-      );
+        });
 
       const scope = yield* Scope.make();
       yield* Scope.provide(mount(Owned, noProps, Dom.host, root), scope);
@@ -434,7 +422,7 @@ interface CountedListProps {
  * reactive root, or Solid never disposes its effect, and by the row's scope,
  * or the fiber outlives the row.
  */
-const CountedList = View.make((props: CountedListProps) =>
+const CountedList = (props: CountedListProps) =>
   Effect.sync(() => {
     const shout = (task: Source<Task>): Source<string> => ({
       get: Effect.map(task.get, (value) => value.title.toUpperCase()),
@@ -450,8 +438,7 @@ const CountedList = View.make((props: CountedListProps) =>
         </For>
       </ul>
     );
-  }),
-);
+  });
 
 describe("row sources", () => {
   it.scoped("a source derived from a row's changes follows the row and ends with it", () =>
@@ -494,12 +481,12 @@ interface CountedRowsProps {
  * Rows with a setup of their own: each keeps a cell that counts its clicks,
  * binds with the module functions, and registers a finalizer in the row scope.
  */
-const CountedRows = View.make((props: CountedRowsProps) =>
+const CountedRows = (props: CountedRowsProps) =>
   Effect.gen(function* () {
     const rows = yield* View.list({
       each: props.tasks,
       keyBy: (task: Task) => task.id,
-      setup: (task: Source<Task>) =>
+      row: (task: Source<Task>) =>
         Effect.gen(function* () {
           const clicks = yield* Cell.make(0);
           yield* Effect.addFinalizer(() => Ref.update(props.closed, (n) => n + 1));
@@ -514,8 +501,7 @@ const CountedRows = View.make((props: CountedRowsProps) =>
         }),
     });
     return <ul>{rows}</ul>;
-  }),
-);
+  });
 
 interface LateRowsProps {
   readonly tasks: Source<ReadonlyArray<Task>>;
@@ -525,12 +511,12 @@ interface LateRowsProps {
 }
 
 /** One row's setup suspends: it must land in its place, not at the end. */
-const LateRows = View.make((props: LateRowsProps) =>
+const LateRows = (props: LateRowsProps) =>
   Effect.gen(function* () {
     const rows = yield* View.list({
       each: props.tasks,
       keyBy: (task: Task) => task.id,
-      setup: (task: Source<Task>) =>
+      row: (task: Source<Task>) =>
         Effect.gen(function* () {
           const current = yield* task.get;
           if (current.id === props.slow) {
@@ -540,8 +526,7 @@ const LateRows = View.make((props: LateRowsProps) =>
         }),
     });
     return <ul>{rows}</ul>;
-  }),
-);
+  });
 
 describe("rows with a setup", () => {
   it.scoped("each row keeps its own state, and a row that leaves closes its scope", () =>

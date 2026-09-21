@@ -21,7 +21,7 @@ export interface NotesPageProps {
   readonly resume: Option.Option<Applied<SnapshotOf<typeof Notes>>>;
 }
 
-export const NotesPage = View.make((props: NotesPageProps) =>
+export const NotesPage = (props: NotesPageProps) =>
   Effect.gen(function* () {
     const notes = yield* ref(Notes, props.key, { resume: props.resume });
     const draft = yield* spawn(Behavior.value(""));
@@ -76,5 +76,4 @@ export const NotesPage = View.make((props: NotesPageProps) =>
         <p id="count">{View.bind(notes.state, (snapshot) => snapshot.notes.length)}</p>
       </section>
     );
-  }),
-);
+  });

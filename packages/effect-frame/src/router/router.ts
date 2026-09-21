@@ -1,6 +1,6 @@
 import type { Source } from "effect-frame/actor";
-import type { Host } from "effect-frame/view";
-import { View, mount as mountView } from "effect-frame/view";
+import type { Host, View } from "effect-frame/view";
+import { mount as mountView } from "effect-frame/view";
 import {
   Context,
   Deferred,
@@ -86,7 +86,7 @@ const notFoundRoute = <R>(view: View.View<NotFoundProps, never, R>): AnyRoute<R>
   enter: (url) =>
     Option.some(
       Effect.map(SubscriptionRef.make(url), (current): Entered<R> => ({
-        setup: view.setup({
+        setup: view({
           url: { get: SubscriptionRef.get(current), changes: SubscriptionRef.changes(current) },
         }),
         update: (next) => Effect.as(SubscriptionRef.set(current, next), true),
@@ -184,7 +184,7 @@ export const mount: <R, HostNode>(
       }
       const child = yield* Scope.fork(scope);
       const entered = yield* target.enter;
-      const page = View.make(() => Effect.provideService(entered.setup, Router, service));
+      const page = () => Effect.provideService(entered.setup, Router, service);
       yield* Scope.provide(mountView(page, {}, options.host, options.root), child);
       const previous = mounted;
       mounted = Option.some({ route: target.route, entered, scope: child });

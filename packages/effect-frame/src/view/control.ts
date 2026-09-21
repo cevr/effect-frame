@@ -27,12 +27,12 @@ export interface ListOptions<Item, R> {
   readonly each: Source<ReadonlyArray<Item>>;
   readonly keyBy: (item: Item) => string;
   /**
-   * One setup per row, run in a scope of its own that closes when the row
+   * One view per row, run in a scope of its own that closes when the row
    * leaves: a row may spawn actors, follow queries and add finalizers, as a
    * view's setup does. It cannot fail, because a row has no place to return
    * a failure to; handle errors inside it.
    */
-  readonly setup: (item: Source<Item>) => Effect.Effect<Node, never, R | Scope.Scope>;
+  readonly row: (item: Source<Item>) => Effect.Effect<Node, never, R | Scope.Scope>;
 }
 
 /**
@@ -53,7 +53,7 @@ export const list = <Item, R>(
     // Providing `Exclude<R, Scope>` to an effect that needs `R | Scope`
     // leaves `Scope`, which the checker cannot reduce for a generic `R`, so
     // the assertion states what the arithmetic already means.
-    const setup = (item: Source<Item>) => Effect.provide(options.setup(item), context);
+    const setup = (item: Source<Item>) => Effect.provide(options.row(item), context);
     // oxlint-disable-next-line effect/noAs
     const rows = setup as ForNode<Item>["setup"];
     return { _tag: "For", each: options.each, keyBy: options.keyBy, setup: rows };

@@ -28,19 +28,18 @@ interface CounterProps {
   readonly count: LocalActorRef<number, SetValue<number>>;
 }
 
-const Counter = View.make((props: CounterProps) =>
+const Counter = (props: CounterProps) =>
   Effect.succeed(
     <box flexDirection="column" width={30} height={3}>
       <text>{View.bind(select(props.count.state, (n) => `count ${n}`))}</text>
     </box>,
-  ),
-);
+  );
 
 interface DraftProps {
   readonly draft: LocalActorRef<string, SetValue<string>>;
 }
 
-const Composer = View.make((props: DraftProps) =>
+const Composer = (props: DraftProps) =>
   Effect.succeed(
     <input
       width={20}
@@ -50,8 +49,7 @@ const Composer = View.make((props: DraftProps) =>
           .pipe(Effect.catchTag("ActorStopped", () => Effect.void)),
       )}
     />,
-  ),
-);
+  );
 
 describe("terminal view", () => {
   it.scoped("the same view draws a bound source in a terminal", () =>

@@ -81,19 +81,18 @@ export const submit = (handler: Handler): Prepared => ({
 export { list, type ListOptions } from "./control.js";
 
 /**
- * A view: one setup Effect per mounted identity. Setup runs once. State
- * updates never run it again. `E` and `R` stay visible to the mounting
- * application, and `Scope` owns every resource setup opens.
+ * A view is a function from props to an Effect that produces a node tree:
+ * one setup per mounted identity. Setup runs once. State updates never run
+ * it again. `E` and `R` stay visible to the mounting application, and
+ * `Scope` owns every resource setup opens.
  *
- * A parent composes a child with `yield* Child.setup(props)`, which runs in
- * the parent's own context. `bind`, `event` and `submit` are module
- * functions, so a child, or a plain function that returns a `Node`, needs
- * nothing from its parent to mark a dynamic value or a handler.
+ * A parent composes a child with `yield* Child(props)`, which runs in the
+ * parent's own context, so the child's `E` and `R` are visible at the one
+ * place they enter. A view is never a JSX tag: a tag is a synchronous
+ * function or an intrinsic name, and the runtime runs no Effect found in a
+ * tree. A named view is `Effect.fn("Name")(function* (props) { ... })`,
+ * which also names its span; an anonymous one is a plain arrow. `bind`,
+ * `event` and `submit` are module functions, so a plain function that
+ * returns a `Node` needs nothing from the view that calls it.
  */
-export interface View<Props, E, R> {
-  readonly setup: (props: Props) => Effect.Effect<Node, E, R>;
-}
-
-export const make = <Props, E, R>(
-  setup: (props: Props) => Effect.Effect<Node, E, R>,
-): View<Props, E, R> => ({ setup });
+export type View<Props, E, R> = (props: Props) => Effect.Effect<Node, E, R>;

@@ -685,7 +685,7 @@ export const mount = Effect.fn("View.mount")(function* <Props, E, R, HostNode>(
   host: Host<HostNode>,
   root: HostNode,
 ) {
-  const tree: Node = yield* view.setup(props);
+  const tree: Node = yield* view(props);
 
   const tracker = yield* makeTracker();
   const slot: Slot<HostNode> = { nodes: [] };

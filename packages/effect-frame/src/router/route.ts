@@ -248,10 +248,10 @@ interface Decoded<Params, Search> {
 }
 
 /**
- * Rendering mode is a constructor, not a field. `spa` is the one built so
+ * Rendering mode is a constructor, not a field. `client` is the one built so
  * far: the route renders on the client only. The others are #18 §6.
  */
-export const spa = <
+export const client = <
   const Name extends string,
   Params extends ParamsCodec,
   Search extends SearchCodec,
@@ -281,7 +281,7 @@ export const spa = <
           changes: SubscriptionRef.changes(current),
         };
         return {
-          setup: definition.view.setup({
+          setup: definition.view({
             params: select(source, (value) => value.params),
             search: select(source, (value) => value.search),
           }),

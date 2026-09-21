@@ -1,5 +1,4 @@
 import { Route } from "effect-frame/router";
-import { View } from "effect-frame/view";
 import { Effect, Option, Result, Schema, SchemaGetter } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
@@ -11,7 +10,7 @@ import { describe, expect, it } from "effect-bun-test";
 
 const Nothing = Schema.Struct({});
 
-const Blank = View.make((_props: Route.RouteProps<unknown, unknown>) => Effect.succeed(<span />));
+const Blank = (_props: Route.RouteProps<unknown, unknown>) => Effect.succeed(<span />);
 
 /** `?q=a&q=b` → `{ q: "a" }`, and `{ q: "" }` prints no query at all. */
 const Query = Route.SearchRecord.pipe(
@@ -33,14 +32,14 @@ const Query = Route.SearchRecord.pipe(
   }),
 );
 
-const book = Route.spa("book", {
+const book = Route.client("book", {
   path: "/books/:id",
   params: Schema.Struct({ id: Schema.String }),
   search: Query,
   view: Blank,
 });
 
-const files = Route.spa("files", {
+const files = Route.client("files", {
   path: "/files/:path*",
   params: Schema.Struct({ path: Schema.Array(Schema.String) }),
   search: Nothing,

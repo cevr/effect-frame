@@ -1,6 +1,6 @@
 import type { Source } from "effect-frame/actor";
 import { Context, Effect, Option, Predicate, Scope } from "effect";
-import type { ForNode, Node, ShowNode } from "./jsx-runtime.js";
+import type { ForNode, MatchNode, Node, ShowNode } from "./jsx-runtime.js";
 import { Empty } from "./jsx-runtime.js";
 
 /**
@@ -110,3 +110,51 @@ export function Show<A>(props: ShowProps | ShowIfProps<A>): ShowNode<A> | ShowNo
     fallback,
   };
 }
+
+/** A value with a `_tag`, the shape Effect's `Match.tagsExhaustive` folds. */
+export interface Tagged {
+  readonly _tag: string;
+}
+
+/**
+ * A case's parameter is compared bivariantly, as a method's is, so a case
+ * written for one member is a case the node can call with its one source
+ * of the whole union: the key it was drawn under says which member that
+ * source holds while the case is shown.
+ */
+type Case<Member> = { bivariant(value: Source<Member>): Node }["bivariant"];
+
+/**
+ * One case per tag, and every tag present: the table is exhaustive at the
+ * type level, so a new member of the union is a compile error at each
+ * `Match` over it. A case receives a source of its own member, which exists
+ * only while that member holds, as a narrowing `Show` does.
+ */
+export type MatchCases<A extends Tagged> = {
+  readonly [K in A["_tag"]]: Case<Extract<A, { readonly _tag: K }>>;
+};
+
+export interface MatchProps<A extends Tagged> {
+  readonly on: Source<A>;
+  readonly cases: MatchCases<A>;
+}
+
+/**
+ * Exhaustive control over a source of a tagged union. The case table takes
+ * the shape of Effect's `Match.tagsExhaustive`, so what an app writes for an
+ * actor's state it writes for a view. One source is tracked, one branch is
+ * drawn, and a change that keeps the tag updates that branch in place.
+ * `<Match on={state} cases={{ Idle: () => ..., Running: (s) => ... }} />`.
+ */
+export const Match = <A extends Tagged>(props: MatchProps<A>): MatchNode<A> => {
+  const table: Record<string, Case<A>> = props.cases;
+  return {
+    _tag: "Match",
+    on: props.on,
+    key: (value) => value._tag,
+    render: (tag, value) => {
+      const draw = Option.fromNullishOr(table[tag]);
+      return Option.match(draw, { onNone: () => Empty, onSome: (found) => found(value) });
+    },
+  };
+};

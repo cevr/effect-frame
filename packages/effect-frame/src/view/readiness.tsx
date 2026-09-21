@@ -1,6 +1,13 @@
-import { Source, isFailed, isLoading, isReady, select } from "effect-frame/actor/client";
-import { Context as ServiceMap, Effect, Match, Option, Stream, SubscriptionRef } from "effect";
-import { Show } from "./control.js";
+import { Source, isFailed, isReady, select } from "effect-frame/actor/client";
+import {
+  Context as ServiceMap,
+  Effect,
+  Match as EffectMatch,
+  Option,
+  Stream,
+  SubscriptionRef,
+} from "effect";
+import { Match, Show } from "./control.js";
 import type { Node } from "./jsx-runtime.js";
 import type { QueryState } from "./query-state.js";
 import { held } from "./query-state.js";
@@ -191,57 +198,42 @@ const holdSome = <A,>(
     Stream.map(Stream.filter(changes, Option.isSome), (some) => some.value),
   );
 
-/** `true` once the query has stopped being in flight, either way. */
-const hasSettled = <Value, Error>(state: QueryState<Value, Error>): boolean =>
-  Match.value(state).pipe(
-    Match.withReturnType<boolean>(),
-    Match.tagsExhaustive({ Loading: () => false, Ready: () => true, Failed: () => true }),
-  );
+/**
+ * `true` once the query has stopped being in flight, either way. A case
+ * table over every tag, so it is a matcher; built once, since it runs on
+ * every state change (`tests/perf/match.bench.ts`).
+ */
+const hasSettled: (state: QueryState<unknown, unknown>) => boolean = EffectMatch.type<
+  QueryState<unknown, unknown>
+>().pipe(
+  EffectMatch.withReturnType<boolean>(),
+  EffectMatch.tagsExhaustive({ Loading: () => false, Ready: () => true, Failed: () => true }),
+);
 
 /**
  * `true` while the query has not failed. `ErroredScope` reads this to decide
- * whether to show its own fallback.
+ * whether to show its own fallback. One tag is the exception, so it is a
+ * predicate, not a table.
  */
-const isNotFailed = <Value, Error>(state: QueryState<Value, Error>): boolean =>
-  Match.value(state).pipe(
-    Match.withReturnType<boolean>(),
-    Match.tagsExhaustive({ Loading: () => true, Ready: () => true, Failed: () => false }),
-  );
+const isNotFailed = <Value, Error>(state: QueryState<Value, Error>): boolean => !isFailed(state);
 
+/** One member narrowed, so a predicate and not a table. */
 const valueOf = <Value, Error>(state: QueryState<Value, Error>): Option.Option<Value> =>
-  Match.value(state).pipe(
-    Match.withReturnType<Option.Option<Value>>(),
-    Match.tagsExhaustive({
-      Loading: () => Option.none(),
-      Ready: (found) => Option.some(found.value),
-      Failed: () => Option.none(),
-    }),
-  );
+  Option.map(Option.liftPredicate(state, isReady), (found) => found.value);
 
 const readyValueOf = <Value, Error>(
   state: QueryState<Value, Error>,
 ): Option.Option<ReadyValue<Value>> =>
-  Match.value(state).pipe(
-    Match.withReturnType<Option.Option<ReadyValue<Value>>>(),
-    Match.tagsExhaustive({
-      Loading: () => Option.none(),
-      Ready: (found) => Option.some({ value: found.value, stale: found.stale }),
-      Failed: () => Option.none(),
-    }),
-  );
+  Option.map(Option.liftPredicate(state, isReady), (found) => ({
+    value: found.value,
+    stale: found.stale,
+  }));
 
 const valueOr = <Value, Error>(state: QueryState<Value, Error>, fallback: Value): Value =>
   Option.getOrElse(valueOf(state), () => fallback);
 
 const errorOf = <Value, Error>(state: QueryState<Value, Error>): Option.Option<Error> =>
-  Match.value(state).pipe(
-    Match.withReturnType<Option.Option<Error>>(),
-    Match.tagsExhaustive({
-      Loading: () => Option.none(),
-      Ready: () => Option.none(),
-      Failed: (found) => Option.some(found.error),
-    }),
-  );
+  Option.map(Option.liftPredicate(state, isFailed), (found) => found.error);
 
 /** The first failure among the contributions, in registration order. */
 const firstFailure = (contributions: ReadonlyArray<Contribution>): Option.Option<unknown> =>
@@ -391,27 +383,23 @@ export interface QueryProps<Value, Error> {
  * The other half of the pair: match the union yourself, with no scope in
  * context and no registration. `ready` inside `Loading` is the facade for
  * the common case, and `Query` is for a view that wants all three states
- * in one place. It is three narrowing `Show`s, so each branch reads a
- * source that exists only while its state holds: no placeholder value, no
+ * in one place. It is one `Match` over the three tags, so each branch reads
+ * a source that exists only while its state holds: no placeholder value, no
  * cast, and nothing to name for a state that has not been reached.
  */
 export const Query = <Value, Error>(props: QueryProps<Value, Error>): Node => (
-  <>
-    <Show when={props.state} is={isLoading<Value, Error>}>
-      {props.loading}
-    </Show>
-    <Show when={props.state} is={isReady<Value, Error>}>
-      {(found) =>
+  <Match
+    on={props.state}
+    cases={{
+      Loading: () => props.loading,
+      Ready: (found) =>
         props.ready(
           select(found, (state) => state.value),
           select(found, (state) => state.stale),
-        )
-      }
-    </Show>
-    <Show when={props.state} is={isFailed<Value, Error>}>
-      {(found) => props.failed(select(found, (state) => state.error))}
-    </Show>
-  </>
+        ),
+      Failed: (found) => props.failed(select(found, (state) => state.error)),
+    }}
+  />
 );
 
 export interface AwaitProps<Value, Error> {

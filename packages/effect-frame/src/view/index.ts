@@ -1,12 +1,16 @@
 export * as View from "./view.js";
 export {
   For,
+  Match,
   Show,
   type ForProps,
   type ListOptions,
+  type MatchCases,
+  type MatchProps,
   type ShowIfProps,
   type ShowProps,
   type ShowWhenProps,
+  type Tagged,
 } from "./control.js";
 export { mount, render } from "./runtime.js";
 export type { Cleanup, EventHandler, Host, HostEvent, PropertyValue, StaticProps } from "./host.js";
@@ -18,6 +22,7 @@ export type {
   ElementNode,
   ElementProps,
   ForNode,
+  MatchNode,
   Node,
   PropValue,
   ShowNode,

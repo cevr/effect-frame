@@ -1,6 +1,7 @@
 import type { Source } from "effect-frame/actor";
-import type { ErroredScope, Host, LoadingScope, QueryState } from "effect-frame/view";
-import { Loading, View, mount, orErrored, ready } from "effect-frame/view";
+import type { ErroredScope, Host, LoadingScope, MatchNode, QueryState } from "effect-frame/view";
+import { Loading, Match, View, mount, orErrored, ready } from "effect-frame/view";
+import { select } from "effect-frame/actor";
 import type { Scope } from "effect";
 import { Context, Effect, Schema } from "effect";
 import { describe, expect, test } from "bun:test";
@@ -159,3 +160,39 @@ describe("readiness types", () => {
     expect(readyOutsideIsNotRunnable).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Match is exhaustive at the type level
+// ---------------------------------------------------------------------------
+
+type Light = { readonly _tag: "Red" } | { readonly _tag: "Green"; readonly seconds: number };
+
+declare const light: Source<Light>;
+
+/** Every tag present, each case given a source of its own member. */
+const complete = () =>
+  Match({
+    on: light,
+    cases: {
+      Red: () => <p>stop</p>,
+      Green: (green) => <p>{View.bind(select(green, (g) => String(g.seconds)))}</p>,
+    },
+  });
+
+/** A missing case is a compile error, so a new member cannot be forgotten. */
+// @ts-expect-error `Green` is not handled
+const incomplete = () => <Match on={light} cases={{ Red: () => <p>stop</p> }} />;
+
+/** A case for a tag the union lacks is a compile error too. */
+const surplus = () => (
+  <Match
+    on={light}
+    // @ts-expect-error `Blue` is not a member
+    cases={{ Red: () => <p />, Green: () => <p />, Blue: () => <p /> }}
+  />
+);
+
+const matchIsExhaustive: Equals<ReturnType<typeof complete>, MatchNode<Light>> = true;
+void incomplete;
+void surplus;
+void matchIsExhaustive;

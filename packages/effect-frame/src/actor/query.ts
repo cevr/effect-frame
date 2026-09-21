@@ -1,4 +1,5 @@
-import { Schema } from "effect";
+import { Match, Schema } from "effect";
+import { dual } from "effect/Function";
 import type { Pure } from "./contract.js";
 import { Unauthorized, Unreachable } from "./vocabulary.js";
 
@@ -166,24 +167,41 @@ export const isReady = <A, E>(state: QueryState<A, E>): state is QueryReady<A> =
 export const isFailed = <A, E>(state: QueryState<A, E>): state is QueryFailedState<E> =>
   state._tag === "Failed";
 
+/**
+ * The case table `match` folds: one function per tag, each given its own
+ * member. It is the shape of Effect's `Match.tagsExhaustive`, so a view
+ * writes the same table for a query it writes for an actor's state.
+ */
 export interface QueryStateCases<A, E, Out> {
-  readonly Loading: () => Out;
-  readonly Ready: (value: A, stale: boolean) => Out;
-  readonly Failed: (error: E) => Out;
+  readonly Loading: (state: QueryLoading) => Out;
+  readonly Ready: (state: QueryReady<A>) => Out;
+  readonly Failed: (state: QueryFailedState<E>) => Out;
 }
 
-/** Fold the three states. Exhaustive: a fourth state cannot be added quietly. */
-export const match = <A, E, Out>(
-  state: QueryState<A, E>,
+/**
+ * Fold the three states. Exhaustive: a fourth state cannot be added quietly.
+ *
+ * `match(cases)` builds the matcher once and returns the fold; use that form
+ * where the fold runs on every update. `match(state, cases)` is the one-shot
+ * form and builds a matcher per call: a built matcher costs about a fifth
+ * of one built per call and allocates nothing (`tests/perf/match.bench.ts`).
+ */
+export const match: {
+  <A, E, Out>(cases: QueryStateCases<A, E, Out>): (state: QueryState<A, E>) => Out;
+  <A, E, Out>(state: QueryState<A, E>, cases: QueryStateCases<A, E, Out>): Out;
+} = dual(2, <A, E, Out>(state: QueryState<A, E>, cases: QueryStateCases<A, E, Out>): Out =>
+  matcher<A, E, Out>(cases)(state),
+);
+
+const matcher = <A, E, Out>(
   cases: QueryStateCases<A, E, Out>,
-): Out => {
-  if (isLoading(state)) {
-    return cases.Loading();
-  }
-  if (isReady(state)) {
-    return cases.Ready(state.value, state.stale);
-  }
-  return cases.Failed(state.error);
+): ((state: QueryState<A, E>) => Out) => {
+  const fold = Match.type<QueryState<A, E>>().pipe(Match.tagsExhaustive(cases));
+  // `Match` types its result as `Unify<Out>`, which the checker cannot reduce
+  // for a generic `Out`; at every call site `Out` is concrete and the two
+  // are the same type.
+  // oxlint-disable-next-line effect/noAs
+  return fold as (state: QueryState<A, E>) => Out;
 };
 
 export const Loading = <A, E>(): QueryState<A, E> => ({ _tag: "Loading" });

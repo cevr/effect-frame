@@ -71,8 +71,21 @@ export interface ShowNode<A = unknown> {
   readonly fallback: Node;
 }
 
+/**
+ * One branch per case of a tagged union. `key` names the case the value is
+ * in; `render` draws that case from a source of the value that exists only
+ * while the case holds. The runtime switches branches when the key changes
+ * and updates in place while it does not.
+ */
+export interface MatchNode<A = unknown> {
+  readonly _tag: "Match";
+  readonly on: Source<A>;
+  key(value: A): string;
+  render(key: string, value: Source<A>): Node;
+}
+
 /** Control flow in the tree. `control.ts` builds it; `runtime.ts` reads it. */
-export type ControlNode = ForNode<unknown> | ShowNode<unknown>;
+export type ControlNode = ForNode<unknown> | ShowNode<unknown> | MatchNode<unknown>;
 
 export const Empty: EmptyNode = { _tag: "Empty" };
 

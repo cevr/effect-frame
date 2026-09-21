@@ -329,7 +329,7 @@ export const BoardPage = ((props: BoardInput) =>
 );
 ```
 
-`For` and `Show` accept explicit reactive sources. Each `For` child receives a read-only source for its keyed item. Replacing an item under the same key updates that source. `bind(source, select)` is shorthand for a selected binding. `submit` prevents native form navigation and then runs the returned Effect.
+`For`, `Show`, and `Match` accept explicit reactive sources. `Match` is exhaustive over a tagged union and takes the case table of Effect's `Match.tagsExhaustive`; `Query` is a `Match` over `QueryState`. Each `For` child receives a read-only source for its keyed item. Replacing an item under the same key updates that source. `bind(source, select)` is shorthand for a selected binding. `submit` prevents native form navigation and then runs the returned Effect.
 
 ## 7. Terminal JSX
 

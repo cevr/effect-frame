@@ -11,7 +11,7 @@ import {
   untrack,
 } from "@solidjs/signals";
 import type { Cleanup, Host, HostEvent, PropertyValue, StaticProps } from "./host.js";
-import type { ElementNode, ForNode, Node, PropValue, ShowNode } from "./jsx-runtime.js";
+import type { ElementNode, ForNode, MatchNode, Node, PropValue, ShowNode } from "./jsx-runtime.js";
 import type { Bound, Handler, Prepared, View } from "./view.js";
 
 /**
@@ -277,6 +277,7 @@ const plan = <HostNode>(renderer: Renderer<HostNode>, node: Node): Build<HostNod
       // hidden branch has tracked no source. `For` plans each row the same
       // way, for the same reason.
       Show: (branch) => planShow(renderer, branch),
+      Match: (matched) => planMatch(renderer, matched),
     }),
   );
 
@@ -370,17 +371,52 @@ interface Branch<HostNode> {
  * true. Nothing survives a hide: a hidden branch holds no host node, keeps no
  * source subscribed, and runs no binding.
  */
-const show =
-  <HostNode>(
+const show = <HostNode>(
+  tracker: Tracker,
+  host: Host<HostNode>,
+  when: Accessor<boolean>,
+  child: () => Build<HostNode>,
+  fallback: () => Build<HostNode>,
+): Build<HostNode> =>
+  switchOn(tracker, host, when, (visible) => {
+    if (visible) {
+      return child;
+    }
+    return fallback;
+  });
+
+/**
+ * `Match` is the same switch over a tag. The case's body reads the matched
+ * value as a signal-backed source, as a `Show` branch does, and the source
+ * is only ever read while its tag holds.
+ */
+const planMatch = <HostNode, A>(
+  renderer: Renderer<HostNode>,
+  node: MatchNode<A>,
+): Build<HostNode> => {
+  const value = renderer.tracker.track(node.on);
+  return switchOn(
+    renderer.tracker,
+    renderer.host,
+    () => node.key(value()),
+    (tag) => () => plan(renderer, node.render(tag, signalSource(value))),
+  );
+};
+
+/**
+ * One drawn side at a time, chosen by a key. A `Show` keys on a boolean and
+ * a `Match` on a tag; the switch neither knows nor cares. A key that repeats
+ * is not a change, so the drawn side updates in place through its own
+ * bindings and is never rebuilt.
+ */
+const switchOn =
+  <HostNode, Key>(
     tracker: Tracker,
     host: Host<HostNode>,
-    when: Accessor<boolean>,
-    child: () => Build<HostNode>,
-    fallback: () => Build<HostNode>,
+    key: Accessor<Key>,
+    sideFor: (key: Key) => () => Build<HostNode>,
   ): Build<HostNode> =>
   (parent, slot, changed) => {
-    // Exactly one of the two is drawn at any time: the branch while `when`
-    // holds, the fallback otherwise. Both are built the same way.
     let shown: Option.Option<Branch<HostNode>> = Option.none();
 
     const build = (side: () => Build<HostNode>): Branch<HostNode> => {
@@ -417,28 +453,22 @@ const show =
       }
     };
 
-    let visible: Option.Option<boolean> = Option.none();
-    const sideFor = (next: boolean): (() => Build<HostNode>) => {
-      if (next) {
-        return child;
-      }
-      return fallback;
-    };
+    let current: Option.Option<Key> = Option.none();
 
-    const apply = (next: boolean): void => {
-      if (Option.contains(visible, next)) {
+    const apply = (next: Key): void => {
+      if (Option.contains(current, next)) {
         return;
       }
       Option.match(shown, { onNone: () => {}, onSome: tearDown });
       const drawn = untrack(() => build(sideFor(next)));
       shown = Option.some(drawn);
-      visible = Option.some(next);
+      current = Option.some(next);
       slot.nodes = drawn.slot.nodes;
       changed();
     };
 
-    apply(when());
-    createRenderEffect(when, apply, { defer: true });
+    apply(key());
+    createRenderEffect(key, apply, { defer: true });
   };
 
 // ---------------------------------------------------------------------------

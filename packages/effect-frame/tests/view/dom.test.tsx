@@ -4,7 +4,7 @@ registerDom();
 
 import { Behavior, Cell, Value, modify, select, spawn } from "effect-frame/actor";
 import type { LocalActorRef, SetValue, Source } from "effect-frame/actor";
-import { Dom, For, Show, View, mount, render } from "effect-frame/view";
+import { Dom, For, Match, Show, View, mount, render } from "effect-frame/view";
 import { Deferred, Effect, Exit, Option, Ref, Scope, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
@@ -135,6 +135,36 @@ const Optional = (props: OptionalProps) =>
     </section>,
   );
 
+type Job =
+  | { readonly _tag: "Idle" }
+  | { readonly _tag: "Running"; readonly percent: number }
+  | { readonly _tag: "Done"; readonly output: string };
+
+interface JobProps {
+  readonly job: Source<Job>;
+}
+
+/**
+ * One branch per tag. Each case reads a source of its own member, which
+ * exists only while that member holds; a change that keeps the tag updates
+ * the drawn branch in place.
+ */
+const JobView = (props: JobProps) =>
+  Effect.succeed(
+    <section>
+      <Match
+        on={props.job}
+        cases={{
+          Idle: () => <p id="idle">idle</p>,
+          Running: (running) => (
+            <p id="running">{View.bind(select(running, (r) => `${r.percent}%`))}</p>
+          ),
+          Done: (done) => <p id="done">{View.bind(select(done, (d) => d.output))}</p>,
+        }}
+      />
+    </section>,
+  );
+
 describe("browser view", () => {
   it.scoped("a bound source writes its first value and then every change", () =>
     Effect.gen(function* () {
@@ -236,6 +266,33 @@ describe("browser view", () => {
       yield* render;
       expect(root.querySelector("#first")).toBeNull();
       expect(textOf(root, "#none")).toBe("no hits");
+    }),
+  );
+
+  it.scoped("Match draws one case per tag and updates a kept tag in place", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const job = yield* spawn(Behavior.value<Job>({ _tag: "Idle" }));
+      yield* mount(JobView, { job: job.state }, Dom.host, root);
+      expect(textOf(root, "#idle")).toBe("idle");
+      expect(root.querySelector("#running")).toBeNull();
+
+      yield* job.call(Value.Set<Job>({ _tag: "Running", percent: 10 }));
+      yield* render;
+      expect(root.querySelector("#idle")).toBeNull();
+      expect(textOf(root, "#running")).toBe("10%");
+      const drawn = root.querySelector("#running");
+
+      // Same tag: the branch is kept and its binding moves.
+      yield* job.call(Value.Set<Job>({ _tag: "Running", percent: 60 }));
+      yield* render;
+      expect(textOf(root, "#running")).toBe("60%");
+      expect(root.querySelector("#running")).toBe(drawn);
+
+      yield* job.call(Value.Set<Job>({ _tag: "Done", output: "ok" }));
+      yield* render;
+      expect(root.querySelector("#running")).toBeNull();
+      expect(textOf(root, "#done")).toBe("ok");
     }),
   );
 

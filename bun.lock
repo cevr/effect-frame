@@ -56,6 +56,21 @@
         "effect": "catalog:",
       },
     },
+    "packages/router": {
+      "name": "@effect-frame/router",
+      "version": "0.0.0",
+      "dependencies": {
+        "@effect-frame/actor": "workspace:*",
+        "@effect-frame/view": "workspace:*",
+      },
+      "devDependencies": {
+        "@happy-dom/global-registrator": "20.14.5",
+        "happy-dom": "20.14.5",
+      },
+      "peerDependencies": {
+        "effect": "catalog:",
+      },
+    },
     "packages/view": {
       "name": "@effect-frame/view",
       "version": "0.0.0",
@@ -94,6 +109,8 @@
     "@effect-frame/example-notes": ["@effect-frame/example-notes@workspace:apps/notes"],
 
     "@effect-frame/host-celld": ["@effect-frame/host-celld@workspace:packages/host-celld"],
+
+    "@effect-frame/router": ["@effect-frame/router@workspace:packages/router"],
 
     "@effect-frame/toolchain-checks": ["@effect-frame/toolchain-checks@workspace:tooling/checks"],
 

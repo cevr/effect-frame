@@ -1,0 +1,25 @@
+{
+  "name": "@effect-frame/router",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "bun build src/index.ts --target browser --outdir dist --external effect --external @solidjs/signals",
+    "test": "bun test tests/"
+  },
+  "dependencies": {
+    "@effect-frame/actor": "workspace:*",
+    "@effect-frame/view": "workspace:*"
+  },
+  "devDependencies": {
+    "@happy-dom/global-registrator": "20.14.5",
+    "happy-dom": "20.14.5"
+  },
+  "peerDependencies": {
+    "effect": "catalog:"
+  }
+}

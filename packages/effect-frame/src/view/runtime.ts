@@ -731,7 +731,16 @@ const buildFor =
     const rows = new Map<string, Row<HostNode, Item>>();
     let order: ReadonlyArray<string> = [];
 
-    const createRow = (item: Item): Row<HostNode, Item> => {
+    /**
+     * Keys whose nodes are in the document, in document order. A row's
+     * nodes land at the end when its body builds; `reorder` then moves
+     * only the rows that are out of place, walking the wanted order
+     * against this one, so a change that keeps a row where it was never
+     * touches its nodes: focus, selection, and scroll inside it survive.
+     */
+    let placed: Array<string> = [];
+
+    const createRow = (key: string, item: Item): Row<HostNode, Item> => {
       const rowSlot: Slot<HostNode> = { nodes: [] };
       const cell = makeCell(item);
       let built = false;
@@ -750,6 +759,7 @@ const buildFor =
                 tracker.commit(() => {
                   untrack(() => plan(renderer, tree)(parent, rowSlot, () => {}));
                   built = true;
+                  placed.push(key);
                   if (late) {
                     reorder();
                   }
@@ -778,12 +788,29 @@ const buildFor =
       const slots = order.flatMap((key) =>
         Option.match(get(rows, key), { onNone: () => [], onSome: (row) => [row.slot] }),
       );
-      slots.forEach((child, index) => {
+      const settled = placed.filter((key) => rows.has(key));
+      let cursor = 0;
+      order.forEach((key, index) => {
+        const row = get(rows, key);
+        if (Option.isNone(row) || row.value.slot.nodes.length === 0) {
+          return;
+        }
+        if (Option.contains(at(settled, cursor), key)) {
+          cursor += 1;
+          return;
+        }
         const anchor = anchorAfter(slots, index);
-        for (const created of child.nodes) {
+        for (const created of row.value.slot.nodes) {
           host.insert(parent, created, anchor);
         }
+        settled.splice(settled.indexOf(key), 1);
       });
+      placed = order.filter((key) =>
+        Option.match(get(rows, key), {
+          onNone: () => false,
+          onSome: (row) => row.slot.nodes.length > 0,
+        }),
+      );
       slot.nodes = slots.flatMap((child) => child.nodes);
       changed();
     };
@@ -798,6 +825,7 @@ const buildFor =
           }
           row.dispose();
           rows.delete(key);
+          placed = placed.filter((kept) => kept !== key);
         }
       }
       next.forEach((item, index) => {
@@ -808,7 +836,7 @@ const buildFor =
               onNone: () =>
                 void rows.set(
                   key,
-                  untrack(() => createRow(item)),
+                  untrack(() => createRow(key, item)),
                 ),
               onSome: (row) => row.set(item),
             }),

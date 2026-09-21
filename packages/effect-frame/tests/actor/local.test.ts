@@ -1,7 +1,7 @@
 import { Effect, Exit, Fiber, Option, Schema, Scope, Stream } from "effect";
 import { describe, expect, it, yieldFibers } from "effect-bun-test";
 import { Event, Machine, State } from "effect-machine";
-import { Behavior, Value, modify, select, spawn, zip } from "effect-frame/actor";
+import { Behavior, Cell, Source, Value, modify, select, spawn, zip } from "effect-frame/actor";
 
 const CounterState = State({
   Counting: { count: Schema.Finite },
@@ -156,6 +156,62 @@ describe("source combinators", () => {
       yield* left.call(Value.Set(2));
       yield* right.call(Value.Set("b"));
       expect(Array.from(yield* Fiber.join(seen))).toEqual(["a1", "a2", "b2"]);
+    }),
+  );
+});
+
+describe("source products and followers", () => {
+  it.scoped("all builds a struct and a tuple, and re-reads on either side's change", () =>
+    Effect.gen(function* () {
+      const n = yield* spawn(Behavior.value(1));
+      const s = yield* spawn(Behavior.value("a"));
+      const struct = Source.all({ n: n.state, s: s.state });
+      const tuple = Source.all([n.state, s.state]);
+      expect(yield* struct.get).toEqual({ n: 1, s: "a" });
+      expect(yield* tuple.get).toEqual([1, "a"]);
+
+      const seen = yield* Stream.take(struct.changes, 3).pipe(Stream.runCollect, Effect.forkScoped);
+      yield* Effect.yieldNow;
+      yield* n.call(Value.Set(2));
+      yield* s.call(Value.Set("b"));
+      expect(Array.from(yield* Fiber.join(seen))).toEqual([
+        { n: 1, s: "a" },
+        { n: 2, s: "a" },
+        { n: 2, s: "b" },
+      ]);
+    }),
+  );
+
+  it.scoped("on runs for the current value and every change, and ends with the scope", () =>
+    Effect.gen(function* () {
+      const cell = yield* Cell.make(0);
+      const seen: Array<number> = [];
+      const scope = yield* Scope.make();
+      yield* Scope.provide(
+        Source.on(cell.state, (value) => Effect.sync(() => void seen.push(value))),
+        scope,
+      );
+      yield* yieldFibers;
+      yield* cell.set(1);
+      yield* cell.update((value) => value + 1);
+      yield* yieldFibers;
+      expect(seen).toEqual([0, 1, 2]);
+
+      yield* Scope.close(scope, Exit.void);
+      yield* cell.set(9);
+      yield* yieldFibers;
+      expect(seen).toEqual([0, 1, 2]);
+    }),
+  );
+
+  it.scoped("a write to a cell whose scope has closed is a no-op", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const cell = yield* Scope.provide(Cell.make("open"), scope);
+      yield* Scope.close(scope, Exit.void);
+      yield* cell.set("late");
+      yield* cell.update((value) => `${value}!`);
+      expect(yield* cell.get).toBe("open");
     }),
   );
 });

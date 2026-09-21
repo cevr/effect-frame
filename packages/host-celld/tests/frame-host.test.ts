@@ -1,7 +1,7 @@
 import { Effect, Hash, Layer, Option, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
-import { Behavior, CommandId, implementTransparent } from "@effect-frame/actor";
-import { contract } from "@effect-frame/actor/client";
+import { Behavior, CommandId, implementTransparent } from "effect-frame/actor";
+import { contract } from "effect-frame/actor/client";
 import { defineFrameHost } from "../src/frame-host.js";
 import * as StorageStore from "../src/storage-store.js";
 import { scopedFake } from "./sqlite-storage.js";

@@ -14,12 +14,12 @@ All commits referenced in this repository's design notes live on the local
 
 | Package                    | Entry           | Ships to | Holds                                                                                                                   |
 | -------------------------- | --------------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `@effect-frame/actor`      | `.`             | server   | everything below plus `durable`, `MailboxStore`, `implement`, `ActorHost`, `HttpServer`                                 |
-| `@effect-frame/actor`      | `./client`      | browser  | vocabulary, `contract`, `resumeCodec`, local `spawn` and `Behavior`, remote `ref`, `ActorTransport`, `HttpTransport`    |
-| `@effect-frame/actor`      | `./testing`     | tests    | the `MailboxStore` conformance suite as one Effect                                                                      |
-| `@effect-frame/view`       | `.`             | both     | `View.make`, `View.Context`, `mount`, `render`, `For`, `Show`, `Dom` (incl. `hydrate`), `Html` (incl. `renderToString`) |
-| `@effect-frame/view`       | `./jsx-runtime` | both     | the JSX factory the compiler targets                                                                                    |
-| `@effect-frame/view`       | `./opentui`     | terminal | the OpenTUI host                                                                                                        |
+| `effect-frame/actor`       | `.`             | server   | everything below plus `durable`, `MailboxStore`, `implement`, `ActorHost`, `HttpServer`                                 |
+| `effect-frame/actor`       | `./client`      | browser  | vocabulary, `contract`, `resumeCodec`, local `spawn` and `Behavior`, remote `ref`, `ActorTransport`, `HttpTransport`    |
+| `effect-frame/actor`       | `./testing`     | tests    | the `MailboxStore` conformance suite as one Effect                                                                      |
+| `effect-frame/view`        | `.`             | both     | `View.make`, `View.Context`, `mount`, `render`, `For`, `Show`, `Dom` (incl. `hydrate`), `Html` (incl. `renderToString`) |
+| `effect-frame/view`        | `./jsx-runtime` | both     | the JSX factory the compiler targets                                                                                    |
+| `effect-frame/view`        | `./opentui`     | terminal | the OpenTUI host                                                                                                        |
 | `@effect-frame/host-celld` | `.`             | celld    | `StorageStore` over Durable Object SQL, the Durable Object classes, the interop seam                                    |
 | `apps/notes`               | app             | example  | one contract, a Bun server with server render and the HTTP transport, a hydrated browser client, a terminal client      |
 
@@ -104,7 +104,7 @@ step that runs inside one storage transaction before the actor opens. Receipts
 are retained without bound in the first release; `compact` is a later store
 operation.
 
-**Conformance.** `@effect-frame/actor/testing` holds eight cases every
+**Conformance.** `effect-frame/actor/testing` holds eight cases every
 `MailboxStore` must pass: starts empty; append admits in order and `next` walks
 admission order; a duplicate append carries the receipt; a conflicting payload
 fails with `CommandConflict`; `commit` advances one revision and updates

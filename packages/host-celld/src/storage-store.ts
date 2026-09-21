@@ -5,9 +5,9 @@ import type {
   Committed,
   PendingCommand,
   StoredReceipt,
-} from "@effect-frame/actor";
-import { CommandConflict, CommandId, MailboxStore } from "@effect-frame/actor";
-import type { StoreFactory } from "@effect-frame/actor/testing";
+} from "effect-frame/actor";
+import { CommandConflict, CommandId, MailboxStore } from "effect-frame/actor";
+import type { StoreFactory } from "effect-frame/actor/testing";
 import * as Interop from "./interop.js";
 import type { DurableStorage, SqlRow, SqlStorage } from "./storage.js";
 

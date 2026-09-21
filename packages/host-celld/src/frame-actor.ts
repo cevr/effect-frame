@@ -1,6 +1,6 @@
 import { Duration, Effect, Match, Option, Result, Schema, Stream } from "effect";
-import type { ActorRef, Behavior } from "@effect-frame/actor";
-import { CommandId, MailboxStore, durable } from "@effect-frame/actor";
+import type { ActorRef, Behavior } from "effect-frame/actor";
+import { CommandId, MailboxStore, durable } from "effect-frame/actor";
 import type { DurableStorage } from "./storage.js";
 import * as StorageStore from "./storage-store.js";
 

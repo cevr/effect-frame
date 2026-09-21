@@ -1,4 +1,4 @@
-import { contract } from "@effect-frame/actor/client";
+import { contract } from "effect-frame/actor/client";
 import { Schema } from "effect";
 
 /**

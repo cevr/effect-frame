@@ -1,8 +1,13 @@
 {
   "$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
-  "changelog": ["@changesets/changelog-github", { "repo": "cevr/effect-frame" }],
+  "changelog": [
+    "@changesets/changelog-github",
+    {
+      "repo": "cevr/effect-frame"
+    }
+  ],
   "commit": false,
-  "fixed": [["@effect-frame/actor", "@effect-frame/view", "@effect-frame/router"]],
+  "fixed": [],
   "linked": [],
   "access": "public",
   "baseBranch": "main",

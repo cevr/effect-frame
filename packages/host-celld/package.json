@@ -16,7 +16,7 @@
     "proof:contract": "bun --conditions=source scripts/contract-proof.ts"
   },
   "dependencies": {
-    "@effect-frame/actor": "workspace:*",
+    "effect-frame": "workspace:*",
     "effect-machine": "0.27.0"
   },
   "peerDependencies": {

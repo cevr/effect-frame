@@ -2,11 +2,11 @@ import { platformFetch, registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { serverOnly } from "@effect-frame/actor";
-import type { ActorTransport, Applied, SnapshotOf } from "@effect-frame/actor/client";
-import { CommandId, HttpTransport, ref, resumeCodec } from "@effect-frame/actor/client";
-import { Dom, mount, render } from "@effect-frame/view";
-import { make as makeTuiHost } from "@effect-frame/view/opentui";
+import { serverOnly } from "effect-frame/actor";
+import type { ActorTransport, Applied, SnapshotOf } from "effect-frame/actor/client";
+import { CommandId, HttpTransport, ref, resumeCodec } from "effect-frame/actor/client";
+import { Dom, mount, render } from "effect-frame/view";
+import { make as makeTuiHost } from "effect-frame/view/opentui";
 import type { TestRendererSetup } from "@opentui/core/testing";
 import { createTestRenderer } from "@opentui/core/testing";
 import { Effect, Layer, Option, Schema } from "effect";
@@ -132,8 +132,8 @@ describe("notes end to end", () => {
       const bundle = yield* fetchText(`${server.url}/client.js`);
       expect(bundle.length).toBeGreaterThan(0);
       expect(bundle).not.toContain(serverOnly);
-      expect(bundle).not.toContain("@effect-frame/actor/src/mailbox-store/MailboxStore");
-      expect(bundle).not.toContain("@effect-frame/actor/src/host/Authorizer");
+      expect(bundle).not.toContain("effect-frame/src/actor/mailbox-store/MailboxStore");
+      expect(bundle).not.toContain("effect-frame/src/actor/host/Authorizer");
     }),
   );
 

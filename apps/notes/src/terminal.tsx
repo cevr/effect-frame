@@ -1,6 +1,6 @@
-import { HttpTransport } from "@effect-frame/actor/client";
-import { mount, render } from "@effect-frame/view";
-import { make as makeHost } from "@effect-frame/view/opentui";
+import { HttpTransport } from "effect-frame/actor/client";
+import { mount, render } from "effect-frame/view";
+import { make as makeHost } from "effect-frame/view/opentui";
 import type { BaseRenderable } from "@opentui/core";
 import { InputRenderable, createCliRenderer } from "@opentui/core";
 import { Effect, Option } from "effect";

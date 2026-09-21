@@ -1,7 +1,7 @@
 import { Effect, Option, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
-import { CommandId } from "@effect-frame/actor";
-import { mailboxStoreConformance } from "@effect-frame/actor/testing";
+import { CommandId } from "effect-frame/actor";
+import { mailboxStoreConformance } from "effect-frame/actor/testing";
 import * as Interop from "../src/interop.js";
 import * as StorageStore from "../src/storage-store.js";
 import { scopedFake } from "./sqlite-storage.js";

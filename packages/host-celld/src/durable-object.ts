@@ -1,5 +1,5 @@
 import { Effect, Exit, Layer, ManagedRuntime, Option, Scope } from "effect";
-import { DurableHostConfig } from "@effect-frame/actor";
+import { DurableHostConfig } from "effect-frame/actor";
 import type { HostedActor, Reply } from "./frame-actor.js";
 import { emptyBody, handle, host, readBody, route } from "./frame-actor.js";
 import type { DurableStorage } from "./storage.js";

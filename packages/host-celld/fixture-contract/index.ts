@@ -1,7 +1,7 @@
 import { Duration, Effect, Layer, Option, Schema } from "effect";
 import { Event, Machine, State } from "effect-machine";
-import { Behavior, implement, implementTransparent } from "@effect-frame/actor";
-import { contract } from "@effect-frame/actor/client";
+import { Behavior, implement, implementTransparent } from "effect-frame/actor";
+import { contract } from "effect-frame/actor/client";
 import { defineFrameHost } from "../src/frame-host.js";
 
 /**

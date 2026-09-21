@@ -1,7 +1,5 @@
 ---
-"@effect-frame/actor": minor
-"@effect-frame/view": minor
-"@effect-frame/router": minor
+"effect-frame": minor
 ---
 
-First published release: actors, queries, views, and the router, as proven by the egw-search port.
+First published release: actors, queries, views and the router, as proven by the egw-search port.

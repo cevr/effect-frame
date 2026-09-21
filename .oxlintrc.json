@@ -207,7 +207,7 @@
       }
     },
     {
-      "files": ["packages/actor/src/canonical-json.ts"],
+      "files": ["packages/effect-frame/src/actor/canonical-json.ts"],
       "rules": {
         "effect/noGlobals": "off",
         "effect/noNullish": "off",

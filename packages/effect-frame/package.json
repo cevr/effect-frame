@@ -1,0 +1,87 @@
+{
+  "name": "effect-frame",
+  "version": "0.0.0",
+  "private": false,
+  "description": "Actors, queries, views and a router on Effect.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cevr/effect-frame.git",
+    "directory": "packages/effect-frame"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    "./actor": {
+      "source": "./src/actor/index.ts",
+      "types": "./dist/actor/index.d.ts",
+      "default": "./dist/actor/index.js"
+    },
+    "./actor/client": {
+      "source": "./src/actor/client.ts",
+      "types": "./dist/actor/client.d.ts",
+      "default": "./dist/actor/client.js"
+    },
+    "./actor/testing": {
+      "source": "./src/actor/testing/conformance.ts",
+      "types": "./dist/actor/testing/conformance.d.ts",
+      "default": "./dist/actor/testing/conformance.js"
+    },
+    "./view": {
+      "source": "./src/view/index.ts",
+      "types": "./dist/view/index.d.ts",
+      "default": "./dist/view/index.js"
+    },
+    "./view/jsx-runtime": {
+      "source": "./src/view/jsx-runtime.ts",
+      "types": "./dist/view/jsx-runtime.d.ts",
+      "default": "./dist/view/jsx-runtime.js"
+    },
+    "./view/jsx-dev-runtime": {
+      "source": "./src/view/jsx-runtime.ts",
+      "types": "./dist/view/jsx-runtime.d.ts",
+      "default": "./dist/view/jsx-runtime.js"
+    },
+    "./view/opentui": {
+      "source": "./src/view/hosts/opentui.ts",
+      "types": "./dist/view/hosts/opentui.d.ts",
+      "default": "./dist/view/hosts/opentui.js"
+    },
+    "./router": {
+      "source": "./src/router/index.ts",
+      "types": "./dist/router/index.d.ts",
+      "default": "./dist/router/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "bun --bun tsdown",
+    "test": "bun run test:actor && bun run test:view && bun run test:router",
+    "test:actor": "bun test --conditions=source tests/actor",
+    "test:view": "bun test --conditions=source tests/view",
+    "test:router": "bun test --conditions=source tests/router"
+  },
+  "dependencies": {
+    "@solidjs/signals": "2.0.0-rc.8",
+    "effect-machine": "0.27.0"
+  },
+  "devDependencies": {
+    "@happy-dom/global-registrator": "20.14.5",
+    "@opentui/core": "0.5.11",
+    "happy-dom": "20.14.5"
+  },
+  "peerDependencies": {
+    "@opentui/core": "0.5.11",
+    "effect": "^4.0.0-rc.115"
+  },
+  "peerDependenciesMeta": {
+    "@opentui/core": {
+      "optional": true
+    }
+  }
+}

@@ -11,8 +11,7 @@
     "terminal": "bun run --conditions=source src/terminal.tsx"
   },
   "dependencies": {
-    "@effect-frame/actor": "workspace:*",
-    "@effect-frame/view": "workspace:*"
+    "effect-frame": "workspace:*"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "20.14.5",

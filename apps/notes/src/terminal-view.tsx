@@ -1,6 +1,6 @@
-import type { Applied, SnapshotOf } from "@effect-frame/actor/client";
-import { Behavior, ref, select, spawn } from "@effect-frame/actor/client";
-import { For, View } from "@effect-frame/view";
+import type { Applied, SnapshotOf } from "effect-frame/actor/client";
+import { Behavior, ref, select, spawn } from "effect-frame/actor/client";
+import { For, View } from "effect-frame/view";
 import type { Option } from "effect";
 import { Effect } from "effect";
 import { addNote, writeDraft } from "./commands.js";

@@ -1,6 +1,6 @@
-import type { Applied, SnapshotOf } from "@effect-frame/actor/client";
-import { HttpTransport, resumeCodec } from "@effect-frame/actor/client";
-import { Dom, mount, render } from "@effect-frame/view";
+import type { Applied, SnapshotOf } from "effect-frame/actor/client";
+import { HttpTransport, resumeCodec } from "effect-frame/actor/client";
+import { Dom, mount, render } from "effect-frame/view";
 import { Effect, Option, Schema } from "effect";
 import { Notes, demoKey, resumeScriptId } from "./contract.js";
 import { NotesPage } from "./page.js";

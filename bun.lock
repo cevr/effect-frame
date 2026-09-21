@@ -26,8 +26,7 @@
       "name": "@effect-frame/example-notes",
       "version": "0.0.0",
       "dependencies": {
-        "@effect-frame/actor": "workspace:*",
-        "@effect-frame/view": "workspace:*",
+        "effect-frame": "workspace:*",
       },
       "devDependencies": {
         "@happy-dom/global-registrator": "20.14.5",
@@ -38,48 +37,12 @@
         "effect": "catalog:",
       },
     },
-    "packages/actor": {
-      "name": "@effect-frame/actor",
+    "packages/effect-frame": {
+      "name": "effect-frame",
       "version": "0.0.0",
       "dependencies": {
-        "effect-machine": "0.27.0",
-      },
-      "peerDependencies": {
-        "effect": "^4.0.0-rc.115",
-      },
-    },
-    "packages/host-celld": {
-      "name": "@effect-frame/host-celld",
-      "version": "0.0.0",
-      "dependencies": {
-        "@effect-frame/actor": "workspace:*",
-        "effect-machine": "0.27.0",
-      },
-      "peerDependencies": {
-        "effect": "catalog:",
-      },
-    },
-    "packages/router": {
-      "name": "@effect-frame/router",
-      "version": "0.0.0",
-      "dependencies": {
-        "@effect-frame/actor": "0.0.0",
-        "@effect-frame/view": "0.0.0",
-      },
-      "devDependencies": {
-        "@happy-dom/global-registrator": "20.14.5",
-        "happy-dom": "20.14.5",
-      },
-      "peerDependencies": {
-        "effect": "^4.0.0-rc.115",
-      },
-    },
-    "packages/view": {
-      "name": "@effect-frame/view",
-      "version": "0.0.0",
-      "dependencies": {
-        "@effect-frame/actor": "0.0.0",
         "@solidjs/signals": "2.0.0-rc.8",
+        "effect-machine": "0.27.0",
       },
       "devDependencies": {
         "@happy-dom/global-registrator": "20.14.5",
@@ -93,6 +56,17 @@
       "optionalPeers": [
         "@opentui/core",
       ],
+    },
+    "packages/host-celld": {
+      "name": "@effect-frame/host-celld",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect-frame": "workspace:*",
+        "effect-machine": "0.27.0",
+      },
+      "peerDependencies": {
+        "effect": "catalog:",
+      },
     },
     "tooling/checks": {
       "name": "@effect-frame/toolchain-checks",
@@ -145,17 +119,11 @@
 
     "@clack/prompts": ["@clack/prompts@1.8.1", "", { "dependencies": { "@clack/core": "1.5.1", "fast-string-width": "^3.0.2", "fast-wrap-ansi": "^0.2.0", "sisteransi": "^1.0.5" } }, "sha512-dlT1m5e/0yUL0kRNcQn7yGLVThkgbB0Ga/1AmfDDC/8ik6AIiSf2QLQO2zPYvefsHP0aFgxO93cVLCCfDp7kzQ=="],
 
-    "@effect-frame/actor": ["@effect-frame/actor@workspace:packages/actor"],
-
     "@effect-frame/example-notes": ["@effect-frame/example-notes@workspace:apps/notes"],
 
     "@effect-frame/host-celld": ["@effect-frame/host-celld@workspace:packages/host-celld"],
 
-    "@effect-frame/router": ["@effect-frame/router@workspace:packages/router"],
-
     "@effect-frame/toolchain-checks": ["@effect-frame/toolchain-checks@workspace:tooling/checks"],
-
-    "@effect-frame/view": ["@effect-frame/view@workspace:packages/view"],
 
     "@effect/tsgo": ["@effect/tsgo@0.24.3", "", { "optionalDependencies": { "@effect/tsgo-darwin-arm64": "0.24.3", "@effect/tsgo-darwin-x64": "0.24.3", "@effect/tsgo-linux-arm": "0.24.3", "@effect/tsgo-linux-arm64": "0.24.3", "@effect/tsgo-linux-x64": "0.24.3", "@effect/tsgo-win32-arm64": "0.24.3", "@effect/tsgo-win32-x64": "0.24.3" }, "bin": { "effect-tsgo": "dist/effect-tsgo.js" } }, "sha512-WQxKU3MFzWzI38GbE9cf0POkVX4y0xahD8QqDjLfixW1AEValuHNfOQvyKM2MDWOLdGff4hP8VnIOeduwQt66A=="],
 
@@ -498,6 +466,8 @@
     "effect": ["effect@4.0.0-rc.115", "", {}, "sha512-ogYulZ5ffeOzrJqQrG0XOkDO5lKn2s9KNHhoxJy/6wKUkF0i12dlVXWA9TgsgQ+zV/JzizyG0+XMPepZEQX6vw=="],
 
     "effect-bun-test": ["effect-bun-test@0.3.0", "", { "peerDependencies": { "bun": "*", "effect": ">=3.19.0" } }, "sha512-P2xZ4HBZg4bFw2ePY4E5UB6EZ2d1L/HO13+KdoprTYFuc8B1uTpdn7V4UU6qyYiYsqTY9DZ1TFB94Ekx2YLA4g=="],
+
+    "effect-frame": ["effect-frame@workspace:packages/effect-frame"],
 
     "effect-machine": ["effect-machine@0.27.0", "", { "peerDependencies": { "effect": ">=4.0.0-rc.112 <5" } }, "sha512-gBZq1P+qUZxvPFRkU/4oylypGgmfuPyPLlPmaPa1R0YA6dAzZDID8POYMWIjmpgks7srFFPBVelyYbvpUlR9FA=="],
 

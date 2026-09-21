@@ -1,8 +1,8 @@
 import type { Duration } from "effect";
 import { Effect, Layer, ManagedRuntime, Option, Schema } from "effect";
-import type { ActorTransport, AnyImplementation } from "@effect-frame/actor";
-import { ActorHost, DurableHostConfig, HttpServer } from "@effect-frame/actor";
-import type { Address } from "@effect-frame/actor/client";
+import type { ActorTransport, AnyImplementation } from "effect-frame/actor";
+import { ActorHost, DurableHostConfig, HttpServer } from "effect-frame/actor";
+import type { Address } from "effect-frame/actor/client";
 import * as Interop from "./interop.js";
 import type { DurableObjectContext } from "./durable-object.js";
 import type { DurableStorage, SqlRow } from "./storage.js";

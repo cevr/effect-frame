@@ -1,8 +1,8 @@
 import type { Layer } from "effect";
-import { HttpServer } from "@effect-frame/actor";
-import type { ActorTransport } from "@effect-frame/actor/client";
-import { ref, resumeCodec } from "@effect-frame/actor/client";
-import { Html } from "@effect-frame/view";
+import { HttpServer } from "effect-frame/actor";
+import type { ActorTransport } from "effect-frame/actor/client";
+import { ref, resumeCodec } from "effect-frame/actor/client";
+import { Html } from "effect-frame/view";
 import { Effect, ManagedRuntime, Option, Schema } from "effect";
 import { Notes, demoKey, resumeScriptId } from "./contract.js";
 import { inProcess, upstream } from "./notes.server.js";

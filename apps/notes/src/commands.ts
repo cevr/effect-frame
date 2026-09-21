@@ -1,5 +1,5 @@
-import type { LocalActorRef, RemoteActorRef, SetValue } from "@effect-frame/actor/client";
-import { CommandId, Value } from "@effect-frame/actor/client";
+import type { LocalActorRef, RemoteActorRef, SetValue } from "effect-frame/actor/client";
+import { CommandId, Value } from "effect-frame/actor/client";
 import { Effect, Random, Schema } from "effect";
 import type { Notes, NotesMessage } from "./contract.js";
 

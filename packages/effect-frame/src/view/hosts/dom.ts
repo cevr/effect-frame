@@ -63,6 +63,57 @@ export const attach = (
     Option.match(asElement(node), { onNone: () => Effect.void, onSome: run }),
   );
 
+/**
+ * Resolves on the next animation frame: the browser has laid out and is
+ * about to paint. A behaviour that needs layout (a measurement, a scroll to
+ * a position that depends on content) yields it first. A behaviour already
+ * runs after its element is in the document, which is enough to focus.
+ */
+export const afterPaint: Effect.Effect<void> = Effect.callback<void>((resume) => {
+  const handle = requestAnimationFrame(() => resume(Effect.void));
+  return Effect.sync(() => cancelAnimationFrame(handle));
+});
+
+export interface FocusOptions {
+  readonly preventScroll?: boolean;
+}
+
+/** Focus the element once it is in the document. Composes: `attach={[Dom.scrollIntoView(), Dom.focus()]}`. */
+export const focus = (options?: FocusOptions): Attached<DomNode> =>
+  attach((element) =>
+    Effect.sync(() => {
+      if (element instanceof HTMLElement) {
+        element.focus({ preventScroll: options?.preventScroll === true });
+      }
+    }),
+  );
+
+/** Scroll the element into view once it is in the document. */
+export const scrollIntoView = (options?: ScrollIntoViewOptions): Attached<DomNode> =>
+  attach((element) => Effect.sync(() => element.scrollIntoView(options)));
+
+/**
+ * Observe the element's size for as long as it is in the document. The
+ * observer disconnects with the element's scope.
+ */
+export const observeSize = (
+  onSize: (rect: DOMRectReadOnly) => Effect.Effect<unknown>,
+): Attached<DomNode> =>
+  attach((element) =>
+    Effect.gen(function* () {
+      const runFork = Effect.runForkWith(yield* Effect.context<never>());
+      const observer = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          runFork(onSize(entry.contentRect));
+        }
+      });
+      yield* Effect.acquireRelease(
+        Effect.sync(() => observer.observe(element)),
+        () => Effect.sync(() => observer.disconnect()),
+      );
+    }),
+  );
+
 export const host: Host<DomNode> = {
   createElement: (tag: string, staticProps: StaticProps) => {
     const element = document.createElement(tag);

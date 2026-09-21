@@ -26,13 +26,26 @@ import { make as makeView } from "./view.js";
 // ---------------------------------------------------------------------------
 
 /**
- * What one registered query contributes to its scope. `settled` is the only
- * thing the scope's derivation reads: whether this query has produced the
- * kind of value this scope is waiting for.
+ * What one registered query contributes to its scope: whether it has
+ * produced the kind of value this scope is waiting for, and the failure it
+ * carries when it has failed. A loading registration never fails; its
+ * `failure` is a constant `None`.
  */
 interface Registration {
   readonly settled: Source<boolean>;
+  readonly failure: Source<Option.Option<unknown>>;
 }
+
+/** One registration's current contribution, read when the scope recomputes. */
+interface Contribution {
+  readonly settled: boolean;
+  readonly failure: Option.Option<unknown>;
+}
+
+const noFailure: Source<Option.Option<unknown>> = {
+  get: Effect.succeed(Option.none()),
+  changes: Stream.empty,
+};
 
 /**
  * The shared machinery behind both scopes. A scope holds the registrations
@@ -108,8 +121,10 @@ export const orErrored = Effect.fn("Readiness.orErrored")(function* <Value, Erro
   state: Source<QueryState<Value, Error>>,
 ) {
   const erroredScope = yield* ErroredScope;
+  const initial = yield* state.get;
   yield* erroredScope.register({
-    settled: yield* held(isNotFailed(yield* state.get), Stream.map(state.changes, isNotFailed)),
+    settled: yield* held(isNotFailed(initial), Stream.map(state.changes, isNotFailed)),
+    failure: yield* held(errorOf(initial), Stream.map(state.changes, errorOf)),
   });
   return state;
 });
@@ -131,6 +146,7 @@ const registerLoading = Effect.fn("Readiness.registerLoading")(function* <Value,
   const loadingScope = yield* LoadingScope;
   yield* loadingScope.register({
     settled: yield* held(hasSettled(yield* state.get), Stream.map(state.changes, hasSettled)),
+    failure: noFailure,
   });
   return state;
 });
@@ -229,6 +245,13 @@ const errorOf = <Value, Error>(state: QueryState<Value, Error>): Option.Option<E
     }),
   );
 
+/** The first failure among the contributions, in registration order. */
+const firstFailure = (contributions: ReadonlyArray<Contribution>): Option.Option<unknown> =>
+  Option.flatMap(
+    Option.fromNullishOr(contributions.find((one) => Option.isSome(one.failure))),
+    (one) => one.failure,
+  );
+
 // ---------------------------------------------------------------------------
 // Deriving pending
 // ---------------------------------------------------------------------------
@@ -245,34 +268,39 @@ const errorOf = <Value, Error>(state: QueryState<Value, Error>): Option.Option<E
  * flips it back.
  */
 const pendingOf = (registry: Registry): Effect.Effect<Source<boolean>> =>
-  derive(registry, (settled) => settled.length === 0 || settled.includes(false));
+  derive(registry, (all) => all.length === 0 || all.some((one) => !one.settled));
 
 /**
- * Derive one boolean source from every registration under a scope.
+ * Derive one source from every registration under a scope.
  *
- * `fold` sees each registration's current `settled` value, in registration
+ * `fold` sees each registration's current contribution, in registration
  * order. The result recomputes on two triggers: a new registration, and any
  * registered query changing state. `switchMap` re-subscribes to the whole
- * settled set whenever the set itself changes, so a query that registers
- * after first paint is picked up without anyone writing a flag.
+ * set whenever the set itself changes, so a query that registers after
+ * first paint is picked up without anyone writing a flag.
  */
-const derive = (
+const derive = <A,>(
   registry: Registry,
-  fold: (settled: ReadonlyArray<boolean>) => boolean,
-): Effect.Effect<Source<boolean>> =>
+  fold: (contributions: ReadonlyArray<Contribution>) => A,
+): Effect.Effect<Source<A>> =>
   Effect.gen(function* () {
-    const compute = (entries: ReadonlyArray<Registration>): Effect.Effect<boolean> =>
-      Effect.map(
-        Effect.forEach(entries, (entry) => entry.settled.get, { concurrency: 1 }),
-        fold,
-      );
+    const contribution = (entry: Registration): Effect.Effect<Contribution> =>
+      Effect.map(Effect.all([entry.settled.get, entry.failure.get]), ([settled, failure]) => ({
+        settled,
+        failure,
+      }));
+    const compute = (entries: ReadonlyArray<Registration>): Effect.Effect<A> =>
+      Effect.map(Effect.forEach(entries, contribution, { concurrency: 1 }), fold);
 
     const entryChanges = Stream.switchMap(registry.entries.changes, (entries) =>
       Stream.merge(
         Stream.succeed(entries),
         Stream.map(
           Stream.mergeAll(
-            entries.map((entry) => entry.settled.changes),
+            entries.flatMap((entry): ReadonlyArray<Stream.Stream<void>> => [
+              Stream.map(entry.settled.changes, () => void 0),
+              Stream.map(entry.failure.changes, () => void 0),
+            ]),
             { concurrency: "unbounded" },
           ),
           () => entries,
@@ -321,7 +349,11 @@ export interface LoadingProps<E, R> {
 }
 
 export interface ErroredProps<E, R> {
-  /** The fallback may read the first error the scope saw. */
+  /**
+   * The fallback reads the first failure among the queries routed here, in
+   * registration order. It is `unknown` because one scope may hold queries
+   * with different error types; the fallback narrows what it shows.
+   */
   readonly fallback: (error: Source<Option.Option<unknown>>) => Node;
   readonly children: Effect.Effect<Node, E, R>;
 }
@@ -337,26 +369,17 @@ export const Errored = <E, R>(
   makeView(() =>
     Effect.gen(function* () {
       const registry = yield* makeRegistry;
-      const failedSource = yield* failedOf(registry);
+      const failure = yield* derive(registry, firstFailure);
+      const failed = select(failure, Option.isSome);
       const content = yield* Effect.provideService(props.children, ErroredScope, registry);
       return (
         <>
-          <Show when={failedSource}>{props.fallback(errorHolder)}</Show>
-          <Show when={select(failedSource, (value) => !value)}>{content}</Show>
+          <Show when={failed}>{props.fallback(failure)}</Show>
+          <Show when={select(failed, (value) => !value)}>{content}</Show>
         </>
       );
     }),
   );
-
-/** The prototype does not carry the error value itself; #16 only asks where it routes. */
-const errorHolder: Source<Option.Option<unknown>> = {
-  get: Effect.succeed(Option.none()),
-  changes: Stream.empty,
-};
-
-/** `true` once any registration under this scope reports a failure. */
-const failedOf = (registry: Registry): Effect.Effect<Source<boolean>> =>
-  derive(registry, (settled) => settled.includes(false));
 
 // ---------------------------------------------------------------------------
 // Await

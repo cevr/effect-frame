@@ -168,18 +168,16 @@ describe("readiness through context", () => {
       const root = yield* makeRoot;
       const query = yield* QueryState.fakeQuery<string, string>();
 
-      /**
-       * `Loading` outside, `Errored` inside. The other order is the one a
-       * reader expects, and it exposes issue #26: the outer `Show` does not
-       * own nodes an inner `Show` revealed in the same update, so the content
-       * stays on screen under the error fallback. That is the view runtime's
-       * node ownership, not readiness, and this order avoids it.
-       */
-      const Page = Loading({
-        fallback: <p id="pending">loading</p>,
+      // `Errored` outside, `Loading` inside: the order a reader expects.
+      // #26 made this order leave content behind; a shown branch now owns
+      // its nodes, so either order holds.
+      const Page = Errored({
+        fallback: (error) => (
+          <p id="failed">{bound(error, (found) => Option.getOrElse(found, () => "?"))}</p>
+        ),
         children: Effect.gen(function* () {
-          const inner = Errored({
-            fallback: () => <p id="failed">failed</p>,
+          const inner = Loading({
+            fallback: <p id="pending">loading</p>,
             children: Effect.gen(function* () {
               const view = yield* View.Context;
               const title = yield* ready(yield* orErrored(query.source), "");
@@ -198,9 +196,21 @@ describe("readiness through context", () => {
       yield* flush;
       // The loading fallback lets go, because a failed query has settled.
       expect(has(root, "#pending")).toBe(false);
-      // The error fallback owns the region from here.
-      expect(textOf(root, "#failed")).toBe("failed");
+      // The error fallback owns the region from here, and carries the error.
+      expect(textOf(root, "#failed")).toBe("boom");
       expect(has(root, "#title")).toBe(false);
+
+      // A retry: the query is in flight again, so the error fallback lets go
+      // and the loading fallback comes back.
+      yield* query.refetch;
+      yield* flush;
+      expect(has(root, "#failed")).toBe(false);
+      expect(textOf(root, "#pending")).toBe("loading");
+
+      yield* query.resolve("Alpha");
+      yield* flush;
+      expect(has(root, "#pending")).toBe(false);
+      expect(textOf(root, "#title")).toBe("Alpha");
     }),
   );
 

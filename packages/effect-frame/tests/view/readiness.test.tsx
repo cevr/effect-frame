@@ -40,10 +40,8 @@ const has = (root: HTMLElement, selector: string): boolean =>
   Option.isSome(Option.fromNullishOr(root.querySelector(selector)));
 
 /**
- * Bind a source outside a view's setup. `Await` hands its branches a plain
- * `Source`, and a branch is a `Node`, not an Effect, so there is no
- * `View.Context` in reach. Building the marker directly is what the facade
- * would otherwise do, and it shows the cost of `Await`'s shape.
+ * Bind a source outside a view's setup, by building the marker directly.
+ * `View.bind` does the same; this spells out that a `Bound` is only data.
  */
 const bound = <A, B>(source: Source<A>, project: (value: A) => B): Bound<B> => ({
   _tag: "Bound",
@@ -79,9 +77,8 @@ describe("readiness through context", () => {
       const Page = Loading({
         fallback: <p id="pending">loading</p>,
         children: Effect.gen(function* () {
-          const view = yield* View.Context;
           const title = yield* ready(query.source, "");
-          return <h1 id="title">{view.bind(title)}</h1>;
+          return <h1 id="title">{View.bind(title)}</h1>;
         }),
       });
 
@@ -104,12 +101,11 @@ describe("readiness through context", () => {
       const Page = Loading({
         fallback: <p id="pending">loading</p>,
         children: Effect.gen(function* () {
-          const view = yield* View.Context;
           const title = yield* readyWithStale(query.source, "");
           return (
             <section>
-              <h1 id="title">{view.bind(title, (state: ReadyValue<string>) => state.value)}</h1>
-              <span id="stale">{view.bind(title, (state) => String(state.stale))}</span>
+              <h1 id="title">{View.bind(title, (state: ReadyValue<string>) => state.value)}</h1>
+              <span id="stale">{View.bind(title, (state) => String(state.stale))}</span>
             </section>
           );
         }),
@@ -144,13 +140,12 @@ describe("readiness through context", () => {
       const Page = Loading({
         fallback: <p id="pending">loading</p>,
         children: Effect.gen(function* () {
-          const view = yield* View.Context;
           const a = yield* ready(left.source, "");
           const b = yield* ready(right.source, "");
           return (
             <section>
-              <span id="a">{view.bind(a)}</span>
-              <span id="b">{view.bind(b)}</span>
+              <span id="a">{View.bind(a)}</span>
+              <span id="b">{View.bind(b)}</span>
             </section>
           );
         }),
@@ -187,9 +182,8 @@ describe("readiness through context", () => {
           const inner = Loading({
             fallback: <p id="pending">loading</p>,
             children: Effect.gen(function* () {
-              const view = yield* View.Context;
               const title = yield* ready(yield* orErrored(query.source), "");
-              return <h1 id="title">{view.bind(title)}</h1>;
+              return <h1 id="title">{View.bind(title)}</h1>;
             }),
           });
           return yield* inner.setup({});
@@ -231,18 +225,17 @@ describe("readiness through context", () => {
       const Page = Loading({
         fallback: <p id="outer-pending">outer</p>,
         children: Effect.gen(function* () {
-          const view = yield* View.Context;
           const header = yield* ready(outer.source, "");
           const nested = Loading({
             fallback: <p id="inner-pending">inner</p>,
             children: Effect.gen(function* () {
               const body = yield* ready(inner.source, "");
-              return <p id="body">{view.bind(body)}</p>;
+              return <p id="body">{View.bind(body)}</p>;
             }),
           });
           return (
             <section>
-              <h1 id="header">{view.bind(header)}</h1>
+              <h1 id="header">{View.bind(header)}</h1>
               {yield* nested.setup({})}
             </section>
           );
@@ -348,14 +341,13 @@ describe("readiness through context", () => {
       const Page = Loading({
         fallback: <p id="pending">loading</p>,
         children: Effect.gen(function* () {
-          const view = yield* View.Context;
           const a = yield* ready(first.source, "");
           // A second query registers after the first already had a value.
           const b = yield* ready(second.source, "");
           return (
             <section>
-              <span id="a">{view.bind(a)}</span>
-              <span id="b">{view.bind(b)}</span>
+              <span id="a">{View.bind(a)}</span>
+              <span id="b">{View.bind(b)}</span>
             </section>
           );
         }),
@@ -382,9 +374,8 @@ describe("readiness on the server", () => {
       const Page = Loading({
         fallback: <p id="pending">loading</p>,
         children: Effect.gen(function* () {
-          const view = yield* View.Context;
           const title = yield* ready(query.source, "");
-          return <h1 id="title">{view.bind(title)}</h1>;
+          return <h1 id="title">{View.bind(title)}</h1>;
         }),
       });
 
@@ -404,9 +395,8 @@ describe("readiness on the server", () => {
       const Page = Loading({
         fallback: <p id="pending">loading</p>,
         children: Effect.gen(function* () {
-          const view = yield* View.Context;
           const title = yield* ready(query.source, "");
-          return <h1 id="title">{view.bind(title)}</h1>;
+          return <h1 id="title">{View.bind(title)}</h1>;
         }),
       });
 

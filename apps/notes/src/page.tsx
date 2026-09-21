@@ -23,12 +23,11 @@ export interface NotesPageProps {
 
 export const NotesPage = View.make((props: NotesPageProps) =>
   Effect.gen(function* () {
-    const view = yield* View.Context;
     const notes = yield* ref(Notes, props.key, { resume: props.resume });
     const draft = yield* spawn(Behavior.value(""));
     const setDraft = writeDraft(draft);
 
-    const submit = view.submit(() =>
+    const submit = View.submit(() =>
       Effect.flatMap(draft.state.get, (text) => Effect.andThen(addNote(notes, text), setDraft(""))),
     );
 
@@ -38,8 +37,8 @@ export const NotesPage = View.make((props: NotesPageProps) =>
           <input
             id="draft"
             name="text"
-            value={view.bind(draft.state)}
-            onInput={view.event((event) => setDraft(event.value))}
+            value={View.bind(draft.state)}
+            onInput={View.event((event) => setDraft(event.value))}
           />
           <button type="submit">add</button>
         </form>
@@ -52,17 +51,17 @@ export const NotesPage = View.make((props: NotesPageProps) =>
               <li>
                 <input
                   type="checkbox"
-                  checked={view.bind(note, (value) => value.done)}
-                  onChange={view.event(() =>
+                  checked={View.bind(note, (value) => value.done)}
+                  onChange={View.event(() =>
                     Effect.flatMap(note.get, (value) =>
                       dispatch(notes, { _tag: "Toggle", id: value.id }),
                     ),
                   )}
                 />
-                <span>{view.bind(note, (value) => value.text)}</span>
+                <span>{View.bind(note, (value) => value.text)}</span>
                 <button
                   type="button"
-                  onClick={view.event(() =>
+                  onClick={View.event(() =>
                     Effect.flatMap(note.get, (value) =>
                       dispatch(notes, { _tag: "Remove", id: value.id }),
                     ),
@@ -74,7 +73,7 @@ export const NotesPage = View.make((props: NotesPageProps) =>
             )}
           </For>
         </ul>
-        <p id="count">{view.bind(notes.state, (snapshot) => snapshot.notes.length)}</p>
+        <p id="count">{View.bind(notes.state, (snapshot) => snapshot.notes.length)}</p>
       </section>
     );
   }),

@@ -66,7 +66,6 @@ let homeMounts = 0;
 
 const Home = View.make((_props: Route.RouteProps<unknown, unknown>) =>
   Effect.gen(function* () {
-    const view = yield* View.Context;
     const router = yield* Router;
     homeMounts += 1;
     return (
@@ -74,7 +73,7 @@ const Home = View.make((_props: Route.RouteProps<unknown, unknown>) =>
         <a id="to-book" href="/books/7">
           book
         </a>
-        <button id="go" onClick={view.event(() => router.navigate("/books/9", { replace: true }))}>
+        <button id="go" onClick={View.event(() => router.navigate("/books/9", { replace: true }))}>
           go
         </button>
       </section>
@@ -83,17 +82,11 @@ const Home = View.make((_props: Route.RouteProps<unknown, unknown>) =>
 );
 
 const Book = View.make((props: Route.RouteProps<{ readonly id: string }, unknown>) =>
-  Effect.gen(function* () {
-    const view = yield* View.Context;
-    return <h1 id="book">{view.bind(props.params, (params) => params.id)}</h1>;
-  }),
+  Effect.succeed(<h1 id="book">{View.bind(props.params, (params) => params.id)}</h1>),
 );
 
 const NotFound = View.make((props: { readonly url: Source<URL> }) =>
-  Effect.gen(function* () {
-    const view = yield* View.Context;
-    return <p id="missing">{view.bind(props.url, (url) => url.pathname)}</p>;
-  }),
+  Effect.succeed(<p id="missing">{View.bind(props.url, (url) => url.pathname)}</p>),
 );
 
 const home = Route.spa("home", { path: "/", params: Nothing, search: Nothing, view: Home });

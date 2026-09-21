@@ -20,14 +20,13 @@ const makeRoot = Effect.sync(() => document.createElement("main"));
 
 const Counter = View.make((_props: NoProps) =>
   Effect.gen(function* () {
-    const view = yield* View.Context;
     const count = yield* spawn(Behavior.value(0));
     return (
       <div>
-        <span id="count">{view.bind(select(count.state, (n) => String(n)))}</span>
+        <span id="count">{View.bind(select(count.state, (n) => String(n)))}</span>
         <button
           id="up"
-          onClick={view.event(() =>
+          onClick={View.event(() =>
             modify(count, (n) => n + 1).pipe(Effect.catchTag("ActorStopped", () => Effect.void)),
           )}
         >
@@ -48,16 +47,13 @@ interface ListProps {
 }
 
 const TaskList = View.make((props: ListProps) =>
-  Effect.gen(function* () {
-    const view = yield* View.Context;
-    return (
-      <ul>
-        <For each={props.tasks} keyBy={(task: Task) => task.id}>
-          {(task: Source<Task>) => <li>{view.bind(task, (value) => value.title)}</li>}
-        </For>
-      </ul>
-    );
-  }),
+  Effect.succeed(
+    <ul>
+      <For each={props.tasks} keyBy={(task: Task) => task.id}>
+        {(task: Source<Task>) => <li>{View.bind(task, (value) => value.title)}</li>}
+      </For>
+    </ul>,
+  ),
 );
 
 interface ToggleProps {
@@ -103,9 +99,8 @@ const textOf = (root: HTMLElement, selector: string): string =>
 /** A child asks for the capabilities itself; nothing passes them down. */
 const Child = View.make((_props: NoProps) =>
   Effect.gen(function* () {
-    const view = yield* View.Context;
     const label = yield* spawn(Behavior.value("child"));
-    return <em id="child">{view.bind(label.state)}</em>;
+    return <em id="child">{View.bind(label.state)}</em>;
   }),
 );
 
@@ -124,16 +119,13 @@ interface HitsProps {
  * exists only while the test holds, and the fallback draws otherwise.
  */
 const Hits = View.make((props: HitsProps) =>
-  Effect.gen(function* () {
-    const view = yield* View.Context;
-    return (
-      <section>
-        <Show when={props.hits} is={(xs) => xs.length > 0} fallback={<p id="none">no hits</p>}>
-          {(xs) => <p id="first">{view.bind(select(xs, (found) => found[0] ?? ""))}</p>}
-        </Show>
-      </section>
-    );
-  }),
+  Effect.succeed(
+    <section>
+      <Show when={props.hits} is={(xs) => xs.length > 0} fallback={<p id="none">no hits</p>}>
+        {(xs) => <p id="first">{View.bind(select(xs, (found) => found[0] ?? ""))}</p>}
+      </Show>
+    </section>,
+  ),
 );
 
 interface OptionalProps {
@@ -142,16 +134,13 @@ interface OptionalProps {
 
 /** A type predicate narrows the branch's source to the `Some`. */
 const Optional = View.make((props: OptionalProps) =>
-  Effect.gen(function* () {
-    const view = yield* View.Context;
-    return (
-      <section>
-        <Show when={props.name} is={Option.isSome<string>}>
-          {(some) => <b id="name">{view.bind(select(some, (found) => found.value))}</b>}
-        </Show>
-      </section>
-    );
-  }),
+  Effect.succeed(
+    <section>
+      <Show when={props.name} is={Option.isSome<string>}>
+        {(some) => <b id="name">{View.bind(select(some, (found) => found.value))}</b>}
+      </Show>
+    </section>,
+  ),
 );
 
 describe("browser view", () => {
@@ -225,7 +214,7 @@ describe("browser view", () => {
     }),
   );
 
-  it.scoped("a child view reads View.Context from the parent's setup", () =>
+  it.scoped("a parent composes a child by yielding its setup", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
       yield* mount(Parent, noProps, Dom.host, root);
@@ -317,16 +306,13 @@ describe("browser view", () => {
         return String(n);
       });
       const Watched = View.make((_props: NoProps) =>
-        Effect.gen(function* () {
-          const view = yield* View.Context;
-          return (
-            <section>
-              <Show when={open.state}>
-                <p id="watched">{view.bind(counted)}</p>
-              </Show>
-            </section>
-          );
-        }),
+        Effect.succeed(
+          <section>
+            <Show when={open.state}>
+              <p id="watched">{View.bind(counted)}</p>
+            </Show>
+          </section>,
+        ),
       );
       yield* mount(Watched, noProps, Dom.host, root);
       expect(textOf(root, "#watched")).toBe("0");
@@ -353,14 +339,11 @@ describe("browser view", () => {
       const root = yield* makeRoot;
       const seen = yield* Ref.make<ReadonlyArray<string>>([]);
       const Echo = View.make((_props: NoProps) =>
-        Effect.gen(function* () {
-          const view = yield* View.Context;
-          return (
-            <button id="say" onClick={view.event(() => Ref.update(seen, (all) => [...all, "hi"]))}>
-              say
-            </button>
-          );
-        }),
+        Effect.succeed(
+          <button id="say" onClick={View.event(() => Ref.update(seen, (all) => [...all, "hi"]))}>
+            say
+          </button>,
+        ),
       );
       yield* mount(Echo, noProps, Dom.host, root);
       root.querySelector("#say")?.dispatchEvent(new Event("click"));
@@ -374,14 +357,11 @@ describe("browser view", () => {
       const root = yield* makeRoot;
       const sent = yield* Ref.make(false);
       const Form = View.make((_props: NoProps) =>
-        Effect.gen(function* () {
-          const view = yield* View.Context;
-          return (
-            <form id="form" onSubmit={view.submit(() => Ref.set(sent, true))}>
-              <button>go</button>
-            </form>
-          );
-        }),
+        Effect.succeed(
+          <form id="form" onSubmit={View.submit(() => Ref.set(sent, true))}>
+            <button>go</button>
+          </form>,
+        ),
       );
       yield* mount(Form, noProps, Dom.host, root);
 
@@ -455,8 +435,7 @@ interface CountedListProps {
  * or the fiber outlives the row.
  */
 const CountedList = View.make((props: CountedListProps) =>
-  Effect.gen(function* () {
-    const view = yield* View.Context;
+  Effect.sync(() => {
     const shout = (task: Source<Task>): Source<string> => ({
       get: Effect.map(task.get, (value) => value.title.toUpperCase()),
       changes: Stream.ensuring(
@@ -467,7 +446,7 @@ const CountedList = View.make((props: CountedListProps) =>
     return (
       <ul>
         <For each={props.tasks} keyBy={(task: Task) => task.id}>
-          {(task: Source<Task>) => <li>{view.bind(shout(task))}</li>}
+          {(task: Source<Task>) => <li>{View.bind(shout(task))}</li>}
         </For>
       </ul>
     );
@@ -513,7 +492,7 @@ interface CountedRowsProps {
 
 /**
  * Rows with a setup of their own: each keeps a cell that counts its clicks,
- * reads `View.Context` itself, and registers a finalizer in the row scope.
+ * binds with the module functions, and registers a finalizer in the row scope.
  */
 const CountedRows = View.make((props: CountedRowsProps) =>
   Effect.gen(function* () {
@@ -522,14 +501,13 @@ const CountedRows = View.make((props: CountedRowsProps) =>
       keyBy: (task: Task) => task.id,
       setup: (task: Source<Task>) =>
         Effect.gen(function* () {
-          const view = yield* View.Context;
           const clicks = yield* Cell.make(0);
           yield* Effect.addFinalizer(() => Ref.update(props.closed, (n) => n + 1));
           return (
             <li>
-              <span class="title">{view.bind(task, (value) => value.title)}</span>
-              <button class="tap" onClick={view.event(() => clicks.update((n) => n + 1))}>
-                {view.bind(clicks.state, String)}
+              <span class="title">{View.bind(task, (value) => value.title)}</span>
+              <button class="tap" onClick={View.event(() => clicks.update((n) => n + 1))}>
+                {View.bind(clicks.state, String)}
               </button>
             </li>
           );
@@ -554,12 +532,11 @@ const LateRows = View.make((props: LateRowsProps) =>
       keyBy: (task: Task) => task.id,
       setup: (task: Source<Task>) =>
         Effect.gen(function* () {
-          const view = yield* View.Context;
           const current = yield* task.get;
           if (current.id === props.slow) {
             yield* Deferred.await(props.gate);
           }
-          return <li>{view.bind(task, (value) => value.title)}</li>;
+          return <li>{View.bind(task, (value) => value.title)}</li>;
         }),
     });
     return <ul>{rows}</ul>;

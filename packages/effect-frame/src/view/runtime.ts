@@ -10,10 +10,9 @@ import {
   runWithOwner,
   untrack,
 } from "@solidjs/signals";
-import type { Cleanup, Host, PropertyValue, StaticProps } from "./host.js";
+import type { Cleanup, Host, HostEvent, PropertyValue, StaticProps } from "./host.js";
 import type { ElementNode, ForNode, Node, PropValue, ShowNode } from "./jsx-runtime.js";
-import type { Bound, Prepared, View } from "./view.js";
-import { Context as ViewContext, capabilities as makeCapabilities } from "./view.js";
+import type { Bound, Handler, Prepared, View } from "./view.js";
 
 /**
  * The mount runtime. It walks one JSX tree, resolves every explicitly bound
@@ -158,6 +157,12 @@ interface Tracker {
    * effect with no suspension completes before this returns.
    */
   readonly run: (effect: Effect.Effect<unknown>, scope: Scope.Scope) => void;
+  /**
+   * Turn a handler into a host callback bound to the scope current at the
+   * call: the scope of the branch or row whose element is being built. The
+   * fiber the callback forks is interrupted when that scope closes.
+   */
+  readonly handle: (handler: Handler) => (event: HostEvent) => void;
 }
 
 interface Renderer<HostNode> {
@@ -219,6 +224,10 @@ const makeTracker = Effect.fn("View.makeTracker")(function* () {
     owned,
     within,
     run: (effect, scope) => void Fiber.runIn(runFork(effect), scope),
+    handle: (handler) => {
+      const scope = current;
+      return (event) => void Fiber.runIn(runFork(handler(event)), scope);
+    },
   } satisfies Tracker;
 });
 
@@ -421,7 +430,7 @@ const show =
         return;
       }
       Option.match(shown, { onNone: () => {}, onSome: tearDown });
-      const drawn = build(sideFor(next));
+      const drawn = untrack(() => build(sideFor(next)));
       shown = Option.some(drawn);
       visible = Option.some(next);
       slot.nodes = drawn.slot.nodes;
@@ -517,12 +526,13 @@ const buildElement =
       createRenderEffect(read, (value) => host.setProperty(node, name, value), { defer: true });
     }
     for (const [name, prepared] of element.events) {
+      const run = tracker.handle(prepared.handler);
       tracker.register(
         host.addEventListener(node, name, (event) => {
           if (prepared.preventDefault) {
             event.preventDefault();
           }
-          prepared.run(event);
+          run(event);
         }),
       );
     }
@@ -643,7 +653,11 @@ const buildFor =
           onNone: () => {},
           onSome: (key) =>
             Option.match(get(rows, key), {
-              onNone: () => void rows.set(key, createRow(item)),
+              onNone: () =>
+                void rows.set(
+                  key,
+                  untrack(() => createRow(item)),
+                ),
               onSome: (row) => row.set(item),
             }),
         });
@@ -671,8 +685,7 @@ export const mount = Effect.fn("View.mount")(function* <Props, E, R, HostNode>(
   host: Host<HostNode>,
   root: HostNode,
 ) {
-  const capabilities = yield* makeCapabilities();
-  const tree: Node = yield* Effect.provideService(view.setup(props), ViewContext, capabilities);
+  const tree: Node = yield* view.setup(props);
 
   const tracker = yield* makeTracker();
   const slot: Slot<HostNode> = { nodes: [] };

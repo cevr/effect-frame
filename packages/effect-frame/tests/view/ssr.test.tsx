@@ -58,13 +58,12 @@ interface PageProps {
 
 const NotePage = View.make((props: PageProps) =>
   Effect.gen(function* () {
-    const view = yield* View.Context;
     const note = yield* ref(Note, props.key, { resume: props.resume });
     yield* Effect.addFinalizer(() => props.onClose);
     return (
       <article>
-        <h1>{view.bind(note.state, (state) => state.title)}</h1>
-        <p id="count">{view.bind(note.state, (state) => state.count)}</p>
+        <h1>{View.bind(note.state, (state) => state.title)}</h1>
+        <p id="count">{View.bind(note.state, (state) => state.count)}</p>
       </article>
     );
   }),

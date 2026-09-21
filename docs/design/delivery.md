@@ -12,16 +12,16 @@ All commits referenced in this repository's design notes live on the local
 
 ## Package split
 
-| Package                    | Entry           | Ships to | Holds                                                                                                                   |
-| -------------------------- | --------------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `effect-frame/actor`       | `.`             | server   | everything below plus `durable`, `MailboxStore`, `implement`, `ActorHost`, `HttpServer`                                 |
-| `effect-frame/actor`       | `./client`      | browser  | vocabulary, `contract`, `resumeCodec`, local `spawn` and `Behavior`, remote `ref`, `ActorTransport`, `HttpTransport`    |
-| `effect-frame/actor`       | `./testing`     | tests    | the `MailboxStore` conformance suite as one Effect                                                                      |
-| `effect-frame/view`        | `.`             | both     | `View.make`, `View.Context`, `mount`, `render`, `For`, `Show`, `Dom` (incl. `hydrate`), `Html` (incl. `renderToString`) |
-| `effect-frame/view`        | `./jsx-runtime` | both     | the JSX factory the compiler targets                                                                                    |
-| `effect-frame/view`        | `./opentui`     | terminal | the OpenTUI host                                                                                                        |
-| `@effect-frame/host-celld` | `.`             | celld    | `StorageStore` over Durable Object SQL, the Durable Object classes, the interop seam                                    |
-| `apps/notes`               | app             | example  | one contract, a Bun server with server render and the HTTP transport, a hydrated browser client, a terminal client      |
+| Package                    | Entry           | Ships to | Holds                                                                                                                              |
+| -------------------------- | --------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `effect-frame/actor`       | `.`             | server   | everything below plus `durable`, `MailboxStore`, `implement`, `ActorHost`, `HttpServer`                                            |
+| `effect-frame/actor`       | `./client`      | browser  | vocabulary, `contract`, `resumeCodec`, local `spawn` and `Behavior`, remote `ref`, `ActorTransport`, `HttpTransport`               |
+| `effect-frame/actor`       | `./testing`     | tests    | the `MailboxStore` conformance suite as one Effect                                                                                 |
+| `effect-frame/view`        | `.`             | both     | `View.make`, `View.bind`, `View.event`, `mount`, `render`, `For`, `Show`, `Dom` (incl. `hydrate`), `Html` (incl. `renderToString`) |
+| `effect-frame/view`        | `./jsx-runtime` | both     | the JSX factory the compiler targets                                                                                               |
+| `effect-frame/view`        | `./opentui`     | terminal | the OpenTUI host                                                                                                                   |
+| `@effect-frame/host-celld` | `.`             | celld    | `StorageStore` over Durable Object SQL, the Durable Object classes, the interop seam                                               |
+| `apps/notes`               | app             | example  | one contract, a Bun server with server render and the HTTP transport, a hydrated browser client, a terminal client                 |
 
 The rule behind the split: a module a browser may load never imports a store, a
 host, or an implementation. `packages/actor/tests/boundary.test.ts` bundles the

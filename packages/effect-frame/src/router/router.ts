@@ -141,7 +141,7 @@ export const mount: <R, HostNode>(
 ) => Effect.Effect<
   RouterService,
   never,
-  Exclude<Exclude<Exclude<R, Router>, View.Context>, Scope.Scope> | Location | Scope.Scope
+  Exclude<Exclude<R, Router>, Scope.Scope> | Location | Scope.Scope
 > = Effect.fn("Router.mount")(function* <R, HostNode>(options: MountOptions<R, HostNode>) {
   const location = yield* Location;
   const scope = yield* Effect.scope;

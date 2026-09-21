@@ -219,7 +219,7 @@ export interface RouteDefinition<Params extends ParamsCodec, Search extends Sear
  * different shapes in one list.
  */
 export interface Entered<R> {
-  readonly setup: Effect.Effect<Node, never, R | Scope.Scope | View.Context>;
+  readonly setup: Effect.Effect<Node, never, R | Scope.Scope>;
   readonly update: (url: URL) => Effect.Effect<boolean>;
 }
 

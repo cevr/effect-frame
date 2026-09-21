@@ -28,26 +28,25 @@ const line = (note: Note): string => {
 
 export const NotesTerminal = View.make((props: NotesTerminalProps) =>
   Effect.gen(function* () {
-    const view = yield* View.Context;
     const notes = yield* ref(Notes, props.key, { resume: props.resume });
     const draft = yield* spawn(Behavior.value(""));
     const setDraft = writeDraft(draft);
 
     return (
       <box flexDirection="column" width={48}>
-        <text>{view.bind(notes.state, (snapshot) => `notes: ${snapshot.notes.length}`)}</text>
+        <text>{View.bind(notes.state, (snapshot) => `notes: ${snapshot.notes.length}`)}</text>
         <box flexDirection="column">
           <For
             each={select(notes.state, (snapshot) => snapshot.notes)}
             keyBy={(note: Note) => note.id}
           >
-            {(note) => <text>{view.bind(note, line)}</text>}
+            {(note) => <text>{View.bind(note, line)}</text>}
           </For>
         </box>
         <input
           width={40}
-          onInput={view.event((event) => setDraft(event.value))}
-          onEnter={view.event(() =>
+          onInput={View.event((event) => setDraft(event.value))}
+          onEnter={View.event(() =>
             Effect.flatMap(draft.state.get, (text) =>
               Effect.andThen(addNote(notes, text), setDraft("")),
             ),

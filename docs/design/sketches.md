@@ -29,7 +29,7 @@ The original sketch document used forms that later turns rejected. Do not build 
 
 | Rejected                                      | Replaced by                                         | Reason                                                          |
 | --------------------------------------------- | --------------------------------------------------- | --------------------------------------------------------------- |
-| `View.make((props, ui) => ...)`               | `yield* View.Context` inside setup                  | Effect already has one context mechanism                        |
+| `View.make((props, ui) => ...)`               | `View.bind` / `View.event` module functions         | A binding is data; the runtime owns the scope it forks into     |
 | `LocalActor.spawn`, `RemoteActor.connect`     | `Actor.spawn`, `Actor.ref`                          | Location is a declaration, not a second interface               |
 | `Actor.remote(Counter, { runtime: "celld" })` | `Actor.durable(Counter)`                            | Application code does not name the host; the Alchemy Layer does |
 | `createSignal`, `createMemo` as primitives    | `Behavior.value`, `select`                          | One actor interface for simple state and machines               |
@@ -108,14 +108,13 @@ Rules:
 ```tsx
 export const Counter = View.make((props) =>
   Effect.gen(function* () {
-    const view = yield* View.Context;
     const counter = yield* Actor.spawn(Behavior.machine(CounterMachine));
 
-    const count = view.select(counter.state, (state) => state.count);
+    const count = View.select(counter.state, (state) => state.count);
 
     return (
-      <button onClick={view.event(() => counter.send(CounterEvent.Increment))}>
-        Count: {view.bind(count)}
+      <button onClick={View.event(() => counter.send(CounterEvent.Increment))}>
+        Count: {View.bind(count)}
       </button>
     );
   }),
@@ -126,7 +125,7 @@ Rules:
 
 - `View.make` creates one setup Effect per mounted identity. State updates do not run setup again.
 - Setup can fail or require services. Its `E` and `R` types remain visible to the mounting application.
-- `props` supplies component inputs. `View.Context` supplies capabilities. `Scope` owns resource lifetimes.
+- `props` supplies component inputs. `View.bind` and `View.event` are module functions. `Scope` owns resource lifetimes.
 - The view owns a Scope. `Actor.spawn` binds actor shutdown to that Scope.
 - `select` takes an explicit source. It does not find dependencies through ambient reads.
 - `bind` marks a dynamic JSX value. Ordinary JSX values remain static.
@@ -185,12 +184,11 @@ import { Counter } from "../contracts/counter";
 
 export const CounterView = View.make((props: { counterId: CounterId }) =>
   Effect.gen(function* () {
-    const view = yield* View.Context;
     const counter = yield* Actor.ref(Counter, props.counterId);
 
     yield* counter.call(Counter.Add({ amount: 1 }), { timeout: "5 seconds" });
 
-    return <span>{view.bind(counter.state, (state) => state.count)}</span>;
+    return <span>{View.bind(counter.state, (state) => state.count)}</span>;
   }),
 );
 ```
@@ -288,14 +286,13 @@ A durable ref's `state` is fed by the snapshot subscription. The connection has 
 ```tsx
 export const BoardPage = View.make((props: BoardInput) =>
   Effect.gen(function* () {
-    const view = yield* View.Context;
     const { board, composer } = yield* BoardScreen.make(props);
 
-    const tasks = view.select(board.state, (snapshot) => snapshot.tasks);
-    const draft = view.select(composer.state, ComposerSelectors.draft);
-    const submitting = view.select(composer.state, ComposerSelectors.submitting);
-    const message = view.select(composer.state, ComposerSelectors.message);
-    const canRetry = view.select(composer.state, ComposerSelectors.canRetry);
+    const tasks = View.select(board.state, (snapshot) => snapshot.tasks);
+    const draft = View.select(composer.state, ComposerSelectors.draft);
+    const submitting = View.select(composer.state, ComposerSelectors.submitting);
+    const message = View.select(composer.state, ComposerSelectors.message);
+    const canRetry = View.select(composer.state, ComposerSelectors.canRetry);
 
     return (
       <main>
@@ -304,25 +301,25 @@ export const BoardPage = View.make((props: BoardInput) =>
 
         <ul>
           <For each={tasks} keyBy={(task) => task.id}>
-            {(task) => <li>{view.bind(task, (value) => value.title)}</li>}
+            {(task) => <li>{View.bind(task, (value) => value.title)}</li>}
           </For>
         </ul>
 
-        <form onSubmit={view.submit(() => composer.send(ComposerEvent.Submit))}>
+        <form onSubmit={View.submit(() => composer.send(ComposerEvent.Submit))}>
           <input
             aria-label="New task"
-            value={view.bind(draft)}
-            disabled={view.bind(submitting)}
-            onInput={view.event((event) =>
+            value={View.bind(draft)}
+            disabled={View.bind(submitting)}
+            onInput={View.event((event) =>
               composer.send(ComposerEvent.DraftChanged({ value: event.currentTarget.value })),
             )}
           />
-          <button disabled={view.bind(submitting)}>Add task</button>
+          <button disabled={View.bind(submitting)}>Add task</button>
         </form>
 
-        <p role="status">{view.bind(message)}</p>
+        <p role="status">{View.bind(message)}</p>
         <Show when={canRetry}>
-          <button onClick={view.event(() => composer.send(ComposerEvent.Retry))}>
+          <button onClick={View.event(() => composer.send(ComposerEvent.Retry))}>
             Retry this request
           </button>
         </Show>
@@ -341,21 +338,20 @@ The terminal uses the same screen setup, contract, and composer machine. It uses
 ```tsx
 export const BoardTerminal = View.make((props: BoardInput) =>
   Effect.gen(function* () {
-    const view = yield* View.Context;
     const { board, composer } = yield* BoardScreen.make(props);
-    const tasks = view.select(board.state, (snapshot) => snapshot.tasks);
-    const draft = view.select(composer.state, ComposerSelectors.draft);
+    const tasks = View.select(board.state, (snapshot) => snapshot.tasks);
+    const draft = View.select(composer.state, ComposerSelectors.draft);
 
     return (
       <box flexDirection="column">
         <text>Tasks</text>
         <For each={tasks} keyBy={(task) => task.id}>
-          {(task) => <text>{view.bind(task, (value) => value.title)}</text>}
+          {(task) => <text>{View.bind(task, (value) => value.title)}</text>}
         </For>
         <input
-          value={view.bind(draft)}
-          onInput={view.event((value) => composer.send(ComposerEvent.DraftChanged({ value })))}
-          onSubmit={view.event(() => composer.send(ComposerEvent.Submit))}
+          value={View.bind(draft)}
+          onInput={View.event((value) => composer.send(ComposerEvent.DraftChanged({ value })))}
+          onSubmit={View.event(() => composer.send(ComposerEvent.Submit))}
         />
         <ComposerStatus actor={composer} />
       </box>

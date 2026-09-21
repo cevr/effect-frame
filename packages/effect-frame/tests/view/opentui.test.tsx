@@ -29,14 +29,11 @@ interface CounterProps {
 }
 
 const Counter = View.make((props: CounterProps) =>
-  Effect.gen(function* () {
-    const view = yield* View.Context;
-    return (
-      <box flexDirection="column" width={30} height={3}>
-        <text>{view.bind(select(props.count.state, (n) => `count ${n}`))}</text>
-      </box>
-    );
-  }),
+  Effect.succeed(
+    <box flexDirection="column" width={30} height={3}>
+      <text>{View.bind(select(props.count.state, (n) => `count ${n}`))}</text>
+    </box>,
+  ),
 );
 
 interface DraftProps {
@@ -44,19 +41,16 @@ interface DraftProps {
 }
 
 const Composer = View.make((props: DraftProps) =>
-  Effect.gen(function* () {
-    const view = yield* View.Context;
-    return (
-      <input
-        width={20}
-        onInput={view.event((event) =>
-          props.draft
-            .send(Value.Set(event.value))
-            .pipe(Effect.catchTag("ActorStopped", () => Effect.void)),
-        )}
-      />
-    );
-  }),
+  Effect.succeed(
+    <input
+      width={20}
+      onInput={View.event((event) =>
+        props.draft
+          .send(Value.Set(event.value))
+          .pipe(Effect.catchTag("ActorStopped", () => Effect.void)),
+      )}
+    />,
+  ),
 );
 
 describe("terminal view", () => {

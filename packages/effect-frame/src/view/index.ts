@@ -10,7 +10,7 @@ export {
 } from "./control.js";
 export { mount, render } from "./runtime.js";
 export type { Cleanup, EventHandler, Host, HostEvent, PropertyValue, StaticProps } from "./host.js";
-export type { Bound, Capabilities, Handler, Prepared } from "./view.js";
+export { bind, event, submit, type Bound, type Handler, type Prepared } from "./view.js";
 export type {
   Child,
   Component,

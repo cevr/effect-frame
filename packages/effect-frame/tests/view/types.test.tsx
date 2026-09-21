@@ -36,10 +36,9 @@ const Plain = View.make((_props: NoProps) => Effect.succeed(<p>plain</p>));
 
 const NeedsClock = View.make((_props: NoProps) =>
   Effect.gen(function* () {
-    const view = yield* View.Context;
     const clock = yield* Clock;
     const now = yield* clock.now;
-    return <p onClick={view.event(() => Effect.void)}>{String(now)}</p>;
+    return <p onClick={View.event(() => Effect.void)}>{String(now)}</p>;
   }),
 );
 
@@ -55,7 +54,7 @@ const plainNeedsOnlyScope: Equals<
   Effect.Effect<void, never, Scope.Scope>
 > = true;
 
-/** `View.Context` is supplied by `mount`; a real service is not. */
+/** `mount` supplies nothing of its own: a real service stays visible. */
 const clockStaysVisible: Equals<
   ReturnType<typeof mountNeedsClock>,
   Effect.Effect<void, never, Clock | Scope.Scope>
@@ -86,9 +85,8 @@ describe("view types", () => {
  */
 const readyOutsideAScope = View.make((_props: NoProps) =>
   Effect.gen(function* () {
-    const view = yield* View.Context;
     const title = yield* ready(query, "");
-    return <h1>{view.bind(title)}</h1>;
+    return <h1>{View.bind(title)}</h1>;
   }),
 );
 
@@ -123,9 +121,8 @@ const readyOutsideIsNotRunnable: Equals<
 const wrapped = Loading({
   fallback: <p>loading</p>,
   children: Effect.gen(function* () {
-    const view = yield* View.Context;
     const title = yield* ready(query, "");
-    return <h1>{view.bind(title)}</h1>;
+    return <h1>{View.bind(title)}</h1>;
   }),
 });
 
@@ -144,9 +141,8 @@ const mountWrapped = () => mount(wrapped, {}, host, "root");
 const wrappedWithError = Loading({
   fallback: <p>loading</p>,
   children: Effect.gen(function* () {
-    const view = yield* View.Context;
     const title = yield* ready(yield* orErrored(query), "");
-    return <h1>{view.bind(title)}</h1>;
+    return <h1>{View.bind(title)}</h1>;
   }),
 });
 

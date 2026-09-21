@@ -1,4 +1,6 @@
 export * as Route from "./route.js";
+export { Link, isActive, link, type LinkProps } from "./link.js";
+export type { Link as RouteLink } from "./link.js";
 export {
   Location,
   Router,
@@ -6,6 +8,7 @@ export {
   followLinks,
   mount,
   type LocationService,
+  type Match,
   type MountOptions,
   type Navigation,
   type NavigateOptions,

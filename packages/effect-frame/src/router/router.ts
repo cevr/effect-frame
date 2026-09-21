@@ -31,14 +31,23 @@ export interface Navigation {
   readonly kind: "initial" | "push" | "replace" | "pop";
 }
 
+/** Which route the document is on, and at what URL. */
+export interface Match {
+  readonly name: string;
+  readonly url: URL;
+}
+
 export interface RouterService {
   /**
    * Move to a printed href. It cannot fail: a URL no route matches shows
    * the not-found view. An href equal to the current one is not a move.
+   * A typed move prints its href with `route.href`, or is a `Route.link`.
    */
   readonly navigate: (href: string, options?: NavigateOptions) => Effect.Effect<void>;
   /** Every navigation, the current one first. */
   readonly navigations: Source<Navigation>;
+  /** The route the document is on, by name, with its URL. */
+  readonly current: Source<Match>;
 }
 
 export class Router extends Context.Service<Router, RouterService>()(
@@ -148,6 +157,7 @@ export const mount: <R, HostNode>(
   const fallback = notFoundRoute(options.notFound);
   const initial = yield* location.current;
   const navigations = yield* SubscriptionRef.make<Navigation>({ url: initial, kind: "initial" });
+  const nameOf = (url: URL): string => resolve(options.routes, fallback, url).route.name;
   const requests = yield* Queue.unbounded<Request>();
   let mounted: Option.Option<Mounted<R>> = Option.none();
 
@@ -172,6 +182,16 @@ export const mount: <R, HostNode>(
     navigations: {
       get: SubscriptionRef.get(navigations),
       changes: SubscriptionRef.changes(navigations),
+    },
+    current: {
+      get: Effect.map(SubscriptionRef.get(navigations), (moved) => ({
+        name: nameOf(moved.url),
+        url: moved.url,
+      })),
+      changes: Stream.map(SubscriptionRef.changes(navigations), (moved) => ({
+        name: nameOf(moved.url),
+        url: moved.url,
+      })),
     },
   };
 

@@ -3,7 +3,7 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import type { Source } from "effect-frame/actor";
-import { Location, Route, Router, followLinks, mount } from "effect-frame/router";
+import { Link, Location, Route, Router, followLinks, link, mount } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
 import { Dom, View, render } from "effect-frame/view";
 import { Effect, Option, Queue, Ref, Schema, Stream } from "effect";
@@ -68,11 +68,22 @@ const Home = (_props: Route.RouteProps<unknown, unknown>) =>
   Effect.gen(function* () {
     const router = yield* Router;
     homeMounts += 1;
+    // A typed link: the href comes from the route's own Schemas, and
+    // `active` follows the router. Declared before `book` exists at runtime
+    // only in source order; the route is a module-level constant.
+    const toBook = yield* link(book, { id: "5" }, {});
+    const here = yield* link(home, {}, {});
     return (
       <section id="home">
         <a id="to-book" href="/books/7">
           book
         </a>
+        <Link link={toBook} class="nav">
+          typed
+        </Link>
+        <Link link={here} replace>
+          home
+        </Link>
         <button id="go" onClick={View.event(() => router.navigate("/books/9", { replace: true }))}>
           go
         </button>
@@ -86,7 +97,14 @@ const Book = (props: Route.RouteProps<{ readonly id: string }, unknown>) =>
 const NotFound = (props: { readonly url: Source<URL> }) =>
   Effect.succeed(<p id="missing">{View.bind(props.url, (url) => url.pathname)}</p>);
 
-const home = Route.client("home", { path: "/", params: Nothing, search: Nothing, view: Home });
+// Annotated because `Home` links to `home` and `book`, and `book` to none:
+// the checker would otherwise chase the cycle.
+const home: Route.Route<"home", typeof Nothing, typeof Nothing, Router> = Route.client("home", {
+  path: "/",
+  params: Nothing,
+  search: Nothing,
+  view: Home,
+});
 const book = Route.client("book", {
   path: "/books/:id",
   params: Schema.Struct({ id: Schema.String }),
@@ -116,6 +134,38 @@ describe("router", () => {
 
       const missing = yield* start("http://app.test/nowhere");
       expect(textOf(missing.root, "#missing")).toBe("/nowhere");
+    }),
+  );
+
+  it.scoped("a typed link prints the route's href, says when it is current, and moves", () =>
+    Effect.gen(function* () {
+      const { root, router, location } = yield* start("http://app.test/");
+      const anchors = Array.from(root.querySelectorAll("a"));
+      const typed = anchors.find((a) => a.textContent === "typed");
+      const here = anchors.find((a) => a.textContent === "home");
+      expect(typed?.getAttribute("href")).toBe("/books/5");
+      expect(typed?.getAttribute("aria-current")).toBeNull();
+      expect(here?.getAttribute("aria-current")).toBe("page");
+      expect((yield* router.current.get).name).toBe("home");
+
+      typed?.click();
+      yield* render;
+      expect(textOf(root, "#book")).toBe("5");
+      expect((yield* router.current.get).name).toBe("book");
+      expect(location.history).toEqual(["push /books/5"]);
+    }),
+  );
+
+  it.scoped("a replacing link replaces the entry", () =>
+    Effect.gen(function* () {
+      const { root, router, location } = yield* start("http://app.test/books/1");
+      yield* router.navigate("/");
+      yield* render;
+      const here = Array.from(root.querySelectorAll("a")).find((a) => a.textContent === "home");
+      // Already home: the move is not a move, so nothing is recorded.
+      here?.click();
+      yield* render;
+      expect(location.history).toEqual(["push /"]);
     }),
   );
 
@@ -152,9 +202,9 @@ describe("router", () => {
   it.scoped("a same-origin link click is intercepted; a modified click is not", () =>
     Effect.gen(function* () {
       const { root, location } = yield* start("http://app.test/");
-      const link = Option.getOrThrow(Option.fromNullishOr(root.querySelector("#to-book")));
+      const anchor = Option.getOrThrow(Option.fromNullishOr(root.querySelector("#to-book")));
       const plain = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
-      link.dispatchEvent(plain);
+      anchor.dispatchEvent(plain);
       yield* render;
       expect(plain.defaultPrevented).toBe(true);
       expect(textOf(root, "#book")).toBe("7");

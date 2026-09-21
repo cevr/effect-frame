@@ -50,14 +50,14 @@ against `webdriver-ts/src/`. See K8 and K9.
 
 ## Source versions
 
-| Source                           | Pinned revision or tag                                    | Meaning                                                           |
-| -------------------------------- | --------------------------------------------------------- | ----------------------------------------------------------------- |
-| krausest js-framework-benchmark  | `f2df01a8679de05225c32714ca8cecbea3d78c5d` (master)       | 186 implementations. Latest tagged run `chrome152`.               |
-| Octane                           | `octane@0.2.7` in the krausest entry; `main` for the repo | Octane's own repo holds the 20-suite table.                       |
-| milomg js-reactivity-benchmark   | `main`                                                    | pnpm workspace: `packages/core`, `packages/node`, `packages/web`. |
-| Solid in krausest                | `solid-js: ^1.9.3`                                        | Solid 1, not Solid 2.                                             |
-| Solid in Octane's fixtures       | `solid-js: 2.0.0-beta.20`, `@solidjs/web: 2.0.0-beta.20`  | Solid 2 beta, pinned through the pnpm catalog.                    |
-| Solid in js-reactivity-benchmark | `solid-js: ^1.9.11`; also `@solidjs/signals: ^0.10.2`     | The active Solid adapter imports `solid-js`.                      |
+| Source                           | Pinned revision or tag                                    | Meaning                                                                |
+| -------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------- |
+| krausest js-framework-benchmark  | `f2df01a8679de05225c32714ca8cecbea3d78c5d` (master)       | 191 keyed and 67 non-keyed directories. Latest tagged run `chrome152`. |
+| Octane                           | `octane@0.2.7` in the krausest entry; `main` for the repo | Octane's own repo holds the 20-suite table.                            |
+| milomg js-reactivity-benchmark   | `main`                                                    | pnpm workspace: `packages/core`, `packages/node`, `packages/web`.      |
+| Solid in krausest                | `solid-js: ^1.9.3`                                        | Solid 1, not Solid 2.                                                  |
+| Solid in Octane's fixtures       | `solid-js: 2.0.0-beta.20`, `@solidjs/web: 2.0.0-beta.20`  | Solid 2 beta, pinned through the pnpm catalog.                         |
+| Solid in js-reactivity-benchmark | `solid-js: ^1.9.11`; also `@solidjs/signals: ^0.10.2`     | The active Solid adapter imports `solid-js`.                           |
 
 Commands used: `curl` against `raw.githubusercontent.com` and the GitHub
 contents API. See K0, O0, R0.
@@ -67,6 +67,15 @@ contents API. See K0, O0, R0.
 Repository: <https://github.com/krausest/js-framework-benchmark>.
 Official results: <https://krausest.github.io/js-framework-benchmark/index.html>.
 See K0 and K2.
+
+Size, with a discrepancy left open: the contents API returns **191 directories
+under `frameworks/keyed` and 67 under `frameworks/non-keyed`** — 258 in total,
+every entry a directory, neither listing truncated. The README states "186
+implementations" twice. Those two figures do not reconcile, and 186 is not a
+stale directory count, since 191 keyed directories alone exceed it. Either the
+README counts something narrower than a directory, or it is out of date. This
+review did not determine which, and no conclusion here depends on it. See K0
+and K1.
 
 ### Measured operations
 
@@ -548,7 +557,7 @@ framework, "about 12 hours" for all) are quoted, not measured here.
 
 ## Primary source inventory
 
-- **K0 — Repository and revision.** master `f2df01a8679de05225c32714ca8cecbea3d78c5d`, via `https://api.github.com/repos/krausest/js-framework-benchmark/commits/master`. [Repository](https://github.com/krausest/js-framework-benchmark).
+- **K0 — Repository, revision, directory counts.** master `f2df01a8679de05225c32714ca8cecbea3d78c5d`, via `https://api.github.com/repos/krausest/js-framework-benchmark/commits/master`. [Repository](https://github.com/krausest/js-framework-benchmark). Counts checked 2026-09-21 against `https://api.github.com/repos/krausest/js-framework-benchmark/contents/frameworks/keyed` and `.../non-keyed`: 191 and 67 entries, all of `"type": "dir"`.
 - **K1 — Operations, memory and startup metrics, weighted geometric mean.** [README, "About the benchmarks"](https://github.com/krausest/js-framework-benchmark/blob/master/README.md). Linked method notes: [how the duration is measured](https://github.com/krausest/js-framework-benchmark/wiki/How-the-duration-is-measured), [weighted geometric mean](https://github.com/krausest/js-framework-benchmark/wiki/Computation-of-the-weighted-geometric-mean).
 - **K2 — Official results page.** <https://krausest.github.io/js-framework-benchmark/index.html>, named in the README's "Official results" section.
 - **K3 — Keyed definition, node version, local run sequence, driver, result JSON, selector flags.** README sections 2.2 through 2.6 and section 3, [README](https://github.com/krausest/js-framework-benchmark/blob/master/README.md).

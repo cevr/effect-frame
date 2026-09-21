@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import type { Pure } from "./contract.js";
-import type { Unauthorized, Unreachable } from "./vocabulary.js";
+import { Unauthorized, Unreachable } from "./vocabulary.js";
 
 export { canonicalize } from "./canonical-json.js";
 
@@ -140,10 +140,51 @@ export const keyOf = (key: QueryKey): string => `${key.query}@${key.version}/${k
  * at once. Ticket #16 builds readiness over this same union; the tags and
  * the field names are the coordination point and must not drift.
  */
-export type QueryState<A, E> =
-  | { readonly _tag: "Loading" }
-  | { readonly _tag: "Ready"; readonly value: A; readonly stale: boolean }
-  | { readonly _tag: "Failed"; readonly error: E };
+export type QueryState<A, E> = QueryLoading | QueryReady<A> | QueryFailedState<E>;
+
+export interface QueryLoading {
+  readonly _tag: "Loading";
+}
+
+export interface QueryReady<A> {
+  readonly _tag: "Ready";
+  readonly value: A;
+  readonly stale: boolean;
+}
+
+export interface QueryFailedState<E> {
+  readonly _tag: "Failed";
+  readonly error: E;
+}
+
+export const isLoading = <A, E>(state: QueryState<A, E>): state is QueryLoading =>
+  state._tag === "Loading";
+
+export const isReady = <A, E>(state: QueryState<A, E>): state is QueryReady<A> =>
+  state._tag === "Ready";
+
+export const isFailed = <A, E>(state: QueryState<A, E>): state is QueryFailedState<E> =>
+  state._tag === "Failed";
+
+export interface QueryStateCases<A, E, Out> {
+  readonly Loading: () => Out;
+  readonly Ready: (value: A, stale: boolean) => Out;
+  readonly Failed: (error: E) => Out;
+}
+
+/** Fold the three states. Exhaustive: a fourth state cannot be added quietly. */
+export const match = <A, E, Out>(
+  state: QueryState<A, E>,
+  cases: QueryStateCases<A, E, Out>,
+): Out => {
+  if (isLoading(state)) {
+    return cases.Loading();
+  }
+  if (isReady(state)) {
+    return cases.Ready(state.value, state.stale);
+  }
+  return cases.Failed(state.error);
+};
 
 export const Loading = <A, E>(): QueryState<A, E> => ({ _tag: "Loading" });
 
@@ -154,6 +195,9 @@ export const Ready = <A, E>(value: A, stale: boolean): QueryState<A, E> => ({
 });
 
 export const Failed = <A, E>(error: E): QueryState<A, E> => ({ _tag: "Failed", error });
+
+/** The constructors and guards under the type's own name. */
+export const QueryState = { Loading, Ready, Failed, isLoading, isReady, isFailed, match };
 
 /** Marks a ready value stale. Loading and Failed have nothing to hold. */
 export const markStale = <A, E>(state: QueryState<A, E>): QueryState<A, E> => {
@@ -218,3 +262,16 @@ export type QueryFailure =
   | QueryFailed
   | Unauthorized
   | Unreachable;
+
+/** The same union as a Schema, so a value from an untyped place can be narrowed. */
+export const QueryFailure = Schema.Union([
+  UnknownQuery,
+  QueryVersionMismatch,
+  PolicyMissing,
+  InvalidQueryArgs,
+  QueryFailed,
+  Unauthorized,
+  Unreachable,
+]);
+
+export const isQueryFailure = Schema.is(QueryFailure);

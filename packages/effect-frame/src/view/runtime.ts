@@ -3,7 +3,7 @@ import { Effect, Exit, Match, Option, Predicate, Queue, Scope, Stream } from "ef
 import type { Accessor } from "@solidjs/signals";
 import { createRenderEffect, createRoot, createSignal, flush, untrack } from "@solidjs/signals";
 import type { Cleanup, Host, PropertyValue, StaticProps } from "./host.js";
-import type { ElementNode, ForNode, Node, PropValue } from "./jsx-runtime.js";
+import type { ElementNode, ForNode, Node, PropValue, ShowNode } from "./jsx-runtime.js";
 import type { Bound, Prepared, View } from "./view.js";
 import { Context as ViewContext, capabilities as makeCapabilities } from "./view.js";
 
@@ -244,10 +244,7 @@ const plan = <HostNode>(renderer: Renderer<HostNode>, node: Node): Build<HostNod
       // The branch is planned lazily, inside the owner that shows it, so a
       // hidden branch has tracked no source. `For` plans each row the same
       // way, for the same reason.
-      Show: (branch) =>
-        show(renderer.tracker, renderer.host, renderer.tracker.track(branch.when), () =>
-          plan(renderer, branch.children),
-        ),
+      Show: (branch) => planShow(renderer, branch),
     }),
   );
 
@@ -302,6 +299,27 @@ const sequence =
   };
 
 /**
+ * The branch and its fallback are planned lazily, each inside the owner
+ * that shows it, so a hidden side has tracked no source. The branch's body
+ * receives the tested value as a signal-backed source, read straight from
+ * the graph, which is what lets a narrowed reading of it be honest: the
+ * source is only ever read while the test holds.
+ */
+const planShow = <HostNode, A>(
+  renderer: Renderer<HostNode>,
+  branch: ShowNode<A>,
+): Build<HostNode> => {
+  const value = renderer.tracker.track(branch.when);
+  return show(
+    renderer.tracker,
+    renderer.host,
+    () => branch.test(value()),
+    () => plan(renderer, branch.render(signalSource(value))),
+    () => plan(renderer, branch.fallback),
+  );
+};
+
+/**
  * A branch that is currently drawn: the span it occupies and the reactive
  * owner that keeps it live. Hidden is the absence of one, so there is no
  * state describing a branch that has nodes but no owner, or the reverse.
@@ -326,11 +344,14 @@ const show =
     host: Host<HostNode>,
     when: Accessor<boolean>,
     child: () => Build<HostNode>,
+    fallback: () => Build<HostNode>,
   ): Build<HostNode> =>
   (parent, slot, changed) => {
-    let branch: Option.Option<Branch<HostNode>> = Option.none();
+    // Exactly one of the two is drawn at any time: the branch while `when`
+    // holds, the fallback otherwise. Both are built the same way.
+    let shown: Option.Option<Branch<HostNode>> = Option.none();
 
-    const build = (): Branch<HostNode> => {
+    const build = (side: () => Build<HostNode>): Branch<HostNode> => {
       const inner: Slot<HostNode> = { nodes: [] };
       // One reactive owner and one Effect scope per shown branch: the render
       // effects live in the first, the source subscriptions in the second.
@@ -340,7 +361,7 @@ const show =
       const branchOwner = tracker.owned(() =>
         createRoot((disposeBranch) => {
           untrack(() =>
-            child()(parent, inner, () => {
+            side()(parent, inner, () => {
               slot.nodes = inner.nodes;
               changed();
             }),
@@ -357,26 +378,30 @@ const show =
       };
     };
 
-    const tearDown = (shown: Branch<HostNode>): void => {
-      shown.dispose();
-      for (const node of shown.slot.nodes) {
+    const tearDown = (drawn: Branch<HostNode>): void => {
+      drawn.dispose();
+      for (const node of drawn.slot.nodes) {
         host.remove(parent, node);
       }
     };
 
-    const apply = (visible: boolean): void => {
-      if (visible === Option.isSome(branch)) {
+    let visible: Option.Option<boolean> = Option.none();
+    const sideFor = (next: boolean): (() => Build<HostNode>) => {
+      if (next) {
+        return child;
+      }
+      return fallback;
+    };
+
+    const apply = (next: boolean): void => {
+      if (Option.contains(visible, next)) {
         return;
       }
-      if (visible) {
-        const shown = build();
-        branch = Option.some(shown);
-        slot.nodes = shown.slot.nodes;
-      } else {
-        Option.match(branch, { onNone: () => {}, onSome: tearDown });
-        branch = Option.none();
-        slot.nodes = [];
-      }
+      Option.match(shown, { onNone: () => {}, onSome: tearDown });
+      const drawn = build(sideFor(next));
+      shown = Option.some(drawn);
+      visible = Option.some(next);
+      slot.nodes = drawn.slot.nodes;
       changed();
     };
 

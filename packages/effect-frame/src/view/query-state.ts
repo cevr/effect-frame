@@ -1,6 +1,17 @@
 import type { QueryState as ActorQueryState, Source } from "effect-frame/actor";
 import { Effect, Match, Schema, Stream, SubscriptionRef } from "effect";
 
+export {
+  isFailed,
+  isLoading,
+  isReady,
+  match,
+  type QueryFailedState,
+  type QueryLoading,
+  type QueryReady,
+  type QueryStateCases,
+} from "effect-frame/actor/client";
+
 /**
  * What a client can observe about a query at one moment (#16): loading,
  * ready with a value that may be stale, or failed with an error. Never two

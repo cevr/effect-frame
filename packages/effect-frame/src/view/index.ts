@@ -1,5 +1,12 @@
 export * as View from "./view.js";
-export { For, Show, type ForProps, type ShowProps } from "./control.js";
+export {
+  For,
+  Show,
+  type ForProps,
+  type ShowIfProps,
+  type ShowProps,
+  type ShowWhenProps,
+} from "./control.js";
 export { mount, render } from "./runtime.js";
 export type { Cleanup, EventHandler, Host, HostEvent, PropertyValue, StaticProps } from "./host.js";
 export type { Bound, Capabilities, Handler, Prepared } from "./view.js";
@@ -26,11 +33,13 @@ export {
   ErroredScope,
   Loading,
   LoadingScope,
+  Query,
   orErrored,
   ready,
   readyWithStale,
   type AwaitProps,
   type ErroredProps,
   type LoadingProps,
+  type QueryProps,
   type ReadyValue,
 } from "./readiness.js";

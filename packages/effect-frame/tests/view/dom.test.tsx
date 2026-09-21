@@ -5,7 +5,7 @@ registerDom();
 import { Behavior, Value, modify, select, spawn } from "effect-frame/actor";
 import type { LocalActorRef, SetValue, Source } from "effect-frame/actor";
 import { Dom, For, Show, View, mount, render } from "effect-frame/view";
-import { Effect, Exit, Ref, Scope, Stream } from "effect";
+import { Effect, Exit, Option, Ref, Scope, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 /** A view with no input of its own still takes props: an empty record. */
@@ -100,6 +100,45 @@ const NestedToggle = View.make((props: NestedToggleProps) =>
 const textOf = (root: HTMLElement, selector: string): string =>
   root.querySelector(selector)?.textContent ?? "";
 
+interface HitsProps {
+  readonly hits: Source<ReadonlyArray<string>>;
+}
+
+/**
+ * The narrowing form: the branch reads a source of the tested value, which
+ * exists only while the test holds, and the fallback draws otherwise.
+ */
+const Hits = View.make((props: HitsProps) =>
+  Effect.gen(function* () {
+    const view = yield* View.Context;
+    return (
+      <section>
+        <Show when={props.hits} is={(xs) => xs.length > 0} fallback={<p id="none">no hits</p>}>
+          {(xs) => <p id="first">{view.bind(select(xs, (found) => found[0] ?? ""))}</p>}
+        </Show>
+      </section>
+    );
+  }),
+);
+
+interface OptionalProps {
+  readonly name: Source<Option.Option<string>>;
+}
+
+/** A type predicate narrows the branch's source to the `Some`. */
+const Optional = View.make((props: OptionalProps) =>
+  Effect.gen(function* () {
+    const view = yield* View.Context;
+    return (
+      <section>
+        <Show when={props.name} is={Option.isSome<string>}>
+          {(some) => <b id="name">{view.bind(select(some, (found) => found.value))}</b>}
+        </Show>
+      </section>
+    );
+  }),
+);
+
 describe("browser view", () => {
   it.scoped("a bound source writes its first value and then every change", () =>
     Effect.gen(function* () {
@@ -168,6 +207,48 @@ describe("browser view", () => {
       yield* open.call(Value.Set(false));
       yield* render;
       expect(root.querySelector("#body")).toBeNull();
+    }),
+  );
+
+  it.scoped("Show narrows to the tested value and draws its fallback otherwise", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const hits = yield* spawn(Behavior.value<ReadonlyArray<string>>([]));
+      yield* mount(Hits, { hits: hits.state }, Dom.host, root);
+      expect(textOf(root, "#none")).toBe("no hits");
+      expect(root.querySelector("#first")).toBeNull();
+
+      yield* hits.call(Value.Set(["alpha", "beta"]));
+      yield* render;
+      expect(root.querySelector("#none")).toBeNull();
+      expect(textOf(root, "#first")).toBe("alpha");
+
+      // A change that keeps the test true updates the branch in place.
+      yield* hits.call(Value.Set(["gamma"]));
+      yield* render;
+      expect(textOf(root, "#first")).toBe("gamma");
+
+      yield* hits.call(Value.Set([]));
+      yield* render;
+      expect(root.querySelector("#first")).toBeNull();
+      expect(textOf(root, "#none")).toBe("no hits");
+    }),
+  );
+
+  it.scoped("Show accepts a type predicate and hands the branch the narrowed source", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const name = yield* spawn(Behavior.value<Option.Option<string>>(Option.none()));
+      yield* mount(Optional, { name: name.state }, Dom.host, root);
+      expect(root.querySelector("#name")).toBeNull();
+
+      yield* name.call(Value.Set(Option.some("Ada")));
+      yield* render;
+      expect(textOf(root, "#name")).toBe("Ada");
+
+      yield* name.call(Value.Set(Option.none()));
+      yield* render;
+      expect(root.querySelector("#name")).toBeNull();
     }),
   );
 

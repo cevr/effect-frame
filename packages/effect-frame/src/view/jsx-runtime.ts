@@ -50,14 +50,23 @@ export interface ForNode<Item> {
   readonly render: (item: Source<Item>) => Node;
 }
 
-export interface ShowNode {
+/**
+ * A branch. `test` decides from the source's value whether the branch is
+ * shown; `render` receives a source of that value that exists only while
+ * it is, so a narrowed reading of it never has to represent the other case.
+ */
+export interface ShowNode<A = unknown> {
   readonly _tag: "Show";
-  readonly when: Source<boolean>;
-  readonly children: Node;
+  readonly when: Source<A>;
+  // Method signatures, so a `ShowNode<boolean>` is a `ShowNode<unknown>` and
+  // the tree can hold one without knowing what it tests.
+  test(value: A): boolean;
+  render(value: Source<A>): Node;
+  readonly fallback: Node;
 }
 
 /** Control flow in the tree. `control.ts` builds it; `runtime.ts` reads it. */
-export type ControlNode = ForNode<never> | ShowNode;
+export type ControlNode = ForNode<never> | ShowNode<unknown>;
 
 export const Empty: EmptyNode = { _tag: "Empty" };
 

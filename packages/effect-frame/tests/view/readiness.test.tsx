@@ -10,6 +10,7 @@ import {
   Errored,
   Html,
   Loading,
+  Query,
   QueryState,
   View,
   mount,
@@ -57,6 +58,13 @@ const bound = <A, B>(source: Source<A>, project: (value: A) => B): Bound<B> => (
  * runs it twice rather than guessing a count.
  */
 const flush = Effect.andThen(render, render);
+
+const staleClass = (stale: boolean): string => {
+  if (stale) {
+    return "stale";
+  }
+  return "fresh";
+};
 
 /** Mount a scope view, which takes no props of its own. */
 const mountScoped = <E, R>(view: View.View<Record<string, never>, E, R>, root: HTMLElement) =>
@@ -260,6 +268,46 @@ describe("readiness through context", () => {
     }),
   );
 
+  it.scoped("Query draws one of three branches and exposes the stale flag", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const query = yield* QueryState.fakeQuery<string, string>();
+      const Page = View.make(() =>
+        Effect.succeed(
+          <Query
+            state={query.source}
+            loading={<p id="q-loading">loading</p>}
+            ready={(value, stale) => (
+              <h1 id="q-ready" class={bound(stale, staleClass)}>
+                {bound(value, (text) => text)}
+              </h1>
+            )}
+            failed={(error) => <p id="q-failed">{bound(error, (text) => text)}</p>}
+          />,
+        ),
+      );
+
+      yield* mountScoped(Page, root);
+      expect(textOf(root, "#q-loading")).toBe("loading");
+
+      yield* query.resolve("Alpha");
+      yield* flush;
+      expect(has(root, "#q-loading")).toBe(false);
+      expect(textOf(root, "#q-ready")).toBe("Alpha");
+      expect(root.querySelector("#q-ready")?.getAttribute("class")).toBe("fresh");
+
+      yield* query.refetch;
+      yield* flush;
+      expect(textOf(root, "#q-ready")).toBe("Alpha");
+      expect(root.querySelector("#q-ready")?.getAttribute("class")).toBe("stale");
+
+      yield* query.reject("boom");
+      yield* flush;
+      expect(has(root, "#q-ready")).toBe(false);
+      expect(textOf(root, "#q-failed")).toBe("boom");
+    }),
+  );
+
   it.scoped("Await matches the union to one of three views, with no scope", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
@@ -267,7 +315,6 @@ describe("readiness through context", () => {
 
       const Page = Await({
         query: query.source,
-        before: { value: "", error: "" },
         loading: <p id="await-loading">loading</p>,
         ready: (value: Source<ReadyValue<string>>) => (
           <h1 id="await-ready">{bound(value, (state) => state.value)}</h1>

@@ -1,5 +1,4 @@
-import type { Source } from "effect-frame/actor";
-import { select } from "effect-frame/actor/client";
+import { Source, isFailed, isLoading, isReady, select } from "effect-frame/actor/client";
 import { Context as ServiceMap, Effect, Match, Option, Stream, SubscriptionRef } from "effect";
 import { Show } from "./control.js";
 import type { Node } from "./jsx-runtime.js";
@@ -194,12 +193,6 @@ const holdSome = <A,>(
     Stream.map(Stream.filter(changes, Option.isSome), (some) => some.value),
   );
 
-const isReady = <Value, Error>(state: QueryState<Value, Error>): boolean =>
-  Match.value(state).pipe(
-    Match.withReturnType<boolean>(),
-    Match.tagsExhaustive({ Loading: () => false, Ready: () => true, Failed: () => false }),
-  );
-
 /** `true` once the query has stopped being in flight, either way. */
 const hasSettled = <Value, Error>(state: QueryState<Value, Error>): boolean =>
   Match.value(state).pipe(
@@ -389,69 +382,72 @@ export const Errored = <E, R>(
   );
 
 // ---------------------------------------------------------------------------
-// Await
+// Query and Await
 // ---------------------------------------------------------------------------
+
+export interface QueryProps<Value, Error> {
+  readonly state: Source<QueryState<Value, Error>>;
+  readonly loading: Node;
+  readonly failed: (error: Source<Error>) => Node;
+  /** `stale` is `true` while a refresh is in flight and the value is the last one. */
+  readonly ready: (value: Source<Value>, stale: Source<boolean>) => Node;
+}
+
+/**
+ * The other half of the pair: match the union yourself, with no scope in
+ * context and no registration. `ready` inside `Loading` is the facade for
+ * the common case, and `Query` is for a view that wants all three states
+ * in one place. It is three narrowing `Show`s, so each branch reads a
+ * source that exists only while its state holds: no placeholder value, no
+ * cast, and nothing to name for a state that has not been reached.
+ */
+export const Query = <Value, Error>(props: QueryProps<Value, Error>): Node => (
+  <>
+    <Show when={props.state} is={isLoading<Value, Error>}>
+      {props.loading}
+    </Show>
+    <Show when={props.state} is={isReady<Value, Error>}>
+      {(found) =>
+        props.ready(
+          select(found, (state) => state.value),
+          select(found, (state) => state.stale),
+        )
+      }
+    </Show>
+    <Show when={props.state} is={isFailed<Value, Error>}>
+      {(found) => props.failed(select(found, (state) => state.error))}
+    </Show>
+  </>
+);
 
 export interface AwaitProps<Value, Error> {
   readonly query: Source<QueryState<Value, Error>>;
   readonly loading: Node;
   readonly failed: (error: Source<Error>) => Node;
   readonly ready: (value: Source<ReadyValue<Value>>) => Node;
-  /**
-   * What the Ready and Failed branches read before their state has ever been
-   * reached. Asking for it is the honest alternative to a cast: a `Source<A>`
-   * must answer `get` synchronously, and `Show` has not yet put the branch in
-   * the tree, so this value is never drawn. Making the caller name it keeps
-   * `Await` free of both `any` and a fourth state.
-   */
-  readonly before: { readonly value: Value; readonly error: Error };
 }
 
 /**
- * The other half of the pair: match the union yourself, with no scope in
- * context and no registration. `Await` is a view rather than a control node
- * because it needs an Effect to build its three branches' sources.
- *
- * It requires nothing. That is the point of showing both: `ready` inside
- * `Loading` is the facade for the common case, and `Await` is the escape
- * hatch for a view that wants all three states in one place.
+ * `Query` as a view, with the value and the stale flag as one `ReadyValue`
+ * source. It requires nothing, as `Query` does.
  */
 export const Await = <Value, Error>(
   props: AwaitProps<Value, Error>,
 ): View<Record<string, never>, never, never> =>
   makeView(() =>
-    Effect.gen(function* () {
-      const shared = props.query;
-      const initial = yield* shared.get;
-
-      const readyValue = yield* holdSome<ReadyValue<Value>>(
-        Option.getOrElse(readyValueOf(initial), () => ({
-          value: props.before.value,
-          stale: false,
-        })),
-        Stream.map(shared.changes, readyValueOf),
-      );
-      const errorValue = yield* holdSome<Error>(
-        Option.getOrElse(errorOf(initial), () => props.before.error),
-        Stream.map(shared.changes, errorOf),
-      );
-
-      const isLoadingNow = yield* held(
-        !hasSettled(initial),
-        Stream.map(shared.changes, (state) => !hasSettled(state)),
-      );
-      const isReadyNow = yield* held(isReady(initial), Stream.map(shared.changes, isReady));
-      const isFailedNow = yield* held(
-        !isNotFailed(initial),
-        Stream.map(shared.changes, (state) => !isNotFailed(state)),
-      );
-
-      return (
-        <>
-          <Show when={isLoadingNow}>{props.loading}</Show>
-          <Show when={isReadyNow}>{props.ready(readyValue)}</Show>
-          <Show when={isFailedNow}>{props.failed(errorValue)}</Show>
-        </>
-      );
-    }),
+    Effect.succeed(
+      <Query
+        state={props.query}
+        loading={props.loading}
+        failed={props.failed}
+        ready={(value, stale) =>
+          props.ready(
+            select(Source.all({ value, stale }), (both) => ({
+              value: both.value,
+              stale: both.stale,
+            })),
+          )
+        }
+      />,
+    ),
   );

@@ -1,7 +1,7 @@
 import type { Source } from "effect-frame/actor";
 import type { Effect, Scope } from "effect";
 import { Option, Predicate } from "effect";
-import type { Bound, Prepared } from "./view.js";
+import type { Attached, Bound, Prepared } from "./view.js";
 
 /**
  * The JSX element model. A tree is data: the runtime walks it once at mount
@@ -84,8 +84,18 @@ export interface MatchNode<A = unknown> {
   render(key: string, value: Source<A>): Node;
 }
 
+/**
+ * Children drawn under another host node. The portal owns them: they leave
+ * when the portal's branch or row does, wherever they were drawn.
+ */
+export interface PortalNode {
+  readonly _tag: "Portal";
+  readonly into: unknown;
+  readonly children: Node;
+}
+
 /** Control flow in the tree. `control.ts` builds it; `runtime.ts` reads it. */
-export type ControlNode = ForNode<unknown> | ShowNode<unknown> | MatchNode<unknown>;
+export type ControlNode = ForNode<unknown> | ShowNode<unknown> | MatchNode<unknown> | PortalNode;
 
 export const Empty: EmptyNode = { _tag: "Empty" };
 
@@ -105,10 +115,15 @@ export interface StaticValue {
 }
 
 /** Every prop value the runtime understands, once it has been sorted. */
-export type PropValue = Bound<unknown> | Prepared | StaticValue;
+export type PropValue = Bound<unknown> | Prepared | Attached<unknown> | StaticValue;
 
 /** What JSX may write in a prop position, before `classify` sorts it. */
-export type RawProp = Child | Bound<unknown> | Prepared;
+export type RawProp =
+  | Child
+  | Bound<unknown>
+  | Prepared
+  | Attached<unknown>
+  | ReadonlyArray<Attached<unknown>>;
 
 /**
  * One element's props as JSX wrote them. `children` is a prop like any
@@ -119,7 +134,14 @@ export interface ElementProps {
   readonly [name: string]: RawProp;
 }
 
-const isList = (value: RawProp): value is ReadonlyArray<Child> => Array.isArray(value);
+const isList = (value: RawProp): value is ReadonlyArray<Child> | ReadonlyArray<Attached<unknown>> =>
+  Array.isArray(value);
+
+/** A prop marker has no meaning as a child. */
+const drawsNothing = (
+  value: Node | Prepared | Attached<unknown>,
+): value is Prepared | Attached<unknown> =>
+  Predicate.or(Predicate.isTagged("Prepared"), Predicate.isTagged("Attached"))(value);
 
 /**
  * Parse one JSX child position into a tagged node. A prepared event has no
@@ -138,7 +160,7 @@ export const parse = (child: RawProp): Node => {
   if (Predicate.isBoolean(child)) {
     return Empty;
   }
-  if (child._tag === "Prepared") {
+  if (drawsNothing(child)) {
     return Empty;
   }
   return child;

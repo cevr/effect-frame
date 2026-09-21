@@ -1,5 +1,8 @@
+import type { Scope } from "effect";
 import { Effect, Option } from "effect";
 import type { Cleanup, EventHandler, Host, PropertyValue, StaticProps } from "../host.js";
+import type { Attached } from "../view.js";
+import { attach as attachNode } from "../view.js";
 
 /**
  * The browser host. Property names reach `setProperty` exactly as JSX wrote
@@ -48,6 +51,18 @@ const valueOf = (event: Event): string => {
   return "";
 };
 
+/**
+ * A behaviour for a DOM element. The runtime hands the element it created,
+ * so a view can focus it, observe it, or hand it to a widget, in the scope
+ * that owns the element. `<input attach={Dom.attach((el) => Effect.sync(() => el.focus()))} />`.
+ */
+export const attach = (
+  run: (element: Element) => Effect.Effect<unknown, never, Scope.Scope>,
+): Attached<DomNode> =>
+  attachNode<DomNode>((node) =>
+    Option.match(asElement(node), { onNone: () => Effect.void, onSome: run }),
+  );
+
 export const host: Host<DomNode> = {
   createElement: (tag: string, staticProps: StaticProps) => {
     const element = document.createElement(tag);
@@ -78,6 +93,7 @@ export const host: Host<DomNode> = {
     node.addEventListener(name, listener);
     return () => node.removeEventListener(name, listener);
   },
+  attach: (node, run) => run(node),
 };
 
 // ---------------------------------------------------------------------------
@@ -172,6 +188,7 @@ export const hydrate = (root: Node): Hydration => {
       return host.createText(text);
     },
     setProperty: host.setProperty,
+    attach: host.attach,
     insert: (parent, node, anchor) => {
       if (node.parentNode === parent && Option.isNone(anchor)) {
         return;

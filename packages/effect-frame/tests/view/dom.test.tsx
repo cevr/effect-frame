@@ -4,7 +4,7 @@ registerDom();
 
 import { Behavior, Cell, Value, modify, select, spawn } from "effect-frame/actor";
 import type { LocalActorRef, SetValue, Source } from "effect-frame/actor";
-import { Dom, For, Match, Show, View, mount, render } from "effect-frame/view";
+import { Dom, For, Match, Portal, Show, View, mount, render } from "effect-frame/view";
 import { Deferred, Effect, Exit, Option, Ref, Scope, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
@@ -165,6 +165,59 @@ const JobView = (props: JobProps) =>
     </section>,
   );
 
+interface AttachProps {
+  readonly open: Source<boolean>;
+  readonly log: Ref.Ref<ReadonlyArray<string>>;
+}
+
+/**
+ * A behaviour runs once its element is in the document, in the scope of
+ * the branch that owns the element; its finalizer runs when the branch
+ * leaves. Two compose in order.
+ */
+const Attaching = (props: AttachProps) =>
+  Effect.succeed(
+    <section>
+      <Show when={props.open}>
+        <input
+          id="field"
+          attach={[
+            Dom.attach((element) =>
+              Effect.gen(function* () {
+                yield* Ref.update(props.log, (xs) => [...xs, `first:${element.isConnected}`]);
+                yield* Effect.addFinalizer(() => Ref.update(props.log, (xs) => [...xs, "gone"]));
+              }),
+            ),
+            Dom.attach((element) =>
+              Effect.sync(() => {
+                if (element instanceof HTMLInputElement) {
+                  element.focus();
+                }
+              }),
+            ),
+          ]}
+        />
+      </Show>
+    </section>,
+  );
+
+interface PortalProps {
+  readonly open: Source<boolean>;
+  readonly into: Element;
+}
+
+/** A dialog drawn under another node, owned by the branch that opened it. */
+const WithPortal = (props: PortalProps) =>
+  Effect.succeed(
+    <section>
+      <Show when={props.open}>
+        <Portal into={props.into}>
+          <dialog id="modal">hello</dialog>
+        </Portal>
+      </Show>
+    </section>,
+  );
+
 describe("browser view", () => {
   it.scoped("a bound source writes its first value and then every change", () =>
     Effect.gen(function* () {
@@ -293,6 +346,46 @@ describe("browser view", () => {
       yield* render;
       expect(root.querySelector("#running")).toBeNull();
       expect(textOf(root, "#done")).toBe("ok");
+    }),
+  );
+
+  it.scoped("a behaviour runs once its element is in the document and ends with its branch", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      document.body.appendChild(root);
+      const log = yield* Ref.make<ReadonlyArray<string>>([]);
+      const open = yield* spawn(Behavior.value(false));
+      yield* mount(Attaching, { open: open.state, log }, Dom.host, root);
+      expect(yield* Ref.get(log)).toEqual([]);
+
+      yield* open.call(Value.Set(true));
+      yield* render;
+      expect(yield* Ref.get(log)).toEqual(["first:true"]);
+      expect(document.activeElement?.id).toBe("field");
+
+      yield* open.call(Value.Set(false));
+      yield* render;
+      expect(yield* Ref.get(log)).toEqual(["first:true", "gone"]);
+      root.remove();
+    }),
+  );
+
+  it.scoped("a Portal draws under its target and leaves with its branch", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const into = document.createElement("div");
+      const open = yield* spawn(Behavior.value(false));
+      yield* mount(WithPortal, { open: open.state, into }, Dom.host, root);
+      expect(into.querySelector("#modal")).toBeNull();
+
+      yield* open.call(Value.Set(true));
+      yield* render;
+      expect(root.querySelector("#modal")).toBeNull();
+      expect(textOf(into, "#modal")).toBe("hello");
+
+      yield* open.call(Value.Set(false));
+      yield* render;
+      expect(into.querySelector("#modal")).toBeNull();
     }),
   );
 

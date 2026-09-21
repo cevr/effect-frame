@@ -1,7 +1,10 @@
 import type { BaseRenderable, RenderContext, Renderable } from "@opentui/core";
 import { BoxRenderable, InputRenderable, TextNodeRenderable, TextRenderable } from "@opentui/core";
+import type { Effect, Scope } from "effect";
 import { Option } from "effect";
 import type { Cleanup, EventHandler, Host, PropertyValue, StaticProps } from "../host.js";
+import type { Attached } from "../view.js";
+import { attach as attachNode } from "../view.js";
 
 /**
  * The terminal host. Tags are `box`, `text`, and `input`.
@@ -13,6 +16,11 @@ import type { Cleanup, EventHandler, Host, PropertyValue, StaticProps } from "..
  */
 
 export type TuiNode = BaseRenderable;
+
+/** A behaviour for a terminal renderable, run once it is in the tree. */
+export const attach = (
+  run: (node: TuiNode) => Effect.Effect<unknown, never, Scope.Scope>,
+): Attached<TuiNode> => attachNode<TuiNode>(run);
 
 const create = (context: RenderContext, tag: string, options: StaticProps): Renderable => {
   if (tag === "box") {
@@ -102,4 +110,5 @@ export const make = (context: RenderContext): Host<TuiNode> => ({
     emitter.on(name, listener);
     return () => void emitter.off(name, listener);
   },
+  attach: (node, run) => run(node),
 });

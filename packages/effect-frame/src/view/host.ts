@@ -17,6 +17,13 @@ export interface Host<Node> {
   readonly setText: (node: Node, text: string) => void;
   /** Returns the cleanup that detaches the listener. */
   readonly addEventListener: (node: Node, name: string, handler: EventHandler) => Cleanup;
+  /**
+   * Hand a node to the behaviours attached to it, once it is in the
+   * document. A live host calls `run` with the node; the server host, which
+   * has no live node, calls nothing, so a behaviour never runs against an
+   * HTML string.
+   */
+  readonly attach: (node: Node, run: (node: Node) => void) => void;
 }
 
 /**

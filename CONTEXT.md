@@ -32,6 +32,14 @@ _Avoid_: Mutation, action, server function.
 A function from props to an Effect that produces a node tree once, in a scope that owns everything the setup opened. A view is composed by yielding it inside another view's setup, never by placing it as a JSX tag; a JSX tag is a synchronous function or an intrinsic name.
 _Avoid_: Component, widget, render function.
 
+**Attached behaviour**:
+An Effect given a host node, run once the node is in the document, in the scope of the shown branch or row that owns the element; the scope closing ends it. It is the only way a view reaches its own host node: nothing outside the behaviour holds the node, so there is no node reference to keep in step with the tree. Several compose on one element in order.
+_Avoid_: Ref, node reference, mixin, directive.
+
+**Portal**:
+A region of a view drawn under a host node outside the view's own subtree. The view still owns it: it reads the view's sources, runs in its scope, and leaves with its shown branch or row.
+_Avoid_: Teleport, overlay root.
+
 **Rendering mode**:
 Where and when a route's view is turned into markup: on the client only (`Route.client`), on the server before hydration, streamed from the server as its data settles, on the server for every change, or at build time. The destination route names it, and naming it is choosing a constructor rather than setting a field. A plain form post is not a mode: it is a command path that works under every mode that renders on a server.
 _Avoid_: Strategy, target.

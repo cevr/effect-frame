@@ -2,11 +2,13 @@ export * as View from "./view.js";
 export {
   For,
   Match,
+  Portal,
   Show,
   type ForProps,
   type ListOptions,
   type MatchCases,
   type MatchProps,
+  type PortalProps,
   type ShowIfProps,
   type ShowProps,
   type ShowWhenProps,
@@ -14,7 +16,16 @@ export {
 } from "./control.js";
 export { mount, render } from "./runtime.js";
 export type { Cleanup, EventHandler, Host, HostEvent, PropertyValue, StaticProps } from "./host.js";
-export { bind, event, submit, type Bound, type Handler, type Prepared } from "./view.js";
+export {
+  attach,
+  bind,
+  event,
+  submit,
+  type Attached,
+  type Bound,
+  type Handler,
+  type Prepared,
+} from "./view.js";
 export type {
   Child,
   Component,
@@ -24,6 +35,7 @@ export type {
   ForNode,
   MatchNode,
   Node,
+  PortalNode,
   PropValue,
   ShowNode,
   Tag,

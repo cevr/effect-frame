@@ -167,6 +167,8 @@ export const host: Host<HtmlNode> = {
   },
   // The server never receives an event. The listener is a no-op and so is its cleanup.
   addEventListener: (): Cleanup => () => {},
+  // The server has no live node, so a behaviour never runs here.
+  attach: () => {},
 };
 
 /**

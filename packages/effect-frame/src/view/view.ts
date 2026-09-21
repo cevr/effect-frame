@@ -1,6 +1,6 @@
 import type { Source } from "effect-frame/actor";
 import { select as selectSource } from "effect-frame/actor/client";
-import type { Effect } from "effect";
+import type { Effect, Scope } from "effect";
 import { Option } from "effect";
 import type { HostEvent } from "./host.js";
 import type { Node } from "./jsx-runtime.js";
@@ -26,6 +26,31 @@ export interface Prepared {
   readonly preventDefault: boolean;
   readonly handler: Handler;
 }
+
+/**
+ * A behaviour attached to an element: an Effect given the host node, run in
+ * the scope of the branch or row that owns the element, once the node is in
+ * the document. The scope closes when the element leaves, so a listener,
+ * an observer, or a fiber the behaviour opened ends with it. It is data in
+ * a prop position, like `Prepared`; `attach={[a, b]}` composes several.
+ *
+ * A method signature, so an `Attached<Element>` is an `Attached<unknown>`
+ * and the tree can hold one without knowing its host.
+ */
+export interface Attached<HostNode = unknown> {
+  readonly _tag: "Attached";
+  run(node: HostNode): Effect.Effect<unknown, never, Scope.Scope>;
+}
+
+/**
+ * Make a behaviour for a host's node type. A host module exports the typed
+ * form (`Dom.attach`) so a view never names a node type the host cannot
+ * produce. There is no node ref: nothing outside the behaviour holds the
+ * node, so there is no `Option<Node>` to keep in step with the tree.
+ */
+export const attach = <HostNode>(
+  run: (node: HostNode) => Effect.Effect<unknown, never, Scope.Scope>,
+): Attached<HostNode> => ({ _tag: "Attached", run });
 
 /**
  * A handler maps one host event to work. Its failures must already be

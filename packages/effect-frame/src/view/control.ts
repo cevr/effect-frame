@@ -1,6 +1,6 @@
 import type { Source } from "effect-frame/actor";
 import { Context, Effect, Option, Predicate, Scope } from "effect";
-import type { ForNode, MatchNode, Node, ShowNode } from "./jsx-runtime.js";
+import type { ForNode, MatchNode, Node, PortalNode, ShowNode } from "./jsx-runtime.js";
 import { Empty } from "./jsx-runtime.js";
 
 /**
@@ -158,3 +158,21 @@ export const Match = <A extends Tagged>(props: MatchProps<A>): MatchNode<A> => {
     },
   };
 };
+
+export interface PortalProps<HostNode> {
+  /** The host node the children are drawn under. */
+  readonly into: HostNode;
+  readonly children: Node;
+}
+
+/**
+ * Draw children under another node: a dialog under `document.body`, a
+ * toast under a region outside the view's own subtree. The children are
+ * still the view's: they read its sources, run in its scope, and leave with
+ * its branch or row. Only their place in the document differs.
+ */
+export const Portal = <HostNode>(props: PortalProps<HostNode>): PortalNode => ({
+  _tag: "Portal",
+  into: props.into,
+  children: props.children,
+});

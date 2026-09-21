@@ -6,7 +6,7 @@ import { ActorHost, Behavior, CommandId, implementTransparent } from "effect-fra
 import { contract, ref, resumeCodec } from "effect-frame/actor/client";
 import type { Applied, KeyOf, SnapshotOf } from "effect-frame/actor/client";
 import { Dom, Html, View, mount, render } from "effect-frame/view";
-import { Deferred, Effect, Exit, Match, Option, Schema, Scope } from "effect";
+import { Deferred, Effect, Exit, Match, Option, Ref, Schema, Scope } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 /**
@@ -126,6 +126,18 @@ const hydrate = (main: HTMLElement, key: string, onClose: Effect.Effect<void> = 
 const withHost = it.scoped.layer(ActorHost.layerMemory([NoteLive]));
 
 describe("server render and hydration", () => {
+  it.scoped("the server host never runs a behaviour", () =>
+    Effect.gen(function* () {
+      const ran = yield* Ref.make(false);
+      const Page = () =>
+        Effect.succeed(<input id="field" attach={Dom.attach(() => Ref.set(ran, true))} />);
+      const html = yield* Html.renderToString(Page, {});
+      expect(html).toContain("<input");
+      expect(html).not.toContain("attach");
+      expect(yield* Ref.get(ran)).toBe(false);
+    }),
+  );
+
   withHost("the server renders the snapshot and escapes everything it writes", () =>
     Effect.gen(function* () {
       const { note } = yield* server("n1");

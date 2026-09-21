@@ -11,8 +11,16 @@ import {
   untrack,
 } from "@solidjs/signals";
 import type { Cleanup, Host, HostEvent, PropertyValue, StaticProps } from "./host.js";
-import type { ElementNode, ForNode, MatchNode, Node, PropValue, ShowNode } from "./jsx-runtime.js";
-import type { Bound, Handler, Prepared, View } from "./view.js";
+import type {
+  ElementNode,
+  ForNode,
+  MatchNode,
+  Node,
+  PortalNode,
+  PropValue,
+  ShowNode,
+} from "./jsx-runtime.js";
+import type { Attached, Bound, Handler, Prepared, View } from "./view.js";
 
 /**
  * The mount runtime. It walks one JSX tree, resolves every explicitly bound
@@ -163,6 +171,17 @@ interface Tracker {
    * fiber the callback forks is interrupted when that scope closes.
    */
   readonly handle: (handler: Handler) => (event: HostEvent) => void;
+  /**
+   * Run a build and then, once the outermost build has returned and its
+   * nodes are in the document, everything `afterCommit` queued during it.
+   * A build inside a build (a branch planned while the mount is planned)
+   * leaves the queue to the outermost, so a behaviour never sees a node
+   * that is not yet in the document.
+   */
+  readonly commit: <A>(build: () => A) => A;
+  readonly afterCommit: (task: () => void) => void;
+  /** The scope current at the call: the branch or row being built. */
+  readonly scope: () => Scope.Scope;
 }
 
 interface Renderer<HostNode> {
@@ -218,11 +237,33 @@ const makeTracker = Effect.fn("View.makeTracker")(function* () {
     return { value, close: () => void runFork(Scope.close(child, Exit.void)) };
   };
 
+  let pending: Array<() => void> = [];
+  let depth = 0;
+  // A build is synchronous and does not throw: a view that fails does so
+  // in its setup Effect, before the tree exists. So the depth is restored
+  // by plain sequence, and the queue drains only for the outermost build.
+  const commit = <A>(build: () => A): A => {
+    depth += 1;
+    const value = build();
+    depth -= 1;
+    if (depth === 0) {
+      const tasks = pending;
+      pending = [];
+      for (const task of tasks) {
+        task();
+      }
+    }
+    return value;
+  };
+
   return {
     track,
     register: (cleanup: Cleanup) => void cleanups.push(cleanup),
     owned,
     within,
+    commit,
+    afterCommit: (task) => void pending.push(task),
+    scope: () => current,
     run: (effect, scope) => void Fiber.runIn(runFork(effect), scope),
     handle: (handler) => {
       const scope = current;
@@ -278,6 +319,7 @@ const plan = <HostNode>(renderer: Renderer<HostNode>, node: Node): Build<HostNod
       // way, for the same reason.
       Show: (branch) => planShow(renderer, branch),
       Match: (matched) => planMatch(renderer, matched),
+      Portal: (portal) => planPortal(renderer, portal),
     }),
   );
 
@@ -460,11 +502,13 @@ const switchOn =
         return;
       }
       Option.match(shown, { onNone: () => {}, onSome: tearDown });
-      const drawn = untrack(() => build(sideFor(next)));
-      shown = Option.some(drawn);
-      current = Option.some(next);
-      slot.nodes = drawn.slot.nodes;
-      changed();
+      tracker.commit(() => {
+        const drawn = untrack(() => build(sideFor(next)));
+        shown = Option.some(drawn);
+        current = Option.some(next);
+        slot.nodes = drawn.slot.nodes;
+        changed();
+      });
     };
 
     apply(key());
@@ -484,6 +528,7 @@ interface ElementPlan<HostNode> {
   readonly staticProps: StaticProps;
   readonly dynamic: ReadonlyArray<readonly [string, Accessor<unknown>]>;
   readonly events: ReadonlyArray<readonly [string, Prepared]>;
+  readonly attachments: ReadonlyArray<Attached<HostNode>>;
   readonly children: Build<HostNode>;
 }
 
@@ -498,10 +543,30 @@ type RawProp = NonNullable<ElementNode["props"][string]>;
  * A prop that carries a marker the runtime owns, rather than a value the host
  * applies. Composed from `isTagged` so a new marker tag is one more clause.
  */
-const isMarker = (value: RawProp): value is Bound<unknown> | Prepared =>
-  Predicate.or(Predicate.isTagged("Bound"), Predicate.isTagged("Prepared"))(value);
+const isMarker = (value: RawProp): value is Bound<unknown> | Prepared | Attached<unknown> =>
+  Predicate.or(
+    Predicate.or(Predicate.isTagged("Bound"), Predicate.isTagged("Prepared")),
+    Predicate.isTagged("Attached"),
+  )(value);
+
+/** `attach` takes one behaviour or a list; a list composes them in order. */
+const attachmentsOf = <HostNode>(raw: RawProp): ReadonlyArray<Attached<HostNode>> => {
+  const one = (value: RawProp): ReadonlyArray<Attached<HostNode>> => {
+    if (Predicate.isTagged("Attached")(value)) {
+      return [value];
+    }
+    return [];
+  };
+  if (Array.isArray(raw)) {
+    return raw.flatMap(one);
+  }
+  return one(raw);
+};
 
 const classify = (value: RawProp): PropValue => {
+  if (Array.isArray(value)) {
+    return { _tag: "Static", value: asPropertyValue(value) };
+  }
   if (isMarker(value)) {
     return value;
   }
@@ -516,10 +581,15 @@ const sortProps = <HostNode>(
   const staticProps: Record<string, PropertyValue> = {};
   const dynamic: Array<readonly [string, Accessor<unknown>]> = [];
   const events: Array<readonly [string, Prepared]> = [];
+  let attachments: ReadonlyArray<Attached<HostNode>> = [];
 
   for (const [name, raw] of Object.entries(element.props)) {
     const present = Option.fromNullishOr(raw);
     if (name === "children" || Option.isNone(present)) {
+      continue;
+    }
+    if (name === "attach") {
+      attachments = attachmentsOf(present.value);
       continue;
     }
     const prop = classify(present.value);
@@ -532,7 +602,7 @@ const sortProps = <HostNode>(
     }
   }
 
-  return { staticProps, dynamic, events };
+  return { staticProps, dynamic, events, attachments };
 };
 
 const planElement = <HostNode>(
@@ -569,7 +639,57 @@ const buildElement =
     element.children(node, { nodes: [] }, () => {});
     slot.nodes = [node];
     host.insert(parent, node, Option.none());
+    // Behaviours run once the outermost build has put the node in the
+    // document, in the scope of the branch or row being built, so each
+    // ends when the element leaves.
+    if (element.attachments.length > 0) {
+      const scope = tracker.scope();
+      tracker.afterCommit(() =>
+        host.attach(node, (live) => {
+          for (const attached of element.attachments) {
+            tracker.run(Scope.provide(attached.run(live), scope), scope);
+          }
+        }),
+      );
+    }
   };
+
+// ---------------------------------------------------------------------------
+// Portal
+// ---------------------------------------------------------------------------
+
+/**
+ * The children build under `into` instead of the parent, with a slot of
+ * their own, and the portal reports no nodes to its parent. They leave
+ * with the scope that built them: a finalizer on the current scope removes
+ * them from `into`, since the parent's teardown would not find them.
+ */
+const planPortal = <HostNode>(
+  renderer: Renderer<HostNode>,
+  portal: PortalNode,
+): Build<HostNode> => {
+  const children = plan(renderer, portal.children);
+  return () => {
+    const { host, tracker } = renderer;
+    const inner: Slot<HostNode> = { nodes: [] };
+    // oxlint-disable-next-line effect/noAs -- the tree holds a host node it cannot type
+    const into = portal.into as HostNode;
+    children(into, inner, () => {});
+    const scope = tracker.scope();
+    tracker.run(
+      Scope.addFinalizer(
+        scope,
+        Effect.sync(() => {
+          for (const node of inner.nodes) {
+            host.remove(into, node);
+          }
+          inner.nodes = [];
+        }),
+      ),
+      scope,
+    );
+  };
+};
 
 // ---------------------------------------------------------------------------
 // For
@@ -627,11 +747,13 @@ const buildFor =
                 // Untracked for the reason a `Show` branch is: the build's
                 // reads are first values, not dependencies of the list's own
                 // effect.
-                untrack(() => plan(renderer, tree)(parent, rowSlot, () => {}));
-                built = true;
-                if (late) {
-                  reorder();
-                }
+                tracker.commit(() => {
+                  untrack(() => plan(renderer, tree)(parent, rowSlot, () => {}));
+                  built = true;
+                  if (late) {
+                    reorder();
+                  }
+                });
               }),
             );
           tracker.run(
@@ -723,8 +845,10 @@ export const mount = Effect.fn("View.mount")(function* <Props, E, R, HostNode>(
   // Planning creates the signals a binding writes to, so it belongs inside
   // the root that owns them.
   const dispose = createRoot((disposeRoot) => {
-    plan({ host, tracker }, tree)(root, slot, () => {});
-    flush();
+    tracker.commit(() => {
+      plan({ host, tracker }, tree)(root, slot, () => {});
+      flush();
+    });
     return disposeRoot;
   });
 

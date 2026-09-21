@@ -1,7 +1,7 @@
 import { Effect, Exit, Fiber, Option, Schema, Scope, Stream } from "effect";
 import { describe, expect, it, yieldFibers } from "effect-bun-test";
 import { Event, Machine, State } from "effect-machine";
-import { Behavior, Value, modify, select, spawn } from "@effect-frame/actor";
+import { Behavior, Value, modify, select, spawn, zip } from "@effect-frame/actor";
 
 const CounterState = State({
   Counting: { count: Schema.Finite },
@@ -139,6 +139,23 @@ describe("local actor", () => {
       expect(failure._tag).toBe("ActorStopped");
       const callFailure = yield* Effect.flip(count.call(Value.Set(3)));
       expect(callFailure._tag).toBe("ActorStopped");
+    }),
+  );
+});
+
+describe("source combinators", () => {
+  it.scoped("zip reads both sides on either side's change", () =>
+    Effect.gen(function* () {
+      const left = yield* spawn(Behavior.value(1));
+      const right = yield* spawn(Behavior.value("a"));
+      const pair = zip(left.state, right.state, (n, s) => `${s}${String(n)}`);
+      expect(yield* pair.get).toBe("a1");
+
+      const seen = yield* Stream.take(pair.changes, 3).pipe(Stream.runCollect, Effect.forkScoped);
+      yield* Effect.yieldNow;
+      yield* left.call(Value.Set(2));
+      yield* right.call(Value.Set("b"));
+      expect(Array.from(yield* Fiber.join(seen))).toEqual(["a1", "a2", "b2"]);
     }),
   );
 });

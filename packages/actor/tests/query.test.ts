@@ -542,3 +542,38 @@ describe("Query: the Dashboard shape", () => {
     }),
   );
 });
+
+// ---------------------------------------------------------------------------
+// Arguments the server cannot decode
+// ---------------------------------------------------------------------------
+
+/**
+ * The same name and version as `ExchangeRate`, with a different argument
+ * shape. A client built from it encodes arguments the server's contract
+ * refuses. This is the only way bad arguments reach a host: a skewed build.
+ */
+const SkewedExchangeRate = query("ExchangeRate", {
+  version: 1,
+  args: Schema.Struct({ pair: Schema.Finite }),
+  result: Schema.Struct({ rate: Schema.Finite }),
+  policy: "public",
+  depends: [],
+});
+
+describe("Query: arguments the host cannot decode", () => {
+  withDashboard("are a typed refusal, not a defect in the host", () =>
+    Effect.gen(function* () {
+      const refused = yield* useQuery(SkewedExchangeRate, { pair: 1 });
+      yield* settledEntry(refused);
+      const state = yield* refused.state.get;
+      expect(state._tag).toBe("Failed");
+      if (state._tag === "Failed") {
+        expect(state.error._tag).toBe("InvalidQueryArgs");
+        if (state.error._tag === "InvalidQueryArgs") {
+          expect(state.error.query).toBe("ExchangeRate");
+          expect(state.error.detail).toContain("pair");
+        }
+      }
+    }),
+  );
+});

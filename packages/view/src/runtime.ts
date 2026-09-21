@@ -1,7 +1,7 @@
 import type { Source } from "@effect-frame/actor";
 import { Effect, Exit, Match, Option, Predicate, Queue, Scope, Stream } from "effect";
 import type { Accessor } from "@solidjs/signals";
-import { createRenderEffect, createRoot, createSignal, flush } from "@solidjs/signals";
+import { createRenderEffect, createRoot, createSignal, flush, untrack } from "@solidjs/signals";
 import type { Cleanup, Host, PropertyValue, StaticProps } from "./host.js";
 import type { ElementNode, ForNode, Node, PropValue } from "./jsx-runtime.js";
 import type { Bound, Prepared, View } from "./view.js";
@@ -51,13 +51,26 @@ interface SignalSource<A> extends Source<A> {
   readonly [SignalBacked]: Accessor<A>;
 }
 
+/**
+ * A subscriber to `changes` lives outside the reactive graph, so the effect
+ * that feeds it gets an owner of its own: one root, disposed with the
+ * stream's scope. Delivery runs untracked, because an offer can resume the
+ * consumer fiber synchronously and that consumer may read a signal; such a
+ * read is the consumer's, not this effect's.
+ */
 const signalSource = <A>(read: Accessor<A>): SignalSource<A> => ({
   [SignalBacked]: read,
   get: Effect.sync(read),
   changes: Stream.callback<A>((queue) =>
-    Effect.sync(() => {
-      createRenderEffect(read, (value) => void Queue.offerUnsafe(queue, value));
-    }),
+    Effect.acquireRelease(
+      Effect.sync(() =>
+        createRoot((dispose) => {
+          createRenderEffect(read, (value) => untrack(() => void Queue.offerUnsafe(queue, value)));
+          return dispose;
+        }),
+      ),
+      (dispose) => Effect.sync(dispose),
+    ),
   ),
 });
 
@@ -494,18 +507,29 @@ const buildFor =
     items: Accessor<ReadonlyArray<Item>>,
   ): Build<HostNode> =>
   (parent, slot, changed) => {
-    const { host } = renderer;
+    const { host, tracker } = renderer;
     const rows = new Map<string, Row<HostNode, Item>>();
     let order: ReadonlyArray<string> = [];
 
     const createRow = (item: Item): Row<HostNode, Item> => {
       const rowSlot: Slot<HostNode> = { nodes: [] };
       const cell = makeCell(item);
-      const dispose = createRoot((disposeRow) => {
-        plan(renderer, node.render(signalSource(cell.read)))(parent, rowSlot, () => {});
-        return disposeRow;
-      });
-      return { slot: rowSlot, set: cell.write, dispose };
+      // One reactive owner and one Effect scope per row, as for a `Show`
+      // branch: whatever the row's body subscribes to ends with the row.
+      const rowOwner = tracker.owned(() =>
+        createRoot((disposeRow) => {
+          plan(renderer, node.render(signalSource(cell.read)))(parent, rowSlot, () => {});
+          return disposeRow;
+        }),
+      );
+      return {
+        slot: rowSlot,
+        set: cell.write,
+        dispose: () => {
+          rowOwner.value();
+          rowOwner.close();
+        },
+      };
     };
 
     const reorder = (): void => {

@@ -5,7 +5,7 @@ registerDom();
 import { Behavior, Value, modify, select, spawn } from "@effect-frame/actor";
 import type { LocalActorRef, SetValue, Source } from "@effect-frame/actor";
 import { Dom, For, Show, View, mount, render } from "@effect-frame/view";
-import { Effect, Exit, Ref, Scope } from "effect";
+import { Effect, Exit, Ref, Scope, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 /** A view with no input of its own still takes props: an empty record. */
@@ -331,4 +331,72 @@ const setTasks = Effect.fn("test.setTasks")(function* (
 ) {
   yield* tasks.call(Value.Set(next));
   yield* render;
+});
+
+// ---------------------------------------------------------------------------
+// Row sources outside the graph
+// ---------------------------------------------------------------------------
+
+interface CountedListProps {
+  readonly tasks: Source<ReadonlyArray<Task>>;
+  /** How many row subscriptions have ended. */
+  readonly ended: Ref.Ref<number>;
+}
+
+/**
+ * Each row derives a second source from its item through `changes`, the way
+ * an app combines row state with its own. That subscription runs outside the
+ * reactive graph, on a fiber of its own, so it must be owned twice over: by a
+ * reactive root, or Solid never disposes its effect, and by the row's scope,
+ * or the fiber outlives the row.
+ */
+const CountedList = View.make((props: CountedListProps) =>
+  Effect.gen(function* () {
+    const view = yield* View.Context;
+    const shout = (task: Source<Task>): Source<string> => ({
+      get: Effect.map(task.get, (value) => value.title.toUpperCase()),
+      changes: Stream.ensuring(
+        Stream.map(task.changes, (value) => value.title.toUpperCase()),
+        Ref.update(props.ended, (n) => n + 1),
+      ),
+    });
+    return (
+      <ul>
+        <For each={props.tasks} keyBy={(task: Task) => task.id}>
+          {(task: Source<Task>) => <li>{view.bind(shout(task))}</li>}
+        </For>
+      </ul>
+    );
+  }),
+);
+
+describe("row sources", () => {
+  it.scoped("a source derived from a row's changes follows the row and ends with it", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const ended = yield* Ref.make(0);
+      const tasks = yield* spawn(
+        Behavior.value<ReadonlyArray<Task>>([
+          { id: "a", title: "alpha" },
+          { id: "b", title: "beta" },
+        ]),
+      );
+      yield* mount(CountedList, { tasks: tasks.state, ended }, Dom.host, root);
+      expect(titles(root)).toEqual(["ALPHA", "BETA"]);
+
+      // The change reaches the derived source through the row's cell.
+      yield* setTasks(tasks, [
+        { id: "a", title: "alef" },
+        { id: "b", title: "beta" },
+      ]);
+      expect(titles(root)).toEqual(["ALEF", "BETA"]);
+      expect(yield* Ref.get(ended)).toBe(0);
+
+      // Removing a row ends exactly that row's subscription.
+      yield* setTasks(tasks, [{ id: "b", title: "beta" }]);
+      yield* render;
+      expect(titles(root)).toEqual(["BETA"]);
+      expect(yield* Ref.get(ended)).toBe(1);
+    }),
+  );
 });

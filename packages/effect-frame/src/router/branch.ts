@@ -45,14 +45,8 @@ import type {
   SearchCodec,
   SearchRecord,
 } from "./route.js";
-import {
-  matchPrefix,
-  parseTemplate,
-  pathSegments,
-  printSearch,
-  readSearch,
-  search as searchCodec,
-} from "./route.js";
+import { matchPrefix, segmentsOf } from "./path.js";
+import { parseTemplate, printSearch, readSearch, search as searchCodec } from "./route.js";
 import { register as registerInspection } from "./route-inspection.js";
 
 /**
@@ -1151,7 +1145,7 @@ interface MountedTree<R> {
 
 const matchUrl = <R>(root: AnyBranch<R>, url: URL): Option.Option<Match<R>> =>
   root.match({
-    segments: pathSegments(url.pathname),
+    segments: segmentsOf(url.pathname),
     index: 0,
     record: {},
     search: readSearch(url.searchParams),

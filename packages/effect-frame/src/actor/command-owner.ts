@@ -412,14 +412,31 @@ export const make = Effect.fn("Actor.commands.make")(function* <
     }).pipe(
       Effect.tapError((outcome) => {
         // A lost pass that the schedule will follow shows Uncertain now. The
-        // pass that ends the sequence is published by the sequence itself,
-        // after the record is idle, so a retry that sees it can start.
+        // pass that ends the sequence is published by `idle`, in the same
+        // step that makes the record idle, so a retry that sees it can start.
         if (outcome._tag === "Lost" && record.attempt < policy.passes) {
           return publish(record, uncertain(record));
         }
         return Effect.void;
       }),
     );
+
+  /**
+   * The one place a sequence gives up the record. `running` clears in the
+   * same serialized state update that publishes Uncertain: a reader that sees
+   * Uncertain sees an idle record, so its retry can start, and no finished
+   * sequence can later clear the flag of a sequence that started after it.
+   */
+  const idle = (record: CommandRecord<State, Rejection>) =>
+    Effect.suspend(() => {
+      if (record.done) {
+        return Effect.void;
+      }
+      return SubscriptionRef.update(record.state, () => {
+        record.running = false;
+        return uncertain(record);
+      });
+    });
 
   const sequence = (record: CommandRecord<State, Rejection>) =>
     Effect.gen(function* () {
@@ -444,10 +461,8 @@ export const make = Effect.fn("Actor.commands.make")(function* <
         yield* finish(record, { _tag: "Rejected", reason: failure.value.reason });
         return;
       }
-      // Exhausted or held: the record stays retained and Uncertain, and is
-      // idle before anyone can see that state.
-      record.running = false;
-      yield* publish(record, uncertain(record));
+      // Exhausted or held: the record stays retained, Uncertain, and idle.
+      yield* idle(record);
     });
 
   const startSequence = (record: CommandRecord<State, Rejection>): Effect.Effect<void> =>
@@ -457,14 +472,10 @@ export const make = Effect.fn("Actor.commands.make")(function* <
       }
       record.running = true;
       record.attempt = 0;
+      // Only `idle` clears `running`. Every other end of a sequence ends the
+      // record too: terminal settlement or the owner closing.
       const worker = Scope.forkUnsafe(record.scope);
-      const body = Effect.ensuring(
-        sequence(record),
-        Effect.suspend(() => {
-          record.running = false;
-          return Scope.close(worker, Exit.void);
-        }),
-      );
+      const body = Effect.ensuring(sequence(record), Scope.close(worker, Exit.void));
       return Effect.asVoid(Effect.forkIn(owned(body), worker));
     });
 

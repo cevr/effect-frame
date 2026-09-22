@@ -62,6 +62,11 @@ Adapters give it `identify`, `submit`, one healthy `pass`, and `own`.
   Rejected by exhaustion. `retry` starts one new sequence with the same ID and
   bytes. Concurrent retries join it. `retry` on a terminal record or a closed
   owner does nothing.
+- One sequence at a time. Only the step that publishes the exhausted or held
+  `Uncertain` clears `running`, and it does both in one serialized state
+  update. A retry that sees `Uncertain` can start the next sequence, and no
+  finished sequence can clear the flag of a later one. Terminal settlement and
+  owner closure end the record, so they never clear it.
 - Refusal. CommandConflict is always Rejected. Another refusal is Rejected only
   when no admission was possible. After a possible admission, ActorStopped is a
   lost pass, and Unauthorized, ContractMismatch, and UnknownContract hold the

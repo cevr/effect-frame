@@ -1,4 +1,15 @@
-import { Clock, Deferred, Effect, Exit, Layer, Option, Schema, Scope, Stream } from "effect";
+import {
+  Clock,
+  Deferred,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Scheduler,
+  Schema,
+  Scope,
+  Stream,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it, yieldFibers } from "effect-bun-test";
 import {
@@ -161,6 +172,31 @@ const counted = (message: Add) => {
 };
 
 const noKeys = Effect.succeed([]);
+
+type FakeRejection =
+  | { readonly _tag: "ActorStopped" }
+  | { readonly _tag: "CommandConflict"; readonly commandId: CommandId };
+
+/** An adapter with no host behind it. Each test replaces the requests it drives. */
+const fakeAdapter = (
+  overrides: Partial<Commands.CommandAdapter<number, FakeRejection>>,
+): Commands.CommandAdapter<number, FakeRejection> => ({
+  kind: "durable",
+  own: Commands.ownNothing,
+  closed: Effect.succeed(false),
+  send: () => Effect.succeed({ admitted: 1 }),
+  call: () => Effect.succeed({ committed: { revision: 1, state: 1 }, refreshed: [] }),
+  stopped: () => ({ _tag: "ActorStopped" }),
+  conflict: (commandId) => ({ _tag: "CommandConflict", commandId }),
+  ...overrides,
+});
+
+const onePass: Commands.CommandPolicySettings = {
+  passes: 1,
+  passDeadline: "1 hour",
+  baseDelay: "1 millis",
+  maxDelay: "1 millis",
+};
 
 const remoteOwner = Effect.fn("CommandOwnerTest.remoteOwner")(function* (
   behavior: Behavior<number, Add>,
@@ -601,5 +637,56 @@ describe("private command owner", () => {
       expect(finalizerCount(lifetime)).toBe(baseline);
       yield* Scope.close(lifetime, Exit.void);
     }),
+  );
+
+  it.scoped("a retry that races the exhaustion step joins the one running sequence", () =>
+    Effect.gen(function* () {
+      const release = yield* Deferred.make<void>();
+      let sends = 0;
+      let inflight = 0;
+      let maxInflight = 0;
+      let settles = 0;
+      const owner = yield* Commands.make(
+        fakeAdapter({
+          own: () => Effect.succeed(() => Effect.sync(() => (settles += 1))),
+          send: () =>
+            Effect.suspend(() => {
+              sends += 1;
+              if (sends === 1) {
+                return Effect.fail(Commands.lost);
+              }
+              inflight += 1;
+              maxInflight = Math.max(maxInflight, inflight);
+              return Effect.ensuring(
+                Effect.as(Deferred.await(release), { admitted: 1 }),
+                Effect.sync(() => (inflight -= 1)),
+              );
+            }),
+        }),
+      ).pipe(Effect.provideService(Commands.CommandPolicy, onePass));
+      const command = yield* owner.submit(
+        { commandId: id("raced"), identity: "supplied" },
+        Effect.succeed("{}"),
+        noKeys,
+      );
+      // Retry at every moment the record reads idle. A short yield budget
+      // lets this loop run between the steps of the exhausted sequence.
+      let retries = 0;
+      for (let turn = 0; turn < 200 && retries < 3; turn += 1) {
+        const retained = yield* owner.retained;
+        if (retained.some((record) => !record.running)) {
+          yield* command.retry;
+          retries += 1;
+        }
+        yield* Effect.yieldNow;
+      }
+      yield* Deferred.succeed(release, void 0);
+      expect((yield* command.settled)._tag).toBe("Applied");
+      yield* yieldFibers;
+      expect(maxInflight).toBe(1);
+      expect(settles).toBe(1);
+      expect(retries).toBe(1);
+      expect(sends).toBe(2);
+    }).pipe(Effect.provideService(Scheduler.MaxOpsBeforeYield, 3)),
   );
 });

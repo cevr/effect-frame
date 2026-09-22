@@ -1,5 +1,11 @@
 # effect-frame
 
+## 0.9.2
+
+### Patch Changes
+
+- [`ed2d341`](https://github.com/cevr/effect-frame/commit/ed2d341918a110cb3390f98e32673139b6812dfe) Thanks [@cevr](https://github.com/cevr)! - Fix keyed list reorder when rows swap. A moved row could anchor on a row that moved later, so a swap left rows out of order. A reorder now keeps the longest run of rows already in order and moves only the others, walking backwards so each anchor is already in its final place.
+
 ## 0.9.1
 
 ### Patch Changes

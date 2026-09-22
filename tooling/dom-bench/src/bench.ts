@@ -25,6 +25,7 @@ import {
   OperationNameSchema,
   helpText,
   isInvalidOptionsError,
+  officialBenchmarkIds,
   parseOptions,
 } from "./options.js";
 import type { EngineName, FrameworkName, OperationName } from "./options.js";
@@ -776,31 +777,6 @@ const runCellWithDeadline = async (request: CellRequest): Promise<Measurement> =
   }
 };
 
-const officialBenchmarkId = (operation: OperationName | undefined): string => {
-  switch (operation) {
-    case "create-1k":
-      return "01_";
-    case "replace-1k":
-      return "02_";
-    case "update-10th-10k":
-      return "03_";
-    case "select-1k":
-      return "04_";
-    case "swap-1k":
-      return "05_";
-    case "remove-1k":
-      return "06_";
-    case "create-10k":
-      return "07_";
-    case "append-10k":
-      return "08_";
-    case "clear-10k":
-      return "09_";
-    default:
-      return "03_";
-  }
-};
-
 const stageOfficialFixture = async (
   root: string,
   framework: FrameworkName,
@@ -930,6 +906,7 @@ const runOfficial = async (
     const serverResult = await startOfficialServer(root, port, () => interrupted);
     server = serverResult.process;
     if (interrupted !== undefined) throw interrupted;
+    const benchmarks = officialBenchmarkIds(operation);
     const args = [
       runner,
       "--runner",
@@ -937,7 +914,7 @@ const runOfficial = async (
       "--framework",
       `keyed/${stagedName}`,
       "--benchmark",
-      officialBenchmarkId(operation),
+      ...benchmarks,
       "--count",
       String(count),
       "--headless",
@@ -945,7 +922,7 @@ const runOfficial = async (
     ];
     if (chromePath !== undefined) args.push("--chromeBinary", chromePath);
     console.log(
-      `official\tkrausest-playwright\t${framework}\t${officialBenchmarkId(operation)}\t${revision}\t${root}`,
+      `official\tkrausest-playwright\t${framework}\t${benchmarks.join(",")}\t${revision}\t${root}`,
     );
     await runProcess(join(root, "webdriver-ts"), "node", args, {
       ...process.env,

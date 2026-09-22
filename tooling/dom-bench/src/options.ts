@@ -27,6 +27,28 @@ export interface BenchOptions {
   readonly only?: OperationName;
 }
 
+const officialBenchmarkIdByOperation = {
+  "create-1k": "01_",
+  "replace-1k": "02_",
+  "update-10th-10k": "03_",
+  "select-1k": "04_",
+  "swap-1k": "05_",
+  "remove-1k": "06_",
+  "create-10k": "07_",
+  "append-10k": "08_",
+  "clear-10k": "09_",
+} satisfies Readonly<Record<OperationName, string>>;
+
+/** krausest benchmark id prefixes for one operation, or for every CPU operation when none is named. */
+export const officialBenchmarkIds = (
+  // oxlint-disable-next-line effect/noNullish -- the optional --only flag is a CLI boundary.
+  operation: OperationName | undefined,
+): ReadonlyArray<string> =>
+  // oxlint-disable-next-line effect/noNullish, effect/noTernary -- an absent --only selects every official workload.
+  operation === undefined
+    ? Object.values(officialBenchmarkIdByOperation)
+    : [officialBenchmarkIdByOperation[operation]];
+
 export const helpText = `Usage: bun run bench -- [options]
 
 Options:
@@ -34,7 +56,7 @@ Options:
   --engine <name>     chrome or webkit (default: both)
   --count <number>    samples per cell, from 1 to 100 (default: 1)
   --only <operation>  run one operation
-  --official          run the pinned krausest Playwright runner
+  --official          run the pinned krausest Playwright runner (every workload, or --only)
   -h, --help          show this help without starting a benchmark
 `;
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { parseOptions } from "../src/options.js";
+import { officialBenchmarkIds, parseOptions } from "../src/options.js";
 
 describe("benchmark CLI options", () => {
   it("rejects unknown values, missing values, and unknown flags", () => {
@@ -44,5 +44,21 @@ describe("benchmark CLI options", () => {
       official: true,
       only: "create-10k",
     });
+  });
+
+  it("runs every official workload unless one operation is named", () => {
+    // oxlint-disable-next-line effect/noNullish -- an absent --only is the CLI boundary under test.
+    expect(officialBenchmarkIds(undefined)).toEqual([
+      "01_",
+      "02_",
+      "03_",
+      "04_",
+      "05_",
+      "06_",
+      "07_",
+      "08_",
+      "09_",
+    ]);
+    expect(officialBenchmarkIds("swap-1k")).toEqual(["05_"]);
   });
 });

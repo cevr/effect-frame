@@ -3,6 +3,7 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import {
+  ActorStopped,
   ActorTransport,
   Behavior,
   CommandId,
@@ -125,6 +126,8 @@ interface WireService {
   readonly commands: Queue.Queue<string>;
   readonly subscriptions: Ref.Ref<ReadonlyMap<string, number>>;
   readonly snapshots: Ref.Ref<ReadonlyMap<string, Held>>;
+  /** Actor keys whose snapshot read fails once its hold opens. */
+  readonly failing: Ref.Ref<ReadonlySet<string>>;
 }
 
 class Wire extends Context.Service<Wire, WireService>()(
@@ -150,6 +153,9 @@ const wired = Layer.effect(
           if (Option.isSome(held)) {
             yield* Deferred.succeed(held.value.started, void 0);
             yield* Deferred.await(held.value.gate);
+          }
+          if ((yield* Ref.get(wire.failing)).has(address.key)) {
+            return yield* ActorStopped.make({});
           }
           return yield* inner.snapshot(address);
         }),
@@ -185,6 +191,7 @@ const makeWire = Effect.gen(function* () {
     commands: yield* Queue.unbounded<string>(),
     subscriptions: yield* Ref.make<ReadonlyMap<string, number>>(new Map()),
     snapshots: yield* Ref.make<ReadonlyMap<string, Held>>(new Map()),
+    failing: yield* Ref.make<ReadonlySet<string>>(new Set()),
   });
 });
 
@@ -221,6 +228,14 @@ const holdSnapshot = Effect.fn("NestedTest.holdSnapshot")(function* (
   const held = yield* makeHeld;
   yield* Ref.update(wire.snapshots, (all) => new Map(all).set(draftKey(tenant, postId), held));
   return held;
+});
+
+const failSnapshot = Effect.fn("NestedTest.failSnapshot")(function* (
+  tenant: string,
+  postId: string,
+) {
+  const wire = yield* Wire;
+  yield* Ref.update(wire.failing, (all) => new Set(all).add(draftKey(tenant, postId)));
 });
 
 const callsOf = Effect.fn("NestedTest.callsOf")(function* (id: string) {
@@ -930,6 +945,58 @@ describe("private nested transition", () => {
         expect(closed.queries).toHaveLength(0);
         expect(closed.mounts).toHaveLength(0);
         expect(closed.routes).toHaveLength(0);
+      }),
+  );
+
+  it.scoped.layer(frameLayer("nested-stay-failure"))(
+    "8. a failed read during a stay releases every sibling it acquired and publishes nothing",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* makeRoot;
+        const probes = yield* makeProbes;
+        const wire = yield* Wire;
+        const { page, router } = yield* mountApp(makeTree(probes), root, "/app/t1/posts/1");
+        yield* readyPage(page, "1");
+
+        const snapshot2 = yield* holdSnapshot("t1", "2");
+        yield* failSnapshot("t1", "2");
+        const post2 = yield* hold("post:t1/2");
+        const comments2 = yield* hold("comments:t1/2");
+        const moving = yield* Effect.forkChild(router.navigate("/app/t1/posts/2"));
+        yield* Deferred.await(snapshot2.started);
+        yield* Deferred.await(post2.started);
+        yield* Deferred.await(comments2.started);
+
+        // The sibling query interests are acquired before the actor read fails.
+        const acquiring = yield* Frame.inspect;
+        expect(Option.isSome(queryRecord(acquiring, "NestedPostBody", '"postId":"2"'))).toBe(true);
+        expect(Option.isSome(queryRecord(acquiring, "NestedComments", '"postId":"2"'))).toBe(true);
+
+        yield* Deferred.succeed(snapshot2.gate, void 0);
+        // The navigation reports the read failure.
+        expect(Exit.isFailure(yield* Fiber.await(moving))).toBe(true);
+
+        // Every acquired part is released.
+        const after = yield* Frame.inspect;
+        expect(Option.isNone(queryRecord(after, "NestedPostBody", '"postId":"2"'))).toBe(true);
+        expect(Option.isNone(queryRecord(after, "NestedComments", '"postId":"2"'))).toBe(true);
+        expect(queryKeys(after)).toHaveLength(3);
+        expect(yield* subscriptionsOf("t1", "2")).toBe(0);
+        expect(yield* subscriptionsOf("t1", "1")).toBe(1);
+
+        // Nothing is published: after a flush the view still shows post 1,
+        // fresh, and its current actor handle still commands post 1.
+        yield* page.waitFor({
+          label: "post 1 params and data after the failed stay",
+          until: (actual) =>
+            textAt(actual, "#post-param") === "1" &&
+            textAt(actual, "#post-title") === "value:post:t1/1" &&
+            textAt(actual, "#post-stale") === "false",
+        });
+        yield* click(root, "#current");
+        expect(yield* Queue.take(wire.commands)).toBe(draftKey("t1", "1"));
+        expect(yield* Ref.get(probes.postSetups)).toEqual(["1"]);
+        expect(yield* Ref.get(probes.layoutSetups)).toBe(1);
       }),
   );
 

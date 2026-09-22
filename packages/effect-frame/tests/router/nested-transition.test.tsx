@@ -352,6 +352,7 @@ const makeTree = (probes: Probes) => {
         <article id="post">
           <h2 id="post-title">{View.bind(title)}</h2>
           <p id="post-param">{View.bind(props.params, (params) => params.postId)}</p>
+          <p id="post-tab">{View.bind(props.search, (search) => search.tab)}</p>
           <p id="post-comments">{View.bind(comments)}</p>
           <p id="post-tenant">{View.bind(tenant)}</p>
           <p id="post-stale">
@@ -828,10 +829,13 @@ describe("private nested transition", () => {
         yield* click(root, "#current");
         expect(yield* Queue.take(wire.commands)).toBe(draftKey("t1", "2"));
 
-        // A search-only change keeps every declaration and every entry.
+        // A search-only change moves no key, yet publishes the new search
+        // and keeps every declaration and every entry.
+        expect(textAt(root, "#post-tab")).toBe("read");
         yield* page.act(router.navigate("/app/t1/posts/2?tab=comments"), {
-          label: "search refinement",
-          until: () => true,
+          label: "search refinement publishes the new tab",
+          until: (actual) =>
+            textAt(actual, "#post-tab") === "comments" && textAt(actual, "#post-param") === "2",
         });
         expect(yield* callsOf("post:t1/2")).toBe(1);
         expect(yield* subscriptionsOf("t1", "2")).toBe(1);

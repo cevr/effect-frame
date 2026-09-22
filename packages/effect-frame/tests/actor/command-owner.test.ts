@@ -379,6 +379,10 @@ describe("private command owner", () => {
       expect(retained.map((record) => [record.attempt, record.running])).toEqual([[8, false]]);
 
       wire.controls.dropCalls = false;
+      // Retries of an idle record join: the first starts the one sequence and
+      // the others see it running. A retry that races the exhaustion step
+      // itself is proven by "a retry that races the exhaustion step joins the
+      // one running sequence".
       yield* Effect.all([command.retry, command.retry, command.retry], {
         concurrency: "unbounded",
       });

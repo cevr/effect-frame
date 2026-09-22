@@ -18,7 +18,7 @@
     "bench": "bun run --cwd tooling/dom-bench bench",
     "gate": "concurrently -n type,style,build -c blue,yellow,cyan \"bun run typecheck\" \"bun run lint && bun run fmt:check\" \"bun run build\" && bun run test",
     "prepare": "lefthook install && effect-tsgo patch",
-    "version": "changeset version",
+    "version": "changeset version && bun install --lockfile-only --ignore-scripts",
     "release": "bun run build && changeset publish"
   },
   "devDependencies": {

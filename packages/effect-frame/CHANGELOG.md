@@ -1,5 +1,11 @@
 # effect-frame
 
+## 0.9.1
+
+### Patch Changes
+
+- [`982f1a9`](https://github.com/cevr/effect-frame/commit/982f1a9b1066447916909814bb85061f72dba84c) Thanks [@cevr](https://github.com/cevr)! - Type the router's not-found view with its own requirements. `mount` now requires the union of the routes' and the not-found view's services, so a not-found view can use `Router` or another service that no route needs.
+
 ## 0.9.0
 
 ### Minor Changes

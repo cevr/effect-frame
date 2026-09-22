@@ -4,7 +4,7 @@
  * to show a real process disconnect and SIGINT exit code; it is not a bin.
  */
 import { Effect } from "effect";
-import * as Client from "../../src/client.js";
+import * as Client from "../../src/reader.js";
 
 const interrupt = new AbortController();
 process.once("SIGINT", () => interrupt.abort());

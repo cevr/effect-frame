@@ -2,7 +2,7 @@
 import { Effect, Exit, Scope } from "effect";
 import { resolve } from "node:path";
 import * as Gateway from "../src/gateway.js";
-import * as Client from "../src/client.js";
+import * as Client from "../src/reader.js";
 import type { FixtureConfig } from "./fixture/app.js";
 
 export const fixtureDir = resolve(import.meta.dir, "fixture");

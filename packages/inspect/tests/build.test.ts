@@ -19,8 +19,8 @@ describe("inspection build separation", () => {
       "effect-frame/src/inspection/index.ts",
       "effect-frame/src/inspection/attach.ts",
       "effect-frame/src/inspection/protocol.ts",
-      "inspection-gateway/src/gateway.ts",
-      "inspection-gateway/src/client.ts",
+      "packages/inspect/src/gateway.ts",
+      "packages/inspect/src/reader.ts",
     ]) {
       expect({ module, bundled: has(production.inputs, module) }).toEqual({
         module,
@@ -37,8 +37,8 @@ describe("inspection build separation", () => {
     const development = await H.bundle("main.dev.tsx");
     expect(has(development.inputs, "effect-frame/src/inspection/attach.ts")).toBe(true);
     expect(has(development.inputs, "effect-frame/src/inspection/protocol.ts")).toBe(true);
-    expect(has(development.inputs, "inspection-gateway/src/gateway.ts")).toBe(false);
-    expect(has(development.inputs, "inspection-gateway/src/client.ts")).toBe(false);
+    expect(has(development.inputs, "packages/inspect/src/gateway.ts")).toBe(false);
+    expect(has(development.inputs, "packages/inspect/src/reader.ts")).toBe(false);
     expect(development.inputs.filter((input) => /^(bun|node:)/.test(input))).toEqual([]);
     expect(development.text.includes("Bun.serve")).toBe(false);
     expect(/(from\s*|import\(\s*|require\(\s*)["'](node:|bun["'])/.test(development.text)).toBe(

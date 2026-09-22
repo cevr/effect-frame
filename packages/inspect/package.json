@@ -1,7 +1,9 @@
 {
-  "name": "@effect-frame/inspection-gateway",
+  "name": "@effect-frame/inspect",
   "version": "0.0.0",
   "private": true,
+  "description": "The effect-frame inspection gateway and reader: a loopback Bun gateway and the effect-frame CLI.",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",

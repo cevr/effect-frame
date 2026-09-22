@@ -8,7 +8,7 @@ import { describe, expect, it } from "bun:test";
 import { Effect } from "effect";
 import { resolve } from "node:path";
 import type { Protocol } from "effect-frame/inspection";
-import { TOKEN_ENV } from "../src/client.js";
+import { TOKEN_ENV } from "../src/reader.js";
 import * as H from "./harness.js";
 
 type Snapshot = Protocol.InspectResponse["snapshot"];
@@ -228,7 +228,7 @@ describe.skipIf(!H.hasBrowser)("live Frame inspection over a browser-originated 
         [
           "bun",
           "--conditions=source",
-          resolve(H.fixtureDir, "cli-process.ts"),
+          resolve(H.fixtureDir, "reader-process.ts"),
           "inspect",
           "--url",
           url(r),

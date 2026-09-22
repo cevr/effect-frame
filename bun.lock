@@ -68,6 +68,16 @@
         "effect": "catalog:",
       },
     },
+    "packages/inspect": {
+      "name": "@effect-frame/inspect",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect-frame": "workspace:*",
+      },
+      "peerDependencies": {
+        "effect": "catalog:",
+      },
+    },
     "tooling/checks": {
       "name": "@effect-frame/toolchain-checks",
       "version": "0.0.0",
@@ -83,16 +93,6 @@
         "effect-frame": "workspace:*",
         "octane": "0.4.0",
         "solid-js": "2.0.0-rc.9",
-      },
-      "peerDependencies": {
-        "effect": "catalog:",
-      },
-    },
-    "tooling/inspection-gateway": {
-      "name": "@effect-frame/inspection-gateway",
-      "version": "0.0.0",
-      "dependencies": {
-        "effect-frame": "workspace:*",
       },
       "peerDependencies": {
         "effect": "catalog:",
@@ -148,7 +148,7 @@
 
     "@effect-frame/host-celld": ["@effect-frame/host-celld@workspace:packages/host-celld"],
 
-    "@effect-frame/inspection-gateway": ["@effect-frame/inspection-gateway@workspace:tooling/inspection-gateway"],
+    "@effect-frame/inspect": ["@effect-frame/inspect@workspace:packages/inspect"],
 
     "@effect-frame/toolchain-checks": ["@effect-frame/toolchain-checks@workspace:tooling/checks"],
 

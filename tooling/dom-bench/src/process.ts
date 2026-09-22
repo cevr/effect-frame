@@ -4,6 +4,12 @@ import { spawn } from "node:child_process";
 
 export type OwnedProcess = ReturnType<typeof spawn>;
 
+export interface OwnedProcessState {
+  spawned: boolean;
+  spawnFailed: boolean;
+  exited: boolean;
+}
+
 type ProcessSignal = "SIGINT" | "SIGTERM";
 
 const interruptSignals: ReadonlyArray<ProcessSignal> = ["SIGINT", "SIGTERM"];
@@ -35,12 +41,31 @@ const sendSignal = (child: OwnedProcess, signal: NodeJS.Signals): void => {
   }
 };
 
-const waitForExit = (child: OwnedProcess): Promise<void> => {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+const hasExited = (child: OwnedProcess, state?: OwnedProcessState): boolean =>
+  state?.exited === true || child.exitCode !== null || child.signalCode !== null;
+
+const waitForExit = (
+  child: OwnedProcess,
+  milliseconds: number,
+  state?: OwnedProcessState,
+): Promise<boolean> => {
+  if (hasExited(child, state)) return Promise.resolve(true);
   return new Promise((resolve) => {
-    const done = (): void => resolve();
-    child.once("exit", done);
-    child.once("error", done);
+    let settled = false;
+    const finish = (exited: boolean): void => {
+      if (settled) return;
+      settled = true;
+      if (exited && state !== undefined) state.exited = true;
+      clearTimeout(timer);
+      child.removeListener("exit", onExit);
+      child.removeListener("error", onError);
+      resolve(exited);
+    };
+    const onExit = (): void => finish(true);
+    const onError = (): void => finish(true);
+    const timer = setTimeout(() => finish(false), milliseconds);
+    child.once("exit", onExit);
+    child.once("error", onError);
   });
 };
 
@@ -57,17 +82,23 @@ const waitForGroupGone = async (pid: number, milliseconds: number): Promise<bool
 export const cleanupProcessGroup = async (
   child: OwnedProcess,
   graceMilliseconds = 1_000,
+  state?: OwnedProcessState,
 ): Promise<void> => {
   const pid = child.pid;
-  if (pid === undefined || process.platform === "win32") {
-    if (child.exitCode === null && child.signalCode === null) sendSignal(child, "SIGTERM");
-    await Promise.race([waitForExit(child), Bun.sleep(graceMilliseconds)]);
-    if (child.exitCode === null && child.signalCode === null) sendSignal(child, "SIGKILL");
-    await waitForExit(child);
+  if (pid === undefined) return;
+  if (process.platform === "win32") {
+    if (!hasExited(child, state)) sendSignal(child, "SIGTERM");
+    if (!(await waitForExit(child, graceMilliseconds, state)) && !hasExited(child, state)) {
+      sendSignal(child, "SIGKILL");
+      if (!(await waitForExit(child, graceMilliseconds, state))) {
+        // oxlint-disable-next-line effect/noNewError, effect/noThrowStatement -- a surviving owned process is a bounded cleanup failure.
+        throw new Error(`owned process ${pid} did not exit after SIGKILL`);
+      }
+    }
     return;
   }
   if (groupExists(pid)) sendSignal(child, "SIGTERM");
-  await Promise.race([waitForExit(child), Bun.sleep(graceMilliseconds)]);
+  await waitForExit(child, graceMilliseconds, state);
   if (groupExists(pid)) sendSignal(child, "SIGKILL");
   if (!(await waitForGroupGone(pid, graceMilliseconds))) {
     sendSignal(child, "SIGKILL");
@@ -104,6 +135,11 @@ export const runProcess = (
       stdio: "inherit",
       detached: process.platform !== "win32",
     });
+    const state: OwnedProcessState = {
+      spawned: child.pid !== undefined,
+      spawnFailed: false,
+      exited: false,
+    };
     let settled = false;
     const timer = setTimeout(() => {
       settleFailure(new Error(`${command} timed out after ${milliseconds}ms`));
@@ -116,15 +152,18 @@ export const runProcess = (
       settled = true;
       clearTimeout(timer);
       removeSignals();
-      void cleanupProcessGroup(child).then(finish, rejectProcess);
+      const cleanup = state.spawned ? cleanupProcessGroup(child, 1_000, state) : Promise.resolve();
+      void cleanup.then(finish, rejectProcess);
     };
     const settleFailure = (error: Error): void => {
       settle(() => rejectProcess(error));
     };
     child.once("error", (error) => {
+      state.spawnFailed = true;
       settleFailure(error instanceof Error ? error : new Error(String(error)));
     });
     child.once("exit", (code, signal) => {
+      state.exited = true;
       if (code === 0) {
         settle(resolveProcess);
         return;

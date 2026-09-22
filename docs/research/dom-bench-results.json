@@ -39,6 +39,7 @@
         "samples": 1,
         "durationMs": 1140.851,
         "state": "ok",
+        "receiptStatus": "earlier-method; pending final matrix rerun",
         "log": "/tmp/effect-frame-dom-bench-solid2-chrome-create.log",
         "rawTrace": "/tmp/effect-frame-dom-bench-traces/solid2-chrome-create-1k-14519.json"
       },
@@ -58,6 +59,7 @@
         "samples": 1,
         "durationMs": 921.42,
         "state": "ok",
+        "receiptStatus": "earlier-method; pending final matrix rerun",
         "log": "/tmp/effect-frame-dom-bench-octane-chrome-create.log",
         "rawTrace": "/tmp/effect-frame-dom-bench-traces/octane-chrome-create-1k-14579.json"
       },

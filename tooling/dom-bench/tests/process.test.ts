@@ -1,4 +1,4 @@
-/* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNewError, effect/noNodeBuiltinImport, effect/noNullish, effect/noThrowStatement, effect/noTryCatch, effect/noKnownValueWidening, no-await-in-loop, node/no-process-env -- these tests exercise the real owned process-group boundary. */
+/* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNewError, effect/noNewPromise, effect/noNodeBuiltinImport, effect/noNullish, effect/noThrowStatement, effect/noTryCatch, no-await-in-loop, node/no-process-env -- these tests exercise the real owned process-group boundary. */
 
 import { describe, expect, it } from "bun:test";
 import { rm } from "node:fs/promises";
@@ -30,6 +30,15 @@ const waitForExit = async (pid: number): Promise<void> => {
   throw new Error(`test descendant ${pid} is still alive`);
 };
 
+const observeRejection = (promise: Promise<void>): Promise<"resolved" | "rejected" | "timeout"> =>
+  Promise.race([
+    promise.then(
+      (): "resolved" => "resolved",
+      (): "rejected" => "rejected",
+    ),
+    Bun.sleep(1_500).then((): "timeout" => "timeout"),
+  ]);
+
 const startResistantGroup = (token: string) => {
   const pidPath = resolve("/tmp", `effect-frame-dom-bench-process-${token}.pid`);
   const childCode = `process.on("SIGTERM", () => {}); require("node:fs").writeFileSync(${JSON.stringify(pidPath)}, String(process.pid)); setInterval(() => {}, 1000);`;
@@ -38,6 +47,21 @@ const startResistantGroup = (token: string) => {
 };
 
 describe("owned benchmark process groups", () => {
+  it("rejects a missing executable without waiting for a nonexistent child", async () => {
+    const result = await observeRejection(
+      runProcess("/tmp", "/tmp/effect-frame-dom-bench-no-such-command", [], process.env, 100),
+    );
+    expect(result).toBe("rejected");
+  }, 2_000);
+
+  it("rejects a missing working directory without waiting for a nonexistent child", async () => {
+    const missingCwd = `/tmp/effect-frame-dom-bench-no-such-cwd-${process.pid}-${Date.now()}`;
+    const result = await observeRejection(
+      runProcess(missingCwd, process.execPath, ["-e", ""], process.env, 100),
+    );
+    expect(result).toBe("rejected");
+  }, 2_000);
+
   it("kills a TERM-resistant descendant after the leader exits on deadline", async () => {
     const { pidPath, parentCode } = startResistantGroup(`${process.pid}-deadline`);
     let descendantPid: number | undefined;

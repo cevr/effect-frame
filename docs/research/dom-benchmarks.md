@@ -53,22 +53,28 @@ same-process Commit after that mark. It rejects an earlier Commit when the
 trace does not prove the completed DOM render. Raw Chrome events are kept
 under `/tmp/effect-frame-dom-bench-traces/` by default.
 
-| Acceptance cell                                                            | Result                                             |
-| -------------------------------------------------------------------------- | -------------------------------------------------- |
-| Effect Frame through Bun.WebView Chrome, `create-1k`                       | Passed; 1,051.839 ms in the replacement sample.    |
-| Effect Frame through Bun.WebView WebKit, `create-1k`                       | Passed; 354 ms in the recorded sample.             |
-| Solid 2 through Bun.WebView Chrome, `create-1k`                            | Passed; 1,140.851 ms in the recorded sample.       |
-| Solid 2 through Bun.WebView WebKit, `create-1k`                            | Passed; 53 ms in the recorded sample.              |
-| Octane through Bun.WebView Chrome, `create-1k`                             | Passed; 921.420 ms in the recorded sample.         |
-| Octane through Bun.WebView WebKit, `create-1k`                             | Passed; 19 ms in the recorded sample.              |
-| Effect Frame bundle through standard Chrome, `create-1k`                   | Passed; six buttons and 1,000 rows.                |
-| Plain DOM control, 10,000-row partial update                               | Passed; 1,000 labels changed.                      |
-| Solid signals control, 10,000-row partial update                           | Passed; 1,000 labels changed.                      |
-| Effect Frame through Bun.WebView Chrome, `update-10th-10k`                 | Failed at the bounded deadline; no timing claimed. |
-| Pinned krausest Playwright runner, Effect Frame staged fixture, `01_run1k` | Passed; official runner reported 59.550 ms total.  |
-| Pinned krausest Playwright runner, Solid 2 staged fixture, `01_run1k`      | Passed; official runner reported 58.993 ms total.  |
-| Pinned krausest Playwright runner, Octane staged fixture, `01_run1k`       | Passed; official runner reported 28.722 ms total.  |
-| Full three-framework, two-engine matrix                                    | Open.                                              |
+Local timings include Bun.WebView driver round trips and browser frame
+scheduling. They are not pure renderer cost or proof of exact upstream
+algorithm parity. The saved Solid 2 and Octane Chrome traces predate the
+completion marker rule. They lack that marker and remain earlier-method
+receipts pending the final matrix rerun.
+
+| Acceptance cell                                                            | Result                                                            |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Effect Frame through Bun.WebView Chrome, `create-1k`                       | Passed; 1,051.839 ms in the replacement sample.                   |
+| Effect Frame through Bun.WebView WebKit, `create-1k`                       | Passed; 354 ms in the recorded sample.                            |
+| Solid 2 through Bun.WebView Chrome, `create-1k`                            | Earlier-method receipt; 1,140.851 ms; pending final matrix rerun. |
+| Solid 2 through Bun.WebView WebKit, `create-1k`                            | Passed; 53 ms in the recorded sample.                             |
+| Octane through Bun.WebView Chrome, `create-1k`                             | Earlier-method receipt; 921.420 ms; pending final matrix rerun.   |
+| Octane through Bun.WebView WebKit, `create-1k`                             | Passed; 19 ms in the recorded sample.                             |
+| Effect Frame bundle through standard Chrome, `create-1k`                   | Passed; six buttons and 1,000 rows.                               |
+| Plain DOM control, 10,000-row partial update                               | Passed; 1,000 labels changed.                                     |
+| Solid signals control, 10,000-row partial update                           | Passed; 1,000 labels changed.                                     |
+| Effect Frame through Bun.WebView Chrome, `update-10th-10k`                 | Failed at the bounded deadline; no timing claimed.                |
+| Pinned krausest Playwright runner, Effect Frame staged fixture, `01_run1k` | Passed; official runner reported 59.550 ms total.                 |
+| Pinned krausest Playwright runner, Solid 2 staged fixture, `01_run1k`      | Passed; official runner reported 58.993 ms total.                 |
+| Pinned krausest Playwright runner, Octane staged fixture, `01_run1k`       | Passed; official runner reported 28.722 ms total.                 |
+| Full three-framework, two-engine matrix                                    | Open.                                                             |
 
 ## Result
 

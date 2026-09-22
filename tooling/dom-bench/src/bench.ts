@@ -13,7 +13,12 @@ import {
   nouns,
   type InvariantResult,
 } from "./common.js";
-import { cleanupProcessGroup, listenForProcessSignals, runProcess } from "./process.js";
+import {
+  cleanupProcessGroup,
+  listenForProcessSignals,
+  runProcess,
+  type OwnedProcessState,
+} from "./process.js";
 import {
   EngineSchema,
   FrameworkSchema,
@@ -134,6 +139,18 @@ const chromePathCandidates = [
 ];
 
 const krausestRevision = "f2df01a8679de05225c32714ca8cecbea3d78c5d";
+
+type InterruptSignal = "SIGINT" | "SIGTERM";
+
+let interruptedSignal: InterruptSignal | undefined;
+
+const markInterrupted = (signal: InterruptSignal): void => {
+  if (interruptedSignal !== undefined) return;
+  interruptedSignal = signal;
+  process.exitCode = signal === "SIGINT" ? 130 : 143;
+};
+
+const wasInterrupted = (): boolean => interruptedSignal !== undefined;
 
 const readGitRevision = async (root: string): Promise<string> => {
   const command = Bun.spawn(["git", "-C", root, "rev-parse", "HEAD"], {
@@ -634,6 +651,7 @@ const runCellWithDeadline = async (request: CellRequest): Promise<Measurement> =
   await Bun.write(requestPath, JSON.stringify(request));
 
   let child: ReturnType<typeof spawn> | undefined;
+  let childState: OwnedProcessState | undefined;
   let exitResolve: (value: {
     readonly code: number | null;
     readonly signal: NodeJS.Signals | null;
@@ -661,14 +679,19 @@ const runCellWithDeadline = async (request: CellRequest): Promise<Measurement> =
       stdio: "ignore",
       detached: process.platform !== "win32",
     });
+    childState = { spawned: child.pid !== undefined, spawnFailed: false, exited: false };
     removeSignals = listenForProcessSignals((signal) => {
-      process.exitCode = signal === "SIGINT" ? 130 : 143;
+      markInterrupted(signal);
       rejectInterruption(new Error(`benchmark cell interrupted by ${signal}`));
     });
-    child.once("error", (error) =>
-      exitReject(error instanceof Error ? error : new Error(String(error))),
-    );
-    child.once("exit", (code, signal) => exitResolve({ code, signal }));
+    child.once("error", (error) => {
+      if (childState !== undefined) childState.spawnFailed = true;
+      exitReject(error instanceof Error ? error : new Error(String(error)));
+    });
+    child.once("exit", (code, signal) => {
+      if (childState !== undefined) childState.exited = true;
+      exitResolve({ code, signal });
+    });
     const completed = exitedPromise.then(async ({ code, signal }) => {
       if (code !== 0)
         throw new Error(`benchmark cell exited with ${code ?? `signal ${signal ?? "unknown"}`}`);
@@ -697,7 +720,7 @@ const runCellWithDeadline = async (request: CellRequest): Promise<Measurement> =
     }
   } finally {
     removeSignals();
-    if (child !== undefined) await cleanupProcessGroup(child);
+    if (child !== undefined) await cleanupProcessGroup(child, 1_000, childState);
     await rm(requestPath, { force: true });
     await rm(resultPath, { force: true });
   }
@@ -850,7 +873,7 @@ const runOfficial = async (
   let server: ReturnType<typeof spawn> | undefined;
   let interrupted: Error | undefined;
   const removeSignals = listenForProcessSignals((signal) => {
-    process.exitCode = signal === "SIGINT" ? 130 : 143;
+    markInterrupted(signal);
     interrupted = new Error(`official benchmark interrupted by ${signal}`);
   });
   try {
@@ -941,7 +964,7 @@ const runEngine = async (
     (candidate) => only === undefined || candidate.name === only,
   );
   for (const operation of selectedOperations) {
-    if (process.exitCode === 130 || process.exitCode === 143) break;
+    if (wasInterrupted()) break;
     for (let sample = 0; sample < count; sample += 1) {
       // oxlint-disable-next-line no-await-in-loop -- cells run serially to avoid cross-cell browser and CPU contention.
       const result = await runOneCell(framework, engine, operation.name, chromePath, scriptPath);
@@ -952,7 +975,7 @@ const runEngine = async (
         // oxlint-disable-next-line no-await-in-loop -- failure receipts preserve cell order.
         await recordFailure(result.failure);
       }
-      if (process.exitCode === 130 || process.exitCode === 143) break;
+      if (wasInterrupted()) break;
     }
   }
   return { measurements, failures };
@@ -970,6 +993,7 @@ const main = async (): Promise<void> => {
   const measurements: Array<Measurement> = [];
   const failures: Array<MeasurementFailure> = [];
   for (const engine of options.engines) {
+    if (wasInterrupted()) break;
     // oxlint-disable-next-line no-await-in-loop -- engines run serially for comparable measurements.
     const result = await runEngine(
       options.framework,
@@ -983,7 +1007,7 @@ const main = async (): Promise<void> => {
     failures.push(...result.failures);
   }
   printMeasurements(measurements);
-  if (failures.length > 0) {
+  if (failures.length > 0 && !wasInterrupted()) {
     console.log("engine\tframework\toperation\terror");
     for (const failure of failures) {
       console.log(
@@ -992,9 +1016,10 @@ const main = async (): Promise<void> => {
     }
     process.exitCode = 1;
   }
-  if (options.official && process.exitCode !== 130 && process.exitCode !== 143) {
+  if (options.official && !wasInterrupted()) {
     await runOfficial(options.framework, options.count, chromePath, script, options.only).catch(
       (error) => {
+        if (wasInterrupted()) return;
         const reason = error instanceof Error ? error.message : String(error);
         console.log(["official", options.framework, "krausest-playwright", reason].join("\t"));
         process.exitCode = 1;
@@ -1012,7 +1037,7 @@ if (import.meta.main) {
     await main().catch((error) => {
       const message = error instanceof Error ? error.message : String(error);
       console.error(message);
-      process.exitCode = isInvalidOptionsError(error) ? 2 : 1;
+      if (!wasInterrupted()) process.exitCode = isInvalidOptionsError(error) ? 2 : 1;
     });
   }
 }

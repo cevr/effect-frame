@@ -4,9 +4,21 @@
   "private": true,
   "description": "The effect-frame inspection gateway and reader: a loopback Bun gateway and the effect-frame CLI.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cevr/effect-frame.git",
+    "directory": "packages/inspect"
+  },
+  "bin": {
+    "effect-frame": "./dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "build": "bun --bun tsdown",
     "test": "bun test --conditions=source tests/"
   },
   "dependencies": {

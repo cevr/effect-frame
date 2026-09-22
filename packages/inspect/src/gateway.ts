@@ -209,6 +209,12 @@ const frameViolation = (message: string | Buffer): Option.Option<string> => {
   return Option.none();
 };
 
+/** The gateway could not listen, for example because the port is in use. */
+export class GatewayListenError extends Schema.TaggedError<GatewayListenError>()(
+  "GatewayListenError",
+  { port: Schema.Int, detail: Schema.String },
+) {}
+
 class ReaderFailure extends Schema.TaggedError<ReaderFailure>()("ReaderFailure", {
   error: Protocol.GatewayError,
 }) {}
@@ -595,32 +601,38 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
     );
 
   const listener = yield* Effect.acquireRelease(
-    Effect.sync(() =>
-      Bun.serve<RootData>({
-        hostname: "127.0.0.1",
-        port: options.port ?? 0,
-        fetch(request, bunServer) {
-          if (!hostAllowed(request)) {
-            return errorResponse({
-              _tag: "ForbiddenHost",
-              host: (request.headers.get("host") ?? "").slice(0, 256),
-            });
-          }
-          const path = new URL(request.url).pathname;
-          if (path === Protocol.ATTACH_PATH) return attach(request, bunServer);
-          return Effect.runPromiseWith(context)(handleReader(request, path), {
-            signal: request.signal,
-          }).catch(() => new Response(null, { status: 499 }));
-        },
-        websocket: {
-          maxPayloadLength: maxSnapshotBytes + 64 * 1024,
-          idleTimeout: 30,
-          open: openConnection,
-          message: onMessage,
-          close: closeConnection,
-        },
-      }),
-    ),
+    Effect.try({
+      try: () =>
+        Bun.serve<RootData>({
+          hostname: "127.0.0.1",
+          port: options.port ?? 0,
+          fetch(request, bunServer) {
+            if (!hostAllowed(request)) {
+              return errorResponse({
+                _tag: "ForbiddenHost",
+                host: (request.headers.get("host") ?? "").slice(0, 256),
+              });
+            }
+            const path = new URL(request.url).pathname;
+            if (path === Protocol.ATTACH_PATH) return attach(request, bunServer);
+            return Effect.runPromiseWith(context)(handleReader(request, path), {
+              signal: request.signal,
+            }).catch(() => new Response(null, { status: 499 }));
+          },
+          websocket: {
+            maxPayloadLength: maxSnapshotBytes + 64 * 1024,
+            idleTimeout: 30,
+            open: openConnection,
+            message: onMessage,
+            close: closeConnection,
+          },
+        }),
+      catch: (cause) =>
+        GatewayListenError.make({
+          port: options.port ?? 0,
+          detail: cause instanceof Error ? cause.message.slice(0, 256) : "listen failed",
+        }),
+    }),
     (running) =>
       Effect.sync(() => {
         for (const connection of [...registry.values()]) {

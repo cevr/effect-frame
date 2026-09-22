@@ -1,16 +1,18 @@
 /* oxlint-disable effect/noGlobals, effect/noNullish, effect/noTernary -- this module is the reader transport boundary: fetch, AbortSignal, URL, JSON text, and argv parsing. */
 /**
- * The CLI-shaped reader. `run` takes argv and an environment and returns the
- * exit code with stdout and stderr text; it never touches the process. A
- * later public executable only wires `process.argv`, the token environment
- * variable, SIGINT, and the streams to this function.
+ * The reader commands of the `effect-frame` executable. `run` takes argv and
+ * an environment and returns the exit code with stdout and stderr text; it
+ * never touches the process. `bin.ts` wires `process.argv`, the token
+ * environment variable, SIGINT, and the streams to it.
  *
  *   roots   --url <gateway> [--json] [--deadline <ms>] [--token-file <path>]
  *   inspect --url <gateway> --root <id|prefix|name> [--json] [--deadline <ms>]
  *           [--token-file <path>] [--max-text <chars>]
  *
- * Exit codes: 0 success, 1 operational failure, 2 invalid arguments,
- * 130 interrupted. Data goes to stdout; diagnostics go to stderr.
+ * Exit codes: 0 success, 1 operational failure, 2 invalid arguments or a
+ * missing capability, 130 interrupted. Data goes to stdout; diagnostics go
+ * to stderr. With `--json`, stdout holds exactly one versioned document for
+ * every exit code.
  */
 import { Effect, Match, Option, Schema } from "effect";
 import { Protocol } from "effect-frame/inspection";
@@ -38,30 +40,49 @@ export const ClientError = Schema.Union([
   Schema.TaggedStruct("GatewayUnreachable", { url: Schema.String }),
   Schema.TaggedStruct("GatewayTimedOut", { deadlineMillis: Schema.Int }),
   Schema.TaggedStruct("MalformedResponse", { status: Schema.Int, detail: Schema.String }),
+  Schema.TaggedStruct("InvalidArguments", { message: Schema.String }),
+  Schema.TaggedStruct("MissingCapability", { tokenEnv: Schema.String }),
+  Schema.TaggedStruct("Interrupted", {}),
 ]);
 export type ClientError = Schema.Schema.Type<typeof ClientError>;
 
-export const HELP = `effect-frame inspection reader (private proof)
+/**
+ * The one document `--json` prints on stdout: a gateway reply, or an error
+ * envelope that carries a gateway error or a reader-side error.
+ */
+export const Document = Schema.Union([
+  Protocol.RootsResponse,
+  Protocol.InspectResponse,
+  Schema.TaggedStruct("Error", {
+    version: Schema.Literal(Protocol.PROTOCOL_VERSION),
+    error: Schema.Union([Protocol.GatewayError, ClientError]),
+  }),
+]);
+export type Document = Schema.Schema.Type<typeof Document>;
+
+export const HELP = `Read a live Frame root through an effect-frame gateway.
 
 Usage:
-  roots   --url <gateway> [--json] [--deadline <ms>] [--token-file <path>]
-  inspect --url <gateway> --root <selector> [--json] [--deadline <ms>]
-          [--token-file <path>] [--max-text <chars>]
+  effect-frame roots   --url <gateway> [--json] [--deadline <ms>] [--token-file <path>]
+  effect-frame inspect --url <gateway> --root <selector> [--json] [--deadline <ms>]
+                       [--token-file <path>] [--max-text <chars>]
 
 Flags:
   --url <gateway>      Loopback gateway, for example http://127.0.0.1:4318
   --root <selector>    Exact root ID, unique ID prefix, or exact root name
-  --json               Print one versioned JSON response on stdout
+  --json               Print exactly one versioned JSON document on stdout
   --deadline <ms>      Finite deadline, 1..${Protocol.MAX_DEADLINE_MILLIS} (default ${Protocol.DEFAULT_DEADLINE_MILLIS})
   --token-file <path>  Read capability file (else ${TOKEN_ENV})
   --max-text <chars>   Longest value shown in text output (default 160)
   -h, --help           Show this help
 
-Examples:
-  roots --url http://127.0.0.1:4318 --json
-  inspect --url http://127.0.0.1:4318 --root frame-root-3f2a --json
+The capability comes from --token-file or ${TOKEN_ENV}, never from a flag.
 
-Exit codes: 0 ok, 1 failure, 2 invalid arguments, 130 interrupted.
+Examples:
+  effect-frame roots --url http://127.0.0.1:4318 --token-file <state-dir>/read-token
+  effect-frame inspect --url http://127.0.0.1:4318 --root frame-root-3f2a --json
+
+Exit codes: 0 ok, 1 failure, 2 invalid arguments or no capability, 130 interrupted.
 `;
 
 // ---------------------------------------------------------------------------
@@ -267,6 +288,10 @@ const errorText = (error: { readonly _tag: string }): string => {
       return `error: no attached root matches; list roots with: roots --url <gateway>\n${detail}\n`;
     case "Unauthorized":
       return `error: the gateway refused the capability; check --token-file or ${TOKEN_ENV}\n`;
+    case "MissingCapability":
+      return `error: no read capability; pass --token-file <path> or set ${TOKEN_ENV}\n`;
+    case "Interrupted":
+      return "interrupted\n";
     default:
       return `error: ${error._tag}\n${detail}\n`;
   }
@@ -385,31 +410,32 @@ const render = (parsed: Parsed, response: Protocol.ReaderResponse): CliResult =>
     }),
   );
 
+/** A reader-side failure: one error document on stdout under --json. */
+const failure = (
+  exitCode: CliResult["exitCode"],
+  json: boolean,
+  error: ClientError,
+  stderr: string = errorText(error),
+): CliResult => {
+  const body = { _tag: "Error", version: Protocol.PROTOCOL_VERSION, error };
+  return result(exitCode, json ? `${JSON.stringify(body)}\n` : "", stderr);
+};
+
 const execute = (parsed: Parsed, environment: CliEnvironment) =>
   Effect.gen(function* () {
     const token = yield* readToken(parsed, environment);
     if (Option.isNone(token) || token.value.length === 0) {
-      return result(
-        2,
-        "",
-        `error: no read capability; pass --token-file <path> or set ${TOKEN_ENV}\n`,
-      );
+      return failure(2, parsed.json, { _tag: "MissingCapability", tokenEnv: TOKEN_ENV });
     }
     const interrupted = Symbol("interrupted");
     const reply = yield* Effect.raceFirst(
       exchange(parsed, token.value),
       Effect.as(awaitInterrupt(Option.fromNullishOr(environment.interrupt)), interrupted),
     );
-    if (reply === interrupted) return result(130, "", "interrupted\n");
+    if (reply === interrupted) return failure(130, parsed.json, { _tag: "Interrupted" });
     return render(parsed, reply);
   }).pipe(
-    Effect.catchTag("Failed", (failed) => {
-      const error = failed.error;
-      const body = { _tag: "Error", version: Protocol.PROTOCOL_VERSION, error };
-      return Effect.succeed(
-        result(1, parsed.json ? `${JSON.stringify(body)}\n` : "", errorText(error)),
-      );
-    }),
+    Effect.catchTag("Failed", (failed) => Effect.succeed(failure(1, parsed.json, failed.error))),
   );
 
 /** Run one reader command. It never fails and never exits the process. */
@@ -421,6 +447,15 @@ export const run = (
     Effect.flatMap((parsed) => execute(parsed, environment)),
     Effect.catchTags({
       Help: () => Effect.succeed(result(0, HELP, "")),
-      Invalid: (error) => Effect.succeed(result(2, "", `error: ${error.message}\n\n${HELP}`)),
+      // Arguments failed to parse, so only the raw argv says whether --json was asked.
+      Invalid: (error) =>
+        Effect.succeed(
+          failure(
+            2,
+            argv.includes("--json"),
+            { _tag: "InvalidArguments", message: error.message },
+            `error: ${error.message}\n\n${HELP}`,
+          ),
+        ),
     }),
   );

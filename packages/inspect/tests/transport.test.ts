@@ -228,7 +228,7 @@ describe.skipIf(!H.hasBrowser)("live Frame inspection over a browser-originated 
         [
           "bun",
           "--conditions=source",
-          resolve(H.fixtureDir, "reader-process.ts"),
+          resolve(import.meta.dir, "../src/bin.ts"),
           "inspect",
           "--url",
           url(r),
@@ -269,6 +269,10 @@ describe.skipIf(!H.hasBrowser)("live Frame inspection over a browser-originated 
       expect(shortMillis).toBeLessThan(1_400);
       expect(killedExit).toBe(130);
       expect(await new Response(killed.stderr).text()).toContain("interrupted");
+      // Even when interrupted, --json leaves exactly one versioned document.
+      expect(await new Response(killed.stdout).text()).toBe(
+        `${JSON.stringify({ _tag: "Error", version: 1, error: { _tag: "Interrupted" } })}\n`,
+      );
 
       await blocked.done;
       const patientReply = await patient;

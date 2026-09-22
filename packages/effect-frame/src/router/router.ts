@@ -9,6 +9,7 @@ import {
   Option,
   Predicate,
   Queue,
+  Ref,
   Scope,
   Stream,
   SubscriptionRef,
@@ -18,6 +19,7 @@ import {
   Runtime as UrlStateRuntime,
   makeRuntime as makeUrlStateRuntime,
 } from "./url-state-runtime.js";
+import * as Inspection from "../inspection.js";
 
 /**
  * The router (#18 §7). The URL is the state: the router holds nothing about
@@ -92,6 +94,7 @@ interface Mounted<R> {
 }
 
 const newRouteInstance = (): RouteInstance => ({ _tag: "RouteInstance" });
+const unavailableInspection = Symbol.for("effect-frame/frame/inspection-unavailable");
 
 /** The not-found view as a route that matches everything, so one rule mounts both. */
 const notFoundRoute = <R>(view: View.View<NotFoundProps, never, R>): AnyRoute<R> => ({
@@ -101,6 +104,7 @@ const notFoundRoute = <R>(view: View.View<NotFoundProps, never, R>): AnyRoute<R>
     Option.some(
       Effect.map(SubscriptionRef.make(url), (current): Entered<R> => ({
         instance: { _tag: "RouteInstance" },
+        inspection: Effect.succeed({ params: {}, search: {} }),
         setup: view({
           url: { get: SubscriptionRef.get(current), changes: SubscriptionRef.changes(current) },
         }),
@@ -176,6 +180,11 @@ export const mount: <R, HostNode>(
   const pending = new Set<Request>();
   let closed = false;
   let mounted: Option.Option<Mounted<R>> = Option.none();
+  const registry = yield* Effect.serviceOption(Inspection.Registry);
+  let routerOwner = Option.none<Inspection.OwnerToken>();
+  if (Option.isSome(registry)) {
+    routerOwner = Option.some(yield* Inspection.ownerFor(registry.value));
+  }
 
   const submit = (request: Request) =>
     Effect.gen(function* () {
@@ -254,11 +263,50 @@ export const mount: <R, HostNode>(
         onNone: () => ({ ...entered, instance }),
         onSome: () => entered,
       });
+      const phase = yield* Ref.make<"entering" | "mounted">("entering");
+      let routeOwner = Option.none<Inspection.OwnerToken>();
+      if (Option.isSome(registry)) {
+        routeOwner = Option.some(registry.value.makeOwner(routerOwner));
+      }
+      let routeInstanceId = Option.none<string>();
+      if (Option.isSome(registry) && Option.isSome(routeOwner)) {
+        const registration = yield* Scope.provide(
+          registry.value.register(routeOwner.value, (id) =>
+            Effect.gen(function* () {
+              const mountedPhase = yield* Ref.get(phase);
+              const decoded = yield* Option.match(Option.fromNullishOr(mountedEntered.inspection), {
+                onNone: () =>
+                  Effect.succeed({ params: unavailableInspection, search: unavailableInspection }),
+                onSome: (read) => read,
+              });
+              const canonical = yield* SubscriptionRef.get(navigations);
+              return {
+                _tag: "Route",
+                id,
+                ownerId: routeOwner.value.id,
+                parentOwnerId: routeOwner.value.parentId,
+                routerId: Option.getOrThrow(Option.map(routerOwner, (owner) => owner.id)),
+                routeInstanceId: id,
+                routeName: target.route.name,
+                phase: mountedPhase,
+                params: decoded.params,
+                search: decoded.search,
+                canonicalRouteName: nameOf(canonical.url),
+                canonicalUrl: canonical.url.href,
+              };
+            }),
+          ),
+          child,
+        );
+        routeInstanceId = Option.some(registration);
+      }
       const urlStateRuntime = makeUrlStateRuntime(
         service,
         navigation,
         target.route.searchKeys,
         instance,
+        routeInstanceId,
+        Effect.map(SubscriptionRef.get(navigations), (current) => current.url),
       );
       const page = () =>
         Effect.provideService(
@@ -266,7 +314,12 @@ export const mount: <R, HostNode>(
           UrlStateRuntime,
           urlStateRuntime,
         );
-      yield* Scope.provide(mountView(page, {}, options.host, options.root), child);
+      let mountedPage = mountView(page, {}, options.host, options.root);
+      if (Option.isSome(routeOwner)) {
+        mountedPage = Effect.provideService(mountedPage, Inspection.Owner, routeOwner.value);
+      }
+      yield* Scope.provide(mountedPage, child);
+      yield* Ref.set(phase, "mounted");
       const previous = mounted;
       mounted = Option.some({ route: target.route, entered: mountedEntered, scope: child });
       yield* Option.match(previous, {

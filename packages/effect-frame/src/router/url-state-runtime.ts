@@ -11,6 +11,7 @@ import { mergeSearchRecord, readSearch, printSearch, searchKeysOf } from "./rout
 import type { RouterService } from "./router.js";
 import type { Scope } from "effect";
 import { Context, Effect, Option, Schema } from "effect";
+import * as Inspection from "../inspection.js";
 
 /** Explicit wire keys for an opaque SearchRecord codec. */
 export interface Options {
@@ -78,6 +79,8 @@ export const makeRuntime = (
   navigation: RouteNavigation,
   routeKeys: SearchKeyInfo,
   instance: RouteInstance,
+  routeInstanceId: Option.Option<string>,
+  currentUrl: Effect.Effect<URL>,
 ): RuntimeService => {
   const owners = new Map<string, Owner>();
 
@@ -131,6 +134,22 @@ export const makeRuntime = (
       );
 
       const state = select(router.current, (match) => decodeUrl(codec, keys, fallback, match.url));
+
+      const registry = yield* Effect.serviceOption(Inspection.Registry);
+      const frameOwner = yield* Effect.serviceOption(Inspection.Owner);
+      if (Option.isSome(registry) && Option.isSome(frameOwner) && Option.isSome(routeInstanceId)) {
+        yield* registry.value.register(frameOwner.value, (id) =>
+          Effect.map(currentUrl, (url) => ({
+            _tag: "UrlState",
+            id,
+            ownerId: frameOwner.value.id,
+            parentOwnerId: frameOwner.value.parentId,
+            routeInstanceId: routeInstanceId.value,
+            keys: [...keys],
+            value: decodeUrl(codec, keys, fallback, url),
+          })),
+        );
+      }
       const set = (value: S["Type"]): Effect.Effect<void> =>
         replaceOrPush("replace", { _tag: "Set", value });
       const update = (change: (previous: S["Type"]) => S["Type"]): Effect.Effect<void> =>

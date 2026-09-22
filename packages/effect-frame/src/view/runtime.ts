@@ -1,5 +1,5 @@
 import type { Source } from "effect-frame/actor";
-import { Effect, Exit, Fiber, Match, Option, Predicate, Queue, Scope, Stream } from "effect";
+import { Effect, Exit, Fiber, Match, Option, Predicate, Queue, Ref, Scope, Stream } from "effect";
 import type { Accessor } from "@solidjs/signals";
 import {
   createRenderEffect,
@@ -21,6 +21,7 @@ import type {
   ShowNode,
 } from "./jsx-runtime.js";
 import type { Attached, Bound, Handler, Prepared, View } from "./view.js";
+import * as Inspection from "../inspection.js";
 
 /**
  * The mount runtime. It walks one JSX tree, resolves every explicitly bound
@@ -865,30 +866,56 @@ export const mount = Effect.fn("View.mount")(function* <Props, E, R, HostNode>(
   host: Host<HostNode>,
   root: HostNode,
 ) {
-  const tree: Node = yield* view(props);
+  const registry = yield* Effect.serviceOption(Inspection.Registry);
+  let owner = Option.none<Inspection.OwnerToken>();
+  if (Option.isSome(registry)) {
+    owner = Option.some(yield* Inspection.ownerFor(registry.value));
+  }
 
-  const tracker = yield* makeTracker();
-  const slot: Slot<HostNode> = { nodes: [] };
+  const run = Effect.gen(function* () {
+    const phase = yield* Ref.make<"entering" | "mounted">("entering");
+    if (Option.isSome(registry) && Option.isSome(owner)) {
+      yield* registry.value.register(owner.value, (id) =>
+        Effect.map(Ref.get(phase), (mountedPhase) => ({
+          _tag: "Mount",
+          id,
+          ownerId: owner.value.id,
+          parentOwnerId: owner.value.parentId,
+          phase: mountedPhase,
+        })),
+      );
+    }
 
-  // Planning creates the signals a binding writes to, so it belongs inside
-  // the root that owns them.
-  const dispose = createRoot((disposeRoot) => {
-    tracker.commit(() => {
-      plan({ host, tracker }, tree)(root, slot, () => {});
-      flush();
+    const tree: Node = yield* view(props);
+    const tracker = yield* makeTracker();
+    const slot: Slot<HostNode> = { nodes: [] };
+
+    // Planning creates the signals a binding writes to, so it belongs inside
+    // the root that owns them.
+    const dispose = createRoot((disposeRoot) => {
+      tracker.commit(() => {
+        plan({ host, tracker }, tree)(root, slot, () => {});
+        flush();
+      });
+      return disposeRoot;
     });
-    return disposeRoot;
+
+    yield* Ref.set(phase, "mounted");
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        dispose();
+        for (const node of slot.nodes) {
+          host.remove(root, node);
+        }
+        slot.nodes = [];
+      }),
+    );
   });
 
-  yield* Effect.addFinalizer(() =>
-    Effect.sync(() => {
-      dispose();
-      for (const node of slot.nodes) {
-        host.remove(root, node);
-      }
-      slot.nodes = [];
-    }),
-  );
+  if (Option.isSome(owner)) {
+    return yield* Effect.provideService(run, Inspection.Owner, owner.value);
+  }
+  return yield* run;
 });
 
 /**

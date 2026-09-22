@@ -1,4 +1,4 @@
-import { Clock, Context, Effect, Option, Random } from "effect";
+import { Clock, Context, Effect, Option } from "effect";
 import type { Scope } from "effect";
 
 /**
@@ -124,8 +124,10 @@ export const makeRegistry = (
 ): Effect.Effect<RegistryService, never, Scope.Scope> =>
   Effect.gen(function* () {
     const clock = yield* Clock.Clock;
-    const rootNonce = yield* Random.nextInt;
-    const rootId = `frame-root-${String(clock.currentTimeMillisUnsafe())}-${String(rootNonce)}`;
+    // Browser Crypto gives each root an identity independent of app Clock and
+    // Random test services. It is allocated once when the root is built.
+    // oxlint-disable-next-line effect/noGlobals -- browser-safe root identity
+    const rootId = `frame-root-${crypto.randomUUID()}`;
     const rootName = name;
     const registrations = new Map<string, Registration>();
     let ownerSequence = 0;

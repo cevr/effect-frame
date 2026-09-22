@@ -516,8 +516,15 @@ export interface RouteDefinition<Params extends ParamsCodec, Search extends Sear
 export interface Entered<R> {
   /** Identity for actions created by this mounted route instance. */
   readonly instance?: RouteInstance;
+  /** Framework-owned decoded memory for Frame inspection. */
+  readonly inspection?: Effect.Effect<EnteredInspection>;
   readonly setup: Effect.Effect<Node, never, R | Scope.Scope>;
   readonly update: (url: URL) => Effect.Effect<boolean>;
+}
+
+export interface EnteredInspection {
+  readonly params: unknown;
+  readonly search: unknown;
 }
 
 /** A route with its shapes erased: what a router holds. */
@@ -701,6 +708,10 @@ export const client = <
               ),
           }),
           instance,
+          inspection: Effect.map(SubscriptionRef.get(current), (value) => ({
+            params: value.params,
+            search: value.search,
+          })),
           update: (next) =>
             Option.match(parse(next), {
               onNone: () => Effect.succeed(false),

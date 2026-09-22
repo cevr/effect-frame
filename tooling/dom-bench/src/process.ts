@@ -6,7 +6,6 @@ export type OwnedProcess = ReturnType<typeof spawn>;
 
 export interface OwnedProcessState {
   spawned: boolean;
-  spawnFailed: boolean;
   exited: boolean;
 }
 
@@ -137,7 +136,6 @@ export const runProcess = (
     });
     const state: OwnedProcessState = {
       spawned: child.pid !== undefined,
-      spawnFailed: false,
       exited: false,
     };
     let settled = false;
@@ -159,7 +157,6 @@ export const runProcess = (
       settle(() => rejectProcess(error));
     };
     child.once("error", (error) => {
-      state.spawnFailed = true;
       settleFailure(error instanceof Error ? error : new Error(String(error)));
     });
     child.once("exit", (code, signal) => {

@@ -670,22 +670,43 @@ const runCellWithDeadline = async (request: CellRequest): Promise<Measurement> =
   });
   let removeSignals = (): void => {};
   try {
+    removeSignals = listenForProcessSignals((signal) => {
+      markInterrupted(signal);
+      rejectInterruption(new Error(`benchmark cell interrupted by ${signal}`));
+    });
+    const testHoldMs = Number(Bun.env["DOM_BENCH_TEST_HOLD_BEFORE_CELL_MS"] ?? 0);
+    if (Number.isFinite(testHoldMs) && testHoldMs > 0) {
+      const readyPath = Bun.env["DOM_BENCH_TEST_SIGNAL_READY_FILE"];
+      if (readyPath === undefined) {
+        throw new Error("DOM_BENCH_TEST_HOLD_BEFORE_CELL_MS requires a signal-ready file");
+      }
+      await Bun.write(readyPath, "ready\n");
+      let holdTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          interrupted,
+          new Promise<void>((resolveHold) => {
+            holdTimer = setTimeout(resolveHold, Math.min(testHoldMs, 60_000));
+          }),
+        ]);
+      } finally {
+        if (holdTimer !== undefined) clearTimeout(holdTimer);
+      }
+      if (wasInterrupted()) throw new Error("benchmark cell interrupted before worker start");
+    }
     child = spawn(process.execPath, [import.meta.filename], {
       env: {
         ...process.env,
         DOM_BENCH_CELL_REQUEST: requestPath,
         DOM_BENCH_CELL_RESULT: resultPath,
+        DOM_BENCH_TEST_HOLD_BEFORE_CELL_MS: undefined,
+        DOM_BENCH_TEST_SIGNAL_READY_FILE: undefined,
       },
       stdio: "ignore",
       detached: process.platform !== "win32",
     });
-    childState = { spawned: child.pid !== undefined, spawnFailed: false, exited: false };
-    removeSignals = listenForProcessSignals((signal) => {
-      markInterrupted(signal);
-      rejectInterruption(new Error(`benchmark cell interrupted by ${signal}`));
-    });
+    childState = { spawned: child.pid !== undefined, exited: false };
     child.once("error", (error) => {
-      if (childState !== undefined) childState.spawnFailed = true;
       exitReject(error instanceof Error ? error : new Error(String(error)));
     });
     child.once("exit", (code, signal) => {

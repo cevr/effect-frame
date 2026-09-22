@@ -1,5 +1,11 @@
 # effect-frame
 
+## 0.10.0
+
+### Minor Changes
+
+- [`59211aa`](https://github.com/cevr/effect-frame/commit/59211aa3b290783512aa0857c5f62845151a9288) Thanks [@cevr](https://github.com/cevr)! - Add `View.attempt(setup, fallback)`. It runs one setup in a child Scope of its caller and keeps it open on success. On a typed failure, it closes the failed child and waits for its finalizers before the fallback starts in a fresh child. Defects and interruption skip the fallback, and a closed owner never starts either Effect. The result keeps the fallback's own error and requires `R | R2 | Scope`.
+
 ## 0.9.2
 
 ### Patch Changes

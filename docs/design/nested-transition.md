@@ -152,7 +152,9 @@ swap. No view sees that difference without a render in between.
 
 - The router pushes the URL before it calls `update`. If an acquisition
   fails, the failure is a defect: nothing is published, but the URL has moved.
-  A typed transition failure is slice 3.
+  Slice 3 adds a typed `errored` recovery for a segment's own non-`Unauthorized`
+  acquisition failure and for a view's typed setup failure; an unhandled
+  failure keeps this limit. See `route-checks.md`.
 - The exited view closes before `View.list` removes the exited row's DOM,
   because the list closes a row with a fork.
 - Two segments that declare the same actor key hold two refs. Queries are
@@ -165,5 +167,6 @@ swap. No view sees that difference without a render in between.
 - A retained old ref still commands its old address after its interest is
   released. It is not refused.
 - Only the first HTML frame is proved. There is no streaming.
-- Nested routes have no url-state, `href`, `updateSearch`, `before`, pending
-  state, lazy views, or leave checks yet.
+- Nested routes have no url-state, `updateSearch`, pending state, lazy views,
+  or leave checks yet. Segment `href` targets and `before` checks are slice 3,
+  in `route-checks.md`.

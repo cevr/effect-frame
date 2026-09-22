@@ -214,7 +214,7 @@ Reader API:
   expose the root ID on `Frame.Service` so attachment needs no sample.
 - The gateway has no rate limit and no cap on concurrent pending reads.
 - The proof runs WebKit only. Chrome was not exercised.
-- Commands remain `Unavailable` until #37.
+- Commands are `Available`: the text view lists each retained record (kind, lifecycle, attempt, running or idle, command ID), never its payload.
 
 ## Recommendation for the public boundary
 

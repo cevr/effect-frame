@@ -250,7 +250,11 @@ const inspectText = (response: InspectResponse, maxText: number): string => {
         `  ${query.state}  ${clip(query.key, budget)}  age ${query.ageMs}ms  value ${queryValueText(query.value, budget)}`,
     ),
     `urlStates ${snapshot.urlStates.length}`,
-    `commands  ${snapshot.commands._tag} (${snapshot.commands.reason})`,
+    `commands  ${snapshot.commands.records.length}`,
+    ...snapshot.commands.records.map(
+      (command) =>
+        `  ${command.kind}  ${command.lifecycle._tag}  attempt ${command.attempt}  ${runningText(command.running)}  ${command.commandId}`,
+    ),
   ];
   if (budget.truncated > 0) {
     lines.push(
@@ -258,6 +262,12 @@ const inspectText = (response: InspectResponse, maxText: number): string => {
     );
   }
   return `${lines.join("\n")}\n`;
+};
+
+/** Whether an automatic sequence runs now; a command is never shown with its payload. */
+const runningText = (running: boolean): string => {
+  if (running) return "running";
+  return "idle";
 };
 
 const errorText = (error: { readonly _tag: string }): string => {

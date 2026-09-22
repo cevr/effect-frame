@@ -145,10 +145,8 @@ describe.skipIf(!H.hasBrowser)("live Frame inspection over a browser-originated 
       // The same live entry, sampled between two direct reads.
       expect(query?.ageMs).toBeGreaterThan(before.queries[0]?.ageMs ?? Infinity);
       expect(query?.ageMs).toBeLessThan(after.queries[0]?.ageMs ?? -Infinity);
-      expect(snapshot.commands).toEqual({
-        _tag: "Unavailable",
-        reason: "ClientCommandLifecycleNotImplemented",
-      });
+      // The fixture sends no commands: the owner is inspectable and empty.
+      expect(snapshot.commands).toEqual({ _tag: "Available", records: [] });
       // Reading did not start, settle, or restart the resolver.
       expect(await view.evaluate<unknown>("window.__fixture.resolverStarts")).toBe(1);
       expect(await view.evaluate<unknown>("window.__fixture.resolverFinished")).toBe(0);

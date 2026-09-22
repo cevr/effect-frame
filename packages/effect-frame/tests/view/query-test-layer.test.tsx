@@ -60,6 +60,7 @@ interface CountControl {
 }
 
 const countControl = { current: Option.none<CountControl>() };
+let rowBatchGroups: ReadonlyArray<ReadonlyArray<number>> = [];
 
 const testLayer = QueryTest.layer({
   queries: [
@@ -75,13 +76,15 @@ const testLayer = QueryTest.layer({
       }),
     ),
     HostQuery.batched(Rows, {
-      resolve: (args) =>
-        Effect.succeed((arg: (typeof args)[number]) => {
+      resolve: (args) => {
+        rowBatchGroups = [...rowBatchGroups, args.map((arg) => arg.id)];
+        return Effect.succeed((arg: (typeof args)[number]) => {
           if (arg.id === 2) {
             return Effect.fail("row failed");
           }
           return Effect.succeed({ id: arg.id, value: `row-${String(arg.id)}` });
-        }),
+        });
+      },
     }),
     implementQuery(Failure, () => Effect.fail("expected failure")),
   ],
@@ -174,6 +177,7 @@ describe("local query test transport", () => {
 
   it.scoped.layer(testLayer)("keeps batch failures per key and releases cache scopes", () =>
     Effect.gen(function* () {
+      rowBatchGroups = [];
       const first = yield* useQuery(Rows, { id: 1 });
       const second = yield* useQuery(Rows, { id: 2 });
       yield* Effect.all([settled(first.state), settled(second.state)], {
@@ -189,6 +193,7 @@ describe("local query test transport", () => {
       if (secondState._tag === "Failed") {
         expect(secondState.error._tag).toBe("QueryFailed");
       }
+      expect(rowBatchGroups).toEqual([[1, 2]]);
 
       const failed = yield* useQuery(Failure, {});
       yield* settled(failed.state);

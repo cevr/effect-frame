@@ -276,13 +276,48 @@ export const child = <
   parent: Segment<string, unknown, unknown, Declarations, ParentData>,
   name: Name,
   options: SegmentOptions<P, S, Own>,
-): Segment<Name, P["Type"], S["Type"], Own, ParentData & Own> =>
-  makeSegment<Name, P, S, Own, ParentData & Own>(
+): Segment<Name, P["Type"], S["Type"], Own, ParentData & Own> => {
+  const made = makeSegment<Name, P, S, Own, ParentData & Own>(
     name,
     Option.some(parent),
     options,
     Option.getOrElse(Option.fromNullishOr(options.data), () => (): Own => ownEmpty<Own>()),
   );
+  // The path record is accumulated from the root, so a repeated name would
+  // silently replace the ancestor's value. Reject it where it is declared.
+  for (const param of paramNames(made.parts)) {
+    const owner = ancestorWithParam(Option.some(parent), param);
+    if (Option.isSome(owner)) {
+      return Option.getOrThrowWith(Option.none(), () =>
+        BranchRejected.make({
+          segment: name,
+          reason: `path param ${param} is already declared by ${owner.value.name}`,
+        }),
+      );
+    }
+  }
+  return made;
+};
+
+const paramNames = (parts: ReadonlyArray<Part>): ReadonlyArray<string> =>
+  parts.flatMap((part) => {
+    if (part._tag === "Literal") {
+      return [];
+    }
+    return [part.name];
+  });
+
+/** The nearest ancestor whose own path declares `param`. */
+const ancestorWithParam = (
+  from: Option.Option<AnySegment>,
+  param: string,
+): Option.Option<AnySegment> =>
+  Option.flatMap(from, (current) => {
+    if (paramNames(current.parts).includes(param)) {
+      return Option.some(current);
+    }
+    return ancestorWithParam(current.parent, param);
+  });
 
 /**
  * A segment without a data function declares nothing. Its `Own` is then the

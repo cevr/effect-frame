@@ -664,6 +664,41 @@ describe("private nested transition", () => {
     }),
   );
 
+  it.effect("9. rejects a child path param that shadows an ancestor's", () =>
+    Effect.gen(function* () {
+      const rejection = (declare: () => void) =>
+        Effect.flip(
+          Effect.try({ try: declare, catch: Schema.decodeUnknownSync(Branch.BranchRejected) }),
+        );
+      // A direct child may not reuse its parent's param name.
+      expect(
+        yield* rejection(() =>
+          Branch.child(tenantSegment, "shadow", { path: "items/:tenant", params: TenantParams }),
+        ),
+      ).toMatchObject({
+        _tag: "BranchRejected",
+        segment: "shadow",
+        reason: "path param tenant is already declared by tenant",
+      });
+      // A grandchild is checked against every ancestor, tails included.
+      expect(
+        yield* rejection(() =>
+          Branch.child(postSegment, "deep", { path: "files/:tenant*", params: PostParams }),
+        ),
+      ).toMatchObject({
+        _tag: "BranchRejected",
+        segment: "deep",
+        reason: "path param tenant is already declared by tenant",
+      });
+      // A new name is accepted.
+      const accepted = Branch.child(postSegment, "file", {
+        path: "files/:fileId",
+        params: Schema.Struct({ ...PostParams.fields, fileId: Schema.String }),
+      });
+      expect(accepted.name).toBe("file");
+    }),
+  );
+
   it.scoped.layer(frameLayer("nested-first-entry"))(
     "1. starts every declaration in parallel, then starts the unseeded child under the layout Loading",
     () =>

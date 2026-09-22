@@ -4,24 +4,38 @@ registerDom();
 
 import {
   Behavior,
+  Cell,
+  Source,
   implementQuery,
   modify,
   query,
-  select,
   spawn,
   useQuery,
 } from "effect-frame/actor";
-import type { Source } from "effect-frame/actor";
+import type { QueryState, Source as SourceType } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import { Dom, Loading, Query, View, ViewTest, mount, readyWithStale } from "effect-frame/view";
-import { Cause, Clock, Context, Deferred, Effect, Exit, Fiber, Option, Schema } from "effect";
+import {
+  Cause,
+  Clock,
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Match,
+  Option,
+  Schedule,
+  Schema,
+  Stream,
+} from "effect";
 import { TestClock } from "effect/testing";
 import type { Host } from "effect-frame/view";
 import type { Scope } from "effect";
 import { describe, expect, it, test } from "effect-bun-test";
 
 interface CountProps {
-  readonly count: Source<number>;
+  readonly count: SourceType<number>;
 }
 
 const CountPage = (props: CountProps) =>
@@ -135,17 +149,41 @@ describe("scoped view test harness", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const count = yield* spawn(Behavior.value(0));
-      let source: Source<number> = count.state;
-      for (let index = 0; index < 24; index += 1) {
-        source = select(source, (value) => value + 1);
+      let source: SourceType<QueryState<number, never>> = yield* Source.mapEffect(
+        count.state,
+        (value) => Effect.andThen(Effect.yieldNow, Effect.succeed(value + 1)),
+      );
+      for (let index = 1; index < 24; index += 1) {
+        const previous = source;
+        source = yield* Source.mapEffect(previous, (state) =>
+          Match.value(state).pipe(
+            Match.tagsExhaustive({
+              Loading: () => Effect.never,
+              Ready: (value) => Effect.andThen(Effect.yieldNow, Effect.succeed(value.value + 1)),
+              Failed: () => Effect.never,
+            }),
+          ),
+        );
       }
+      const AsyncCountPage = () =>
+        Effect.succeed(
+          <Query
+            state={source}
+            loading={<output id="count">loading</output>}
+            ready={(value) => <output id="count">{View.bind(value, String)}</output>}
+            failed={() => <output id="count">failed</output>}
+          />,
+        );
       const page = yield* ViewTest.make({
         host: Dom.host,
         root,
-        setup: (host, mountRoot) => mount(CountPage, { count: source }, host, mountRoot),
+        setup: (host, mountRoot) => mount(AsyncCountPage, {}, host, mountRoot),
       });
 
-      expect(countText(root)).toBe("24");
+      yield* page.waitFor({
+        label: "initial deep chain",
+        until: (actualRoot) => countText(actualRoot) === "24",
+      });
       yield* page.act(
         modify(count, (value) => value + 1),
         {
@@ -154,6 +192,36 @@ describe("scoped view test harness", () => {
         },
       );
       expect(countText(root)).toBe("25");
+    }),
+  );
+
+  it.scoped("does not lose a host write scheduled after action completion", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const count = yield* spawn(Behavior.value(0));
+      const release = yield* Deferred.make<void>();
+      const page = yield* ViewTest.make({
+        host: Dom.host,
+        root,
+        setup: (host, mountRoot) => mount(CountPage, { count: count.state }, host, mountRoot),
+      });
+
+      yield* page.act(
+        Effect.gen(function* () {
+          yield* Effect.forkChild(
+            Effect.andThen(
+              Deferred.await(release),
+              modify(count, (value) => value + 1),
+            ),
+          );
+          yield* Deferred.succeed(release, void 0);
+        }),
+        {
+          label: "scheduled child write",
+          until: (actualRoot) => countText(actualRoot) === "1",
+        },
+      );
+      expect(countText(root)).toBe("1");
     }),
   );
 
@@ -345,6 +413,110 @@ describe("scoped view test harness", () => {
     }),
   );
 
+  it.scoped("keeps a reentrant host write observable", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const count = yield* spawn(Behavior.value(0));
+      let wrapped: Option.Option<Host<Node>> = Option.none();
+      let nestedWrites = 0;
+      let reentrant = false;
+      const reentrantHost: Host<Node> = {
+        ...Dom.host,
+        setText: (node, text) => {
+          Dom.host.setText(node, text);
+          if (!reentrant && Option.isSome(wrapped)) {
+            reentrant = true;
+            nestedWrites += 1;
+            wrapped.value.setText(node, text);
+            reentrant = false;
+          }
+        },
+      };
+      const page = yield* ViewTest.make({
+        host: reentrantHost,
+        root,
+        setup: (host, mountRoot) => {
+          wrapped = Option.some(host);
+          return mount(CountPage, { count: count.state }, host, mountRoot);
+        },
+      });
+
+      yield* page.act(
+        modify(count, (value) => value + 1),
+        {
+          label: "reentrant count write",
+          until: (actualRoot) => countText(actualRoot) === "1",
+        },
+      );
+      expect(nestedWrites).toBeGreaterThan(0);
+      expect(countText(root)).toBe("1");
+    }),
+  );
+
+  it.scoped("propagates an application action error", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const page = yield* ViewTest.make({
+        host: Dom.host,
+        root,
+        setup: (host, mountRoot) =>
+          mount(
+            CountPage,
+            { count: { get: Effect.succeed(0), changes: Stream.empty } },
+            host,
+            mountRoot,
+          ),
+      });
+      const exit = yield* Effect.exit(
+        page.act(Effect.fail("application boom"), {
+          label: "action error",
+          until: () => false,
+        }),
+      );
+
+      expect(Exit.isFailure(exit)).toBe(true);
+      if (Exit.isFailure(exit)) {
+        const failure = Cause.findErrorOption(exit.cause);
+        expect(Option.isSome(failure)).toBe(true);
+        if (Option.isSome(failure)) {
+          expect(failure.value).toBe("application boom");
+        }
+      }
+    }),
+  );
+
+  it.scoped("propagates a thrown predicate defect", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const page = yield* ViewTest.make({
+        host: Dom.host,
+        root,
+        setup: (host, mountRoot) =>
+          mount(
+            CountPage,
+            { count: { get: Effect.succeed(0), changes: Stream.empty } },
+            host,
+            mountRoot,
+          ),
+      });
+      const exit = yield* Effect.exit(
+        page.waitFor({
+          label: "throwing predicate",
+          until: () => {
+            // This verifies that a programmer defect escapes the harness.
+            // oxlint-disable-next-line effect/noThrowStatement, effect/noNewError
+            throw new Error("predicate boom");
+          },
+        }),
+      );
+
+      expect(Exit.isFailure(exit)).toBe(true);
+      if (Exit.isFailure(exit)) {
+        expect(Cause.hasDies(exit.cause)).toBe(true);
+      }
+    }),
+  );
+
   it.scoped("times out an impossible condition without polling", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
@@ -383,6 +555,33 @@ describe("scoped view test harness", () => {
             );
           }
         }
+      }
+    }),
+  );
+
+  it.scoped("rejects non-positive and infinite condition deadlines", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const page = yield* ViewTest.make({
+        host: Dom.host,
+        root,
+        setup: (host, mountRoot) =>
+          mount(
+            CountPage,
+            { count: { get: Effect.succeed(0), changes: Stream.empty } },
+            host,
+            mountRoot,
+          ),
+      });
+      for (const timeout of [0, -1, Infinity]) {
+        const exit = yield* Effect.exit(
+          page.waitFor({
+            label: `invalid timeout ${String(timeout)}`,
+            timeout,
+            until: () => false,
+          }),
+        );
+        expect(Exit.isFailure(exit)).toBe(true);
       }
     }),
   );
@@ -499,6 +698,64 @@ describe("scoped view test harness", () => {
             }
           }
         }
+      }),
+  );
+
+  it.scoped.layer(TestClock.layer())(
+    "observes debounced and recurring work on the application clock",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* makeRoot;
+        const input = yield* Cell.make(0);
+        const debounced = yield* Source.debounce(input.state, "1 second");
+        const recurring = yield* Cell.make(0);
+        const recurringReached = yield* Deferred.make<void>();
+        const Page = () =>
+          Effect.gen(function* () {
+            yield* Effect.forkScoped(
+              Effect.repeat(
+                Effect.gen(function* () {
+                  yield* Effect.sleep("1 second");
+                  yield* recurring.update((value) => value + 1);
+                  if ((yield* recurring.get) === 3) {
+                    yield* Deferred.succeed(recurringReached, void 0);
+                  }
+                }),
+                Schedule.forever,
+              ),
+            );
+            return (
+              <section>
+                <output id="debounced">{View.bind(debounced, String)}</output>
+                <output id="recurring">{View.bind(recurring.state, String)}</output>
+              </section>
+            );
+          });
+        const page = yield* ViewTest.make({
+          host: Dom.host,
+          root,
+          setup: (host, mountRoot) => mount(Page, {}, host, mountRoot),
+        });
+
+        yield* Effect.yieldNow;
+        yield* input.set(1);
+        yield* input.set(2);
+        expect(root.querySelector("#debounced")?.textContent).toBe("0");
+        yield* TestClock.adjust("1 second");
+        yield* page.waitFor({
+          label: "debounced source",
+          until: (actualRoot) => hasText(actualRoot, "#debounced", "2"),
+        });
+
+        const recurringObserved = yield* page
+          .waitFor({
+            label: "recurring source",
+            until: (actualRoot) => hasText(actualRoot, "#recurring", "3"),
+          })
+          .pipe(Effect.forkChild);
+        yield* TestClock.adjust("3 seconds");
+        yield* Deferred.await(recurringReached);
+        yield* Fiber.join(recurringObserved);
       }),
   );
 });

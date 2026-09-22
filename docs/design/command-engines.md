@@ -107,6 +107,11 @@ started before the settlement still lands, marked stale, and a later read
 follows. The value from before the command never shows as fresh. Closing the
 record scope releases the claim.
 
+The claim is not on the public `QueryCacheService`. Each cache that
+`queryCacheLayer` builds carries it privately, keyed by that service, so a claim
+always lands in the cache the reference reads. A custom cache has no claim, and
+its commands own nothing.
+
 ### Inspection
 
 `Frame.inspect` returns `commands: {_tag: "Available", records}`. Each record

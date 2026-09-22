@@ -6,7 +6,7 @@ import { remoteCommands } from "./remote-commands.js";
 import type { RemoteRejection } from "./remote-commands.js";
 import type { Address, AnyContract, KeyOf, MessageOf, SnapshotOf } from "./contract.js";
 import type { QueryKey } from "./query.js";
-import { QueryCache } from "./query-client.js";
+import { QueryCache, ownershipOf } from "./query-client.js";
 import { fromSubscriptionRef, select } from "./source.js";
 import type { Projection, TransportReadError } from "./transport.js";
 import { ActorTransport } from "./transport.js";
@@ -113,14 +113,15 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
    * from before the first request until the command settles or this
    * reference closes, so the view shows stale content instead of a gap. An
    * Applied settlement delivers its captured refreshes first. A client with
-   * no cache owns nothing.
+   * no cache, or with a cache not built by `queryCacheLayer`, owns nothing.
    */
+  const ownership = Option.flatMap(cache, ownershipOf);
   const own = (active: ReadonlyArray<QueryKey>) =>
-    Option.match(cache, {
+    Option.match(ownership, {
       onNone: () => Commands.ownNothing<SnapshotOf<C>>(active),
-      onSome: (service) =>
+      onSome: (owning) =>
         Effect.map(
-          service.claim(contract.name),
+          owning.claim(contract.name),
           (claim): Commands.SettlementHook<SnapshotOf<C>> =>
             (settlement) =>
               claim.settle(settlement.refreshed),

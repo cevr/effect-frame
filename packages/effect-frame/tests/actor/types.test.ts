@@ -30,7 +30,8 @@ import type {
   UnknownContract,
 } from "effect-frame/actor";
 import { committedRevision, contract, resumeCodec } from "effect-frame/actor/client";
-import type { RefOptions } from "effect-frame/actor/client";
+import type { QueryCacheService, RefOptions } from "effect-frame/actor/client";
+import type * as Client from "effect-frame/actor/client";
 
 /**
  * Compile-time checks. Placement is visible in the reference type: a local
@@ -49,6 +50,15 @@ declare const applied: Applied<number>;
 
 type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+
+// A custom cache implements exactly this surface; ownership is not on it.
+const queryCacheIsPublicOnly: Equals<
+  keyof QueryCacheService,
+  "open" | "active" | "apply" | "invalidate"
+> = true;
+// Command ownership is private: no public entry exports it.
+// @ts-expect-error `CommandClaim` is not a public export.
+export type _PrivateClaim = Client.CommandClaim;
 
 const localCall = () => local.call(message);
 const localSend = () => local.send(message);
@@ -222,6 +232,7 @@ describe("reference types", () => {
     expect(localRefType).toBe(true);
     expect(durableRequirementsAreExact).toBe(true);
     expect(cellNeedsOnlyAScope).toBe(true);
+    expect(queryCacheIsPublicOnly).toBe(true);
   });
 
   test("resume data keeps a numeric revision on the wire and decodes it as committed", () => {

@@ -14,6 +14,7 @@ import {
 import type {
   CommandState,
   QueryEntry,
+  QueryCacheService,
   QueryFailure,
   QueryState,
   TransportService,
@@ -284,6 +285,26 @@ describe("cache command ownership", () => {
       expect(yield* reads).toBe(2);
       expect(seen).not.toContainEqual(ready(0, false));
       expect(seen.at(-1)).toEqual(ready(1, false));
+    }),
+  );
+
+  withApp("a custom QueryCache without command ownership still settles commands", () =>
+    Effect.gen(function* () {
+      const real = yield* QueryCache;
+      // A user's own cache implements only the public service.
+      const custom: QueryCacheService = {
+        open: real.open,
+        active: real.active,
+        apply: real.apply,
+        invalidate: real.invalidate,
+      };
+      const value = yield* useQuery(CounterValue, "one");
+      yield* until(value, isReady(0, false));
+      const counter = yield* ref(Counter, "one").pipe(Effect.provideService(QueryCache, custom));
+      const command = yield* counter.send(1);
+      expect((yield* command.settled)._tag).toBe("Applied");
+      // Nothing claimed the real entry, so it never showed stale for it.
+      expect(yield* value.state.get).toEqual(ready(0, false));
     }),
   );
 

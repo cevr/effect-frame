@@ -215,6 +215,20 @@ export interface QueryCacheService {
   /** Applies the refreshes a command reply carried. */
   readonly apply: (refreshed: ReadonlyArray<Refreshed>) => Effect.Effect<void>;
   /**
+   * Marks every cached entry whose query depends on this contract stale.
+   * The client does this the moment a command is sent, so the view shows
+   * stale content before the reply arrives rather than after it.
+   */
+  readonly invalidate: (contractName: string) => Effect.Effect<void>;
+}
+
+/**
+ * Source-private: how a command owner holds the cache's entries. It is not
+ * part of `QueryCacheService`, so a custom cache implements only the public
+ * surface, and no public entry exports it.
+ */
+export interface CommandOwnership {
+  /**
    * Registers one command's ownership of a contract's dependents in the
    * current Scope. Every live entry that depends on the contract, and every
    * entry mounted later, shows stale until the Scope closes. Register before
@@ -222,12 +236,6 @@ export interface QueryCacheService {
    * when the command's owner closes. Uncertain keeps the ownership.
    */
   readonly claim: (contractName: string) => Effect.Effect<CommandClaim, never, Scope.Scope>;
-  /**
-   * Marks every cached entry whose query depends on this contract stale.
-   * The client does this the moment a command is sent, so the view shows
-   * stale content before the reply arrives rather than after it.
-   */
-  readonly invalidate: (contractName: string) => Effect.Effect<void>;
 }
 
 /** One command's ownership of cache entries. */
@@ -244,6 +252,17 @@ export interface CommandClaim {
 export class QueryCache extends Context.Service<QueryCache, QueryCacheService>()(
   "effect-frame/src/actor/query-client/QueryCache",
 ) {}
+
+/**
+ * The ownership each real cache built here carries, keyed by that exact
+ * service. A claim therefore always lands in the cache the reference reads,
+ * and a cache built elsewhere has none: its commands own nothing.
+ */
+const ownerships = new WeakMap<QueryCacheService, CommandOwnership>();
+
+/** Source-private: the command ownership of a cache built by `layer`. */
+export const ownershipOf = (cache: QueryCacheService): Option.Option<CommandOwnership> =>
+  Option.fromNullishOr(ownerships.get(cache));
 
 const encodeKey = <Q extends AnyQuery>(contract: Q, args: ArgsOf<Q>): Effect.Effect<QueryKey> =>
   Effect.map(Effect.orDie(Schema.encodeEffect(contract.args)(args)), (encoded) => ({
@@ -667,7 +686,8 @@ const make = (): Effect.Effect<QueryCacheService, never, Scope.Scope> =>
         return commandClaim;
       });
 
-    const service: QueryCacheService = { open, active, apply, claim, invalidate };
+    const service: QueryCacheService = { open, active, apply, invalidate };
+    ownerships.set(service, { claim });
     return service;
   });
 

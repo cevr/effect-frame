@@ -63,7 +63,6 @@ export {
   followQuery,
   useQuery,
   layer as queryCacheLayer,
-  type CommandClaim,
   type FollowedQuery,
   type QueryCacheService,
   type QueryEntry,

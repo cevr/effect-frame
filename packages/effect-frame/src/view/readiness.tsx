@@ -331,8 +331,12 @@ export const Loading = <E, R>(
 ): Effect.Effect<Node, E, Exclude<R, LoadingScope>> =>
   Effect.gen(function* () {
     const registry = yield* makeRegistry;
-    const pending = yield* pendingOf(registry);
     const content = yield* Effect.provideService(props.children, LoadingScope, registry);
+    // Build the content before taking the first pending snapshot. Child setup
+    // has completed at this boundary, so every registration made by the
+    // initial tree contributes to the server's one frame. Later registrations
+    // still arrive through the registry source.
+    const pending = yield* pendingOf(registry);
     return (
       <>
         <Show when={pending}>{props.fallback}</Show>

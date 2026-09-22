@@ -892,11 +892,8 @@ export const mount = Effect.fn("View.mount")(function* <Props, E, R, HostNode>(
 });
 
 /**
- * Deliver every pending host write. A source change reaches its signal on the
- * subscription's own fiber, so this first lets those fibers run and only then
- * flushes the reactive graph. A test calls it after it changes state.
+ * Flush reactive writes that have already reached Solid. Source delivery and
+ * other asynchronous work may still be pending; use an observed host
+ * condition or an explicit domain signal when a test needs completion.
  */
-export const render: Effect.Effect<void> = Effect.andThen(
-  Effect.repeat(Effect.yieldNow, { times: 9 }),
-  Effect.sync(flush),
-);
+export const render: Effect.Effect<void> = Effect.sync(flush);

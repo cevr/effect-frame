@@ -143,29 +143,66 @@ const MAX_DEPTH = 6;
 const MAX_ENTRIES = 32;
 const MAX_NODES = 128;
 const MAX_STRING_LENGTH = 512;
+const MAX_PROPERTY_NAME_LENGTH = 128;
+const MAX_DIAGNOSTIC_BYTES = 16_384;
 
 interface DiagnosticBudget {
-  remaining: number;
+  remainingNodes: number;
+  remainingBytes: number;
 }
 
 const opaque = (reason: string): DiagnosticValue => ({ _tag: "Opaque", reason });
+const truncated = (reason: string): DiagnosticValue => ({ _tag: "Truncated", reason });
+
+const spend = (budget: DiagnosticBudget, bytes: number): boolean => {
+  if (bytes > budget.remainingBytes) {
+    return false;
+  }
+  budget.remainingBytes -= bytes;
+  return true;
+};
+
+const spendNode = (budget: DiagnosticBudget): boolean => {
+  if (budget.remainingNodes === 0) {
+    return false;
+  }
+  budget.remainingNodes -= 1;
+  return spend(budget, 24);
+};
+
+const stringCost = (value: string): number => value.length * 2 + 32;
 
 type DiagnosticInput = Schema.Schema.Type<typeof Schema.Unknown>;
 
-const diagnosticPrimitive = (input: DiagnosticInput): Option.Option<DiagnosticValue> => {
+const diagnosticPrimitive = (
+  input: DiagnosticInput,
+  budget: DiagnosticBudget,
+): Option.Option<DiagnosticValue> => {
   if (Schema.is(Schema.Null)(input)) {
+    if (!spend(budget, 16)) {
+      return Option.some(truncated("maximum-size"));
+    }
     return Option.some({ _tag: "Value", value: Schema.decodeUnknownSync(Schema.Null)(input) });
   }
   if (Schema.is(Schema.String)(input)) {
     if (input.length > MAX_STRING_LENGTH) {
-      return Option.some({ _tag: "Truncated", reason: "maximum-string-length" });
+      return Option.some(truncated("maximum-string-length"));
+    }
+    if (!spend(budget, stringCost(input))) {
+      return Option.some(truncated("maximum-size"));
     }
     return Option.some({ _tag: "Value", value: input });
   }
   if (Schema.is(Schema.Boolean)(input)) {
+    if (!spend(budget, 20)) {
+      return Option.some(truncated("maximum-size"));
+    }
     return Option.some({ _tag: "Value", value: input });
   }
   if (Schema.is(Schema.Finite)(input)) {
+    if (!spend(budget, 32)) {
+      return Option.some(truncated("maximum-size"));
+    }
     return Option.some({ _tag: "Value", value: input });
   }
   return Option.none();
@@ -176,24 +213,26 @@ const diagnosticArray = (
   depth: number,
   ancestors: ReadonlySet<object>,
   budget: DiagnosticBudget,
-  descriptors: Record<string, PropertyDescriptor>,
 ): DiagnosticValue => {
   if (!Schema.is(Schema.ObjectKeyword)(input)) {
     return opaque("unsupported-value");
   }
-  const lengthDescriptor = Option.fromNullishOr(descriptors["length"]);
+  const lengthDescriptor = Option.fromNullishOr(Object.getOwnPropertyDescriptor(input, "length"));
   if (Option.isNone(lengthDescriptor)) {
-    return { _tag: "Truncated", reason: "maximum-entries" };
+    return truncated("maximum-entries");
   }
   const length = lengthDescriptor.value.value;
   if (!Schema.is(Schema.Finite)(length) || !Number.isSafeInteger(length) || length > MAX_ENTRIES) {
-    return { _tag: "Truncated", reason: "maximum-entries" };
+    return truncated("maximum-entries");
   }
   const nextAncestors = new Set(ancestors);
   nextAncestors.add(input);
   const values: Array<DiagnosticValue> = [];
   for (let index = 0; index < length; index += 1) {
-    const descriptor = Option.fromNullishOr(descriptors[String(index)]);
+    if (!spend(budget, 20)) {
+      return truncated("maximum-size");
+    }
+    const descriptor = Option.fromNullishOr(Object.getOwnPropertyDescriptor(input, String(index)));
     if (Option.isNone(descriptor)) {
       values.push(opaque("array-hole"));
     } else if ("get" in descriptor.value || "set" in descriptor.value) {
@@ -210,20 +249,25 @@ const diagnosticRecord = (
   depth: number,
   ancestors: ReadonlySet<object>,
   budget: DiagnosticBudget,
-  descriptors: Record<string, PropertyDescriptor>,
 ): DiagnosticValue => {
   if (!Schema.is(Schema.ObjectKeyword)(input)) {
     return opaque("unsupported-value");
   }
-  const keys = Object.keys(descriptors);
+  const keys = Object.keys(input);
   if (keys.length > MAX_ENTRIES) {
-    return { _tag: "Truncated", reason: "maximum-entries" };
+    return truncated("maximum-entries");
   }
   const nextAncestors = new Set(ancestors);
   nextAncestors.add(input);
   const value: Record<string, DiagnosticValue> = {};
   for (const key of keys) {
-    const descriptor = Option.fromNullishOr(descriptors[key]);
+    if (key.length > MAX_PROPERTY_NAME_LENGTH) {
+      return truncated("maximum-property-name-length");
+    }
+    if (!spend(budget, stringCost(key))) {
+      return truncated("maximum-size");
+    }
+    const descriptor = Option.fromNullishOr(Object.getOwnPropertyDescriptor(input, key));
     if (Option.isNone(descriptor)) {
       continue;
     }
@@ -249,14 +293,11 @@ const diagnosticObject = (
   if (!Schema.is(Schema.ObjectKeyword)(input)) {
     return opaque("unsupported-value");
   }
-  const readable = Option.liftThrowable(() => ({
-    descriptors: Object.getOwnPropertyDescriptors(input),
-    prototype: Object.getPrototypeOf(input),
-  }))();
+  const readable = Option.liftThrowable(() => Object.getPrototypeOf(input))();
   if (Option.isNone(readable)) {
     return opaque("unreadable-object");
   }
-  const { descriptors, prototype } = readable.value;
+  const prototype = readable.value;
   if (
     prototype !== Object.prototype &&
     Option.isSome(Option.fromNullishOr(prototype)) &&
@@ -265,9 +306,9 @@ const diagnosticObject = (
     return opaque("unsupported-object");
   }
   if (Array.isArray(input)) {
-    return diagnosticArray(input, depth, ancestors, budget, descriptors);
+    return diagnosticArray(input, depth, ancestors, budget);
   }
-  return diagnosticRecord(input, depth, ancestors, budget, descriptors);
+  return diagnosticRecord(input, depth, ancestors, budget);
 };
 
 const diagnostic = (
@@ -276,11 +317,10 @@ const diagnostic = (
   ancestors: ReadonlySet<object>,
   budget: DiagnosticBudget,
 ): DiagnosticValue => {
-  budget.remaining -= 1;
-  if (budget.remaining < 0) {
-    return { _tag: "Truncated", reason: "maximum-size" };
+  if (!spendNode(budget)) {
+    return truncated("maximum-size");
   }
-  const primitive = diagnosticPrimitive(input);
+  const primitive = diagnosticPrimitive(input, budget);
   if (Option.isSome(primitive)) {
     return primitive.value;
   }
@@ -288,7 +328,7 @@ const diagnostic = (
     return opaque("unsupported-value");
   }
   if (depth >= MAX_DEPTH) {
-    return { _tag: "Truncated", reason: "maximum-depth" };
+    return truncated("maximum-depth");
   }
   if (ancestors.has(input)) {
     return opaque("cycle");
@@ -297,7 +337,10 @@ const diagnostic = (
 };
 
 const toDiagnostic = (input: DiagnosticInput): DiagnosticValue =>
-  diagnostic(input, 0, new Set(), { remaining: MAX_NODES });
+  diagnostic(input, 0, new Set(), {
+    remainingNodes: MAX_NODES,
+    remainingBytes: MAX_DIAGNOSTIC_BYTES,
+  });
 
 const identity = (value: string): Identity => Schema.decodeUnknownSync(Identity)(value);
 

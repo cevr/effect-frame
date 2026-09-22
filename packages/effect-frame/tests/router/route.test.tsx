@@ -293,7 +293,7 @@ describe("route", () => {
     }),
   );
 
-  it.live("fills omitted defaults and omits equal scalar and array defaults", () =>
+  it.scoped("fills omitted defaults and omits equal scalar and array defaults", () =>
     Effect.gen(function* () {
       expect(defaults.href({ id: "1" }, { page: 1, panes: ["all"] })).toBe("/defaults/1");
       expect(defaults.href({ id: "1" }, { page: 2, panes: ["one", "two"] })).toBe(

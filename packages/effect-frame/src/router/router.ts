@@ -34,6 +34,11 @@ export interface Navigation {
   readonly kind: "initial" | "push" | "replace" | "pop";
 }
 
+/** The resolved name retained with one published navigation. */
+interface NavigationSample extends Navigation {
+  readonly routeName: string;
+}
+
 /** Which route the document is on, and at what URL. */
 export interface Match {
   readonly name: string;
@@ -119,7 +124,7 @@ const notFoundRoute = <R>(view: View.View<NotFoundProps, never, R>): AnyRoute<R>
 
 interface Resolved<R> {
   readonly route: AnyRoute<R>;
-  readonly enter: Effect.Effect<Entered<R>>;
+  readonly enter: Effect.Effect<Entered<R>, never, Scope.Scope>;
 }
 
 /** The first route that matches, or not-found. Total. */
@@ -179,7 +184,11 @@ export const mount: <R, HostNode>(
   const scope = yield* Effect.scope;
   const fallback = notFoundRoute(options.notFound);
   const initial = yield* location.current;
-  const navigations = yield* SubscriptionRef.make<Navigation>({ url: initial, kind: "initial" });
+  const navigations = yield* SubscriptionRef.make<NavigationSample>({
+    url: initial,
+    kind: "initial",
+    routeName: fallback.name,
+  });
   const requests = yield* Queue.unbounded<Request>();
   const pending = new Set<Request>();
   let closed = false;
@@ -229,16 +238,16 @@ export const mount: <R, HostNode>(
     navigate: (href) => enqueue("push", href),
     replace: (href) => enqueue("replace", href),
     navigations: {
-      get: SubscriptionRef.get(navigations),
-      changes: SubscriptionRef.changes(navigations),
+      get: Effect.map(SubscriptionRef.get(navigations), navigationOf),
+      changes: Stream.map(SubscriptionRef.changes(navigations), navigationOf),
     },
     current: {
       get: Effect.map(SubscriptionRef.get(navigations), (moved) => ({
-        name: nameOf(moved.url),
+        name: moved.routeName,
         url: moved.url,
       })),
       changes: Stream.map(SubscriptionRef.changes(navigations), (moved) => ({
-        name: nameOf(moved.url),
+        name: moved.routeName,
         url: moved.url,
       })),
     },
@@ -249,91 +258,112 @@ export const mount: <R, HostNode>(
     replace: (href, instance) => enqueue("replace", href, instance),
   };
 
-  const nameOf = (url: URL): string =>
-    resolve(options.routes, fallback, url, navigation).route.name;
-
-  const show = (url: URL) =>
+  const show = (url: URL, resolved?: Resolved<R>) =>
     Effect.gen(function* () {
-      const target = resolve(options.routes, fallback, url, navigation);
+      const target = resolved ?? resolve(options.routes, fallback, url, navigation);
       if (Option.isSome(mounted) && mounted.value.route === target.route) {
         yield* mounted.value.entered.update(url);
         return;
       }
       const child = yield* Scope.fork(scope);
-      const entered = yield* target.enter;
-      const enteredInstance = Option.fromNullishOr(entered.instance);
-      const instance = Option.getOrElse(enteredInstance, newRouteInstance);
-      const mountedEntered = Option.match(enteredInstance, {
-        onNone: () => ({ ...entered, instance }),
-        onSome: () => entered,
-      });
-      const phase = yield* Ref.make<"entering" | "mounted">("entering");
-      let routeOwner = Option.none<Inspection.OwnerToken>();
-      if (Option.isSome(registry)) {
-        routeOwner = Option.some(registry.value.makeOwner(routerOwner));
-      }
-      let routeInstanceId = Option.none<string>();
-      if (Option.isSome(registry) && Option.isSome(routeOwner)) {
-        const registration = yield* Scope.provide(
-          registry.value.register(routeOwner.value, (id) =>
-            Effect.gen(function* () {
-              const mountedPhase = yield* Ref.get(phase);
-              const decoded = yield* Option.match(readInspection(mountedEntered), {
-                onNone: () =>
-                  Effect.succeed({ params: unavailableInspection, search: unavailableInspection }),
-                onSome: (read) => read,
-              });
-              const canonical = yield* SubscriptionRef.get(navigations);
-              return {
-                _tag: "Route",
-                id,
-                ownerId: routeOwner.value.id,
-                parentOwnerId: routeOwner.value.parentId,
-                routerId: Option.getOrThrow(Option.map(routerOwner, (owner) => owner.id)),
-                routeInstanceId: id,
-                routeName: target.route.name,
-                phase: mountedPhase,
-                params: decoded.params,
-                search: decoded.search,
-                canonicalRouteName: nameOf(canonical.url),
-                canonicalUrl: canonical.url.href,
-              };
+      const outcome = yield* Effect.exit(
+        Scope.provide(
+          Effect.gen(function* () {
+            const entered = yield* target.enter;
+            const enteredInstance = Option.fromNullishOr(entered.instance);
+            const instance = Option.getOrElse(enteredInstance, newRouteInstance);
+            const mountedEntered = Option.match(enteredInstance, {
+              onNone: () => ({ ...entered, instance }),
+              onSome: () => entered,
+            });
+            const phase = yield* Ref.make<"entering" | "mounted">("entering");
+            let routeOwner = Option.none<Inspection.OwnerToken>();
+            if (Option.isSome(registry)) {
+              routeOwner = Option.some(registry.value.makeOwner(routerOwner));
+            }
+            let routeInstanceId = Option.none<string>();
+            if (Option.isSome(registry) && Option.isSome(routeOwner)) {
+              const registration = yield* registry.value.register(routeOwner.value, (id) =>
+                Effect.gen(function* () {
+                  const mountedPhase = yield* Ref.get(phase);
+                  const decoded = yield* Option.match(readInspection(mountedEntered), {
+                    onNone: () =>
+                      Effect.succeed({
+                        params: unavailableInspection,
+                        search: unavailableInspection,
+                      }),
+                    onSome: (read) => read,
+                  });
+                  const canonical = yield* SubscriptionRef.get(navigations);
+                  return {
+                    _tag: "Route",
+                    id,
+                    ownerId: routeOwner.value.id,
+                    parentOwnerId: routeOwner.value.parentId,
+                    routerId: Option.getOrThrow(Option.map(routerOwner, (owner) => owner.id)),
+                    routeInstanceId: id,
+                    routeName: target.route.name,
+                    phase: mountedPhase,
+                    params: decoded.params,
+                    search: decoded.search,
+                    canonicalRouteName: canonical.routeName,
+                    canonicalUrl: canonical.url.href,
+                  };
+                }),
+              );
+              routeInstanceId = Option.some(registration);
+            }
+            const urlStateRuntime = makeUrlStateRuntime(
+              service,
+              navigation,
+              target.route.searchKeys,
+              instance,
+              routeInstanceId,
+              Effect.map(SubscriptionRef.get(navigations), (current) => current.url),
+            );
+            const page = () =>
+              Effect.provideService(
+                Effect.provideService(entered.setup, Router, service),
+                UrlStateRuntime,
+                urlStateRuntime,
+              );
+            let mountedPage = mountView(page, {}, options.host, options.root);
+            if (Option.isSome(routeOwner)) {
+              mountedPage = Effect.provideService(mountedPage, Inspection.Owner, routeOwner.value);
+            }
+            yield* mountedPage;
+            yield* Ref.set(phase, "mounted");
+            return { route: target.route, entered: mountedEntered };
+          }),
+          child,
+        ).pipe(
+          Effect.onExit((exit) =>
+            Exit.match(exit, {
+              onFailure: (cause) => Scope.close(child, Exit.failCause(cause)),
+              onSuccess: () => Effect.void,
             }),
           ),
-          child,
-        );
-        routeInstanceId = Option.some(registration);
-      }
-      const urlStateRuntime = makeUrlStateRuntime(
-        service,
-        navigation,
-        target.route.searchKeys,
-        instance,
-        routeInstanceId,
-        Effect.map(SubscriptionRef.get(navigations), (current) => current.url),
+        ),
       );
-      const page = () =>
-        Effect.provideService(
-          Effect.provideService(entered.setup, Router, service),
-          UrlStateRuntime,
-          urlStateRuntime,
-        );
-      let mountedPage = mountView(page, {}, options.host, options.root);
-      if (Option.isSome(routeOwner)) {
-        mountedPage = Effect.provideService(mountedPage, Inspection.Owner, routeOwner.value);
-      }
-      yield* Scope.provide(mountedPage, child);
-      yield* Ref.set(phase, "mounted");
-      const previous = mounted;
-      mounted = Option.some({ route: target.route, entered: mountedEntered, scope: child });
-      yield* Option.match(previous, {
-        onNone: () => Effect.void,
-        onSome: (shown) => Scope.close(shown.scope, Exit.void),
+      yield* Exit.match(outcome, {
+        onFailure: (cause) => Effect.failCause(cause),
+        onSuccess: (next) => {
+          const previous = mounted;
+          mounted = Option.some({ ...next, scope: child });
+          return Option.match(previous, {
+            onNone: () => Effect.void,
+            onSome: (shown) => Scope.close(shown.scope, Exit.void),
+          });
+        },
       });
     });
 
   const move = (url: URL, kind: Navigation["kind"]) =>
-    Effect.andThen(SubscriptionRef.set(navigations, { url, kind }), show(url));
+    Effect.gen(function* () {
+      const target = resolve(options.routes, fallback, url, navigation);
+      yield* SubscriptionRef.set(navigations, { url, kind, routeName: target.route.name });
+      yield* show(url, target);
+    });
 
   const process = (request: Request) =>
     Effect.gen(function* () {
@@ -376,7 +406,14 @@ export const mount: <R, HostNode>(
       ),
     );
 
-  yield* show(initial);
+  const initialTarget = resolve(options.routes, fallback, initial, navigation);
+  const initialNavigation: NavigationSample = {
+    url: initial,
+    kind: "initial",
+    routeName: initialTarget.route.name,
+  };
+  yield* SubscriptionRef.set(navigations, initialNavigation);
+  yield* show(initial, initialTarget);
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
       closed = true;
@@ -400,6 +437,8 @@ export const mount: <R, HostNode>(
 });
 
 const isUrlUpdater = (href: string | UrlUpdater): href is UrlUpdater => Predicate.isFunction(href);
+
+const navigationOf = ({ url, kind }: NavigationSample): Navigation => ({ url, kind });
 
 // ---------------------------------------------------------------------------
 // The browser

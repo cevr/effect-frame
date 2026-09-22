@@ -6,7 +6,20 @@ import { Location, Route, UrlState, mount } from "effect-frame/router";
 import type { AnyRoute, Entered, LocationService } from "effect-frame/router";
 import type { Source } from "effect-frame/actor";
 import { Dom, View, render } from "effect-frame/view";
-import { Deferred, Effect, Fiber, Option, Queue, Ref, Schema, SchemaGetter, Stream } from "effect";
+import {
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Queue,
+  Ref,
+  Schema,
+  SchemaGetter,
+  Scope,
+  Stream,
+} from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import * as Frame from "../../src/frame.js";
 
@@ -304,5 +317,376 @@ describe("Frame router inspection", () => {
         expect(route.params).toEqual({ _tag: "Opaque", reason: "unsupported-value" });
         expect(route.search).toEqual({ _tag: "Opaque", reason: "unsupported-value" });
       }),
+  );
+
+  it.scoped.layer(Frame.layer({ name: "navigation-resolution" }))(
+    "retains the resolved navigation name without re-entering routes or codecs",
+    () =>
+      Effect.gen(function* () {
+        let enterCalls = 0;
+        let codecCalls = 0;
+        const CountedParams = Route.PathRecord.pipe(
+          Schema.decodeTo(Schema.Unknown, {
+            decode: SchemaGetter.transform((record) => {
+              codecCalls += 1;
+              return record;
+            }),
+            encode: SchemaGetter.transform((): Route.PathRecord => ({ id: "1" })),
+          }),
+        );
+        const base = Route.client("counted", {
+          path: "/counted/:id",
+          params: CountedParams,
+          search: Route.search(Nothing),
+          view: () => Effect.succeed(<p>counted</p>),
+        });
+        const counted: AnyRoute<never> = {
+          ...base,
+          enter: (url, navigation) => {
+            enterCalls += 1;
+            return base.enter(url, navigation);
+          },
+        };
+        const { router } = yield* makeStart("http://app.test/counted/1", [counted]);
+        const entered = { enterCalls, codecCalls };
+
+        const first = yield* Frame.inspect;
+        expect((yield* router.current.get).name).toBe("counted");
+        const second = yield* Frame.inspect;
+
+        expect(second.routes[0]?.canonicalRouteName).toBe("counted");
+        expect(enterCalls).toBe(entered.enterCalls);
+        expect(codecCalls).toBe(entered.codecCalls);
+        expect(first.routes[0]?.routeInstanceId).toBe(second.routes[0]?.routeInstanceId);
+      }),
+  );
+
+  it.scoped.layer(Frame.layer({ name: "diagnostic-bounds" }))(
+    "bounds diagnostic keys and cost without invoking accessors",
+    () =>
+      Effect.gen(function* () {
+        const longKey = "x".repeat(1_000);
+        const longObject = { [longKey]: "small" };
+        const nested = { count: 1 };
+        type DeepNode = { next?: DeepNode };
+        const deep: DeepNode = {};
+        let deepCursor = deep;
+        for (let index = 0; index < 10; index += 1) {
+          const next: DeepNode = {};
+          deepCursor["next"] = next;
+          deepCursor = next;
+        }
+        let getterCalls = 0;
+        const accessor = {};
+        Object.defineProperty(accessor, "secret", {
+          enumerable: true,
+          get: () => {
+            getterCalls += 1;
+            return "should not be read";
+          },
+        });
+        const wide = Object.fromEntries(
+          Array.from({ length: 33 }, (_, index) => [`key-${index}`, "value"]),
+        );
+        for (let index = 0; index < 33; index += 1) {
+          wide[`key-${index}`] = "value";
+        }
+        const DiagnosticParams = Route.PathRecord.pipe(
+          Schema.decodeTo(Schema.Unknown, {
+            decode: SchemaGetter.transform(() => ({ longObject, nested, deep, accessor, wide })),
+            encode: SchemaGetter.transform((): Route.PathRecord => ({ id: "1" })),
+          }),
+        );
+        const diagnosticRoute = Route.client("bounds", {
+          path: "/bounds/:id",
+          params: DiagnosticParams,
+          search: Route.search(Nothing),
+          view: () => Effect.succeed(<p>bounds</p>),
+        });
+        yield* makeStart("http://app.test/bounds/1", [diagnosticRoute]);
+
+        const first = yield* Frame.inspect;
+        const firstParams = routeNamed(first, "bounds").params;
+        expect(firstParams).toEqual({
+          _tag: "Value",
+          value: {
+            longObject: { _tag: "Truncated", reason: "maximum-property-name-length" },
+            nested: { _tag: "Value", value: { count: { _tag: "Value", value: 1 } } },
+            deep: {
+              _tag: "Value",
+              value: {
+                next: {
+                  _tag: "Value",
+                  value: {
+                    next: {
+                      _tag: "Value",
+                      value: {
+                        next: {
+                          _tag: "Value",
+                          value: {
+                            next: {
+                              _tag: "Value",
+                              value: {
+                                next: { _tag: "Truncated", reason: "maximum-depth" },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            accessor: { _tag: "Opaque", reason: "accessor" },
+            wide: { _tag: "Truncated", reason: "maximum-entries" },
+          },
+        });
+        expect(getterCalls).toBe(0);
+        const encoded = yield* Effect.orDie(
+          Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(firstParams),
+        );
+        expect(encoded.length).toBeLessThan(2_000);
+
+        nested.count = 2;
+        const second = yield* Frame.inspect;
+        expect(firstParams).toEqual({
+          _tag: "Value",
+          value: {
+            longObject: { _tag: "Truncated", reason: "maximum-property-name-length" },
+            nested: { _tag: "Value", value: { count: { _tag: "Value", value: 1 } } },
+            deep: {
+              _tag: "Value",
+              value: {
+                next: {
+                  _tag: "Value",
+                  value: {
+                    next: {
+                      _tag: "Value",
+                      value: {
+                        next: {
+                          _tag: "Value",
+                          value: {
+                            next: {
+                              _tag: "Value",
+                              value: {
+                                next: { _tag: "Truncated", reason: "maximum-depth" },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            accessor: { _tag: "Opaque", reason: "accessor" },
+            wide: { _tag: "Truncated", reason: "maximum-entries" },
+          },
+        });
+        expect(routeNamed(second, "bounds").params).toEqual({
+          _tag: "Value",
+          value: {
+            longObject: { _tag: "Truncated", reason: "maximum-property-name-length" },
+            nested: { _tag: "Value", value: { count: { _tag: "Value", value: 2 } } },
+            deep: {
+              _tag: "Value",
+              value: {
+                next: {
+                  _tag: "Value",
+                  value: {
+                    next: {
+                      _tag: "Value",
+                      value: {
+                        next: {
+                          _tag: "Value",
+                          value: {
+                            next: {
+                              _tag: "Value",
+                              value: {
+                                next: { _tag: "Truncated", reason: "maximum-depth" },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            accessor: { _tag: "Opaque", reason: "accessor" },
+            wide: { _tag: "Truncated", reason: "maximum-entries" },
+          },
+        });
+      }),
+  );
+
+  it.scoped.layer(Frame.layer({ name: "route-failure" }))(
+    "closes route-owned setup resources after a failed route transition",
+    () =>
+      Effect.gen(function* () {
+        let released = 0;
+        const old = Route.client("old", {
+          path: "/old",
+          params: Nothing,
+          search: Route.search(Nothing),
+          view: () => Effect.succeed(<p>old</p>),
+        });
+        const bad: AnyRoute<never> = {
+          name: "bad",
+          searchKeys: { known: true, keys: [] },
+          enter: () =>
+            Option.some(
+              Effect.acquireRelease(
+                Effect.succeed<Entered<never>>({
+                  setup: Effect.die("bad route setup"),
+                  update: () => Effect.succeed(true),
+                }),
+                () => Effect.sync(() => void (released += 1)),
+              ),
+            ),
+        };
+        const { router } = yield* makeStart("http://app.test/old", [old, bad]);
+        const failed = yield* Effect.exit(router.navigate("/bad"));
+        expect(Exit.isFailure(failed)).toBe(true);
+        expect(released).toBe(1);
+        expect((yield* Frame.inspect).routes.map((route) => route.routeName)).toEqual(["old"]);
+        yield* router.navigate("/old");
+        expect((yield* router.current.get).name).toBe("old");
+        expect((yield* Frame.inspect).routes.map((route) => route.routeName)).toEqual(["old"]);
+      }),
+  );
+
+  it.scoped.layer(Frame.layer({ name: "route-interruption" }))(
+    "closes route-owned resources when mount setup is interrupted",
+    () =>
+      Effect.gen(function* () {
+        const parent = yield* Scope.make();
+        const started = yield* Deferred.make<void>();
+        const hold = yield* Deferred.make<void>();
+        let released = 0;
+        const blocked: AnyRoute<never> = {
+          name: "blocked",
+          searchKeys: { known: true, keys: [] },
+          enter: () =>
+            Option.some(
+              Effect.gen(function* () {
+                yield* Effect.acquireRelease(Effect.void, (_value, _exit) =>
+                  Effect.sync(() => {
+                    released += 1;
+                  }),
+                );
+                yield* Deferred.succeed(started, void 0);
+                yield* Deferred.await(hold);
+                return yield* Effect.succeed<Entered<never>>({
+                  setup: Effect.succeed(<p>blocked</p>),
+                  update: () => Effect.succeed(true),
+                });
+              }),
+            ),
+        };
+        const location = yield* makeLocation("http://app.test/blocked");
+        const mounting = yield* Effect.forkChild(
+          mount({
+            routes: [blocked],
+            notFound: NotFound,
+            host: Dom.host,
+            root: document.createElement("main"),
+          }).pipe(Effect.provideService(Location, location.service), Scope.provide(parent)),
+        );
+        yield* Deferred.await(started);
+        yield* Fiber.interrupt(mounting);
+
+        expect(released).toBe(1);
+        expect((yield* Frame.inspect).routes).toHaveLength(0);
+        yield* Scope.close(parent, Exit.void);
+        expect(released).toBe(1);
+      }),
+  );
+
+  it.scoped.layer(Frame.layer({ name: "route-lifetime" }))(
+    "releases route-owned resources when the route exits",
+    () =>
+      Effect.gen(function* () {
+        let released = 0;
+        const old = Route.client("old-lifetime", {
+          path: "/old-lifetime",
+          params: Nothing,
+          search: Route.search(Nothing),
+          view: () => Effect.succeed(<p>old</p>),
+        });
+        const owned: AnyRoute<never> = {
+          name: "owned",
+          searchKeys: { known: true, keys: [] },
+          enter: () =>
+            Option.some(
+              Effect.acquireRelease(
+                Effect.succeed<Entered<never>>({
+                  setup: Effect.succeed(<p>owned</p>),
+                  update: () => Effect.succeed(true),
+                }),
+                (_value, _exit) =>
+                  Effect.sync(() => {
+                    released += 1;
+                  }),
+              ),
+            ),
+        };
+        const { router } = yield* makeStart("http://app.test/old-lifetime", [old, owned]);
+        yield* router.navigate("/owned");
+        expect(released).toBe(0);
+        yield* router.navigate("/old-lifetime");
+        expect(released).toBe(1);
+      }),
+  );
+
+  it.scoped("keeps identical route names independent after one root closes", () =>
+    Effect.gen(function* () {
+      const route = Route.client("same-route", {
+        path: "/same",
+        params: Nothing,
+        search: Route.search(Nothing),
+        view: () => Effect.succeed(<p id="same-route">same</p>),
+      });
+      const openRoot = Effect.gen(function* () {
+        const rootScope = yield* Scope.make();
+        const context = yield* Scope.provide(
+          Layer.build(Frame.layer({ name: "same-route-root" })),
+          rootScope,
+        );
+        const location = yield* makeLocation("http://app.test/same");
+        const router = yield* Effect.provideContext(
+          mount({
+            routes: [route],
+            notFound: NotFound,
+            host: Dom.host,
+            root: document.createElement("main"),
+          }).pipe(Effect.provideService(Location, location.service), Scope.provide(rootScope)),
+          context,
+        );
+        return { context, rootScope, router };
+      });
+
+      const first = yield* openRoot;
+      const second = yield* openRoot;
+      const firstSnapshot = yield* Effect.provideContext(Frame.inspect, first.context);
+      const secondSnapshot = yield* Effect.provideContext(Frame.inspect, second.context);
+      expect(firstSnapshot.root.name).toBe("same-route-root");
+      expect(secondSnapshot.root.name).toBe("same-route-root");
+      expect(firstSnapshot.root.id).not.toBe(secondSnapshot.root.id);
+      expect(firstSnapshot.routes[0]?.routeName).toBe("same-route");
+      expect(secondSnapshot.routes[0]?.routeName).toBe("same-route");
+      expect(firstSnapshot.routes[0]?.id).not.toBe(secondSnapshot.routes[0]?.id);
+
+      yield* Scope.close(first.rootScope, Exit.void);
+      const secondAfterClose = yield* Effect.provideContext(Frame.inspect, second.context);
+      expect(secondAfterClose.root.id).toBe(secondSnapshot.root.id);
+      expect(secondAfterClose.routes).toHaveLength(1);
+      expect(secondAfterClose.routes[0]?.routeName).toBe("same-route");
+
+      yield* Scope.close(second.rootScope, Exit.void);
+    }),
   );
 });

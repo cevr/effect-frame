@@ -10,8 +10,10 @@ import {
 } from "effect-frame/actor";
 import { ref } from "effect-frame/actor/client";
 import { QueryTest } from "effect-frame/actor/testing";
+import type { View } from "effect-frame/view";
 import { Context, Effect, Layer, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
+import type * as Frame from "../../src/frame.js";
 
 class ApplicationValue extends Context.Service<ApplicationValue, { readonly value: number }>()(
   "effect-frame/tests/actor/query-types.test/ApplicationValue",
@@ -100,6 +102,28 @@ const hostWithoutApplicationValue = ActorHost.layerMemory([], [SingleLive]);
 type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
+const viewWithApplicationChannels: View.View<
+  Record<string, never>,
+  "view-error",
+  ApplicationValue
+> = () => Effect.fail("view-error");
+
+/** View effects keep both application failures and services visible at their call site. */
+const viewErrorIsPreserved: Equals<
+  Effect.Error<ReturnType<typeof viewWithApplicationChannels>>,
+  "view-error"
+> = true;
+const viewRequirementsArePreserved: Equals<
+  Effect.Services<ReturnType<typeof viewWithApplicationChannels>>,
+  ApplicationValue
+> = true;
+
+/** Frame inspection requires only its public Frame service. */
+const inspectionRequirementsArePreserved: Equals<
+  Effect.Services<typeof Frame.inspect>,
+  Frame.Service
+> = true;
+
 /** The missing service remains visible until the application provides it. */
 const missingApplicationValueIsVisible: Equals<
   Layer.Services<typeof hostWithoutApplicationValue>,
@@ -121,6 +145,9 @@ describe("query implementation service requirements", () => {
       expect(missingApplicationValueIsVisible).toBe(true);
       expect(hostRequirementsAreDischarged).toBe(true);
       expect(queryTestRequirementsArePreserved).toBe(true);
+      expect(viewErrorIsPreserved).toBe(true);
+      expect(viewRequirementsArePreserved).toBe(true);
+      expect(inspectionRequirementsArePreserved).toBe(true);
       batchReleases.current = 0;
       const single = yield* transport.query({ query: Single.name, version: 1, args: "{}" });
       expect(single).toBe('{"value":40}');

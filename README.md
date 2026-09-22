@@ -32,6 +32,36 @@ The gate runs strict lint, format checks, patched TypeScript checks, a browser b
 
 No cloud deployment or npm publication is configured.
 
+## Browser inspection
+
+The browser-safe `effect-frame/frame` entry exposes `Frame.layer` and
+`Frame.inspect`. Build one Frame layer for each application root. Keep it in
+the same layer graph as the query cache so the cache registers its entries in
+that root.
+
+```ts
+import * as Frame from "effect-frame/frame";
+import { Layer } from "effect";
+import { queryCacheLayer } from "effect-frame/actor/client";
+
+const frameLayer = Frame.layer({ name: "notes" });
+const appLayer = Layer.merge(queryCacheLayer.pipe(Layer.provideMerge(frameLayer)), transportLayer);
+```
+
+`Layer.provideMerge` gives the cache the Frame registry and keeps the Frame
+service available to the mounted application. A test host uses the same
+composition with `QueryTest.layer`:
+
+```ts
+const testLayer = QueryTest.layer({ queries: [NotesQueryLive] }).pipe(
+  Layer.provideMerge(Frame.layer({ name: "notes-test" })),
+);
+```
+
+Keep the cache layer alive for the full mounted application scope. Providing a
+cache only around a short setup effect closes its `RcMap` when that effect
+returns, even if an outer view scope still holds a query consumer.
+
 ## Planning
 
 Read [the GitHub tracker guide](docs/wayfinder/github.md) before changing the map. Read source findings in `docs/research/` when they are available.

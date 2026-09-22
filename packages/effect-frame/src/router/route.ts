@@ -529,7 +529,7 @@ export interface AnyRoute<R> {
   readonly enter: (
     url: URL,
     navigation?: RouteNavigation,
-  ) => Option.Option<Effect.Effect<Entered<R>>>;
+  ) => Option.Option<Effect.Effect<Entered<R>, never, Scope.Scope>>;
 }
 
 export interface Route<

@@ -25,8 +25,12 @@ import {
 import type { Node } from "effect-frame/view";
 import { LoadingScope, View, ready } from "effect-frame/view";
 import {
+  Clock,
+  Deferred,
+  Duration,
   Effect,
   Exit,
+  Fiber,
   Function,
   Option,
   Result,
@@ -37,6 +41,8 @@ import {
   SubscriptionRef,
 } from "effect";
 import { attempt } from "../view/attempt.js";
+import type { Definition as LazyDefinition, Ticket } from "../view/lazy.js";
+import { definitionOf as lazyDefinitionOf, withTicket } from "../view/lazy.js";
 import type { Before, Checker, NavigationKind, RouteFailure, Verdict } from "./check.js";
 import { Continue, register as registerChecks } from "./check.js";
 import type {
@@ -57,6 +63,7 @@ import {
   search as searchCodec,
 } from "./route.js";
 import { register as registerInspection } from "./route-inspection.js";
+import { Router } from "./router.js";
 
 /**
  * PRIVATE proof (route slice 2, the #36 dependency). This module is not
@@ -96,6 +103,20 @@ import { register as registerInspection } from "./route-inspection.js";
  *   `errored` handler. A declared acquisition failure of the segment's own
  *   data goes to the same handler as `Declaration`. A failed instance is
  *   never stayed: the next navigation that matches it enters it again.
+ *
+ * Route slice 4 adds, still privately (see `docs/design/route-pending.md`):
+ *
+ * - A leaf or layout may present `pending` while its entered instance
+ *   prepares: a lazy import or its own suspended setup. Timing starts when
+ *   the transition enters the segment, after every check continued. The
+ *   fallback shows only after `after`, and once shown it stays `atLeast`
+ *   unless the setup failed or the instance closed. Queries are not waited
+ *   on: their readiness stays with `Loading` and the reads below it.
+ * - A lazy view's import starts when the transition enters its segment,
+ *   beside declaration acquisition, and its setup waits on that same
+ *   attempt. The tree's first mount on the initial navigation waits for
+ *   every entered import before it creates an instance, so the first frame
+ *   holds imported views and never a pending fallback.
  */
 
 // ---------------------------------------------------------------------------
@@ -433,16 +454,43 @@ export type LayoutPropsOf<Seg, ChildR> =
  */
 export interface Recovery<E> {
   readonly errored: (failure: Source<RouteFailure<E>>) => Node;
+  readonly pending?: Pending;
 }
 
 /**
- * The recovery argument. A view that cannot fail may omit it; its
- * declaration failures then fail the navigation. A view that can fail with
- * `E` must handle exactly that `E`.
+ * What an entered instance shows while it prepares: its lazy import and its
+ * own suspended setup. Queries are not preparation; `Loading` owns them.
+ *
+ * - `after`: how long preparation may take before `fallback` shows. Work
+ *   that finishes sooner never shows it.
+ * - `atLeast`: how long a shown fallback stays, at least. A failed setup and
+ *   a closed instance do not wait for it.
+ *
+ * Both are read with the Effect `Clock`. There are no defaults.
+ */
+export interface Pending {
+  readonly fallback: Node;
+  readonly after: Duration.Input;
+  readonly atLeast: Duration.Input;
+}
+
+/**
+ * The options of a view that cannot fail. `errored` handles only its
+ * declaration failures, and `pending` presents its preparation.
+ */
+export interface Presentation {
+  readonly errored?: (failure: Source<RouteFailure<never>>) => Node;
+  readonly pending?: Pending;
+}
+
+/**
+ * The options argument. A view that cannot fail may omit it, or any part of
+ * it; its declaration failures then fail the navigation when it has no
+ * `errored`. A view that can fail with `E` must handle exactly that `E`.
  */
 export type RecoveryFor<E> = [E] extends [never]
-  ? readonly [] | readonly [recovery: Recovery<never>]
-  : readonly [recovery: Recovery<E>];
+  ? readonly [] | readonly [options: Presentation]
+  : readonly [options: Recovery<E>];
 
 /**
  * A mounted segment. `R` is its view's requirements. It appears only in
@@ -482,6 +530,13 @@ interface Tree {
    * transitions among themselves, but a setup fails on a row's own fiber.
    */
   readonly lock: Semaphore.Semaphore;
+  /**
+   * Whether an instance created now may present `pending`. False while the
+   * tree's first mount on the initial navigation creates its instances:
+   * that first frame waits for imports and setup instead. True afterwards,
+   * and from the start for a tree entered by a later navigation.
+   */
+  present: boolean;
 }
 
 /** Prepared entry of a segment and every matched descendant. Nothing is published yet. */
@@ -568,7 +623,8 @@ export const leaf = <
     seg,
     [],
     (props) => view(props),
-    recoveryOf<E>(recovery),
+    boundaryOf<E>(recovery),
+    lazyDefinitionOf(view),
   );
 
 /**
@@ -620,23 +676,35 @@ export const layout = <
     seg,
     typed,
     (props, outlet) => view({ ...props, outlet }),
-    recoveryOf<E>(recovery),
+    boundaryOf<E>(recovery),
+    lazyDefinitionOf(view),
   );
 };
 
+/** The options argument, read once: each part is present or absent. */
+interface Boundary<E> {
+  readonly errored: Option.Option<(failure: Source<RouteFailure<E>>) => Node>;
+  readonly pending: Option.Option<Pending>;
+}
+
 /**
- * The optional recovery argument as an Option. `RecoveryFor` already made
- * it required whenever `E` is not `never`.
+ * The optional options argument as Options. `RecoveryFor` already made
+ * `errored` required whenever `E` is not `never`.
  */
-const recoveryOf = <E>(
-  recovery: ReadonlyArray<Recovery<E> | Recovery<never>>,
-): Option.Option<Recovery<E>> =>
-  Option.map(
-    Option.fromNullishOr(recovery[0]),
-    // A Recovery<never> handles only declaration failures; it never sees Setup.
-    // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- errored only reads RouteFailure<E>, and E is never whenever Recovery<never> was accepted.
-    (one) => one as Recovery<E>,
-  );
+const boundaryOf = <E>(recovery: ReadonlyArray<Recovery<E> | Presentation>): Boundary<E> => {
+  const given = Option.fromNullishOr(recovery[0]);
+  return {
+    errored: Option.flatMap(given, (one) =>
+      Option.map(
+        Option.fromNullishOr(one.errored),
+        // A Presentation handles only declaration failures; it never sees Setup.
+        // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- errored only reads RouteFailure<E>, and E is never whenever a Presentation was accepted.
+        (errored) => errored as (failure: Source<RouteFailure<E>>) => Node,
+      ),
+    ),
+    pending: Option.flatMap(given, (one) => Option.fromNullishOr(one.pending)),
+  };
+};
 
 /** A branch the builder cannot mount. */
 export class BranchRejected extends Schema.TaggedError<BranchRejected>()("BranchRejected", {
@@ -989,16 +1057,121 @@ const constant = <A>(value: A): Source<A> => ({
  * pending by the readiness rule).
  */
 const presentFailure = (node: Node): Effect.Effect<Node, never, Scope.Scope> =>
-  Effect.flatMap(Effect.serviceOption(LoadingScope), (loading) =>
+  Effect.as(settleLoading, node);
+
+/**
+ * Register one settled read with the nearest `Loading`, if any, for as long
+ * as the caller's Scope lives. It never makes the Loading wait: it says only
+ * that this region has nothing for it to wait on.
+ */
+const settleLoading: Effect.Effect<void, never, Scope.Scope> = Effect.flatMap(
+  Effect.serviceOption(LoadingScope),
+  (loading) =>
     Option.match(loading, {
-      onNone: () => Effect.succeed(node),
+      onNone: () => Effect.void,
       onSome: (scope) =>
-        Effect.as(
+        Effect.asVoid(
           Effect.provideService(ready(constant(Ready(true, false)), false), LoadingScope, scope),
-          node,
         ),
     }),
-  );
+);
+
+/** What a pending presentation draws: nothing yet, the fallback, or the view. */
+interface Shown {
+  readonly key: "fallback" | "view";
+  readonly node: Node;
+}
+
+/**
+ * The completed work, or None when `deadline` came first. A result that is
+ * already there wins over a deadline that has already passed.
+ */
+const awaitUntil = <A>(
+  fiber: Fiber.Fiber<A>,
+  deadline: number,
+): Effect.Effect<Option.Option<Exit.Exit<A>>> =>
+  Effect.gen(function* () {
+    const polled = Option.fromNullishOr(fiber.pollUnsafe());
+    const now = yield* Clock.currentTimeMillis;
+    if (Option.isSome(polled) || now >= deadline) {
+      return polled;
+    }
+    return yield* Effect.timeoutOption(Fiber.await(fiber), Duration.millis(deadline - now));
+  });
+
+const sleepUntil = (deadline: number): Effect.Effect<void> =>
+  Effect.flatMap(Clock.currentTimeMillis, (now) => {
+    if (now >= deadline) {
+      return Effect.void;
+    }
+    return Effect.sleep(Duration.millis(deadline - now));
+  });
+
+/**
+ * Present one instance's preparation. With no `pending` the setup runs in
+ * place, as before. With one, the setup runs on a fiber owned by the view
+ * Scope and this returns at once:
+ *
+ * - The fallback shows at `startedAt + after`, unless the setup already
+ *   finished. `startedAt` is when the transition entered the segment.
+ * - Once shown, a successful setup is drawn at `shown + atLeast` at the
+ *   earliest. A typed failure's `errored` node is drawn at once.
+ * - A defect removes the fallback at once and fails the presenting fiber.
+ * - Closing the view Scope interrupts both fibers: nothing waits for
+ *   `atLeast`, and nothing late is drawn.
+ *
+ * While it prepares, the region settles the nearest `Loading`, so that
+ * Loading presents this fallback rather than its own. The view's own reads
+ * register during its setup and take over when it is drawn.
+ */
+const presentWith = <R>(
+  pending: Option.Option<Pending>,
+  work: Effect.Effect<Node, never, R>,
+  startedAt: number,
+  failed: () => boolean,
+): Effect.Effect<Node, never, R | Scope.Scope> =>
+  Option.match(pending, {
+    onNone: () => work,
+    onSome: (options): Effect.Effect<Node, never, R | Scope.Scope> =>
+      Effect.gen(function* () {
+        const owner = yield* Effect.scope;
+        const shown = yield* SubscriptionRef.make<ReadonlyArray<Shown>>([]);
+        const preparing = yield* Scope.fork(owner);
+        yield* Scope.provide(settleLoading, preparing);
+        const fiber = yield* Effect.forkIn(work, owner);
+        const finish = (exit: Exit.Exit<Node>) =>
+          Effect.andThen(
+            Scope.close(preparing, Exit.void),
+            Exit.match(exit, {
+              onSuccess: (node) => SubscriptionRef.set(shown, [{ key: "view", node }]),
+              onFailure: (cause) =>
+                Effect.andThen(SubscriptionRef.set(shown, []), Effect.failCause(cause)),
+            }),
+          );
+        const showAt = startedAt + Duration.toMillis(Duration.fromInputUnsafe(options.after));
+        const holdUntil = showAt + Duration.toMillis(Duration.fromInputUnsafe(options.atLeast));
+        yield* Effect.forkIn(
+          Effect.gen(function* () {
+            const early = yield* awaitUntil(fiber, showAt);
+            if (Option.isSome(early)) {
+              return yield* finish(early.value);
+            }
+            yield* SubscriptionRef.set(shown, [{ key: "fallback", node: options.fallback }]);
+            const exit = yield* Fiber.await(fiber);
+            if (Exit.isSuccess(exit) && !failed()) {
+              yield* sleepUntil(holdUntil);
+            }
+            return yield* finish(exit);
+          }),
+          owner,
+        );
+        return yield* View.list({
+          each: { get: SubscriptionRef.get(shown), changes: SubscriptionRef.changes(shown) },
+          keyBy: (one) => one.key,
+          row: (item) => Effect.map(item.get, (one) => one.node),
+        });
+      }),
+  });
 
 /**
  * An instance that shows only `errored`: its own declarations failed. It
@@ -1085,7 +1258,8 @@ const makeBranch = <
     props: SegmentProps<Params, Search, Data>,
     outlet: Effect.Effect<Node, never, ChildR>,
   ) => Effect.Effect<Node, E, R>,
-  recovery: Option.Option<Recovery<E>>,
+  boundary: Boundary<E>,
+  lazy: Option.Option<LazyDefinition>,
 ): Branch<Segment<Name, Params, Search, Own, Data, CheckR>, Exclude<R, Scope.Scope>, never> => {
   // Typed memory of the instances this branch created. A match of this
   // branch reads it back, so no instance value is ever cast.
@@ -1113,9 +1287,9 @@ const makeBranch = <
     internals: Internals<Params, Search, ChildR>,
     error: E,
   ): Effect.Effect<Node, never, Scope.Scope> =>
-    Option.match(recovery, {
+    Option.match(boundary.errored, {
       onNone: () => Effect.die(error),
-      onSome: (handler) =>
+      onSome: (errored) =>
         Effect.andThen(
           tree.lock.withPermit(
             Effect.gen(function* () {
@@ -1133,7 +1307,7 @@ const makeBranch = <
             }),
           ),
           Effect.suspend(() =>
-            presentFailure(handler.errored(constant<RouteFailure<E>>({ _tag: "Setup", error }))),
+            presentFailure(errored(constant<RouteFailure<E>>({ _tag: "Setup", error }))),
           ),
         ),
     });
@@ -1149,11 +1323,15 @@ const makeBranch = <
     failure: PartFailure,
   ): Effect.Effect<Entering<A>, TransportReadError> => {
     const error = failure.error;
-    if (failure._tag === "Own" && error._tag !== "Unauthorized" && Option.isSome(recovery)) {
-      const handler = recovery.value;
+    if (
+      failure._tag === "Own" &&
+      error._tag !== "Unauthorized" &&
+      Option.isSome(boundary.errored)
+    ) {
+      const errored = boundary.errored.value;
       return Effect.succeed(
         failedEntering<A>(tree, seg.name, identity, values, () =>
-          handler.errored(constant<RouteFailure<E>>({ _tag: "Declaration", error })),
+          errored(constant<RouteFailure<E>>({ _tag: "Declaration", error })),
         ),
       );
     }
@@ -1166,9 +1344,12 @@ const makeBranch = <
     signature: string,
     acquired: ReadonlyArray<{ readonly name: string; readonly acquired: Acquired }>,
     childEntering: Option.Option<Entering<ChildR>>,
+    ticket: Option.Option<Ticket>,
+    startedAt: number,
     inherited: DataRecord,
     parentScope: Scope.Scope,
   ) {
+    const presentable = tree.present;
     const scope = yield* Scope.fork(parentScope);
     const bindingsScope = yield* Scope.fork(scope);
     const viewScope = yield* Scope.fork(scope);
@@ -1233,11 +1414,17 @@ const makeBranch = <
       branch: identity,
       // The view runs under an owned attempt in the instance's view Scope:
       // a row that starts after the instance closed never runs it, and a
-      // typed failure closes the failed setup before `errored` is built.
+      // typed failure closes the failed setup before `errored` is built. A
+      // lazy view waits on the import attempt its transition took.
       setup: Scope.provide(
-        attempt(
-          Effect.suspend(() => view(props, slotSetup(internals))),
-          (error: E) => setupFailed(tree, internals, error),
+        presentWith(
+          Option.filter(boundary.pending, () => presentable),
+          attempt(
+            Effect.suspend(() => withTicket(ticket, view(props, slotSetup(internals)))),
+            (error: E) => setupFailed(tree, internals, error),
+          ),
+          startedAt,
+          () => internals.failed,
         ),
         viewScope,
       ),
@@ -1357,6 +1544,12 @@ const makeBranch = <
     signature: string,
     childMatch: Option.Option<Match<ChildR>>,
   ) {
+    // Every check continued before the transition entered this segment: the
+    // pending timer and the import start here, not earlier.
+    const startedAt = yield* Clock.currentTimeMillis;
+    const ticket = yield* Effect.transposeOption(
+      Option.map(lazy, (definition) => definition.start),
+    );
     const ownDeclarations = yield* keyed(seg.declare(values));
     type Prepared =
       | { readonly _tag: "Own"; readonly name: string; readonly acquired: Acquired }
@@ -1396,6 +1589,12 @@ const makeBranch = <
     if (Result.isFailure(outcome)) {
       return yield* declarationFailed<Exclude<R, Scope.Scope>>(tree, values, outcome.failure);
     }
+    if (!tree.present && Option.isSome(ticket)) {
+      // The first frame holds the imported view. The outcome is the setup's
+      // to read: it waits on this same attempt, so a failure reaches
+      // `errored` without a second import.
+      yield* Effect.exit(Deferred.await(ticket.value.done));
+    }
     const parts = outcome.success;
     const acquired = parts.filter(
       (part): part is Extract<Prepared, { readonly _tag: "Own" }> => part._tag === "Own",
@@ -1417,7 +1616,17 @@ const makeBranch = <
         }),
       ),
       create: (inherited, parentScope) =>
-        create(tree, values, signature, acquired, childEntering, inherited, parentScope),
+        create(
+          tree,
+          values,
+          signature,
+          acquired,
+          childEntering,
+          ticket,
+          startedAt,
+          inherited,
+          parentScope,
+        ),
     };
     return entering;
   });
@@ -1505,6 +1714,21 @@ const deepest = (instance: Instance<unknown>): Effect.Effect<Values<unknown, unk
   );
 
 /**
+ * Whether this tree is mounted by a navigation after the initial one. The
+ * router provides `Router` to a route's setup and publishes the navigation
+ * before it enters the route. Without a router, the mount is a first frame.
+ */
+const laterNavigation: Effect.Effect<boolean> = Effect.flatMap(
+  Effect.serviceOption(Router),
+  (router) =>
+    Option.match(router, {
+      onNone: () => Effect.succeed(false),
+      onSome: (service) =>
+        Effect.map(service.navigations.get, (navigation) => navigation.kind !== "initial"),
+    }),
+);
+
+/**
  * Mount a tree as one route. `update` runs the nested transition for every
  * URL the tree matches. The router runs the tree's checks before it moves
  * history and before `enter` or `update`. An acquisition failure that no
@@ -1538,9 +1762,12 @@ export const route = <const Name extends string, Seg extends AnySegment, ViewR, 
                   return `${segmentName}#${String(counter)}`;
                 },
                 lock: yield* Semaphore.make(1),
+                present: yield* laterNavigation,
               };
               const entering = yield* Effect.orDie(first.enter(tree));
               const instance = yield* entering.create(new Map(), owner);
+              // Every instance of the first mount exists now. Later ones present.
+              tree.present = true;
               mounted = Option.some({ tree, root: instance });
               // Yielded directly, not through a list, so a host's first
               // frame holds the root's setup.

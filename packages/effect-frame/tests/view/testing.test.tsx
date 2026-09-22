@@ -737,7 +737,6 @@ describe("scoped view test harness", () => {
           setup: (host, mountRoot) => mount(Page, {}, host, mountRoot),
         });
 
-        yield* Effect.yieldNow;
         yield* input.set(1);
         yield* input.set(2);
         expect(root.querySelector("#debounced")?.textContent).toBe("0");

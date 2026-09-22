@@ -363,7 +363,6 @@ describe("router", () => {
 
       const plain = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
       anchor.dispatchEvent(plain);
-      yield* Effect.yieldNow;
       yield* location.awaitMove;
       yield* page.waitFor({
         label: "ordinary link route",

@@ -565,9 +565,17 @@ describe("browser view", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const seen = yield* Ref.make<ReadonlyArray<string>>([]);
+      const handled = yield* Deferred.make<void>();
       const Echo = (_props: NoProps) =>
         Effect.succeed(
-          <button id="say" onClick={View.event(() => Ref.update(seen, (all) => [...all, "hi"]))}>
+          <button
+            id="say"
+            onClick={View.event(() =>
+              Ref.update(seen, (all) => [...all, "hi"]).pipe(
+                Effect.andThen(Deferred.succeed(handled, void 0)),
+              ),
+            )}
+          >
             say
           </button>,
         );
@@ -576,7 +584,7 @@ describe("browser view", () => {
         Effect.sync(() => root.querySelector("#say")?.dispatchEvent(new Event("click"))),
         { label: "event reaches its actor", until: () => true },
       );
-      yield* Effect.yieldNow;
+      yield* Deferred.await(handled);
       expect(yield* Ref.get(seen)).toEqual(["hi"]);
     }),
   );
@@ -585,9 +593,15 @@ describe("browser view", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const sent = yield* Ref.make(false);
+      const handled = yield* Deferred.make<void>();
       const Form = (_props: NoProps) =>
         Effect.succeed(
-          <form id="form" onSubmit={View.submit(() => Ref.set(sent, true))}>
+          <form
+            id="form"
+            onSubmit={View.submit(() =>
+              Ref.set(sent, true).pipe(Effect.andThen(Deferred.succeed(handled, void 0))),
+            )}
+          >
             <button>go</button>
           </form>,
         );
@@ -598,7 +612,7 @@ describe("browser view", () => {
         Effect.sync(() => root.querySelector("#form")?.dispatchEvent(event)),
         { label: "form submit is handled", until: () => event.defaultPrevented },
       );
-      yield* Effect.yieldNow;
+      yield* Deferred.await(handled);
       expect(event.defaultPrevented).toBe(true);
       expect(yield* Ref.get(sent)).toBe(true);
     }),

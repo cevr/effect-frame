@@ -3,6 +3,7 @@ import { Effect, Layer, Schema, Scope, Stream } from "effect";
 import type { Behavior } from "./behavior.js";
 import type { AnyContract, MessageOf, SnapshotOf } from "./contract.js";
 import { openDurable } from "./durable-engine.js";
+import type { Committed } from "./engine-types.js";
 import type { MailboxStore } from "./mailbox-store.js";
 import type { Projection } from "./transport.js";
 import type {
@@ -83,7 +84,7 @@ const openWith = <C extends AnyContract, State, R>(
       message: contract.message,
     });
     const encodeSnapshot = Schema.encodeEffect(contract.snapshot);
-    const project = (committed: { readonly revision: number; readonly state: State }) =>
+    const project = (committed: Committed<State>) =>
       Effect.map(
         Effect.orDie(encodeSnapshot(options.snapshot(committed.state))),
         (snapshot): Projection => ({ revision: committed.revision, snapshot }),
@@ -103,10 +104,10 @@ const openWith = <C extends AnyContract, State, R>(
         Effect.flatMap(prepareMessage(payload), (prepared) =>
           Effect.flatMap(actor.callEncoded(commandId, prepared, timeout), project),
         ),
-      snapshot: Effect.flatMap(actor.applied.get, project),
+      snapshot: Effect.flatMap(actor.committed.get, project),
       changes: (after) =>
         Stream.mapEffect(
-          Stream.filter(actor.applied.changes, (committed) => committed.revision > after),
+          Stream.filter(actor.committed.changes, (committed) => committed.revision > after),
           project,
         ),
     };

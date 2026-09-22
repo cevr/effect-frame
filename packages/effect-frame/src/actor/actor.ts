@@ -2,7 +2,14 @@ import { Effect, Function } from "effect";
 import type { Behavior, SetValue } from "./behavior.js";
 import { Value } from "./behavior.js";
 import { openLocal } from "./local-engine.js";
-import type { ActorRef, ActorStopped, Applied } from "./vocabulary.js";
+import { select } from "./source.js";
+import type { Committed } from "./engine-types.js";
+import type { ActorRef, Admitted, ActorStopped, Applied } from "./vocabulary.js";
+
+const toApplied = <State>(committed: Committed<State>): Applied<State> => ({
+  revision: committed.revision,
+  state: committed.state,
+});
 
 /**
  * A local reference adds `derive`: compute the message from the current state
@@ -23,7 +30,28 @@ export interface LocalActorRef<State, Message> extends ActorRef<State, Message, 
 export const spawn = Effect.fn("Actor.spawn")(function* <State, Message, R>(
   behavior: Behavior<State, Message, R>,
 ) {
-  return yield* openLocal(behavior);
+  const engine = yield* openLocal(behavior);
+  const applied = select(engine.committed, toApplied);
+  const send = Effect.fn("Actor.send")(function* (message: Message) {
+    const { admitted } = yield* engine.admit(() => message);
+    return { admitted } satisfies Admitted;
+  });
+  const call = Effect.fn("Actor.call")(function* (message: Message) {
+    const { reply } = yield* engine.admit(() => message);
+    return yield* Effect.map(engine.awaitReply(reply), toApplied);
+  });
+  const derive = Effect.fn("Actor.derive")(function* (compute: (state: State) => Message) {
+    const { reply } = yield* engine.admit(compute);
+    return yield* Effect.map(engine.awaitReply(reply), toApplied);
+  });
+  return {
+    kind: "local",
+    applied,
+    state: select(applied, (committed) => committed.state),
+    send,
+    call,
+    derive,
+  } satisfies LocalActorRef<State, Message>;
 });
 
 /**

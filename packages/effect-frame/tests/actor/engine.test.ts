@@ -1,4 +1,5 @@
 import { Context, Effect, Layer, Schema, Stream } from "effect";
+import type { Scope } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import {
   ActorHost,
@@ -71,7 +72,12 @@ const id = Schema.decodeSync(CommandId);
 describe("private actor engines", () => {
   it.scoped("preserves local behavior services inside the local engine", () =>
     Effect.gen(function* () {
-      const actor = yield* spawn(localBehavior).pipe(
+      const localSpawn: Effect.Effect<
+        LocalActorRef<number, Add>,
+        never,
+        LocalValue | Scope.Scope
+      > = spawn(localBehavior);
+      const actor = yield* localSpawn.pipe(
         Effect.provideService(LocalValue, LocalValue.of({ amount: 4 })),
       );
       const applied = yield* actor.call({ _tag: "EngineAdd", amount: 3 });

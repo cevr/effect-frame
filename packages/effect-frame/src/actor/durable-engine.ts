@@ -15,11 +15,12 @@ import {
 } from "effect";
 import * as Inspection from "../inspection.js";
 import type { Behavior } from "./behavior.js";
+import type { Committed } from "./engine-types.js";
 import type { PendingCommand, StoredReceipt } from "./mailbox-store.js";
 import { MailboxStore } from "./mailbox-store.js";
 import { fromSubscriptionRef } from "./source.js";
 import type { Source } from "./source.js";
-import type { Applied, CommandConflict, CommandId, DurableReceipt } from "./vocabulary.js";
+import type { CommandConflict, CommandId, DurableReceipt } from "./vocabulary.js";
 import { ActorStopped, Uncertain } from "./vocabulary.js";
 
 export interface DurableEngineOptions<State, Message, R> {
@@ -32,7 +33,7 @@ export interface DurableEngineOptions<State, Message, R> {
 
 /** The private durable engine surface shared by the public and hosted adapters. */
 export interface DurableEngine<State, Message> {
-  readonly applied: Source<Applied<State>>;
+  readonly committed: Source<Committed<State>>;
   readonly send: (
     message: Message,
     options: { readonly commandId: CommandId },
@@ -40,7 +41,7 @@ export interface DurableEngine<State, Message> {
   readonly call: (
     message: Message,
     options: { readonly commandId: CommandId; readonly timeout: Duration.Input },
-  ) => Effect.Effect<Applied<State>, ActorStopped | CommandConflict | Uncertain>;
+  ) => Effect.Effect<Committed<State>, ActorStopped | CommandConflict | Uncertain>;
   /** Submit a validated, prepared payload without running its encoder again. */
   readonly sendEncoded: (
     commandId: CommandId,
@@ -51,7 +52,7 @@ export interface DurableEngine<State, Message> {
     commandId: CommandId,
     payload: string,
     timeout: Duration.Input,
-  ) => Effect.Effect<Applied<State>, ActorStopped | CommandConflict | Uncertain>;
+  ) => Effect.Effect<Committed<State>, ActorStopped | CommandConflict | Uncertain>;
 }
 
 export interface DurableHostSettings {
@@ -92,12 +93,12 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <State, M
   const restored = yield* Effect.flatMap(store.latest, (latest) =>
     Option.match(latest, {
       onNone: () =>
-        Effect.succeed<Applied<State>>({
+        Effect.succeed<Committed<State>>({
           revision: 0,
           state: options.behavior.initial,
         }),
       onSome: (committed) =>
-        Effect.map(Effect.orDie(decodeState(committed.state)), (state): Applied<State> => ({
+        Effect.map(Effect.orDie(decodeState(committed.state)), (state): Committed<State> => ({
           revision: committed.revision,
           state,
         })),
@@ -105,7 +106,7 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <State, M
   );
 
   const turn = yield* options.behavior.open(restored.state);
-  const applied = yield* SubscriptionRef.make(restored);
+  const committed = yield* SubscriptionRef.make(restored);
   const closed = yield* Deferred.make<never, ActorStopped>();
   const signal = yield* Queue.unbounded<Wake<State>>();
   const wake = yield* PubSub.unbounded<StoredReceipt>();
@@ -121,12 +122,12 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <State, M
     command: PendingCommand,
   ) {
     const message = yield* Effect.orDie(decodeMessage(command.payload));
-    const current = yield* SubscriptionRef.get(applied);
+    const current = yield* SubscriptionRef.get(committed);
     const next = yield* turn.apply(current.state, message);
     const encoded = yield* Effect.orDie(encodeState(next));
     const receipt = yield* store.commit(command.commandId, encoded);
     yield* Ref.set(lastEncoded, Option.some(encoded));
-    yield* SubscriptionRef.set(applied, { revision: receipt.revision, state: next });
+    yield* SubscriptionRef.set(committed, { revision: receipt.revision, state: next });
     yield* PubSub.publish(wake, receipt);
   });
 
@@ -138,9 +139,9 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <State, M
     if (Option.isSome(previous) && previous.value === encoded) {
       return;
     }
-    const committed = yield* store.advance(encoded);
+    const advanced = yield* store.advance(encoded);
     yield* Ref.set(lastEncoded, Option.some(encoded));
-    yield* SubscriptionRef.set(applied, { revision: committed.revision, state: changed });
+    yield* SubscriptionRef.set(committed, { revision: advanced.revision, state: changed });
   });
 
   /** Drain pending commands in admission order, then wait for the next wake. */
@@ -164,9 +165,9 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <State, M
     ),
   );
 
-  const toApplied = Effect.fn("Actor.durable.toApplied")(function* (receipt: StoredReceipt) {
+  const toCommitted = Effect.fn("Actor.durable.toCommitted")(function* (receipt: StoredReceipt) {
     const decoded = yield* Effect.orDie(decodeState(receipt.state));
-    return { revision: receipt.revision, state: decoded } satisfies Applied<State>;
+    return { revision: receipt.revision, state: decoded } satisfies Committed<State>;
   });
 
   const sendEncoded = Effect.fn("Actor.durable.sendEncoded")(function* (
@@ -201,6 +202,10 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <State, M
     message: Message,
     sendOptions: { readonly commandId: CommandId },
   ) {
+    const isClosed = yield* Deferred.isDone(closed);
+    if (isClosed) {
+      return yield* ActorStopped.make();
+    }
     const payload = yield* Effect.orDie(encodeMessage(message));
     return yield* sendEncoded(sendOptions.commandId, payload);
   });
@@ -245,24 +250,40 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <State, M
     if (Option.isNone(outcome)) {
       return yield* Uncertain.make({ commandId });
     }
-    return yield* toApplied(outcome.value);
+    return yield* toCommitted(outcome.value);
   });
 
   const call = Effect.fn("Actor.durable.call")(function* (
     message: Message,
     callOptions: { readonly commandId: CommandId; readonly timeout: Duration.Input },
   ) {
-    const payload = yield* Effect.orDie(encodeMessage(message));
-    return yield* callEncoded(callOptions.commandId, payload, callOptions.timeout);
+    const wait = Effect.scopedWith((scope: Scope.Scope) =>
+      Effect.gen(function* () {
+        // Keep message preparation inside the public wait. An asynchronous
+        // encoder must obey the caller timeout and actor close race.
+        const subscription = yield* PubSub.subscribe(wake).pipe(Scope.provide(scope));
+        const payload = yield* Effect.orDie(encodeMessage(message));
+        yield* sendEncoded(callOptions.commandId, payload);
+        return yield* awaitReceipt(callOptions.commandId, subscription);
+      }),
+    );
+    const outcome = yield* Effect.raceFirst(
+      Effect.timeoutOption(wait, callOptions.timeout),
+      Deferred.await(closed),
+    );
+    if (Option.isNone(outcome)) {
+      return yield* Uncertain.make({ commandId: callOptions.commandId });
+    }
+    return yield* toCommitted(outcome.value);
   });
 
-  const appliedSource = fromSubscriptionRef(applied);
+  const committedSource = fromSubscriptionRef(committed);
 
   const registry = yield* Effect.serviceOption(Inspection.Registry);
   if (Option.isSome(registry)) {
     const owner = yield* Inspection.ownerFor(registry.value);
     yield* registry.value.register(owner, (id) =>
-      Effect.map(SubscriptionRef.get(applied), (current) => ({
+      Effect.map(SubscriptionRef.get(committed), (current) => ({
         _tag: "Actor",
         id,
         ownerId: owner.id,
@@ -273,7 +294,7 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <State, M
     );
   }
   return {
-    applied: appliedSource,
+    committed: committedSource,
     send,
     call,
     sendEncoded,

@@ -8,6 +8,7 @@ import {
   Option,
   Queue,
   Schema,
+  SchemaTransformation,
   Scope,
   Stream,
 } from "effect";
@@ -221,6 +222,94 @@ describe("durable actor", () => {
         timeout: "1 second",
       });
       expect(retried).toEqual({ revision: 1, state: 1 });
+    }),
+  );
+
+  withStore("a call timeout covers asynchronous message encoding before admission", () =>
+    Effect.gen(function* () {
+      const store = yield* MailboxStore;
+      const encodingStarted = yield* Deferred.make<void>();
+      const encodingRelease = yield* Deferred.make<void>();
+      const encodingFinalized = yield* Deferred.make<void>();
+      let encodes = 0;
+      const message = Schema.String.pipe(
+        Schema.decodeTo(
+          Schema.Finite,
+          SchemaTransformation.transformEffect({
+            decode: (value: string) => Effect.succeed(Number(value)),
+            encode: (value: number) =>
+              Effect.ensuring(
+                Effect.gen(function* () {
+                  encodes += 1;
+                  yield* Deferred.succeed(encodingStarted, void 0);
+                  yield* Deferred.await(encodingRelease);
+                  return String(value);
+                }),
+                Deferred.succeed(encodingFinalized, void 0),
+              ),
+          }),
+        ),
+      );
+      const counter = yield* durable({
+        behavior: Behavior.reducer<number, number>({
+          initial: 0,
+          reduce: (state, amount) => state + amount,
+        }),
+        state: Schema.fromJsonString(Schema.Finite),
+        message,
+      });
+      const waiting = yield* Effect.forkScoped(
+        Effect.flip(
+          counter.call(1, {
+            commandId: id("encoder-timeout"),
+            timeout: "10 millis",
+          }),
+        ),
+      );
+      yield* Deferred.await(encodingStarted);
+      yield* TestClock.adjust("10 millis");
+      const failure = yield* Fiber.join(waiting);
+
+      expect(failure._tag).toBe("Uncertain");
+      expect(encodes).toBe(1);
+      expect(yield* Deferred.isDone(encodingFinalized)).toBe(true);
+      expect(yield* store.pending).toEqual([]);
+      expect(yield* store.latest).toEqual(Option.none());
+    }),
+  );
+
+  withStore("a stopped send refuses before message encoding", () =>
+    Effect.gen(function* () {
+      const life = yield* Scope.make();
+      let encodes = 0;
+      const message = Schema.String.pipe(
+        Schema.decodeTo(
+          Schema.Finite,
+          SchemaTransformation.transformEffect({
+            decode: (value: string) => Effect.succeed(Number(value)),
+            encode: (value: number) =>
+              Effect.sync(() => {
+                encodes += 1;
+                return String(value);
+              }),
+          }),
+        ),
+      );
+      const counter = yield* durable({
+        behavior: Behavior.reducer<number, number>({
+          initial: 0,
+          reduce: (state, amount) => state + amount,
+        }),
+        state: Schema.fromJsonString(Schema.Finite),
+        message,
+      }).pipe(Scope.provide(life));
+      yield* Scope.close(life, Exit.void);
+
+      const failure = yield* Effect.flip(
+        counter.send(1, { commandId: id("stopped-before-encode") }),
+      );
+      expect(failure._tag).toBe("ActorStopped");
+      expect(encodes).toBe(0);
     }),
   );
 

@@ -30,7 +30,7 @@ export type DiagnosticValue =
   | { readonly _tag: "Opaque"; readonly reason: string }
   | { readonly _tag: "Truncated"; readonly reason: string };
 
-export const DiagnosticValue: Schema.Schema<DiagnosticValue> = Schema.suspend(() =>
+export const DiagnosticValue: Schema.Codec<DiagnosticValue> = Schema.suspend(() =>
   Schema.Union([
     Schema.TaggedStruct("Value", {
       value: Schema.Union([

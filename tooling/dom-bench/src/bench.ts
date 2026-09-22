@@ -35,7 +35,7 @@ import {
   completionStatsExpression,
   type CompletionStats,
 } from "./completion.js";
-import { bundleFixture, servePage } from "./page.js";
+import { bundleFixture, requireServedPageUrl, servePage } from "./page.js";
 import { decodeChromeTraceEvents, reduceChromeTrace, traceCompletionMark } from "./trace.js";
 import type { TraceReduction } from "./trace.js";
 
@@ -546,7 +546,7 @@ const measure = async (
   const page = servePage(script);
   const view = makeView(engine, chromePath);
   try {
-    await stages.run("navigate", () => view.navigate(page.url));
+    await stages.run("navigate", () => view.navigate(requireServedPageUrl(page.url)));
     await stages.run("ready", () => waitForReady(view));
     const seeded = await seed(view, operation, stages);
     await stages.run("identity capture", () => captureOperationState(view));

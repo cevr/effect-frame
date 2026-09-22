@@ -61,3 +61,17 @@ export const servePage = (script: string): ServedPage => {
   });
   return { url: `http://127.0.0.1:${server.port}/`, stop: () => void server.stop(true) };
 };
+
+/**
+ * Returns `url` only when it names an owned loopback HTTP page. Every benchmark
+ * navigation goes through this check, so a `data:` page fails before it loads.
+ */
+export const requireServedPageUrl = (url: string): string => {
+  const parsed = new URL(url);
+  if (parsed.protocol !== "http:" || parsed.hostname !== "127.0.0.1") {
+    throw new Error(
+      `benchmark pages must be served from http://127.0.0.1; refusing ${parsed.protocol} page`,
+    );
+  }
+  return url;
+};

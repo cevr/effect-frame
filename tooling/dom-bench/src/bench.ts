@@ -868,6 +868,40 @@ const startOfficialServer = async (
   }
 };
 
+/** Runs one official workload in its own runner process. Returns the failure reason, if any. */
+const runOfficialWorkload = async (workload: {
+  readonly root: string;
+  readonly stagedName: string;
+  readonly benchmark: string;
+  readonly count: number;
+  readonly chromePath: string | undefined;
+  readonly port: number;
+}): Promise<string | undefined> => {
+  const args = [
+    join(workload.root, "webdriver-ts", "dist", "benchmarkRunner.js"),
+    "--runner",
+    "playwright",
+    "--framework",
+    `keyed/${workload.stagedName}`,
+    "--benchmark",
+    workload.benchmark,
+    "--count",
+    String(workload.count),
+    "--headless",
+    "--nothrottling",
+  ];
+  if (workload.chromePath !== undefined) args.push("--chromeBinary", workload.chromePath);
+  try {
+    await runProcess(join(workload.root, "webdriver-ts"), "node", args, {
+      ...process.env,
+      PORT: String(workload.port),
+    });
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+};
+
 const runOfficial = async (
   framework: FrameworkName,
   count: number,
@@ -906,28 +940,32 @@ const runOfficial = async (
     const serverResult = await startOfficialServer(root, port, () => interrupted);
     server = serverResult.process;
     if (interrupted !== undefined) throw interrupted;
-    const benchmarks = officialBenchmarkIds(operation);
-    const args = [
-      runner,
-      "--runner",
-      "playwright",
-      "--framework",
-      `keyed/${stagedName}`,
-      "--benchmark",
-      ...benchmarks,
-      "--count",
-      String(count),
-      "--headless",
-      "--nothrottling",
-    ];
-    if (chromePath !== undefined) args.push("--chromeBinary", chromePath);
-    console.log(
-      `official\tkrausest-playwright\t${framework}\t${benchmarks.join(",")}\t${revision}\t${root}`,
-    );
-    await runProcess(join(root, "webdriver-ts"), "node", args, {
-      ...process.env,
-      PORT: String(port),
-    });
+    // One runner process per workload, so each workload keeps its own
+    // bounded deadline and one failed workload does not hide the others.
+    const failed: Array<string> = [];
+    for (const benchmark of officialBenchmarkIds(operation)) {
+      if (interrupted !== undefined) throw interrupted;
+      console.log(
+        `official\tkrausest-playwright\t${framework}\t${benchmark}\t${revision}\t${root}`,
+      );
+      // oxlint-disable-next-line no-await-in-loop -- official workloads run serially, as the local cells do.
+      const failure = await runOfficialWorkload({
+        root,
+        stagedName,
+        benchmark,
+        count,
+        chromePath,
+        port,
+      });
+      if (interrupted !== undefined) throw interrupted;
+      if (failure !== undefined) {
+        console.log(["official", framework, benchmark, "failed", failure].join("\t"));
+        failed.push(benchmark);
+      }
+    }
+    if (failed.length > 0) {
+      throw new Error(`official workloads failed: ${failed.join(",")}`);
+    }
   } finally {
     removeSignals();
     if (server !== undefined) await cleanupProcessGroup(server);

@@ -109,6 +109,8 @@ interface HarnessState<HostNode> {
   readonly rootId: string;
   readonly summarizeRoot: Option.Option<(root: HostNode) => string>;
   readonly frame: Option.Option<Frame.FrameService>;
+  /** The construction context supplies the application services to inspection only. */
+  readonly applicationContext: Context.Context<never>;
   readonly liveClock: Clock.Clock;
   readonly collectionScopes: Set<Scope.Scope>;
   readonly waiters: Set<Waiter>;
@@ -370,7 +372,10 @@ const collectInspection = <HostNode>(
       state.collectionScopes.add(collectionScope);
       const diagnosticTimeout = Symbol("ViewTestDiagnosticTimeout");
       const collection = Effect.gen(function* () {
-        const inspectionFiber = yield* Effect.forkIn(Effect.exit(frame.inspect), collectionScope);
+        const inspectionFiber = yield* Effect.forkIn(
+          Effect.exit(Effect.provideContext(frame.inspect, state.applicationContext)),
+          collectionScope,
+        );
         const result = yield* Effect.ensuring(
           Effect.raceFirst(
             Fiber.join(inspectionFiber),
@@ -390,9 +395,13 @@ const collectInspection = <HostNode>(
         collection.pipe(
           Effect.catchCause(() => Effect.succeed(unavailableInspection("CollectionDefect"))),
         ),
-        Effect.sync(() => {
-          state.collectionScopes.delete(collectionScope);
-        }),
+        Scope.close(collectionScope, Exit.void).pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              state.collectionScopes.delete(collectionScope);
+            }),
+          ),
+        ),
       );
     },
   });
@@ -488,6 +497,7 @@ export const make = Effect.fn("ViewTest.make")(function* <HostNode, A, E, R>(
   const parentScope = yield* Effect.scope;
   const harnessScope = Scope.forkUnsafe(parentScope);
   const frame = yield* Effect.serviceOption(Frame.Service);
+  const applicationContext = Context.omit(Scope.Scope)(yield* Effect.context<R>());
   const state: HarnessState<HostNode> = {
     root: options.root,
     rootId: Option.match(Option.fromNullishOr(options.rootId), {
@@ -496,6 +506,7 @@ export const make = Effect.fn("ViewTest.make")(function* <HostNode, A, E, R>(
     }),
     summarizeRoot: Option.fromNullishOr(options.summarizeRoot),
     frame,
+    applicationContext,
     // The test application's Clock can be TestClock. Keep the watchdog on
     // Effect's live default without replacing the clock used by the app.
     liveClock: Context.get(Context.empty(), Clock.Clock),

@@ -12,8 +12,17 @@ import {
   type SetValue,
 } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
+import {
+  Location,
+  Route,
+  mount as mountRouter,
+  type LocationService,
+  type NotFoundProps,
+} from "effect-frame/router";
 import { Dom, Loading, Query, View, ViewTest, mount, readyWithStale } from "effect-frame/view";
 import * as Frame from "../../src/frame.js";
+// @ts-expect-error Effect keeps this pinned scope counter runtime-only; this test checks scope ownership.
+import { scopeFinalizerCountUnsafe } from "../../../../node_modules/effect/dist/internal/effect.js";
 import {
   Cause,
   Clock,
@@ -27,6 +36,7 @@ import {
   Ref,
   Schema,
   Scope,
+  Stream,
 } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
@@ -341,6 +351,86 @@ describe("ViewTest Frame inspection", () => {
     }),
   );
 
+  it.scoped.layer(Frame.layer({ name: "view-test-scope-lifetime" }))(
+    "closes completed diagnostic scopes while the harness remains open",
+    () =>
+      Effect.gen(function* () {
+        const root = document.createElement("main");
+        const page = yield* ViewTest.make({
+          host: Dom.host,
+          root,
+          setup: (host, mountRoot) =>
+            Effect.gen(function* () {
+              yield* mount(() => Effect.succeed(<p id="stable">stable</p>), {}, host, mountRoot);
+              return yield* Effect.scope;
+            }),
+        });
+        const baseline = scopeFinalizerCountUnsafe(page.setup);
+        const counts: Array<number> = [baseline];
+
+        for (let index = 0; index < 4; index += 1) {
+          const failure = conditionFailure(
+            yield* Effect.exit(
+              page.waitFor({
+                label: `repeated diagnostic ${String(index)}`,
+                timeout: "5 millis",
+                until: () => false,
+              }),
+            ),
+          );
+          expect(failure.inspection._tag).toBe("Available");
+          counts.push(scopeFinalizerCountUnsafe(page.setup));
+        }
+
+        expect(counts).toEqual([baseline, baseline, baseline, baseline, baseline]);
+        yield* page.close;
+      }),
+  );
+
+  it.scoped("uses the construction Clock for failure inspection", () =>
+    Effect.gen(function* () {
+      const constructionContext = yield* Layer.build(TestClock.layer());
+      const frame = Frame.Service.of({
+        inspect: Effect.map(Clock.currentTimeMillis, (now) => ({
+          ...emptySnapshot,
+          startedAt: now,
+          finishedAt: now,
+        })),
+      });
+      const page = yield* Effect.provideContext(
+        ViewTest.make({
+          host: Dom.host,
+          root: document.createElement("main"),
+          setup: (host, mountRoot) =>
+            mount(() => Effect.succeed(<p id="construction-clock">clock</p>), {}, host, mountRoot),
+        }),
+        Context.add(constructionContext, Frame.Service, frame),
+      );
+
+      yield* Effect.provideContext(TestClock.adjust("7 seconds"), constructionContext);
+      const callerClock = Context.get(Context.empty(), Clock.Clock);
+      const failure = conditionFailure(
+        yield* Effect.provideService(
+          Effect.exit(
+            page.waitFor({
+              label: "construction Clock inspection",
+              timeout: "20 millis",
+              until: () => false,
+            }),
+          ),
+          Clock.Clock,
+          callerClock,
+        ),
+      );
+
+      expect(failure.inspection._tag).toBe("Available");
+      if (failure.inspection._tag === "Available") {
+        expect(failure.inspection.snapshot.startedAt).toBe(7_000);
+        expect(failure.inspection.snapshot.finishedAt).toBe(7_000);
+      }
+    }),
+  );
+
   it.scoped("keeps a timeout committed while delayed inspection observes a later host write", () =>
     Effect.gen(function* () {
       const inspectionStarted = yield* Deferred.make<void>();
@@ -444,6 +534,68 @@ describe("ViewTest Frame inspection", () => {
       expect(failure.inspection).toEqual({ _tag: "Unavailable", reason: "CollectionDefect" });
       expect(failure.rootDisposed).toBe(false);
       expect(root.childNodes).toHaveLength(0);
+    }),
+  );
+
+  it.scoped.layer(
+    QueryTest.layer({ queries: [BlockedLive] }).pipe(
+      Layer.provideMerge(Layer.effect(BlockControl, makeControl)),
+      Layer.provideMerge(TestClock.layer()),
+      Layer.provideMerge(Frame.layer({ name: "view-test-routed-inspection" })),
+    ),
+  )("includes the mounted route in a routed ViewTest failure", () =>
+    Effect.gen(function* () {
+      const control = yield* BlockControl;
+      const location: LocationService = {
+        current: Effect.succeed(new URL("http://app.test/search?q=blocked")),
+        push: () => Effect.void,
+        replace: () => Effect.void,
+        pops: Stream.empty,
+      };
+      const route = Route.client("search", {
+        path: "/search",
+        params: Schema.Struct({}),
+        search: Route.search(Schema.Struct({ query: Schema.String.pipe(Route.withDefault("")) })),
+        view: () => SearchPage(),
+      });
+      const notFound = (_props: NotFoundProps) => Effect.succeed(<p id="missing">missing</p>);
+      const root = document.createElement("main");
+      const page = yield* ViewTest.make({
+        host: Dom.host,
+        root,
+        rootId: "view-test-routed-root",
+        setup: (host, mountRoot) =>
+          mountRouter({ routes: [route], notFound, host, root: mountRoot }).pipe(
+            Effect.provideService(Location, location),
+          ),
+      });
+
+      yield* Deferred.await(control.started);
+      yield* page.waitFor({
+        label: "routed blocked query loading",
+        until: (actualRoot) => hasElement(actualRoot, "#loading"),
+      });
+      const failure = conditionFailure(
+        yield* Effect.exit(
+          page.waitFor({
+            label: "routed inspection condition",
+            timeout: "20 millis",
+            until: () => false,
+          }),
+        ),
+      );
+
+      expect(failure.rootId).toBe("view-test-routed-root");
+      expect(failure.inspection._tag).toBe("Available");
+      if (failure.inspection._tag === "Available") {
+        const snapshot = failure.inspection.snapshot;
+        expect(snapshot.mounts.some((mountRecord) => mountRecord.phase === "mounted")).toBe(true);
+        expect(snapshot.routes).toHaveLength(1);
+        expect(snapshot.routes[0]?.routeName).toBe("search");
+        expect(snapshot.routes[0]?.phase).toBe("mounted");
+        expect(snapshot.queries).toHaveLength(1);
+        expect(snapshot.queries[0]?.state).toBe("Loading");
+      }
     }),
   );
 });

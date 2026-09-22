@@ -1,5 +1,11 @@
 # effect-frame
 
+## 0.4.0
+
+### Minor Changes
+
+- [`2bf0bd8`](https://github.com/cevr/effect-frame/commit/2bf0bd8ee1eae2324495558ff83c154bb6c40568) Thanks [@cevr](https://github.com/cevr)! - Add local transport and query-host helpers for testing the real query cache.
+
 ## 0.3.0
 
 ### Minor Changes

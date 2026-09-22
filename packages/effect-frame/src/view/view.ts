@@ -106,6 +106,7 @@ export const submit = (handler: Handler): Prepared => ({
 });
 
 export { list, type ListOptions } from "./control.js";
+export { attempt } from "./attempt.js";
 
 /**
  * A view is a function from props to an Effect that produces a node tree:

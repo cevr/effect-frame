@@ -2,9 +2,7 @@ import { Cause, Effect, Exit, Option, Scope } from "effect";
 import type { Node } from "./jsx-runtime.js";
 
 /**
- * PRIVATE proof (route-boundary slice 1). This module is not exported from
- * `effect-frame/view`. It exists so the owned-attempt contract can be proved
- * against the real runtime before any public `View.attempt` is chosen.
+ * `View.attempt(setup, fallback)` handles the typed error of one setup.
  * See `docs/design/owned-attempt.md`.
  *
  * `attempt(setup, fallback)` runs `setup` in one child Scope forked from the

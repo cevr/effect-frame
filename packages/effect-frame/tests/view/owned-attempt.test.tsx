@@ -19,7 +19,6 @@ import {
 } from "effect-frame/view";
 import type { Node as ViewNode } from "effect-frame/view";
 import * as Frame from "../../src/frame.js";
-import { attempt } from "../../src/view/attempt.js";
 import {
   Cause,
   Clock,
@@ -204,13 +203,13 @@ const fallbackExpr = (error: SetupFailed) =>
     return <p>fallback</p>;
   });
 
-const attemptedExpr = attempt(setupExpr, fallbackExpr);
+const attemptedExpr = View.attempt(setupExpr, fallbackExpr);
 /** E is inferred from setup into the fallback parameter, not annotated. */
-const inferredParameter = attempt(setupExpr, (error) => Effect.succeed(<p>{error.reason}</p>));
+const inferredParameter = View.attempt(setupExpr, (error) => Effect.succeed(<p>{error.reason}</p>));
 /** A fallback that needs no service and cannot fail. */
-const handledExpr = attempt(setupExpr, () => Effect.succeed(<p>handled</p>));
+const handledExpr = View.attempt(setupExpr, () => Effect.succeed(<p>handled</p>));
 /** A setup that needs no Scope still yields a Scope requirement: the owner. */
-const noScopeSetup = attempt(Effect.succeed(<p>plain</p>), () => Effect.succeed(<p>never</p>));
+const noScopeSetup = View.attempt(Effect.succeed(<p>plain</p>), () => Effect.succeed(<p>never</p>));
 
 const setupError: Equals<Effect.Error<typeof setupExpr>, SetupFailed> = true;
 const setupServices: Equals<Effect.Services<typeof setupExpr>, SetupService> = true;
@@ -254,7 +253,7 @@ const fallbackServiceHidden: Equals<
 // Negative fixtures below are TypeScript errors by design. The Effect language
 // service reports the same mismatch separately, so it is paused for them only.
 // @effect-diagnostics missingEffectError:off
-const wrongFallback = attempt<SetupFailed, SetupService, never, never>(
+const wrongFallback = View.attempt<SetupFailed, SetupService, never, never>(
   setupExpr,
   // @ts-expect-error A fallback for a different error does not accept setup E.
   (error: FallbackFailed) => Effect.succeed(<p>{error.reason}</p>),
@@ -337,7 +336,7 @@ describe("private owned attempt", () => {
               each: rowsSource.state,
               keyBy: (row) => row.id,
               row: (item) =>
-                attempt(
+                View.attempt(
                   Effect.gen(function* () {
                     const first = yield* item.get;
                     // Registered first, so it runs after the actor and query close.
@@ -475,7 +474,7 @@ describe("private owned attempt", () => {
               row: () =>
                 Effect.gen(function* () {
                   yield* Deferred.succeed(rowScope, yield* Effect.scope);
-                  return yield* attempt(
+                  return yield* View.attempt(
                     Effect.gen(function* () {
                       yield* Deferred.succeed(setupScope, yield* Effect.scope);
                       yield* spawnAtRevision(3);
@@ -549,7 +548,7 @@ describe("private owned attempt", () => {
       const fallbackRuns = yield* Ref.make(0);
       const owner = yield* Scope.make();
       const exit = yield* Effect.exit(
-        attempt(
+        View.attempt(
           Effect.andThen(
             Ref.update(setupRuns, (count) => count + 1),
             Effect.fail(SetupFailed.make({ reason: "offline" })),
@@ -591,7 +590,7 @@ describe("private owned attempt", () => {
           const setupClosed = yield* Ref.make(0);
           const owner = yield* Scope.make();
           const exit = yield* Effect.exit(
-            attempt(
+            View.attempt(
               Effect.andThen(
                 Effect.addFinalizer(() => Ref.update(setupClosed, (count) => count + 1)),
                 setupFailure,
@@ -640,7 +639,7 @@ describe("private owned attempt", () => {
         const fallbackClosed = yield* Ref.make(0);
         const owner = yield* Scope.make();
         const exit = yield* Effect.exit(
-          attempt(Effect.fail(SetupFailed.make({ reason: "x" })), () =>
+          View.attempt(Effect.fail(SetupFailed.make({ reason: "x" })), () =>
             Effect.gen(function* () {
               yield* Ref.update(fallbackRuns, (count) => count + 1);
               yield* Effect.addFinalizer(() => Ref.update(fallbackClosed, (count) => count + 1));
@@ -661,7 +660,7 @@ describe("private owned attempt", () => {
         const owner = yield* Scope.make();
         yield* Scope.close(owner, Exit.void);
         const exit = yield* Effect.exit(
-          attempt(
+          View.attempt(
             Effect.as(
               Ref.update(setupRuns, (count) => count + 1),
               <p>late</p>,
@@ -685,7 +684,7 @@ describe("private owned attempt", () => {
           // The attempt fiber is not owned by `owner`: only the explicit owner
           // check can refuse fallback here, not interruption.
           const fiber = yield* Effect.forkDetach(
-            attempt(
+            View.attempt(
               Effect.andThen(
                 Effect.addFinalizer(() =>
                   Effect.andThen(
@@ -719,7 +718,7 @@ describe("private owned attempt", () => {
         const completed = yield* Ref.make(false);
         const owner = yield* Scope.make();
         const fiber = yield* Effect.forkDetach(
-          attempt(
+          View.attempt(
             Effect.gen(function* () {
               yield* Deferred.succeed(started, void 0);
               yield* Deferred.await(gate);
@@ -764,9 +763,12 @@ describe("private owned attempt", () => {
                 keyBy: (id) => id,
                 row: () => {
                   if (phase === "setup") {
-                    return attempt(suspended, () => Effect.succeed(<p id="fallback">f</p>));
+                    return View.attempt(suspended, () => Effect.succeed(<p id="fallback">f</p>));
                   }
-                  return attempt(Effect.fail(SetupFailed.make({ reason: "x" })), () => suspended);
+                  return View.attempt(
+                    Effect.fail(SetupFailed.make({ reason: "x" })),
+                    () => suspended,
+                  );
                 },
               }),
               (rows) => <section>{rows}</section>,
@@ -809,7 +811,7 @@ describe("private owned attempt", () => {
         }
 
         const failedRow = (key: string) =>
-          attempt(
+          View.attempt(
             Effect.gen(function* () {
               yield* spawnAtRevision(5);
               yield* useQuery(AttemptQuery, { id: `setup-${key}` });
@@ -988,7 +990,7 @@ describe("private owned attempt", () => {
           const transitionReady = yield* Deferred.make<Transition>();
 
           const child = (item: Source<ChildRoute>) =>
-            attempt(
+            View.attempt(
               Effect.gen(function* () {
                 const route = yield* item.get;
                 if (route.id === "a") {
@@ -1162,13 +1164,13 @@ describe("private owned attempt", () => {
     it.scoped("serializes a truthful first HTML frame for immediate and delayed setup", () =>
       Effect.gen(function* () {
         const succeeded = yield* Html.renderToString(
-          () => attempt(Effect.succeed(<p id="ok">ok</p>), () => Effect.succeed(<p>no</p>)),
+          () => View.attempt(Effect.succeed(<p id="ok">ok</p>), () => Effect.succeed(<p>no</p>)),
           {},
         );
         expect(succeeded).toBe('<p id="ok">ok</p>');
         const recovered = yield* Html.renderToString(
           () =>
-            attempt(Effect.fail(SetupFailed.make({ reason: "denied" })), (error) =>
+            View.attempt(Effect.fail(SetupFailed.make({ reason: "denied" })), (error) =>
               Effect.succeed(<p id="fallback">{error.reason}</p>),
             ),
           {},
@@ -1185,7 +1187,7 @@ describe("private owned attempt", () => {
                 each: { get: Effect.succeed(["late"]), changes: Stream.empty },
                 keyBy: (id: string) => id,
                 row: () =>
-                  attempt(
+                  View.attempt(
                     Effect.gen(function* () {
                       yield* Effect.addFinalizer(() => Ref.update(finalized, (count) => count + 1));
                       yield* Deferred.succeed(started, void 0);
@@ -1228,7 +1230,7 @@ describe("private owned attempt", () => {
               keyBy: (id: string) => id,
               row: (item) =>
                 Effect.flatMap(item.get, (id) =>
-                  attempt(
+                  View.attempt(
                     Effect.gen(function* () {
                       if (id === "late") {
                         yield* Deferred.succeed(lateStarted, void 0);
@@ -1287,7 +1289,7 @@ describe("private owned attempt", () => {
         const childScope = yield* Deferred.make<Scope.Scope>();
         const Page = () =>
           Effect.gen(function* () {
-            const node = yield* attempt(
+            const node = yield* View.attempt(
               Effect.gen(function* () {
                 yield* Ref.update(setups, (count) => count + 1);
                 yield* Deferred.succeed(childScope, yield* Effect.scope);
@@ -1336,7 +1338,7 @@ describe("private owned attempt", () => {
           changes: Stream.empty,
         };
         const setups = yield* Ref.make(0);
-        const owned = attempt(
+        const owned = View.attempt(
           Effect.as(
             Ref.update(setups, (count) => count + 1),
             <p id="content">content</p>,

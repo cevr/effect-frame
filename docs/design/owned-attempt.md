@@ -1,9 +1,9 @@
-# Owned attempt (private proof)
+# Owned attempt
 
-This note records the first route-boundary slice: a private `attempt` helper
-and the proofs of its lifetime. The helper is not exported from
-`effect-frame/view`. No route constructor, route field, or public type
-changed. Issues #36, #55, and #56 stay open.
+This note records the first route-boundary slice: `View.attempt` and the
+proofs of its lifetime. The helper was proved privately first, then exported
+as `View.attempt` from `effect-frame/view`. No route constructor or route
+field changed. Issues #36, #55, and #56 stay open.
 
 Source: `packages/effect-frame/src/view/attempt.ts`.
 Proofs: `packages/effect-frame/tests/view/owned-attempt.test.tsx`.

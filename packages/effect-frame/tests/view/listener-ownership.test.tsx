@@ -64,7 +64,7 @@ const runSchedulerProbe = (): Promise<SchedulerProbeResult> => {
   const viewUrl = new URL("./src/view/index.ts", packageUrl);
   const jsxRuntimeUrl = new URL("./src/view/jsx-runtime.ts", packageUrl);
   const source = `
-import { Effect, Exit, Scope } from ${JSON.stringify(effectUrl.href)};
+import { Effect, Exit, Option, Scope } from ${JSON.stringify(effectUrl.href)};
 import { registerDom } from ${JSON.stringify(domSetupUrl.href)};
 import { Dom, View, mount } from ${JSON.stringify(viewUrl.href)};
 import { jsx } from ${JSON.stringify(jsxRuntimeUrl.href)};
@@ -72,18 +72,24 @@ import { jsx } from ${JSON.stringify(jsxRuntimeUrl.href)};
 registerDom();
 const scope = Scope.makeUnsafe();
 const root = document.createElement("main");
+let started = false;
 const tree = jsx("button", {
-  onClick: View.event(() => Effect.forever(Effect.yieldNow)),
+  onClick: View.event(() =>
+    Effect.sync(() => {
+      started = true;
+    }).pipe(Effect.andThen(Effect.forever(Effect.yieldNow)))
+  ),
   children: "start",
 });
 await Effect.runPromise(mount(() => Effect.succeed(tree), {}, Dom.host, root).pipe(Scope.provide(scope)));
 setTimeout(() => {
   console.log("timer ran");
   Effect.runSync(Scope.close(scope, Exit.void));
-  console.log(JSON.stringify({ nodes: root.childNodes.length }));
+  console.log(JSON.stringify({ started, nodes: root.childNodes.length }));
   process.exit(0);
 }, 0);
-root.querySelector("button")?.dispatchEvent(new Event("click"));
+const button = Option.getOrThrow(Option.fromNullishOr(root.querySelector("button")));
+button.dispatchEvent(new Event("click"));
 console.log("dispatch returned");
 `;
   const child = Bun.spawn([process.execPath, "--conditions=source", "--eval", source], {
@@ -532,7 +538,7 @@ describe("view listener ownership", () => {
       expect(result.stdout.trim().split("\n")).toEqual([
         "dispatch returned",
         "timer ran",
-        '{"nodes":0}',
+        '{"started":true,"nodes":0}',
       ]);
     }),
   );

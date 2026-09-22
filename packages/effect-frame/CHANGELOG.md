@@ -1,5 +1,11 @@
 # effect-frame
 
+## 0.7.0
+
+### Minor Changes
+
+- [`e717f0a`](https://github.com/cevr/effect-frame/commit/e717f0ae7b1ed841043143273c4a66685604cd10) Thanks [@cevr](https://github.com/cevr)! - Add the browser-safe `effect-frame/frame` entry for scoped, schema-backed runtime inspection snapshots.
+
 ## 0.6.0
 
 ### Minor Changes

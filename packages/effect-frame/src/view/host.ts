@@ -10,6 +10,17 @@ import type { Option } from "effect";
 export interface Host<Node> {
   readonly createElement: (tag: string, staticProps: StaticProps) => Node;
   readonly createText: (text: string) => Node;
+  /**
+   * Create a node without acquiring an existing connected node.
+   *
+   * Hydrating hosts use this for content that is owned but currently hidden.
+   * Other hosts may omit the capability because their normal constructors
+   * already create detached values.
+   * A custom host whose normal constructors acquire connected nodes must
+   * provide both detached constructors.
+   */
+  readonly createDetachedElement?: (tag: string, staticProps: StaticProps) => Node;
+  readonly createDetachedText?: (text: string) => Node;
   readonly setProperty: (node: Node, name: string, value: PropertyValue) => void;
   /** Insert `node` before `anchor`, or at the end when the anchor is absent. */
   readonly insert: (parent: Node, node: Node, anchor: Option.Option<Node>) => void;

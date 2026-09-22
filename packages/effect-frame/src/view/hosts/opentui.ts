@@ -87,6 +87,8 @@ const asEmitter = (node: TuiNode): Emitter => node;
 export const make = (context: RenderContext): Host<TuiNode> => ({
   createElement: (tag, staticProps) => create(context, tag, staticProps),
   createText: (text) => TextNodeRenderable.fromString(text),
+  createDetachedElement: (tag, staticProps) => create(context, tag, staticProps),
+  createDetachedText: (text) => TextNodeRenderable.fromString(text),
   setProperty: (node, name, value: PropertyValue) => {
     if (name === "content") {
       setText(node, String(value));
@@ -101,7 +103,11 @@ export const make = (context: RenderContext): Host<TuiNode> => ({
       onSome: (before) => target.insertBefore(node, before),
     });
   },
-  remove: (parent, node) => void asParent(parent).remove(node),
+  remove: (parent, node) => {
+    if (node.parent === parent) {
+      asParent(parent).remove(node);
+    }
+  },
   setText,
   addEventListener: (node, name, handler: EventHandler): Cleanup => {
     const emitter = asEmitter(node);

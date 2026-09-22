@@ -215,7 +215,7 @@ interface TrackedHost<HostNode> extends Host<HostNode> {
 }
 
 interface PresentationHost<HostNode> extends Host<HostNode> {
-  readonly show: () => void;
+  readonly show: (anchor: Option.Option<HostNode>) => void;
   readonly hide: () => void;
   readonly dispose: () => void;
 }
@@ -229,7 +229,10 @@ interface PresentationHost<HostNode> extends Host<HostNode> {
 const presentationHost = <HostNode>(
   host: Host<HostNode>,
   initiallyVisible: boolean,
+  rootParent: HostNode,
 ): PresentationHost<HostNode> => {
+  const createDetachedElement = host.createDetachedElement ?? host.createElement;
+  const createDetachedText = host.createDetachedText ?? host.createText;
   const created = new Set<HostNode>();
   const physicalParent = new Map<HostNode, HostNode>();
   const physicalChildren = new Map<HostNode, Set<HostNode>>();
@@ -284,26 +287,6 @@ const presentationHost = <HostNode>(
     });
   };
 
-  const dropAttachments = (root: HostNode): void => {
-    const pending: Array<HostNode> = [root];
-    while (pending.length > 0) {
-      Option.match(Option.fromNullishOr(pending.pop()), {
-        onNone: () => {},
-        onSome: (node) => {
-          attachments.delete(node);
-          Option.match(Option.fromNullishOr(physicalChildren.get(node)), {
-            onNone: () => {},
-            onSome: (children) => {
-              for (const child of children) {
-                pending.push(child);
-              }
-            },
-          });
-        },
-      });
-    }
-  };
-
   const removeExternalChild = (parent: HostNode, node: HostNode): void => {
     Option.match(Option.fromNullishOr(externalChildren.get(parent)), {
       onNone: () => {},
@@ -317,6 +300,86 @@ const presentationHost = <HostNode>(
         }
       },
     });
+  };
+
+  const forgetExternal = (node: HostNode): void => {
+    Option.match(Option.fromNullishOr(externalParent.get(node)), {
+      onNone: () => {},
+      onSome: (parent) => {
+        removeExternalChild(parent, node);
+        externalParent.delete(node);
+      },
+    });
+  };
+
+  /**
+   * Release a node and every node it owns after a real remove. Hidden nodes
+   * never call this path: `hide` only detaches mounted external children and
+   * keeps their logical graph for the next presentation.
+   */
+  const release = (root: HostNode): void => {
+    const released = new Set<HostNode>();
+    const pending: Array<HostNode> = [root];
+    while (pending.length > 0) {
+      Option.match(Option.fromNullishOr(pending.pop()), {
+        onNone: () => {},
+        onSome: (node) => {
+          if (released.has(node)) {
+            return;
+          }
+          released.add(node);
+          Option.match(Option.fromNullishOr(physicalChildren.get(node)), {
+            onNone: () => {},
+            onSome: (children) => {
+              for (const child of children) {
+                pending.push(child);
+              }
+            },
+          });
+          Option.match(Option.fromNullishOr(externalChildren.get(node)), {
+            onNone: () => {},
+            onSome: (children) => {
+              for (const child of children) {
+                pending.push(child);
+              }
+            },
+          });
+        },
+      });
+    }
+
+    for (const node of released) {
+      const parent = physicalParent.get(node);
+      const mountedParent = mounted.get(node);
+      const external = externalParent.get(node);
+      Option.match(Option.fromNullishOr(mountedParent), {
+        onNone: () => {},
+        onSome: (mountedAt) => {
+          if (!released.has(mountedAt)) {
+            host.remove(mountedAt, node);
+          }
+        },
+      });
+      Option.match(Option.fromNullishOr(external), {
+        onNone: () => {},
+        onSome: (externalParentNode) => removeExternalChild(externalParentNode, node),
+      });
+      Option.match(Option.fromNullishOr(parent), {
+        onNone: () => {},
+        onSome: (physicalParentNode) => {
+          if (!released.has(physicalParentNode)) {
+            forgetPhysical(physicalParentNode, node);
+          }
+        },
+      });
+      physicalParent.delete(node);
+      physicalChildren.delete(node);
+      externalParent.delete(node);
+      externalChildren.delete(node);
+      mounted.delete(node);
+      attachments.delete(node);
+      created.delete(node);
+    }
   };
 
   const rememberExternalChild = (
@@ -365,7 +428,7 @@ const presentationHost = <HostNode>(
       mounted.delete(node);
       forgetPhysical(parent, node);
     }
-    dropAttachments(node);
+    release(node);
   };
 
   const insertExternal = (
@@ -397,6 +460,7 @@ const presentationHost = <HostNode>(
     node: HostNode,
     anchor: Option.Option<HostNode>,
   ): void => {
+    forgetExternal(node);
     Option.match(Option.fromNullishOr(physicalParent.get(node)), {
       onNone: () => {},
       onSome: (previous) => {
@@ -424,19 +488,31 @@ const presentationHost = <HostNode>(
     }
   };
 
-  const show = (): void => {
+  const mountChildren = (
+    parent: HostNode,
+    children: ReadonlyArray<HostNode>,
+    anchor: Option.Option<HostNode>,
+  ): void => {
+    for (const node of children) {
+      if (mounted.has(node)) {
+        continue;
+      }
+      host.insert(parent, node, anchor);
+      rememberPhysical(parent, node);
+      mounted.set(node, parent);
+    }
+  };
+
+  const show = (anchor: Option.Option<HostNode>): void => {
     if (visible) {
       return;
     }
     visible = true;
     for (const [parent, children] of externalChildren) {
-      for (const node of children) {
-        if (mounted.has(node)) {
-          continue;
-        }
-        host.insert(parent, node, Option.none());
-        rememberPhysical(parent, node);
-        mounted.set(node, parent);
+      if (parent === rootParent) {
+        mountChildren(parent, children, anchor);
+      } else {
+        mountChildren(parent, children, Option.none());
       }
     }
     runPendingAttachments();
@@ -468,15 +544,27 @@ const presentationHost = <HostNode>(
 
   return {
     createElement: (tag, staticProps) => {
-      const node = host.createElement(tag, staticProps);
+      let node: HostNode;
+      if (visible) {
+        node = host.createElement(tag, staticProps);
+      } else {
+        node = createDetachedElement(tag, staticProps);
+      }
       created.add(node);
       return node;
     },
     createText: (text) => {
-      const node = host.createText(text);
+      let node: HostNode;
+      if (visible) {
+        node = host.createText(text);
+      } else {
+        node = createDetachedText(text);
+      }
       created.add(node);
       return node;
     },
+    createDetachedElement,
+    createDetachedText,
     setProperty: host.setProperty,
     insert: (parent, node, anchor) => {
       if (created.has(parent)) {
@@ -489,7 +577,7 @@ const presentationHost = <HostNode>(
       if (created.has(parent)) {
         host.remove(parent, node);
         forgetPhysical(parent, node);
-        dropAttachments(node);
+        release(node);
         return;
       }
       removeExternal(parent, node);
@@ -602,6 +690,8 @@ const trackHostWrites = <HostNode>(host: Host<HostNode>): TrackedHost<HostNode> 
   return {
     createElement: host.createElement,
     createText: host.createText,
+    createDetachedElement: host.createDetachedElement,
+    createDetachedText: host.createDetachedText,
     setProperty: host.setProperty,
     insert: (parent, node, anchor) => {
       remember(parent, node);
@@ -847,12 +937,40 @@ const planRetained = <HostNode>(
   const visible = renderer.tracker.track(node.when);
   return (parent, slot, changed) => {
     const contentSlot: Slot<HostNode> = { nodes: [] };
-    const presentation = presentationHost(renderer.host, visible());
+    const presentation = presentationHost(renderer.host, visible(), parent);
     const contentRenderer: Renderer<HostNode> = {
       host: presentation,
       tracker: renderer.tracker,
     };
     let presented = visible();
+    const [fallbackVisible, setFallbackVisible] = createSignal(!presented);
+    let hideAfterFallback = false;
+
+    const fallbackSlot: Slot<HostNode> = { nodes: [] };
+    const fallback = show(
+      renderer.tracker,
+      renderer.host,
+      fallbackVisible,
+      () => plan(renderer, node.fallback),
+      () => nothing(),
+      () => Option.fromNullishOr(contentSlot.nodes[0]),
+      () => {
+        if (!hideAfterFallback) {
+          return;
+        }
+        hideAfterFallback = false;
+        presentation.hide();
+        slot.nodes = fallbackSlot.nodes;
+        changed();
+      },
+    );
+    fallback(parent, fallbackSlot, () => {
+      if (!presented) {
+        slot.nodes = fallbackSlot.nodes;
+        changed();
+      }
+    });
+
     const contentChanged = (): void => {
       if (presented) {
         slot.nodes = contentSlot.nodes;
@@ -869,31 +987,18 @@ const planRetained = <HostNode>(
     );
     renderer.tracker.register(() => contentOwner.close);
 
-    const fallbackSlot: Slot<HostNode> = { nodes: [] };
-    const fallback = show(
-      renderer.tracker,
-      renderer.host,
-      () => !visible(),
-      () => plan(renderer, node.fallback),
-      () => nothing(),
-    );
-    fallback(parent, fallbackSlot, () => {
-      if (!presented) {
-        slot.nodes = fallbackSlot.nodes;
-        changed();
-      }
-    });
-
     const apply = (next: boolean): void => {
       if (next === presented) {
         return;
       }
       presented = next;
       if (presented) {
-        presentation.show();
+        presentation.show(Option.fromNullishOr(fallbackSlot.nodes[0]));
+        setFallbackVisible(false);
         slot.nodes = contentSlot.nodes;
       } else {
-        presentation.hide();
+        hideAfterFallback = true;
+        setFallbackVisible(true);
         slot.nodes = fallbackSlot.nodes;
       }
       changed();
@@ -929,13 +1034,22 @@ const show = <HostNode>(
   when: Accessor<boolean>,
   child: () => Build<HostNode>,
   fallback: () => Build<HostNode>,
+  before?: () => Option.Option<HostNode>,
+  afterBuild?: () => void,
 ): Build<HostNode> =>
-  switchOn(tracker, host, when, (visible) => {
-    if (visible) {
-      return child;
-    }
-    return fallback;
-  });
+  switchOn(
+    tracker,
+    host,
+    when,
+    (visible) => {
+      if (visible) {
+        return child;
+      }
+      return fallback;
+    },
+    before,
+    afterBuild,
+  );
 
 /**
  * `Match` is the same switch over a tag. The case's body reads the matched
@@ -967,6 +1081,8 @@ const switchOn =
     host: Host<HostNode>,
     key: Accessor<Key>,
     sideFor: (key: Key) => () => Build<HostNode>,
+    before?: () => Option.Option<HostNode>,
+    afterBuild?: () => void,
   ): Build<HostNode> =>
   (parent, slot, changed) => {
     let shown: Option.Option<Branch<HostNode>> = Option.none();
@@ -1011,9 +1127,19 @@ const switchOn =
       if (Option.contains(current, next)) {
         return;
       }
-      Option.match(shown, { onNone: () => {}, onSome: tearDown });
+      const anchor = before?.() ?? Option.none();
       tracker.commit(() => {
         const drawn = untrack(() => build(sideFor(next)));
+        Option.match(anchor, {
+          onNone: () => {},
+          onSome: (beforeNode) => {
+            for (const node of drawn.slot.nodes) {
+              host.insert(parent, node, Option.some(beforeNode));
+            }
+          },
+        });
+        afterBuild?.();
+        Option.match(shown, { onNone: () => {}, onSome: tearDown });
         shown = Option.some(drawn);
         current = Option.some(next);
         slot.nodes = drawn.slot.nodes;

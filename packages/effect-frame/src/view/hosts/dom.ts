@@ -114,15 +114,21 @@ export const observeSize = (
     }),
   );
 
+const createElement = (tag: string, staticProps: StaticProps): DomNode => {
+  const element = document.createElement(tag);
+  for (const [name, value] of Object.entries(staticProps)) {
+    applyProperty(element, name, value);
+  }
+  return element;
+};
+
+const createText = (text: string): DomNode => document.createTextNode(text);
+
 export const host: Host<DomNode> = {
-  createElement: (tag: string, staticProps: StaticProps) => {
-    const element = document.createElement(tag);
-    for (const [name, value] of Object.entries(staticProps)) {
-      applyProperty(element, name, value);
-    }
-    return element;
-  },
-  createText: (text: string) => document.createTextNode(text),
+  createElement,
+  createText,
+  createDetachedElement: createElement,
+  createDetachedText: createText,
   setProperty: applyProperty,
   insert: (parent, node, anchor) => {
     Option.match(anchor, {
@@ -238,6 +244,8 @@ export const hydrate = (root: Node): Hydration => {
       }
       return host.createText(text);
     },
+    createDetachedElement: host.createElement,
+    createDetachedText: host.createText,
     setProperty: host.setProperty,
     attach: host.attach,
     insert: (parent, node, anchor) => {

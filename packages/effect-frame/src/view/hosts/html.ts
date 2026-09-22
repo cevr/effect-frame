@@ -137,6 +137,14 @@ export const host: Host<HtmlNode> = {
     return node;
   },
   createText: (text: string): HtmlText => ({ _tag: "Text", text }),
+  createDetachedElement: (tag: string, staticProps: StaticProps) => {
+    const node = element(tag);
+    for (const [name, value] of Object.entries(staticProps)) {
+      node.attributes.set(attributeName(name), value);
+    }
+    return node;
+  },
+  createDetachedText: (text: string): HtmlText => ({ _tag: "Text", text }),
   setProperty: (node, name, value) => {
     if (node._tag === "Element") {
       node.attributes.set(attributeName(name), value);

@@ -75,4 +75,55 @@ describe("benchmark CLI interruption", () => {
       await rm(receipt, { force: true });
     }
   }, 15_000);
+
+  it.skipIf(process.platform !== "darwin")(
+    "fails the cell and writes a receipt when the final invariant is false",
+    async () => {
+      const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const receipt = `/tmp/effect-frame-dom-bench-cli-${token}-invariant.jsonl`;
+      const output: Array<string> = [];
+      const child = spawn(
+        process.execPath,
+        [benchmarkPath, "--engine", "webkit", "--only", "create-1k"],
+        {
+          cwd: packageRoot,
+          env: {
+            ...process.env,
+            DOM_BENCH_FAILURE_RECEIPT: receipt,
+            DOM_BENCH_STAGE_RECEIPT: "",
+            DOM_BENCH_CELL_TIMEOUT_MS: "30000",
+            DOM_BENCH_TEST_FALSE_INVARIANT: "1",
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      child.stdout?.on("data", (chunk) => output.push(String(chunk)));
+      child.stderr?.on("data", (chunk) => output.push(String(chunk)));
+      try {
+        const exit = await Promise.race([
+          waitForExit(child),
+          Bun.sleep(45_000).then(() => undefined),
+        ]);
+        if (exit === undefined) throw new Error("benchmark CLI did not exit before its deadline");
+        expect(exit.code).toBe(1);
+        expect(output.join("")).toContain(
+          "final benchmark invariant failed: test-forced false invariant",
+        );
+        const lines = (await Bun.file(receipt).text()).trim().split("\n");
+        expect(lines).toHaveLength(1);
+        const failure: unknown = JSON.parse(lines[0] ?? "");
+        expect(failure).toMatchObject({
+          engine: "webkit",
+          framework: "effect-frame",
+          operation: "create-1k",
+          reason: "create-1k: final benchmark invariant failed: test-forced false invariant",
+        });
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        await rm(generatedPath, { recursive: true, force: true });
+        await rm(receipt, { force: true });
+      }
+    },
+    60_000,
+  );
 });

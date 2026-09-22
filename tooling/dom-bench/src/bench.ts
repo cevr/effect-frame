@@ -28,7 +28,16 @@ import {
   parseOptions,
 } from "./options.js";
 import type { EngineName, FrameworkName, OperationName } from "./options.js";
+import {
+  armCompletionExpression,
+  awaitCompletionExpression,
+  cancelCompletionExpression,
+  completionStatsExpression,
+  type CompletionStats,
+} from "./completion.js";
+import { bundleFixture, servePage } from "./page.js";
 import { decodeChromeTraceEvents, reduceChromeTrace, traceCompletionMark } from "./trace.js";
+import type { TraceReduction } from "./trace.js";
 
 interface Operation {
   readonly name: OperationName;
@@ -125,12 +134,6 @@ const operations: ReadonlyArray<Operation> = [
   },
 ];
 
-const frameworkEntries = {
-  "effect-frame": "./fixtures/effect-frame.tsx",
-  solid2: "./fixtures/solid2.ts",
-  octane: "./fixtures/octane.ts",
-} satisfies Readonly<Record<FrameworkName, string>>;
-
 const chromePathCandidates = [
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   "/Applications/Chromium.app/Contents/MacOS/Chromium",
@@ -192,33 +195,6 @@ const findChromePath = async (): Promise<string | undefined> => {
     if (await Bun.file(candidate).exists()) return candidate;
   }
   return undefined;
-};
-
-const bundle = async (framework: FrameworkName): Promise<string> => {
-  const outputDirectory = resolve(import.meta.dir, "../.generated");
-  await rm(outputDirectory, { recursive: true, force: true });
-  await mkdir(outputDirectory, { recursive: true });
-  const entrypoint = resolve(import.meta.dir, frameworkEntries[framework]);
-  const result = await Bun.build({
-    entrypoints: [entrypoint],
-    outdir: outputDirectory,
-    target: "browser",
-    format: "esm",
-    minify: false,
-    conditions: framework === "effect-frame" ? ["browser", "source"] : ["browser"],
-    naming: "fixture.js",
-  });
-  if (!result.success) {
-    throw new Error(result.logs.map((log) => log.message).join("\n"));
-  }
-  const output = result.outputs[0];
-  if (output === undefined) throw new Error(`no browser bundle produced for ${framework}`);
-  return output.text();
-};
-
-const pageUrl = (script: string): string => {
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>effect-frame DOM benchmark</title></head><body><main id="main"></main><script type="module">${script}</script></body></html>`;
-  return `data:text/html,${encodeURIComponent(html)}`;
 };
 
 const makeView = (engine: EngineName, chromePath: string | undefined): Bun.WebView => {
@@ -372,81 +348,37 @@ const armCompletion = (
   operation: OperationName,
 ): Promise<void> =>
   timeout(
-    view.evaluate<void>(`(() => {
-      if (typeof window.__benchCompletionCancel === "function") window.__benchCompletionCancel();
-      window.__benchTiming = { start: 0, end: 0 };
-      const selectedValue = ${selected === null ? "null" : selected};
-      const operation = ${JSON.stringify(operation)};
-      const adjectives = ${JSON.stringify(adjectives)};
-      const colors = ${JSON.stringify(colors)};
-      const nouns = ${JSON.stringify(nouns)};
-      const canonical = (label) => {
-        const base = label.endsWith(" !!!") ? label.slice(0, -4) : label;
-        const words = base.split(" ");
-        return words.length === 3 && adjectives.includes(words[0]) && colors.includes(words[1]) && nouns.includes(words[2]);
-      };
-      const operationRowsMatch = () => {
-        const rows = Array.from(document.querySelectorAll("tbody tr"));
-        if (rows.length !== ${rows}) return false;
-        for (const [index, row] of rows.entries()) {
-          const id = Number(row.getAttribute("data-row-id"));
-          const label = row.querySelector("td:nth-of-type(2)>a");
-          const text = label === null ? "" : label.textContent || "";
-          const expectedId = operation === "replace-1k" ? 1001 + index
-            : operation === "swap-1k" && index === 1 ? 999
-            : operation === "swap-1k" && index === 998 ? 2
-            : operation === "remove-1k" ? 2 + index
-            : 1 + index;
-          if (id !== expectedId || !canonical(text)) return false;
-          const changed = text.endsWith(" !!!");
-          const expectedChanged = operation === "update-10th-10k" && index % 10 === 0;
-          if (changed !== expectedChanged) return false;
-        }
-        return true;
-      };
-      const target = document.querySelector("tbody") || document;
-      const clickTarget = document;
-      window.__benchCompletion = new Promise((resolve) => {
-        let finished = false;
-        const check = () => {
-          const rowCount = document.querySelectorAll("tbody tr").length;
-          const selectedRows = document.querySelectorAll("tbody tr.danger").length;
-          const selectedRow = document.querySelector("tbody tr.danger");
-          const selectedId = selectedRow === null ? undefined : selectedRow.getAttribute("data-row-id");
-          const selectedMatches = selectedValue === null
-            ? selectedRows === 0
-            : selectedRows === 1 && Number(selectedId) === selectedValue;
-          const rowsMatch = operation === "clear-10k" ? rowCount === 0 : operationRowsMatch();
-          if (!finished && (window.__benchVersion || 0) > ${beforeVersion} && rowsMatch && selectedMatches) {
-            finished = true;
-            observer.disconnect();
-            window.__benchTiming.end = performance.now();
-            resolve({ ok: true, rows: rowCount, selected: selectedValue });
-          }
-        };
-        const observer = new MutationObserver(() => check());
-        window.__benchCommit = check;
-        const onClick = () => {
-          window.__benchTiming.start = performance.now();
-          clickTarget.removeEventListener("click", onClick, true);
-        };
-        clickTarget.addEventListener("click", onClick, true);
-        observer.observe(target, { subtree: true, childList: true, characterData: true, attributes: true });
-        window.__benchCompletionCancel = () => {
-          observer.disconnect();
-          clickTarget.removeEventListener("click", onClick, true);
-          window.__benchCommit = undefined;
-        };
-      });
-    })()`),
+    view.evaluate<void>(armCompletionExpression({ beforeVersion, rows, selected, operation })),
     "benchmark completion setup",
   );
 
-const awaitCompletion = (view: Bun.WebView): Promise<InvariantResult> =>
-  timeout(
-    view.evaluate<InvariantResult>("window.__benchCompletion"),
+const awaitCompletion = async (view: Bun.WebView): Promise<InvariantResult> => {
+  const result = await timeout(
+    view.evaluate<InvariantResult>(awaitCompletionExpression),
     "benchmark operation completion",
   );
+  if (!result.ok) throw new Error(result.reason ?? "benchmark operation completion failed");
+  return result;
+};
+
+const readCompletionStats = (view: Bun.WebView): Promise<CompletionStats | undefined> =>
+  timeout(
+    view.evaluate<CompletionStats | undefined>(completionStatsExpression),
+    "benchmark completion stats",
+  );
+
+/** Cancels the armed owner before the view closes. Closing the view stays the final boundary. */
+const cancelCompletion = async (view: Bun.WebView): Promise<void> => {
+  try {
+    await timeout(
+      view.evaluate<void>(cancelCompletionExpression),
+      "benchmark completion cleanup",
+      2_000,
+    );
+  } catch {
+    // The page may already be closed or unresponsive; view.close() below still ends it.
+  }
+};
 
 const readOperationDuration = (view: Bun.WebView): Promise<number> =>
   timeout(
@@ -454,10 +386,94 @@ const readOperationDuration = (view: Bun.WebView): Promise<number> =>
     "benchmark operation timing",
   );
 
+/**
+ * Controller-side stage log for one cell. Each stage records the controller's
+ * wall time, which includes driver round trips and browser scheduling. Page
+ * durations and completion counters are recorded separately from the page.
+ */
+type StageEntry =
+  | { readonly stage: string; readonly controllerMs: number; readonly error?: string }
+  | {
+      readonly stage: string;
+      readonly pageOperationMs: number;
+      readonly completion: CompletionStats | undefined;
+    }
+  | ({ readonly stage: string; readonly tracePath: string } & TraceReduction)
+  | ({ readonly stage: string } & InvariantResult);
+
+interface StageLog {
+  readonly entries: Array<StageEntry>;
+  readonly run: <A>(stage: string, promise: () => Promise<A>) => Promise<A>;
+  readonly note: (entry: StageEntry) => void;
+}
+
+const makeStageLog = (): StageLog => {
+  const entries: Array<StageEntry> = [];
+  return {
+    entries,
+    run: async (stage, promise) => {
+      const started = performance.now();
+      try {
+        const value = await promise();
+        entries.push({ stage, controllerMs: performance.now() - started });
+        return value;
+      } catch (error) {
+        entries.push({
+          stage,
+          controllerMs: performance.now() - started,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    },
+    note: (entry) => {
+      entries.push(entry);
+    },
+  };
+};
+
+const stageReceiptPath = Bun.env["DOM_BENCH_STAGE_RECEIPT"];
+
+const recordStages = async (
+  cell: {
+    readonly engine: EngineName;
+    readonly framework: FrameworkName;
+    readonly operation: string;
+  },
+  stages: StageLog,
+): Promise<void> => {
+  if (stageReceiptPath === undefined || stageReceiptPath.length === 0) return;
+  try {
+    await appendFile(
+      stageReceiptPath,
+      `${JSON.stringify({ timestamp: new Date().toISOString(), ...cell, stages: stages.entries })}\n`,
+    );
+  } catch {
+    // Stage receipts are diagnostic; the cell result remains the primary receipt.
+  }
+};
+
+const finalInvariantExpression =
+  Bun.env["DOM_BENCH_TEST_FALSE_INVARIANT"] === "1"
+    ? // Test-only: proves that a false final invariant fails the cell with a receipt.
+      "({ ok: false, rows: 0, selected: null, reason: 'test-forced false invariant' })"
+    : "typeof window.__benchInvariant === 'function' ? window.__benchInvariant() : { ok: false, rows: 0, selected: null, reason: 'missing invariant' }";
+
+const noteCompletion = async (view: Bun.WebView, stages: StageLog, operation: string) => {
+  const completion = await stages.run(`${operation}: completion stats`, () =>
+    readCompletionStats(view),
+  );
+  const pageOperationMs = await stages.run(`${operation}: page timing`, () =>
+    readOperationDuration(view),
+  );
+  stages.note({ stage: `${operation}: page`, pageOperationMs, completion });
+};
+
 const measureChrome = async (
   view: Bun.WebView,
   selector: string,
   tracePath: string,
+  stages: StageLog,
 ): Promise<number> => {
   const entries: Array<unknown> = [];
   let finish = (): void => {};
@@ -471,44 +487,52 @@ const measureChrome = async (
     if (Array.isArray(data.value)) entries.push(...data.value);
   });
   view.addEventListener("Tracing.tracingComplete", () => finish(), { once: true });
-  await view.cdp("Tracing.start", {
-    categories:
-      "disabled-by-default-v8.cpu_profiler,blink.user_timing,devtools.timeline,disabled-by-default-devtools.timeline",
-    transferMode: "ReportEvents",
-  });
-  await click(view, selector);
-  await awaitCompletion(view);
-  await view.cdp("Tracing.recordClockSyncMarker", { syncId: traceCompletionMark });
-  await timeout(
-    view.evaluate<void>(
-      "new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))",
-    ),
-    "Chrome completed-DOM render",
+  await stages.run("trace start", () =>
+    view.cdp("Tracing.start", {
+      categories:
+        "disabled-by-default-v8.cpu_profiler,blink.user_timing,devtools.timeline,disabled-by-default-devtools.timeline",
+      transferMode: "ReportEvents",
+    }),
   );
-  await view.cdp("Tracing.end");
-  await timeout(complete, "Chrome trace completion");
+  await stages.run("operation click", () => click(view, selector));
+  await stages.run("operation completion", () => awaitCompletion(view));
+  await stages.run("completion marker", () =>
+    view.cdp("Tracing.recordClockSyncMarker", { syncId: traceCompletionMark }),
+  );
+  await stages.run("completed-DOM render frames", () =>
+    timeout(
+      view.evaluate<void>(
+        "new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))",
+      ),
+      "Chrome completed-DOM render",
+    ),
+  );
+  await stages.run("trace end", () => view.cdp("Tracing.end"));
+  await stages.run("trace collection", () => timeout(complete, "Chrome trace completion"));
   const decodedEntries = decodeChromeTraceEvents(entries);
   await Bun.write(tracePath, JSON.stringify(decodedEntries));
-  return reduceChromeTrace(decodedEntries).durationMs;
+  const reduced = reduceChromeTrace(decodedEntries);
+  stages.note({ stage: "trace reduction", tracePath, ...reduced });
+  return reduced.durationMs;
 };
 
 const seed = async (
   view: Bun.WebView,
   operation: Operation,
+  stages: StageLog,
 ): Promise<OperationName | undefined> => {
   if (operation.seed === undefined) return undefined;
-  const beforeVersion = await version(view);
-  const expected = apply(initialState, operation.seed.operation);
-  await armCompletion(
-    view,
-    beforeVersion,
-    expected.rows.length,
-    expected.selected,
-    operation.seed.operation,
+  const seedOperation = operation.seed.operation;
+  const seedSelector = operation.seed.selector;
+  const beforeVersion = await stages.run("seed version", () => version(view));
+  const expected = apply(initialState, seedOperation);
+  await stages.run("seed arm", () =>
+    armCompletion(view, beforeVersion, expected.rows.length, expected.selected, seedOperation),
   );
-  await click(view, operation.seed.selector);
-  await awaitCompletion(view);
-  return operation.seed.operation;
+  await stages.run("seed click", () => click(view, seedSelector));
+  await stages.run("seed completion", () => awaitCompletion(view));
+  await noteCompletion(view, stages, `seed ${seedOperation}`);
+  return seedOperation;
 };
 
 const measure = async (
@@ -518,21 +542,19 @@ const measure = async (
   chromePath: string | undefined,
   operation: Operation,
 ): Promise<Measurement> => {
+  const stages = makeStageLog();
+  const page = servePage(script);
   const view = makeView(engine, chromePath);
   try {
-    await view.navigate(pageUrl(script));
-    await waitForReady(view);
-    const seeded = await seed(view, operation);
-    await captureOperationState(view);
+    await stages.run("navigate", () => view.navigate(page.url));
+    await stages.run("ready", () => waitForReady(view));
+    const seeded = await seed(view, operation, stages);
+    await stages.run("identity capture", () => captureOperationState(view));
     const before = seeded === undefined ? initialState : apply(initialState, seeded);
     const expected = apply(before, operation.name);
-    const beforeVersion = await version(view);
-    await armCompletion(
-      view,
-      beforeVersion,
-      expected.rows.length,
-      expected.selected,
-      operation.name,
+    const beforeVersion = await stages.run("operation version", () => version(view));
+    await stages.run("operation arm", () =>
+      armCompletion(view, beforeVersion, expected.rows.length, expected.selected, operation.name),
     );
     let durationMs: number;
     if (engine === "chrome") {
@@ -542,27 +564,34 @@ const measure = async (
         traceDirectory,
         `${framework}-${engine}-${operation.name}-${process.pid}.json`,
       );
-      durationMs = await measureChrome(view, operation.selector, tracePath);
+      durationMs = await measureChrome(view, operation.selector, tracePath, stages);
     } else {
-      await click(view, operation.selector);
-      await awaitCompletion(view);
-      durationMs = await readOperationDuration(view);
+      await stages.run("operation click", () => click(view, operation.selector));
+      await stages.run("operation completion", () => awaitCompletion(view));
+      durationMs = await stages.run("operation timing", () => readOperationDuration(view));
     }
-    const operationResult = await verifyOperationInPage(view, operation.name);
+    await noteCompletion(view, stages, operation.name);
+    const operationResult = await stages.run("full verification", () =>
+      verifyOperationInPage(view, operation.name),
+    );
     if (!operationResult.ok)
       throw new Error(operationResult.reason ?? `${operation.name}: page verification failed`);
-    const identityError = await verifyNodeIdentity(view);
+    const identityError = await stages.run("identity check", () => verifyNodeIdentity(view));
     if (identityError !== undefined) throw new Error(`${operation.name}: ${identityError}`);
-    const result = await timeout(
-      view.evaluate<InvariantResult>(
-        "typeof window.__benchInvariant === 'function' ? window.__benchInvariant() : { ok: false, rows: 0, selected: null, reason: 'missing invariant' }",
+    const result = await stages.run("final invariant", () =>
+      timeout(
+        view.evaluate<InvariantResult>(finalInvariantExpression),
+        "final benchmark invariant",
       ),
-      "final benchmark invariant",
     );
+    stages.note({ stage: "final invariant result", ...result });
     assertInvariant(operation.name, result);
     return { engine, framework, operation: operation.name, durationMs, invariant: result };
   } finally {
+    await cancelCompletion(view);
     view.close();
+    page.stop();
+    await recordStages({ engine, framework, operation: operation.name }, stages);
   }
 };
 
@@ -1008,8 +1037,9 @@ const main = async (): Promise<void> => {
     console.log(helpText);
     return;
   }
-  const script = await bundle(options.framework);
-  const scriptPath = resolve(import.meta.dir, "../.generated/fixture.js");
+  const outputDirectory = resolve(import.meta.dir, "../.generated");
+  const script = await bundleFixture(options.framework, outputDirectory);
+  const scriptPath = join(outputDirectory, "fixture.js");
   const chromePath = options.engines.includes("chrome") ? await findChromePath() : undefined;
   const measurements: Array<Measurement> = [];
   const failures: Array<MeasurementFailure> = [];

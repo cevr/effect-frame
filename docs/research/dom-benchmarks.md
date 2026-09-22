@@ -39,14 +39,32 @@ the official runner line and reports the result as a separate measurement.
 
 ### Timing boundary and comparability
 
-The local `data:` page intentionally has no Bootstrap stylesheet. The
+Each cell serves its page from an owned `127.0.0.1` server on an ephemeral
+port and stops it when the cell ends. The page is not a `data:` URL. Every row
+has two `<a href="#">` links, and both engines resolve each link against the
+document URL during style resolution. With the bundle inlined in a `data:` URL,
+that URL is megabytes long. After a 10,000-row render, macOS `sample` showed the
+WebKit renderer main thread in `computeVisitedLinkHash`, and the Chrome renderer
+main thread in `memmove`, for more than ten seconds. The same bundle served over
+loopback did not stall.
+
+The local loopback page intentionally has no Bootstrap stylesheet. The
 official staged page links krausest's `/css/currentStyle.css`. This changes
 layout and paint work, so local Bun.WebView timings and official runner
 timings are separate receipts. They are not a direct comparison.
 
 Chrome tracing starts immediately before the requested click. The page
 completion promise checks the expected row ids, order, labels, selection, and
-row count after the operation. The harness records
+row count after the operation. Each armed operation has one completion owner.
+Observer and manual notifications share one pending check, which runs as a
+zero-delay timer task. The owner rejects notifications after success or
+cancellation, and before the click and version change, without reading the DOM.
+Arming a new owner cancels the old one, and an old owner never clears a newer
+owner's `__benchCommit`. The WebKit duration ends when that pending check
+accepts the DOM, so it can include the wait for that timer task.
+`DOM_BENCH_STAGE_RECEIPT` appends one JSONL line per cell with controller wait
+times, page operation times, and completion counters. Controller wait time is
+not page CPU time. The harness records
 `effect-frame-dom-bench-complete` with `Tracing.recordClockSyncMarker`, waits
 for two render frames, and then calls `Tracing.end`. The reducer requires a
 same-process Commit after that mark. It rejects an earlier Commit when the

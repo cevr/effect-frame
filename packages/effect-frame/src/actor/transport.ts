@@ -26,7 +26,11 @@ export type Refreshed =
   | { readonly _tag: "Refreshed"; readonly key: QueryKey; readonly result: string }
   | { readonly _tag: "RefreshFailed"; readonly key: QueryKey; readonly error: QueryFailure };
 
-/** A receipt with the single-flight refreshes the command earned. */
+/**
+ * A receipt with the single-flight refreshes the command earned. A fresh
+ * admission has no committed revision, so its refresh list is empty. A
+ * committed duplicate may carry refreshes without applying the message again.
+ */
 export interface ReceiptWithRefresh {
   readonly receipt: DurableReceipt;
   readonly refreshed: ReadonlyArray<Refreshed>;

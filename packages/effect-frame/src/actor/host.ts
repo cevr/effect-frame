@@ -152,10 +152,14 @@ export const make = <R>(
       send: (address, commandId, payload, active) =>
         Effect.flatMap(resolve(address, "send"), (instance) =>
           Effect.flatMap(instance.send(commandId, payload), (receipt) =>
-            Effect.map(refreshFor(address.contract, active), (refreshed) => ({
-              receipt,
-              refreshed,
-            })),
+            Option.match(receipt.committed, {
+              onNone: () => Effect.succeed({ receipt, refreshed: [] }),
+              onSome: () =>
+                Effect.map(refreshFor(address.contract, active), (refreshed) => ({
+                  receipt,
+                  refreshed,
+                })),
+            }),
           ),
         ),
       call: (address, commandId, payload, timeout, active) =>

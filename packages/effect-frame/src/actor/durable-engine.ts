@@ -34,6 +34,8 @@ export interface DurableEngineOptions<State, Message, R> {
 /** The private durable engine surface shared by the public and hosted adapters. */
 export interface DurableEngine<State, Message> {
   readonly committed: Source<Committed<State>>;
+  /** True once the engine scope has begun to close. */
+  readonly isClosed: Effect.Effect<boolean>;
   /** Prepare one message inside the closed-aware admission boundary. */
   readonly sendPrepared: (
     commandId: CommandId,
@@ -330,6 +332,7 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <State, M
   }
   return {
     committed: committedSource,
+    isClosed: Deferred.isDone(closed),
     sendPrepared,
     callPrepared,
     send,

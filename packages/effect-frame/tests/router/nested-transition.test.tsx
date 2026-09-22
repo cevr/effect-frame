@@ -125,6 +125,8 @@ const CommentsLive = implementQuery(Comments, ({ tenant, postId }) =>
 interface WireService {
   readonly commands: Queue.Queue<string>;
   readonly subscriptions: Ref.Ref<ReadonlyMap<string, number>>;
+  /** Every actor key whose change subscription opened, in order. */
+  readonly opened: Queue.Queue<string>;
   readonly snapshots: Ref.Ref<ReadonlyMap<string, Held>>;
   /** Actor keys whose snapshot read fails once its hold opens. */
   readonly failing: Ref.Ref<ReadonlySet<string>>;
@@ -160,7 +162,12 @@ const wired = Layer.effect(
           return yield* inner.snapshot(address);
         }),
       changes: (address, after) =>
-        Stream.fromEffect(Ref.update(wire.subscriptions, count(address.key, 1))).pipe(
+        Stream.fromEffect(
+          Effect.andThen(
+            Ref.update(wire.subscriptions, count(address.key, 1)),
+            Queue.offer(wire.opened, address.key),
+          ),
+        ).pipe(
           Stream.flatMap(() => inner.changes(address, after)),
           Stream.ensuring(Ref.update(wire.subscriptions, count(address.key, -1))),
         ),
@@ -190,6 +197,7 @@ const makeWire = Effect.gen(function* () {
   return Wire.of({
     commands: yield* Queue.unbounded<string>(),
     subscriptions: yield* Ref.make<ReadonlyMap<string, number>>(new Map()),
+    opened: yield* Queue.unbounded<string>(),
     snapshots: yield* Ref.make<ReadonlyMap<string, Held>>(new Map()),
     failing: yield* Ref.make<ReadonlySet<string>>(new Set()),
   });
@@ -236,6 +244,15 @@ const failSnapshot = Effect.fn("NestedTest.failSnapshot")(function* (
 ) {
   const wire = yield* Wire;
   yield* Ref.update(wire.failing, (all) => new Set(all).add(draftKey(tenant, postId)));
+});
+
+/** Waits for the receipt that the actor's change subscription opened. */
+const awaitOpened = Effect.fn("NestedTest.awaitOpened")(function* (tenant: string, postId: string) {
+  const wire = yield* Wire;
+  const key = draftKey(tenant, postId);
+  while ((yield* Queue.take(wire.opened)) !== key) {
+    // Earlier receipts belong to other keys.
+  }
 });
 
 const callsOf = Effect.fn("NestedTest.callsOf")(function* (id: string) {
@@ -1003,9 +1020,7 @@ describe("private nested transition", () => {
         const second2 = yield* holdSnapshot("t1", "2-second");
         const moving = yield* Effect.forkChild(router.navigate("/app/t1/pairs/2"));
         yield* Deferred.await(second2.started);
-        while ((yield* subscriptionsOf("t1", "2")) === 0) {
-          yield* Effect.yieldNow;
-        }
+        yield* awaitOpened("t1", "2");
 
         // Acquired but unpublished: after a flush the view still shows pair 1.
         yield* page.waitFor({

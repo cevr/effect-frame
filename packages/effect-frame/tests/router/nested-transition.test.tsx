@@ -342,6 +342,8 @@ interface Probes {
   readonly observe: Effect.Effect<ClosedWith>;
   /** The order in which view finalizers ran. */
   readonly closeOrder: Ref.Ref<ReadonlyArray<string>>;
+  /** The state each send from the control that captured its ref at setup returned. */
+  readonly staleSent: Queue.Queue<{ readonly _tag: string }>;
 }
 
 interface ClosedWith {
@@ -390,7 +392,14 @@ const makeTree = (probes: Probes) => {
             )}
           </p>
           <output id="post-actor">{View.bind(local.state, String)}</output>
-          <button id="stale" onClick={View.event(() => sendText(draftAtSetup, "stale"))}>
+          <button
+            id="stale"
+            onClick={View.event(() =>
+              Effect.flatMap(sendText(draftAtSetup, "stale"), (handle) =>
+                Effect.flatMap(handle.state.get, (state) => Queue.offer(probes.staleSent, state)),
+              ),
+            )}
+          >
             stale
           </button>
           <button
@@ -479,6 +488,7 @@ const makeProbes = Effect.gen(function* () {
     postClosed: yield* Deferred.make<ClosedWith>(),
     layoutClosed: yield* Deferred.make<ClosedWith>(),
     closeOrder: yield* Ref.make<ReadonlyArray<string>>([]),
+    staleSent: yield* Queue.unbounded<{ readonly _tag: string }>(),
     observe: Effect.gen(function* () {
       const snapshot = yield* frame.inspect;
       return {
@@ -898,10 +908,17 @@ describe("private nested transition", () => {
         expect(Option.isNone(queryRecord(after, "NestedPostBody", '"postId":"1"'))).toBe(true);
         expect(queryKeys(after)).toHaveLength(3);
 
-        // The retained control still commands its old address; the current
-        // handle commands the new one. Neither is reinterpreted.
+        // The retained control still holds its old ref, which the move
+        // released: its command does no work and never reaches the wire,
+        // rather than being reinterpreted for the new address. Its ID is
+        // supplied, so the closed owner reports Uncertain before any pass
+        // instead of claiming a refusal. The current handle commands the new
+        // address, and it is the next command on the wire.
         yield* click(root, "#stale");
-        expect(yield* Queue.take(wire.commands)).toBe(draftKey("t1", "1"));
+        expect(yield* Queue.take(probes.staleSent)).toMatchObject({
+          _tag: "Uncertain",
+          attempt: 0,
+        });
         yield* click(root, "#current");
         expect(yield* Queue.take(wire.commands)).toBe(draftKey("t1", "2"));
 

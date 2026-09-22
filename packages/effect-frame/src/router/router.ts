@@ -22,7 +22,7 @@ import {
 } from "./url-state-runtime.js";
 import * as Inspection from "../inspection.js";
 import type { NavigationKind } from "./check.js";
-import { RedirectCycle, read as readChecks, redirectLimit } from "./check.js";
+import { CheckNavigation, RedirectCycle, read as readChecks, redirectLimit } from "./check.js";
 import type { NavigationResult } from "./receipt.js";
 import { Committed, Unchanged, register as registerReceipts } from "./receipt.js";
 
@@ -297,6 +297,18 @@ export const mount: <R, HostNode, N = R>(
   });
 
   /**
+   * The Router a check sees: it reads where the document is, but it cannot
+   * move. The queue fiber runs the check, so a move would wait on itself.
+   */
+  const refuse = (href: string | UrlUpdater) =>
+    Effect.die(
+      CheckNavigation.make({
+        href: Option.getOrElse(Option.liftPredicate(href, Predicate.isString), () => "<updater>"),
+      }),
+    );
+  const checkService: RouterService = { ...service, navigate: refuse, replace: refuse };
+
+  /**
    * Run the candidate route's checks and follow redirects before history
    * moves, so a denied URL never becomes an entry. Each hop is matched
    * again from the top: a redirect may leave the route that asked for it.
@@ -320,7 +332,7 @@ export const mount: <R, HostNode, N = R>(
       // Each check runs in its own temporary Scope, closed before the answer is used.
       const verdict = yield* checks
         .value(candidate, kind)
-        .pipe(Effect.provideService(Router, service), Effect.scoped);
+        .pipe(Effect.provideService(Router, checkService), Effect.scoped);
       if (verdict._tag === "Continue") {
         return { url: candidate, target };
       }

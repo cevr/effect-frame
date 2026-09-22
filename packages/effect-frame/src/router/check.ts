@@ -123,6 +123,15 @@ export class RedirectCycle extends Schema.TaggedError<RedirectCycle>()("Redirect
   reason: Schema.Literals(["repeated", "limit"]),
 }) {}
 
+/**
+ * A check asked the router to move. A check answers with `Redirect`
+ * instead: the router is busy settling this navigation, so a move from
+ * inside a check could never be served. Reported as a defect of the check.
+ */
+export class CheckNavigation extends Schema.TaggedError<CheckNavigation>()("CheckNavigation", {
+  href: Schema.String,
+}) {}
+
 // ---------------------------------------------------------------------------
 // Failures
 // ---------------------------------------------------------------------------

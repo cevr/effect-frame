@@ -71,8 +71,11 @@ import). `errored` lives on the leaf or layout, because it handles that view's
 1. The router settles a candidate URL before history moves. It resolves the
    route for the URL. If the route has checks (a private registry keyed by the
    route value, like the inspection projection), it runs them in the mount
-   context, with `Router` provided and a temporary `Scope` that closes before
-   the answer is used.
+   context, with a read-only `Router` provided and a temporary `Scope` that
+   closes before the answer is used. The check's `Router` reads `current` and
+   `navigations`; its `navigate` and `replace` die with `CheckNavigation`.
+   The queue fiber runs the check, so a move from inside it could never be
+   served. A check that wants another URL answers `Redirect`.
 2. A tree's checks run parent first, for every matched segment: entering and
    stayed segments alike. A segment is asked only after its parent answered
    `Continue`. A `Redirect` stops the walk. No child check, declaration,
@@ -83,7 +86,8 @@ import). `errored` lives on the leaf or layout, because it handles that view's
    `RedirectCycle { reason: "repeated" }` defect. A chain longer than
    `redirectLimit` (16) hops is `RedirectCycle { reason: "limit" }`. Both are
    defects of that navigation at the router boundary. Nothing is committed;
-   the router keeps serving later navigations.
+   the router keeps serving later navigations. On the initial URL there is no
+   earlier page to keep, so the same defect fails `mount` itself.
 4. History moves once, to the settled URL. A push pushes once. A replace
    replaces once. An initial redirect replaces the entry the document already
    holds. A redirected pop replaces the popped entry. A settled URL equal to
@@ -212,7 +216,8 @@ scratchpad; this table is the record.
   retry control.
 - Redirect targets print the target segment's own search only. Ancestor
   search values are not carried.
-- No browser proof: pop and fragment behavior use the fixture `Location`.
+- No browser proof: pop and fragment behavior use a fixture `Location`
+  (`tests/router/route-check-edges.test.tsx` feeds it pops).
   Real Back/Forward, precommit cancellation, and focus are slice 5.
 - Nested routes still have no url-state, `updateSearch`, pending state, or
   lazy views (slice 4).

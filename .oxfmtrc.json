@@ -9,6 +9,7 @@
     "bun.lock",
     ".tools/**",
     ".proof/**",
-    "packages/host-celld/fixture/worker.js"
+    "packages/host-celld/fixture/worker.js",
+    "tooling/dom-bench/.generated/**"
   ]
 }

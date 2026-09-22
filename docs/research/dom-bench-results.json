@@ -1,0 +1,150 @@
+{
+  "recordedAt": "2026-09-22",
+  "status": "partial",
+  "machine": {
+    "bun": "1.4.2",
+    "node": "v26.8.2",
+    "chrome": "153.0.8010.53",
+    "krausestRevision": "f2df01a8679de05225c32714ca8cecbea3d78c5d"
+  },
+  "effectFrameBundle": {
+    "sha256": "37fe5947efdbd3cc66b8bd413f373942b6e2ddae5e4e87c2f0411d30e60bc9a8",
+    "source": "tooling/dom-bench/src/fixtures/effect-frame.tsx"
+  },
+  "bunWebView": {
+    "effectFrame": [
+      {
+        "engine": "chrome",
+        "operation": "create-1k",
+        "samples": 1,
+        "durationMs": 5.468,
+        "state": "ok",
+        "log": "/tmp/effect-frame-dom-bench-current-create-chrome.log",
+        "rawTrace": "/tmp/effect-frame-dom-bench-traces/effect-frame-chrome-create-1k-13098.json"
+      },
+      {
+        "engine": "webkit",
+        "operation": "create-1k",
+        "samples": 1,
+        "durationMs": 354,
+        "state": "ok",
+        "log": "/tmp/effect-frame-dom-bench-current-create-webkit.log"
+      }
+    ],
+    "solid2": [
+      {
+        "engine": "chrome",
+        "operation": "create-1k",
+        "samples": 1,
+        "durationMs": 1140.851,
+        "state": "ok",
+        "log": "/tmp/effect-frame-dom-bench-solid2-chrome-create.log",
+        "rawTrace": "/tmp/effect-frame-dom-bench-traces/solid2-chrome-create-1k-14519.json"
+      },
+      {
+        "engine": "webkit",
+        "operation": "create-1k",
+        "samples": 1,
+        "durationMs": 53,
+        "state": "ok",
+        "log": "/tmp/effect-frame-dom-bench-solid2-webkit-create.log"
+      }
+    ],
+    "octane": [
+      {
+        "engine": "chrome",
+        "operation": "create-1k",
+        "samples": 1,
+        "durationMs": 921.42,
+        "state": "ok",
+        "log": "/tmp/effect-frame-dom-bench-octane-chrome-create.log",
+        "rawTrace": "/tmp/effect-frame-dom-bench-traces/octane-chrome-create-1k-14579.json"
+      },
+      {
+        "engine": "webkit",
+        "operation": "create-1k",
+        "samples": 1,
+        "durationMs": 19,
+        "state": "ok",
+        "log": "/tmp/effect-frame-dom-bench-octane-webkit-create.log"
+      }
+    ],
+    "failedCells": [
+      {
+        "engine": "chrome",
+        "framework": "effect-frame",
+        "operation": "update-10th-10k",
+        "state": "failed",
+        "reason": "Bun.WebView child cell exceeded the 20,000 ms bounded deadline",
+        "receipt": "/tmp/effect-frame-dom-bench-update-timeout.jsonl",
+        "timingMs": null
+      }
+    ]
+  },
+  "standardChromeSameBundle": {
+    "driver": "Playwright Chromium with Google Chrome",
+    "bundleSha256": "37fe5947efdbd3cc66b8bd413f373942b6e2ddae5e4e87c2f0411d30e60bc9a8",
+    "ready": true,
+    "buttons": 6,
+    "rowsBefore": 0,
+    "rowsAfterCreate1k": 1000,
+    "errors": [],
+    "receipt": "/tmp/effect-frame-playwright-control.json"
+  },
+  "controls": {
+    "driver": "Bun.WebView Chrome",
+    "plainDom": {
+      "rowsBefore": 10000,
+      "rowsAfter": 10000,
+      "changedLabels": 1000,
+      "state": "ok"
+    },
+    "solidSignals": {
+      "package": "@solidjs/signals 2.0.0-rc.9",
+      "rowsBefore": 10000,
+      "rowsAfter": 10000,
+      "changedLabels": 1000,
+      "state": "ok",
+      "bundleSha256": "4abbbb0b388455c350b2cae0208a73adab9cf91bb7b67d9b939d28dd41a8585d"
+    },
+    "receipt": "/tmp/effect-frame-controls-webview.json"
+  },
+  "officialRunner": {
+    "runner": "krausest webdriver-ts Playwright",
+    "measurements": [
+      {
+        "framework": "effect-frame local staged fixture",
+        "benchmark": "01_run1k",
+        "totalMs": 59.55,
+        "scriptMs": 25.053,
+        "paintMs": 17.591,
+        "state": "ok",
+        "log": "/tmp/effect-frame-official-effect-create-final.log"
+      },
+      {
+        "framework": "solid2 local staged fixture",
+        "benchmark": "01_run1k",
+        "totalMs": 58.993,
+        "scriptMs": 41.695,
+        "paintMs": 15.613,
+        "state": "ok",
+        "log": "/tmp/effect-frame-official-solid2-create-final.log"
+      },
+      {
+        "framework": "octane local staged fixture",
+        "benchmark": "01_run1k",
+        "totalMs": 28.722,
+        "scriptMs": 11.415,
+        "paintMs": 15.502,
+        "state": "ok",
+        "log": "/tmp/effect-frame-official-octane-create-final.log"
+      }
+    ],
+    "warning": "This is an official-runner measurement. It is not a local Bun.WebView timing and is not a cross-run comparison."
+  },
+  "openLimits": [
+    "The effect-frame update-10th-10k Bun.WebView Chrome cell has no timing because the bounded child deadline expired.",
+    "The full matrix for all frameworks and operations is not claimed until each requested cell completes.",
+    "Official comparison is recorded for create-1k only. The full operation matrix still requires additional official workload cells."
+  ]
+}

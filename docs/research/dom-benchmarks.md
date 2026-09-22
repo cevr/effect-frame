@@ -2,8 +2,69 @@
 
 Date: 2026-09-21.
 Ticket: [Verify which DOM benchmarks Solid publishes against and how to run them locally](https://github.com/cevr/effect-frame/issues/60).
-Method: primary source review of benchmark repositories, their READMEs, and their manifests. No benchmark was executed.
-Status: research complete. No timing was measured on this machine.
+Harness: [Set up the DOM benchmark harness and record the frame against Solid 2 and Octane](https://github.com/cevr/effect-frame/issues/61).
+Method: primary source review of benchmark repositories, their READMEs, and their manifests.
+Status: research complete. The local harness now has bounded first measurements and
+control receipts. The full matrix remains open because one Bun.WebView Chrome
+cell exceeded its child-process deadline.
+
+The first receipts are in [dom-bench-results.json](./dom-bench-results.json).
+They record Bun.WebView Chrome and WebKit `create-1k` cells for Effect Frame,
+Solid 2, and Octane, a standard Chrome same-bundle control, plain DOM and Solid
+signals controls, and one successful run through the pinned krausest Playwright
+runner. The
+`effect-frame/chrome/update-10th-10k` cell has no timing. The harness records
+that failure at `/tmp/effect-frame-dom-bench-update-timeout.jsonl` and exits
+non-zero for the requested cell.
+
+## Local harness
+
+Run one framework through both required Bun.WebView engines with:
+
+```sh
+bun run bench --framework effect-frame --count 1
+```
+
+Use `--engine chrome` or `--engine webkit` to select one backend. Use
+`--only create-1k` to bound a first check to one workload. Each cell runs in a
+child Bun process. `DOM_BENCH_CELL_TIMEOUT_MS` sets the deadline and is capped
+at 60 seconds. A timed-out cell writes a JSONL receipt and makes the command
+fail.
+
+The `--official` option runs the pinned krausest Playwright runner. Set
+`KRAUSEST_DIR` to the checkout and `KRAUSEST_PORT` to its server port. The
+option reports the official runner result as a separate measurement.
+
+### Timing boundary and comparability
+
+The local `data:` page intentionally has no Bootstrap stylesheet. The
+official staged page links krausest's `/css/currentStyle.css`. This changes
+layout and paint work, so local Bun.WebView timings and official runner
+timings are separate receipts. They are not a direct comparison.
+
+Chrome tracing starts immediately before the requested click. The page
+completion promise checks the expected row ids, order, labels, selection, and
+row count after the operation. The harness calls `Tracing.end` only after
+that DOM contract completes. The reducer then selects the same-process
+click-to-Commit window and drops later host work. Raw Chrome events are kept
+under `/tmp/effect-frame-dom-bench-traces/` by default.
+
+| Acceptance cell                                                            | Result                                             |
+| -------------------------------------------------------------------------- | -------------------------------------------------- |
+| Effect Frame through Bun.WebView Chrome, `create-1k`                       | Passed; 5.468 ms in the recorded sample.           |
+| Effect Frame through Bun.WebView WebKit, `create-1k`                       | Passed; 354 ms in the recorded sample.             |
+| Solid 2 through Bun.WebView Chrome, `create-1k`                            | Passed; 1,140.851 ms in the recorded sample.       |
+| Solid 2 through Bun.WebView WebKit, `create-1k`                            | Passed; 53 ms in the recorded sample.              |
+| Octane through Bun.WebView Chrome, `create-1k`                             | Passed; 921.420 ms in the recorded sample.         |
+| Octane through Bun.WebView WebKit, `create-1k`                             | Passed; 19 ms in the recorded sample.              |
+| Effect Frame bundle through standard Chrome, `create-1k`                   | Passed; six buttons and 1,000 rows.                |
+| Plain DOM control, 10,000-row partial update                               | Passed; 1,000 labels changed.                      |
+| Solid signals control, 10,000-row partial update                           | Passed; 1,000 labels changed.                      |
+| Effect Frame through Bun.WebView Chrome, `update-10th-10k`                 | Failed at the bounded deadline; no timing claimed. |
+| Pinned krausest Playwright runner, Effect Frame staged fixture, `01_run1k` | Passed; official runner reported 59.550 ms total.  |
+| Pinned krausest Playwright runner, Solid 2 staged fixture, `01_run1k`      | Passed; official runner reported 58.993 ms total.  |
+| Pinned krausest Playwright runner, Octane staged fixture, `01_run1k`       | Passed; official runner reported 28.722 ms total.  |
+| Full three-framework, two-engine matrix                                    | Open.                                              |
 
 ## Result
 
@@ -539,9 +600,10 @@ the Octane benchmarks page, the Octane benchmarks README and its `js-framework`
 suite README, the reactivity benchmark's adapter interface and registration
 list, and GitHub contents-API directory listings.
 
-Not performed: no benchmark was run, no repository was cloned, no dependency was
-installed, and no timing was measured. Every duration and ratio quoted here is
-a figure the upstream source publishes, not a measurement made for this ticket.
+The bounded harness ran selected Bun.WebView and control cells. It did not
+complete the full three-framework, two-engine matrix. Every local duration is
+specific to the machine, browser build, driver, page markup, and workload
+receipt recorded above.
 
 Not established: the Chrome and Node versions behind Octane's published table;
 whether the four-command `js-reactivity-benchmark` sequence completes; what

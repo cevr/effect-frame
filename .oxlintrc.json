@@ -237,6 +237,10 @@
     "**/bin/**",
     "packages/host-celld/fixture/worker.js",
     "**/.proof/**",
-    "packages/host-celld/fixture-contract/worker.js"
+    "packages/host-celld/fixture-contract/worker.js",
+    "tooling/dom-bench/.generated/**",
+    "tooling/dom-bench/.generated-debug/**",
+    "tooling/dom-bench/.generated-debug-o/**",
+    "tooling/dom-bench/.turbo/**"
   ]
 }

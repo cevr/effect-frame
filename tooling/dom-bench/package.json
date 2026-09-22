@@ -1,0 +1,21 @@
+{
+  "name": "@effect-frame/dom-bench",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bench": "bun run src/bench.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "bun build src/bench.ts --target bun --outdir dist",
+    "test": "bun test tests/"
+  },
+  "dependencies": {
+    "@solidjs/web": "2.0.0-rc.9",
+    "effect-frame": "workspace:*",
+    "octane": "0.4.0",
+    "solid-js": "2.0.0-rc.9"
+  },
+  "peerDependencies": {
+    "effect": "catalog:"
+  }
+}

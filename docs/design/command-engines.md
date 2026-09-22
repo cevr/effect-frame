@@ -92,7 +92,9 @@ state becomes terminal, and then the owner drops the record.
 `submit` runs on the caller's fiber, which a timeout or an event can interrupt.
 Insertion, adoption (`own`), and the first start run as one uninterruptible
 step. A retained record therefore always has a worker, or is idle and
-Uncertain so `retry` can start one. `own` must finish on its own.
+Uncertain so `retry` can start one. `own` must finish on its own. If adoption
+dies, the owner removes the new record and closes its scope, so the same ID
+starts fresh on its next submission.
 
 ### Cache ownership
 
@@ -109,8 +111,10 @@ record scope releases the claim.
 
 The claim is not on the public `QueryCacheService`. Each cache that
 `queryCacheLayer` builds carries it privately, keyed by that service, so a claim
-always lands in the cache the reference reads. A custom cache has no claim, and
-its commands own nothing.
+always lands in the cache the reference reads. A custom or wrapped cache has no
+claim. It keeps the public contract: the reference invalidates the contract when
+a command starts and applies the reply's refreshes when it is Applied. A Frame
+with no cache owns nothing.
 
 ### Inspection
 

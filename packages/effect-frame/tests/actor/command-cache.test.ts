@@ -288,24 +288,41 @@ describe("cache command ownership", () => {
     }),
   );
 
-  withApp("a custom QueryCache without command ownership still settles commands", () =>
-    Effect.gen(function* () {
-      const real = yield* QueryCache;
-      // A user's own cache implements only the public service.
-      const custom: QueryCacheService = {
-        open: real.open,
-        active: real.active,
-        apply: real.apply,
-        invalidate: real.invalidate,
-      };
-      const value = yield* useQuery(CounterValue, "one");
-      yield* until(value, isReady(0, false));
-      const counter = yield* ref(Counter, "one").pipe(Effect.provideService(QueryCache, custom));
-      const command = yield* counter.send(1);
-      expect((yield* command.settled)._tag).toBe("Applied");
-      // Nothing claimed the real entry, so it never showed stale for it.
-      expect(yield* value.state.get).toEqual(ready(0, false));
-    }),
+  withApp(
+    "a custom QueryCache without command ownership still invalidates and applies refreshes",
+    () =>
+      Effect.gen(function* () {
+        const real = yield* QueryCache;
+        const invalidated: Array<string> = [];
+        const applied: Array<number> = [];
+        // A user's own cache implements only the public service; here it wraps
+        // the real one, so the framework cannot find ownership for it.
+        const custom: QueryCacheService = {
+          open: real.open,
+          active: real.active,
+          apply: (refreshed) =>
+            Effect.andThen(
+              Effect.sync(() => applied.push(refreshed.length)),
+              real.apply(refreshed),
+            ),
+          invalidate: (contractName) =>
+            Effect.andThen(
+              Effect.sync(() => invalidated.push(contractName)),
+              real.invalidate(contractName),
+            ),
+        };
+        const value = yield* useQuery(CounterValue, "one");
+        yield* until(value, isReady(0, false));
+        const counter = yield* ref(Counter, "one").pipe(Effect.provideService(QueryCache, custom));
+        const command = yield* counter.send(1);
+        expect((yield* command.settled)._tag).toBe("Applied");
+        // The public contract a custom cache had before command ownership: the
+        // contract is invalidated when the command starts, and the reply's
+        // refreshes are applied, so the dependent reaches the new value.
+        expect(invalidated).toEqual([Counter.name]);
+        expect(applied).toEqual([1]);
+        yield* until(value, isReady(1, false));
+      }),
   );
 
   withApp("a settlement never recreates an entry that was released", () =>

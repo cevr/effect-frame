@@ -112,20 +112,30 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
    * The cache owns each unresolved command's dependents: they show stale
    * from before the first request until the command settles or this
    * reference closes, so the view shows stale content instead of a gap. An
-   * Applied settlement delivers its captured refreshes first. A client with
-   * no cache, or with a cache not built by `queryCacheLayer`, owns nothing.
+   * Applied settlement delivers its captured refreshes first. A cache not
+   * built by `queryCacheLayer` (a user's own, or a wrapper) keeps the public
+   * contract instead: the contract is invalidated when the command starts and
+   * the reply's refreshes are applied. A client with no cache owns nothing.
    */
-  const ownership = Option.flatMap(cache, ownershipOf);
   const own = (active: ReadonlyArray<QueryKey>) =>
-    Option.match(ownership, {
+    Option.match(cache, {
       onNone: () => Commands.ownNothing<SnapshotOf<C>>(active),
-      onSome: (owning) =>
-        Effect.map(
-          owning.claim(contract.name),
-          (claim): Commands.SettlementHook<SnapshotOf<C>> =>
-            (settlement) =>
-              claim.settle(settlement.refreshed),
-        ),
+      onSome: (service) =>
+        Option.match(ownershipOf(service), {
+          onNone: () =>
+            Effect.as(
+              service.invalidate(contract.name),
+              (settlement: Commands.Settlement<SnapshotOf<C>>) =>
+                service.apply(settlement.refreshed),
+            ),
+          onSome: (owning) =>
+            Effect.map(
+              owning.claim(contract.name),
+              (claim): Commands.SettlementHook<SnapshotOf<C>> =>
+                (settlement) =>
+                  claim.settle(settlement.refreshed),
+            ),
+        }),
     });
 
   const adapter = remoteCommands(transport, address, (projection) =>

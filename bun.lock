@@ -88,6 +88,16 @@
         "effect": "catalog:",
       },
     },
+    "tooling/inspection-gateway": {
+      "name": "@effect-frame/inspection-gateway",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect-frame": "workspace:*",
+      },
+      "peerDependencies": {
+        "effect": "catalog:",
+      },
+    },
   },
   "catalog": {
     "@effect/platform-bun": "4.0.0-rc.115",
@@ -137,6 +147,8 @@
     "@effect-frame/example-notes": ["@effect-frame/example-notes@workspace:apps/notes"],
 
     "@effect-frame/host-celld": ["@effect-frame/host-celld@workspace:packages/host-celld"],
+
+    "@effect-frame/inspection-gateway": ["@effect-frame/inspection-gateway@workspace:tooling/inspection-gateway"],
 
     "@effect-frame/toolchain-checks": ["@effect-frame/toolchain-checks@workspace:tooling/checks"],
 

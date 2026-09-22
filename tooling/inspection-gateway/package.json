@@ -1,0 +1,16 @@
+{
+  "name": "@effect-frame/inspection-gateway",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test --conditions=source tests/"
+  },
+  "dependencies": {
+    "effect-frame": "workspace:*"
+  },
+  "peerDependencies": {
+    "effect": "catalog:"
+  }
+}

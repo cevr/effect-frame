@@ -4,7 +4,7 @@ registerDom();
 
 import { Behavior, Value, spawn } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
-import { Dom, For, Portal, Show, View, mount, render } from "effect-frame/view";
+import { Dom, For, Portal, Show, View, ViewTest, mount } from "effect-frame/view";
 import type { Host } from "effect-frame/view";
 import { Deferred, Effect, Exit, Fiber, Option, Scope } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -73,6 +73,22 @@ const hostLabel = (node: Node): string => {
   return Option.getOrElse(Option.fromNullishOr(node.textContent), () => "");
 };
 
+const hasElement = (root: Node, selector: string): boolean => {
+  if (!(root instanceof Element)) {
+    return false;
+  }
+  return Option.isSome(Option.fromNullishOr(root.querySelector(selector)));
+};
+
+const articleIds = (root: Node): string => {
+  if (!(root instanceof Element)) {
+    return "";
+  }
+  return Array.from(root.querySelectorAll("article"))
+    .map((row) => row.id)
+    .join(",");
+};
+
 describe("mount failure ownership", () => {
   it.scoped("removes partial list, fragment, keyed row, and portal writes only", () =>
     Effect.gen(function* () {
@@ -135,24 +151,46 @@ describe("mount failure ownership", () => {
           Dom.host.remove(parent, node);
         },
       };
-      const caller = yield* Scope.make();
-      yield* Scope.provide(
-        mount(Turnover, { open: open.state, tasks: tasks.state }, host, root),
-        caller,
-      );
+      const page = yield* ViewTest.make({
+        host,
+        root,
+        setup: (observedHost, mountRoot) =>
+          mount(Turnover, { open: open.state, tasks: tasks.state }, observedHost, mountRoot),
+      });
 
-      yield* open.call(Value.Set(false));
-      yield* tasks.call(Value.Set([{ id: "b", title: "beta" }]));
-      yield* render;
-      yield* open.call(Value.Set(true));
-      yield* tasks.call(Value.Set([{ id: "c", title: "gamma" }]));
-      yield* render;
-      yield* open.call(Value.Set(false));
-      yield* tasks.call(Value.Set([]));
-      yield* render;
+      yield* page.waitFor({
+        label: "initial branch and rows are mounted",
+        until: (actualRoot) =>
+          hasElement(actualRoot, "#branch") && articleIds(actualRoot) === "row-a,row-b",
+      });
+
+      yield* page.act(open.call(Value.Set(false)), {
+        label: "branch is hidden",
+        until: (actualRoot) => !hasElement(actualRoot, "#branch"),
+      });
+      yield* page.act(tasks.call(Value.Set([{ id: "b", title: "beta" }])), {
+        label: "first row is removed",
+        until: (actualRoot) => articleIds(actualRoot) === "row-b",
+      });
+      yield* page.act(open.call(Value.Set(true)), {
+        label: "branch is shown again",
+        until: (actualRoot) => hasElement(actualRoot, "#branch"),
+      });
+      yield* page.act(tasks.call(Value.Set([{ id: "c", title: "gamma" }])), {
+        label: "second row is replaced",
+        until: (actualRoot) => articleIds(actualRoot) === "row-c",
+      });
+      yield* page.act(open.call(Value.Set(false)), {
+        label: "branch is hidden for the final time",
+        until: (actualRoot) => !hasElement(actualRoot, "#branch"),
+      });
+      yield* page.act(tasks.call(Value.Set([])), {
+        label: "last row is removed",
+        until: (actualRoot) => !hasElement(actualRoot, "article"),
+      });
 
       const beforeClose = [...removed];
-      yield* Scope.close(caller, Exit.void);
+      yield* page.close;
       expect(root.childNodes).toHaveLength(0);
       expect(removed).toEqual(beforeClose);
     }),

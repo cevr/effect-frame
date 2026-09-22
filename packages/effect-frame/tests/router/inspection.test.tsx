@@ -5,7 +5,7 @@ registerDom();
 import { Location, Route, UrlState, mount } from "effect-frame/router";
 import type { AnyRoute, Entered, LocationService } from "effect-frame/router";
 import type { Source } from "effect-frame/actor";
-import { Dom, View, render } from "effect-frame/view";
+import { Dom, View, ViewTest } from "effect-frame/view";
 import {
   Deferred,
   Effect,
@@ -117,14 +117,30 @@ const makeStart = <R,>(initial: string, routes: ReadonlyArray<Route.AnyRoute<R>>
   Effect.gen(function* () {
     const root = document.createElement("main");
     const location = yield* makeLocation(initial);
-    const router = yield* mount({
-      routes,
-      notFound: NotFound,
+    const page = yield* ViewTest.make({
       host: Dom.host,
       root,
-    }).pipe(Effect.provideService(Location, location.service));
-    return { root, location, router };
+      setup: (host, mountRoot) =>
+        mount({
+          routes,
+          notFound: NotFound,
+          host,
+          root: mountRoot,
+        }).pipe(Effect.provideService(Location, location.service)),
+    });
+    return { root, location, router: page.setup, page };
   });
+
+const textAt = (root: Node, selector: string): string => {
+  if (!(root instanceof Element)) {
+    return "";
+  }
+  const element = Option.fromNullishOr(root.querySelector(selector));
+  return Option.getOrElse(
+    Option.flatMap(element, (node) => Option.fromNullishOr(node.textContent)),
+    () => "",
+  );
+};
 
 const routeNamed = (snapshot: Frame.Snapshot, name: string) =>
   Option.getOrThrow(
@@ -160,7 +176,7 @@ describe("Frame router inspection", () => {
     () =>
       Effect.gen(function* () {
         const ready = yield* Deferred.make<UrlState.State<FilterState>>();
-        const { location, router } = yield* makeStart(
+        const { location, router, page } = yield* makeStart(
           "http://app.test/books/7?tab=one&filter=first",
           [makeBook(ready)],
         );
@@ -191,8 +207,10 @@ describe("Frame router inspection", () => {
           value: { filter: { _tag: "Value", value: "first" } },
         });
 
-        yield* router.navigate("/books/8?tab=two&filter=second");
-        yield* render;
+        yield* page.act(router.navigate("/books/8?tab=two&filter=second"), {
+          label: "navigated to the second book",
+          until: (actualRoot) => textAt(actualRoot, "#book") === "second",
+        });
         const moved = yield* Frame.inspect;
         const movedRoute = routeNamed(moved, "book");
         expect(movedRoute.routeInstanceId).toBe(initialRoute.routeInstanceId);
@@ -211,10 +229,21 @@ describe("Frame router inspection", () => {
         });
         expect(initialRoute.canonicalUrl).toBe("http://app.test/books/7?tab=one&filter=first");
 
-        yield* state.set({ filter: "replaced" });
-        yield* state.push.update((previous) => ({ filter: `${previous.filter}-pushed` }));
-        yield* location.pop("/books/8?tab=back&filter=back");
-        yield* render;
+        yield* page.act(state.set({ filter: "replaced" }), {
+          label: "replaced URL state is rendered",
+          until: (actualRoot) => textAt(actualRoot, "#book") === "replaced",
+        });
+        yield* page.act(
+          state.push.update((previous) => ({ filter: `${previous.filter}-pushed` })),
+          {
+            label: "pushed URL state is rendered",
+            until: (actualRoot) => textAt(actualRoot, "#book") === "replaced-pushed",
+          },
+        );
+        yield* page.act(location.pop("/books/8?tab=back&filter=back"), {
+          label: "popped URL state is rendered",
+          until: (actualRoot) => textAt(actualRoot, "#book") === "back",
+        });
         const back = yield* Frame.inspect;
         expect(routeNamed(back, "book").search).toEqual({
           _tag: "Value",
@@ -230,7 +259,10 @@ describe("Frame router inspection", () => {
           "push /books/8?tab=two&filter=replaced-pushed",
         ]);
 
-        yield* router.navigate("/missing");
+        yield* page.act(router.navigate("/missing"), {
+          label: "not found route is rendered",
+          until: (actualRoot) => textAt(actualRoot, "#missing") === "/missing",
+        });
         const missing = yield* Frame.inspect;
         expect(missing.urlStates).toHaveLength(0);
         expect(missing.mounts).toHaveLength(1);

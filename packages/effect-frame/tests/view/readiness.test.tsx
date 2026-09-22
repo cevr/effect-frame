@@ -287,6 +287,7 @@ describe("readiness through context", () => {
         const fixtures = yield* ReadinessFixtures;
         const leftGate = yield* Deferred.make<void>();
         const rightGate = yield* Deferred.make<void>();
+        const leftObserved = yield* Deferred.make<void>();
         yield* setResponse(fixtures, "left", pendingResponse(leftGate, "one"));
         yield* setResponse(fixtures, "right", pendingResponse(rightGate, "two"));
 
@@ -296,6 +297,11 @@ describe("readiness through context", () => {
             children: Effect.gen(function* () {
               const left = yield* useQuery(ReadinessQuery, { id: "left" });
               const right = yield* useQuery(ReadinessQuery, { id: "right" });
+              yield* Effect.forkChild(
+                Stream.runHead(
+                  Stream.filter(left.state.changes, (state) => state._tag !== "Loading"),
+                ).pipe(Effect.andThen(Deferred.succeed(leftObserved, void 0).pipe(Effect.asVoid))),
+              );
               const a = yield* ready(left.state, "");
               const b = yield* ready(right.state, "");
               return (
@@ -312,6 +318,9 @@ describe("readiness through context", () => {
 
         yield* setResponse(fixtures, "left", readyResponse("one"));
         yield* Deferred.succeed(leftGate, void 0);
+        // The source receipt makes the following unchanged Loading assertion
+        // causal. The predicate was already true before the left result ran.
+        yield* Deferred.await(leftObserved);
         yield* page.waitFor({
           label: "first query remains pending",
           until: (actualRoot) => textAt(actualRoot, "#pending") === "loading",
@@ -553,7 +562,10 @@ describe("readiness through context", () => {
 
       yield* page.act(controlled.refetch, {
         label: "query value becomes stale",
-        until: (actualRoot) => textAt(actualRoot, "#q-ready") === "Alpha",
+        until: (actualRoot) =>
+          textAt(actualRoot, "#q-ready") === "Alpha" &&
+          actualRoot instanceof HTMLElement &&
+          actualRoot.querySelector("#q-ready")?.getAttribute("class") === "stale",
       });
       expect(textOf(root, "#q-ready")).toBe("Alpha");
       expect(root.querySelector("#q-ready")?.getAttribute("class")).toBe("stale");
@@ -813,6 +825,32 @@ describe("readiness on the server", () => {
       const html = yield* Html.renderToString(Page, {});
       expect(html).toContain('<h1 id="title">Alpha</h1>');
       expect(html).not.toContain('id="pending"');
+    }),
+  );
+
+  it.scoped("an already failed source renders Errored around Loading in one HTML frame", () =>
+    Effect.gen(function* () {
+      const controlled = yield* QueryState.fakeQuery<string, string>(QueryState.failed("boom"));
+      const Page = () =>
+        Errored({
+          fallback: (error) => (
+            <p id="error">
+              {bound(error, (value) => Option.match(value, { onNone: () => "", onSome: String }))}
+            </p>
+          ),
+          children: Loading({
+            fallback: <p id="pending">loading</p>,
+            children: Effect.gen(function* () {
+              yield* orErrored(controlled.source);
+              return <p id="content">wrong content</p>;
+            }),
+          }),
+        });
+
+      const html = yield* Html.renderToString(Page, {});
+      expect(html).toContain('<p id="error">boom</p>');
+      expect(html).not.toContain('id="pending"');
+      expect(html).not.toContain('id="content"');
     }),
   );
 });

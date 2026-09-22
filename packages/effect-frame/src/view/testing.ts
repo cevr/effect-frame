@@ -328,6 +328,11 @@ const runBounded = <HostNode, A, E, R>(
         new Error(`ViewTest condition timeout must be finite and positive: ${condition.label}`),
       );
     }
+    // Do this check before forking. A closed owner scope interrupts a forked
+    // child before its operation can report HarnessClosed to the caller.
+    if (state.closed) {
+      return Effect.fail(closeError(state, condition.label));
+    }
     const operationScope = Scope.forkUnsafe(ownerScope);
     const milliseconds = Duration.toMillis(duration);
     const revisionAtStart = state.revision;
@@ -342,6 +347,13 @@ const runBounded = <HostNode, A, E, R>(
       predicateChecked = true;
     };
     const work = Effect.gen(function* () {
+      // The first check closes the ordinary after-close path. This check
+      // covers a close that wins after the operation scope was allocated but
+      // before its fiber starts. The awaitClose race remains the concurrent
+      // close path once the operation is already running.
+      if (state.closed) {
+        return yield* closeError(state, condition.label);
+      }
       const fiber = yield* Effect.forkIn(
         operation(operationScope, markActionFinished, markPredicateResult),
         operationScope,

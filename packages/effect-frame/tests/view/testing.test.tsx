@@ -23,15 +23,16 @@ import {
   Effect,
   Exit,
   Fiber,
+  Layer,
   Match,
   Option,
+  Scope,
   Schedule,
   Schema,
   Stream,
 } from "effect";
 import { TestClock } from "effect/testing";
 import type { Host } from "effect-frame/view";
-import type { Scope } from "effect";
 import { describe, expect, it, test } from "effect-bun-test";
 
 interface CountProps {
@@ -94,30 +95,91 @@ const typedMake = () =>
     setup: () =>
       Effect.gen(function* () {
         const service = yield* SetupService;
+        if (service.value < 0) {
+          return yield* SetupFailure.make();
+        }
         return service.value;
       }),
   });
 
-const setupChannels: () => Effect.Effect<
-  ViewTest.ViewTest<string, number>,
-  SetupFailure,
-  SetupService | Scope.Scope
-> = typedMake;
+type TypedMake = ReturnType<typeof typedMake>;
+type Equals<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+
+const setupValue: Equals<Effect.Success<TypedMake>["setup"], number> = true;
+const setupRoot: Equals<Effect.Success<TypedMake>["root"], string> = true;
+const setupFailure: Equals<Effect.Error<TypedMake>, SetupFailure> = true;
+const setupRequirements: Equals<Effect.Services<TypedMake>, SetupService | Scope.Scope> = true;
 
 declare const typedPage: ViewTest.ViewTest<string, number>;
 declare const typedAction: Effect.Effect<boolean, SetupFailure, SetupService | Scope.Scope>;
 const typedAct = () => typedPage.act(typedAction, { label: "typed", until: () => true });
-const actionChannels: () => Effect.Effect<
-  boolean,
-  SetupFailure | ViewTest.ConditionNotObserved | ViewTest.HarnessClosed,
-  SetupService
-> = typedAct;
+type TypedAction = ReturnType<typeof typedAct>;
+const actionSuccess: Equals<Effect.Success<TypedAction>, boolean> = true;
+const actionFailure: Equals<
+  Effect.Error<TypedAction>,
+  SetupFailure | ViewTest.ConditionNotObserved | ViewTest.HarnessClosed
+> = true;
+const actionRequirements: Equals<Effect.Services<TypedAction>, SetupService> = true;
+
+const typedProvided = () =>
+  typedMake().pipe(
+    // @effect-diagnostics-next-line strictEffectProvide:off
+    Effect.provide(Layer.succeed(SetupService, SetupService.of({ value: 1 }))),
+  );
+type TypedProvided = ReturnType<typeof typedProvided>;
+const providedFailure: Equals<Effect.Error<TypedProvided>, SetupFailure> = true;
+const providedRequirements: Equals<Effect.Services<TypedProvided>, Scope.Scope> = true;
 
 describe("scoped view test harness", () => {
   test("preserves setup and action Effect channels", () => {
-    expect(setupChannels).toBeDefined();
-    expect(actionChannels).toBeDefined();
+    expect(setupValue).toBe(true);
+    expect(setupRoot).toBe(true);
+    expect(setupFailure).toBe(true);
+    expect(setupRequirements).toBe(true);
+    expect(actionSuccess).toBe(true);
+    expect(actionFailure).toBe(true);
+    expect(actionRequirements).toBe(true);
+    expect(providedFailure).toBe(true);
+    expect(providedRequirements).toBe(true);
   });
+
+  it.scoped("closes setup resources when setup fails", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const finalized = yield* Deferred.make<void>();
+      const exit = yield* Effect.exit(
+        ViewTest.make({
+          host: Dom.host,
+          root,
+          setup: (host, mountRoot) =>
+            Effect.gen(function* () {
+              yield* mount(
+                () => Effect.succeed(<p id="failed-setup">temporary</p>),
+                {},
+                host,
+                mountRoot,
+              );
+              yield* Effect.addFinalizer(() =>
+                Deferred.succeed(finalized, void 0).pipe(Effect.asVoid),
+              );
+              return yield* SetupFailure.make();
+            }),
+        }),
+      );
+
+      expect(Exit.isFailure(exit)).toBe(true);
+      if (Exit.isFailure(exit)) {
+        const failure = Cause.findErrorOption(exit.cause);
+        expect(Option.isSome(failure)).toBe(true);
+        if (Option.isSome(failure)) {
+          expect(failure.value._tag).toBe("SetupFailure");
+        }
+      }
+      yield* Deferred.await(finalized);
+      expect(root.childNodes.length).toBe(0);
+    }),
+  );
 
   it.scoped("mounts through the production runtime and waits for the observed result", () =>
     Effect.gen(function* () {
@@ -375,6 +437,101 @@ describe("scoped view test harness", () => {
           expect(failure.value._tag).toBe("HarnessClosed");
         }
       }
+    }),
+  );
+
+  it.scoped("returns HarnessClosed for operations started after explicit close", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      let started = false;
+      const page = yield* ViewTest.make({
+        host: Dom.host,
+        root,
+        setup: (host, mountRoot) =>
+          mount(() => Effect.succeed(<p id="closed">closed</p>), {}, host, mountRoot),
+      });
+      yield* page.close;
+
+      const assertClosed = (exit: Exit.Exit<unknown, unknown>): void => {
+        expect(Exit.isFailure(exit)).toBe(true);
+        if (Exit.isFailure(exit)) {
+          const failure = Cause.findErrorOption(exit.cause);
+          expect(Option.isSome(failure)).toBe(true);
+          if (Option.isSome(failure)) {
+            const closed = Schema.is(ViewTest.HarnessClosed)(failure.value);
+            expect(closed).toBe(true);
+            if (closed) {
+              expect(failure.value.rootDisposed).toBe(true);
+            }
+          }
+        }
+      };
+
+      assertClosed(
+        yield* Effect.exit(page.waitFor({ label: "wait after close", until: () => false })),
+      );
+      assertClosed(
+        yield* Effect.exit(
+          page.act(
+            Effect.sync(() => void (started = true)),
+            {
+              label: "act after close",
+              until: () => true,
+            },
+          ),
+        ),
+      );
+      expect(started).toBe(false);
+    }),
+  );
+
+  it.scoped("returns HarnessClosed for operations after the parent scope closes", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      let started = false;
+      const parent = yield* Scope.make();
+      const page = yield* Scope.provide(
+        ViewTest.make({
+          host: Dom.host,
+          root,
+          setup: (host, mountRoot) =>
+            mount(() => Effect.succeed(<p id="parent-closed">closed</p>), {}, host, mountRoot),
+        }),
+        parent,
+      );
+      yield* Scope.close(parent, Exit.void);
+
+      const assertClosed = (exit: Exit.Exit<unknown, unknown>): void => {
+        expect(Exit.isFailure(exit)).toBe(true);
+        if (Exit.isFailure(exit)) {
+          const failure = Cause.findErrorOption(exit.cause);
+          expect(Option.isSome(failure)).toBe(true);
+          if (Option.isSome(failure)) {
+            const closed = Schema.is(ViewTest.HarnessClosed)(failure.value);
+            expect(closed).toBe(true);
+            if (closed) {
+              expect(failure.value.rootDisposed).toBe(true);
+            }
+          }
+        }
+      };
+
+      assertClosed(
+        yield* Effect.exit(page.waitFor({ label: "wait after parent close", until: () => false })),
+      );
+      assertClosed(
+        yield* Effect.exit(
+          page.act(
+            Effect.sync(() => void (started = true)),
+            {
+              label: "act after parent close",
+              until: () => true,
+            },
+          ),
+        ),
+      );
+      expect(started).toBe(false);
+      expect(root.childNodes.length).toBe(0);
     }),
   );
 

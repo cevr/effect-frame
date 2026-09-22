@@ -370,9 +370,13 @@ export const Errored = <E, R>(
 ): Effect.Effect<Node, E, Exclude<R, ErroredScope>> =>
   Effect.gen(function* () {
     const registry = yield* makeRegistry;
+    const content = yield* Effect.provideService(props.children, ErroredScope, registry);
+    // Build the content before taking the first failure snapshot. Child setup
+    // has completed at this boundary, so an already Failed query contributes
+    // to the server's one frame. Later failures still arrive through the
+    // registry source.
     const failure = yield* derive(registry, firstFailure);
     const failed = select(failure, Option.isSome);
-    const content = yield* Effect.provideService(props.children, ErroredScope, registry);
     return (
       <>
         <Show when={failed}>{props.fallback(failure)}</Show>

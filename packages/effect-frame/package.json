@@ -29,6 +29,11 @@
       "types": "./dist/actor/testing/conformance.d.ts",
       "default": "./dist/actor/testing/conformance.js"
     },
+    "./frame": {
+      "source": "./src/frame.ts",
+      "types": "./dist/frame.d.ts",
+      "default": "./dist/frame.js"
+    },
     "./view": {
       "source": "./src/view/index.ts",
       "types": "./dist/view/index.d.ts",

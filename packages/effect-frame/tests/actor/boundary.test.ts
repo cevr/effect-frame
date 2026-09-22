@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { serverOnly } from "effect-frame/actor";
+import * as Frame from "effect-frame/frame";
 
 const bundle = (entry: string) =>
   Effect.gen(function* () {
@@ -24,6 +25,19 @@ const bundle = (entry: string) =>
  * page would download.
  */
 describe("import boundary", () => {
+  it.effect("the public frame subpath resolves and bundles for a browser", () =>
+    Effect.gen(function* () {
+      expect(Frame.Snapshot).toBeDefined();
+      const text = yield* bundle("../../src/frame.ts");
+      expect(text).not.toContain(serverOnly);
+      expect(text).not.toContain("effect-frame/src/actor/mailbox-store/MailboxStore");
+      expect(text).not.toContain("effect-frame/src/actor/host/Authorizer");
+      expect(text).not.toContain("effect-frame/src/actor/durable/DurableHostConfig");
+      expect(text).not.toContain("effect-frame/actor:query-server-only");
+      expect(text).not.toContain("method not allowed");
+    }),
+  );
+
   it.effect("the client entry bundles without stores, hosts, or implementations", () =>
     Effect.gen(function* () {
       const text = yield* bundle("../../src/actor/client.ts");

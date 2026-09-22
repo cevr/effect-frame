@@ -6,7 +6,7 @@ import { Behavior, Value, modify, spawn } from "effect-frame/actor";
 import type { LocalActorRef, SetValue, Source } from "effect-frame/actor";
 import { Dom, For, Portal, Show, View, ViewTest, mount } from "effect-frame/view";
 import type { Host } from "effect-frame/view";
-import { Effect, Exit, Option, Queue } from "effect";
+import { Deferred, Effect, Exit, Option, Queue } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 interface EventLogProps {
@@ -29,6 +29,14 @@ interface ForProps extends EventLogProps {
 interface PortalProps extends EventLogProps {
   readonly open: Source<boolean>;
   readonly into: Element;
+}
+
+interface ClosingShowProps extends ShowProps {
+  readonly attached: Deferred.Deferred<void>;
+  readonly blocked: Deferred.Deferred<void>;
+  readonly release: Deferred.Deferred<void>;
+  readonly cleaned: Deferred.Deferred<void>;
+  readonly branchCalls: { value: number };
 }
 
 interface ListenerReceipt {
@@ -86,6 +94,39 @@ const PortalPage = (props: PortalProps) =>
             portal
           </button>
         </Portal>
+      </Show>
+    </main>,
+  );
+
+const ClosingShowPage = (props: ClosingShowProps) =>
+  Effect.succeed(
+    <main>
+      <output id="events">{View.bind(props.events, (labels) => labels.join(","))}</output>
+      <button id="sibling" onClick={View.event(() => props.record("sibling"))}>
+        sibling
+      </button>
+      <Show when={props.open}>
+        <button
+          id="branch"
+          attach={Dom.attach(() =>
+            Effect.gen(function* () {
+              yield* Deferred.succeed(props.attached, void 0);
+              yield* Effect.addFinalizer(() =>
+                Deferred.succeed(props.blocked, void 0).pipe(
+                  Effect.andThen(Deferred.await(props.release)),
+                  Effect.andThen(Deferred.succeed(props.cleaned, void 0)),
+                ),
+              );
+            }),
+          )}
+          onClick={View.event(() =>
+            Effect.sync(() => {
+              props.branchCalls.value += 1;
+            }).pipe(Effect.andThen(props.record("branch"))),
+          )}
+        >
+          branch
+        </button>
       </Show>
     </main>,
   );
@@ -315,6 +356,102 @@ describe("view listener ownership", () => {
       yield* awaitRelease(receipts);
       yield* awaitRelease(receipts);
       expect(counts.released).toBe(4);
+      expect(root.childNodes).toHaveLength(0);
+    }),
+  );
+
+  it.scoped("does not start a removed handler while owner cleanup is blocked", () =>
+    Effect.gen(function* () {
+      const root = document.createElement("main");
+      const open = yield* spawn(Behavior.value(true));
+      const events = yield* spawn(Behavior.value<ReadonlyArray<string>>([]));
+      const attached = yield* Deferred.make<void>();
+      const blocked = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const cleaned = yield* Deferred.make<void>();
+      const receipts = yield* Queue.unbounded<ListenerReceipt>();
+      const counts: ListenerCounts = { attached: 0, released: 0 };
+      const branchCalls = { value: 0 };
+      const host = listenerHost(receipts, counts);
+      const record = (label: string) => recordWith(events, label);
+      const page = yield* ViewTest.make({
+        host,
+        root,
+        setup: (observedHost, mountRoot) =>
+          mount(
+            ClosingShowPage,
+            {
+              open: open.state,
+              events: events.state,
+              record,
+              attached,
+              blocked,
+              release,
+              cleaned,
+              branchCalls,
+            },
+            observedHost,
+            mountRoot,
+          ),
+      });
+
+      yield* page.waitFor({
+        label: "initial branch and sibling",
+        until: (actualRoot) => has(actualRoot, "#branch") && has(actualRoot, "#sibling"),
+      });
+      yield* Deferred.await(attached);
+      expect(counts.attached).toBe(2);
+      const oldBranch = Option.getOrThrow(Option.fromNullishOr(root.querySelector("#branch")));
+
+      yield* page.act(open.call(Value.Set(false)), {
+        label: "branch leaves before its finalizer is released",
+        until: (actualRoot) => !has(actualRoot, "#branch"),
+      });
+      yield* Deferred.await(blocked);
+      expect(counts.released).toBe(0);
+
+      oldBranch.dispatchEvent(new Event("click"));
+      expect(branchCalls.value).toBe(0);
+
+      yield* page.act(
+        Effect.sync(() => root.querySelector("#sibling")?.dispatchEvent(new Event("click"))),
+        {
+          label: "sibling stays live while branch cleanup is blocked",
+          until: (actualRoot) => textOf(actualRoot, "#events") === "sibling",
+        },
+      );
+
+      yield* Deferred.succeed(release, void 0);
+      yield* Deferred.await(cleaned);
+      const firstRelease = yield* awaitRelease(receipts);
+      expect(firstRelease.node).toBe(oldBranch);
+      expect(counts.released).toBe(1);
+
+      oldBranch.dispatchEvent(new Event("click"));
+      expect(branchCalls.value).toBe(0);
+
+      yield* page.act(open.call(Value.Set(true)), {
+        label: "replacement branch appears after cleanup",
+        until: (actualRoot) => has(actualRoot, "#branch"),
+      });
+      expect(counts.attached).toBe(3);
+      const replacementBranch = Option.getOrThrow(
+        Option.fromNullishOr(root.querySelector("#branch")),
+      );
+      yield* page.act(
+        Effect.sync(() => replacementBranch.dispatchEvent(new Event("click"))),
+        {
+          label: "replacement branch handles a click",
+          until: (actualRoot) => textOf(actualRoot, "#events") === "sibling,branch",
+        },
+      );
+      expect(branchCalls.value).toBe(1);
+
+      yield* page.close;
+      yield* awaitRelease(receipts);
+      yield* awaitRelease(receipts);
+      expect(counts.released).toBe(3);
+      expect(counts.released).toBe(counts.attached);
       expect(root.childNodes).toHaveLength(0);
     }),
   );

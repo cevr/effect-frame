@@ -1,5 +1,5 @@
 import type { Source } from "effect-frame/actor";
-import { Effect, Exit, Fiber, Match, Option, Predicate, Queue, Ref, Scope, Stream } from "effect";
+import { Effect, Exit, Match, Option, Predicate, Queue, Ref, Scope, Stream } from "effect";
 import type { Accessor } from "@solidjs/signals";
 import {
   createRenderEffect,
@@ -164,13 +164,15 @@ interface Tracker {
   /**
    * Run an Effect on a fiber of its own, in the context captured at mount,
    * and interrupt it when `scope` closes. The fiber starts at once: an
-   * effect with no suspension completes before this returns.
+   * effect with no suspension completes before this returns. The scope owns
+   * the fiber before the fiber starts, so a closed scope cannot start it.
    */
   readonly run: (effect: Effect.Effect<unknown>, scope: Scope.Scope) => void;
   /**
    * Turn a handler into a host callback bound to the scope current at the
    * call: the scope of the branch or row whose element is being built. The
-   * fiber the callback forks is interrupted when that scope closes.
+   * scope owns the fiber before it starts, and interrupts it when that scope
+   * closes.
    */
   readonly handle: (handler: Handler) => (event: HostEvent) => void;
   /**
@@ -384,10 +386,10 @@ const makeTracker = Effect.fn("View.makeTracker")(function* () {
     commit,
     afterCommit: (task) => void pending.push(task),
     scope: () => current,
-    run: (effect, scope) => void Fiber.runIn(runFork(effect), scope),
+    run: (effect, scope) => void runSync(Effect.forkIn(effect, scope)),
     handle: (handler) => {
       const scope = current;
-      return (event) => void Fiber.runIn(runFork(handler(event)), scope);
+      return (event) => void runSync(Effect.forkIn(handler(event), scope));
     },
   } satisfies Tracker;
 });

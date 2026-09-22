@@ -5,10 +5,11 @@ Ticket: [Verify which DOM benchmarks Solid publishes against and how to run them
 Harness: [Set up the DOM benchmark harness and record the frame against Solid 2 and Octane](https://github.com/cevr/effect-frame/issues/61).
 Method: primary source review of benchmark repositories, their READMEs, and their manifests.
 Status: research complete. The local matrix and the official runner ran on
-2026-09-22. 52 of 54 local cells passed. The Effect Frame `swap-1k` cell fails
-in both engines and in the official runner because of a keyed-list reorder
-defect in Effect Frame. Issue 61 stays open for that defect and for the final
-rerun after the remaining map tickets.
+2026-09-22. 52 of 54 local cells passed on the first run. The Effect Frame
+`swap-1k` cell failed in both engines and in the official runner because of a
+keyed-list reorder defect in Effect Frame. The fix (`ed2d341`) was rerun the
+same day, and all 54 local cells and all 27 official workloads now pass. Issue
+61 stays open for the final rerun after the remaining map tickets.
 
 The receipts are in [dom-bench-results.json](./dom-bench-results.json). These
 are local measurements on one machine. They are not a ranking of the
@@ -102,79 +103,80 @@ are under `/tmp/effect-frame-bench-matrix-traces/`.
 
 ### Bun.WebView Chrome
 
-| Framework    | Operation         | State           | Samples | Median ms | Page ms | Controller ms |
-| ------------ | ----------------- | --------------- | ------- | --------- | ------- | ------------- |
-| effect-frame | `create-1k`       | ok              | 5       | 128.458   | 109.6   | 122.205       |
-| effect-frame | `replace-1k`      | ok              | 5       | 134.084   | 120.8   | 151.011       |
-| effect-frame | `update-10th-10k` | ok              | 5       | 750.312   | 693.6   | 861.384       |
-| effect-frame | `select-1k`       | ok              | 5       | 37.597    | 28.7    | 59.615        |
-| effect-frame | `swap-1k`         | failed (5 of 5) | 0       | —         | —       | —             |
-| effect-frame | `remove-1k`       | ok              | 5       | 40.646    | 35.6    | 66.42         |
-| effect-frame | `create-10k`      | ok              | 5       | 1,194.542 | 1,123.1 | 1,138.868     |
-| effect-frame | `append-10k`      | ok              | 5       | 788.897   | 783.5   | 953.934       |
-| effect-frame | `clear-10k`       | ok              | 5       | 418.192   | 410.3   | 585.138       |
-| solid2       | `create-1k`       | ok              | 5       | 79.579    | 66.4    | 76.393        |
-| solid2       | `replace-1k`      | ok              | 5       | 74.147    | 66.9    | 81.155        |
-| solid2       | `update-10th-10k` | ok              | 5       | 487.567   | 486.7   | 563.35        |
-| solid2       | `select-1k`       | ok              | 5       | 32.727    | 17.7    | 33.075        |
-| solid2       | `swap-1k`         | ok              | 5       | 19.989    | 6.2     | 21.045        |
-| solid2       | `remove-1k`       | ok              | 5       | 22.223    | 9       | 26.662        |
-| solid2       | `create-10k`      | ok              | 5       | 976.43    | 972.7   | 983.68        |
-| solid2       | `append-10k`      | ok              | 5       | 596.376   | 595.4   | 671.731       |
-| solid2       | `clear-10k`       | ok              | 5       | 40.087    | 27.9    | 104.9         |
-| octane       | `create-1k`       | ok              | 5       | 45.382    | 36.6    | 48.252        |
-| octane       | `replace-1k`      | ok              | 5       | 48.966    | 36      | 54.894        |
-| octane       | `update-10th-10k` | ok              | 5       | 567.521   | 566.7   | 587.55        |
-| octane       | `select-1k`       | ok              | 5       | 32.722    | 19.3    | 36.112        |
-| octane       | `swap-1k`         | ok              | 5       | 43.983    | 29.6    | 45.731        |
-| octane       | `remove-1k`       | ok              | 5       | 43.172    | 32.4    | 49.759        |
-| octane       | `create-10k`      | ok              | 5       | 723.234   | 717.4   | 736.515       |
-| octane       | `append-10k`      | ok              | 5       | 665.052   | 663.5   | 684.209       |
-| octane       | `clear-10k`       | ok              | 5       | 44.669    | 34.9    | 55.669        |
+| Framework    | Operation         | State      | Samples | Median ms | Page ms | Controller ms |
+| ------------ | ----------------- | ---------- | ------- | --------- | ------- | ------------- |
+| effect-frame | `create-1k`       | ok         | 5       | 128.458   | 109.6   | 122.205       |
+| effect-frame | `replace-1k`      | ok         | 5       | 134.084   | 120.8   | 151.011       |
+| effect-frame | `update-10th-10k` | ok         | 5       | 750.312   | 693.6   | 861.384       |
+| effect-frame | `select-1k`       | ok         | 5       | 37.597    | 28.7    | 59.615        |
+| effect-frame | `swap-1k`         | ok (rerun) | 5       | 39.511    | —       | —             |
+| effect-frame | `remove-1k`       | ok         | 5       | 40.646    | 35.6    | 66.42         |
+| effect-frame | `create-10k`      | ok         | 5       | 1,194.542 | 1,123.1 | 1,138.868     |
+| effect-frame | `append-10k`      | ok         | 5       | 788.897   | 783.5   | 953.934       |
+| effect-frame | `clear-10k`       | ok         | 5       | 418.192   | 410.3   | 585.138       |
+| solid2       | `create-1k`       | ok         | 5       | 79.579    | 66.4    | 76.393        |
+| solid2       | `replace-1k`      | ok         | 5       | 74.147    | 66.9    | 81.155        |
+| solid2       | `update-10th-10k` | ok         | 5       | 487.567   | 486.7   | 563.35        |
+| solid2       | `select-1k`       | ok         | 5       | 32.727    | 17.7    | 33.075        |
+| solid2       | `swap-1k`         | ok         | 5       | 19.989    | 6.2     | 21.045        |
+| solid2       | `remove-1k`       | ok         | 5       | 22.223    | 9       | 26.662        |
+| solid2       | `create-10k`      | ok         | 5       | 976.43    | 972.7   | 983.68        |
+| solid2       | `append-10k`      | ok         | 5       | 596.376   | 595.4   | 671.731       |
+| solid2       | `clear-10k`       | ok         | 5       | 40.087    | 27.9    | 104.9         |
+| octane       | `create-1k`       | ok         | 5       | 45.382    | 36.6    | 48.252        |
+| octane       | `replace-1k`      | ok         | 5       | 48.966    | 36      | 54.894        |
+| octane       | `update-10th-10k` | ok         | 5       | 567.521   | 566.7   | 587.55        |
+| octane       | `select-1k`       | ok         | 5       | 32.722    | 19.3    | 36.112        |
+| octane       | `swap-1k`         | ok         | 5       | 43.983    | 29.6    | 45.731        |
+| octane       | `remove-1k`       | ok         | 5       | 43.172    | 32.4    | 49.759        |
+| octane       | `create-10k`      | ok         | 5       | 723.234   | 717.4   | 736.515       |
+| octane       | `append-10k`      | ok         | 5       | 665.052   | 663.5   | 684.209       |
+| octane       | `clear-10k`       | ok         | 5       | 44.669    | 34.9    | 55.669        |
 
 ### Bun.WebView WebKit
 
-| Framework    | Operation         | State           | Samples | Median ms | Page ms | Controller ms |
-| ------------ | ----------------- | --------------- | ------- | --------- | ------- | ------------- |
-| effect-frame | `create-1k`       | ok              | 5       | 77        | 77      | 90.457        |
-| effect-frame | `replace-1k`      | ok              | 5       | 120       | 120     | 127.574       |
-| effect-frame | `update-10th-10k` | ok              | 5       | 205       | 205     | 269.412       |
-| effect-frame | `select-1k`       | ok              | 5       | 18        | 18      | 29.078        |
-| effect-frame | `swap-1k`         | failed (5 of 5) | 0       | —         | —       | —             |
-| effect-frame | `remove-1k`       | ok              | 5       | 20        | 20      | 23.124        |
-| effect-frame | `create-10k`      | ok              | 5       | 556       | 556     | 569.389       |
-| effect-frame | `append-10k`      | ok              | 5       | 214       | 214     | 278.233       |
-| effect-frame | `clear-10k`       | ok              | 5       | 543       | 543     | 607.051       |
-| solid2       | `create-1k`       | ok              | 5       | 32        | 32      | 55.716        |
-| solid2       | `replace-1k`      | ok              | 5       | 40        | 40      | 44.209        |
-| solid2       | `update-10th-10k` | ok              | 5       | 15        | 15      | 54.382        |
-| solid2       | `select-1k`       | ok              | 5       | 3         | 3       | 6.054         |
-| solid2       | `swap-1k`         | ok              | 5       | 3         | 3       | 5.249         |
-| solid2       | `remove-1k`       | ok              | 5       | 3         | 3       | 5.067         |
-| solid2       | `create-10k`      | ok              | 5       | 237       | 237     | 245.434       |
-| solid2       | `append-10k`      | ok              | 5       | 34        | 34      | 51.543        |
-| solid2       | `clear-10k`       | ok              | 5       | 47        | 47      | 48.808        |
-| octane       | `create-1k`       | ok              | 5       | 23        | 23      | 48.17         |
-| octane       | `replace-1k`      | ok              | 5       | 31        | 31      | 34.352        |
-| octane       | `update-10th-10k` | ok              | 5       | 106       | 106     | 146.127       |
-| octane       | `select-1k`       | ok              | 5       | 12        | 12      | 14.363        |
-| octane       | `swap-1k`         | ok              | 5       | 42        | 42      | 44.288        |
-| octane       | `remove-1k`       | ok              | 5       | 32        | 32      | 45.633        |
-| octane       | `create-10k`      | ok              | 5       | 196       | 196     | 214.853       |
-| octane       | `append-10k`      | ok              | 5       | 122       | 122     | 141.36        |
-| octane       | `clear-10k`       | ok              | 5       | 45        | 45      | 48.935        |
+| Framework    | Operation         | State      | Samples | Median ms | Page ms | Controller ms |
+| ------------ | ----------------- | ---------- | ------- | --------- | ------- | ------------- |
+| effect-frame | `create-1k`       | ok         | 5       | 77        | 77      | 90.457        |
+| effect-frame | `replace-1k`      | ok         | 5       | 120       | 120     | 127.574       |
+| effect-frame | `update-10th-10k` | ok         | 5       | 205       | 205     | 269.412       |
+| effect-frame | `select-1k`       | ok         | 5       | 18        | 18      | 29.078        |
+| effect-frame | `swap-1k`         | ok (rerun) | 5       | 20        | —       | —             |
+| effect-frame | `remove-1k`       | ok         | 5       | 20        | 20      | 23.124        |
+| effect-frame | `create-10k`      | ok         | 5       | 556       | 556     | 569.389       |
+| effect-frame | `append-10k`      | ok         | 5       | 214       | 214     | 278.233       |
+| effect-frame | `clear-10k`       | ok         | 5       | 543       | 543     | 607.051       |
+| solid2       | `create-1k`       | ok         | 5       | 32        | 32      | 55.716        |
+| solid2       | `replace-1k`      | ok         | 5       | 40        | 40      | 44.209        |
+| solid2       | `update-10th-10k` | ok         | 5       | 15        | 15      | 54.382        |
+| solid2       | `select-1k`       | ok         | 5       | 3         | 3       | 6.054         |
+| solid2       | `swap-1k`         | ok         | 5       | 3         | 3       | 5.249         |
+| solid2       | `remove-1k`       | ok         | 5       | 3         | 3       | 5.067         |
+| solid2       | `create-10k`      | ok         | 5       | 237       | 237     | 245.434       |
+| solid2       | `append-10k`      | ok         | 5       | 34        | 34      | 51.543        |
+| solid2       | `clear-10k`       | ok         | 5       | 47        | 47      | 48.808        |
+| octane       | `create-1k`       | ok         | 5       | 23        | 23      | 48.17         |
+| octane       | `replace-1k`      | ok         | 5       | 31        | 31      | 34.352        |
+| octane       | `update-10th-10k` | ok         | 5       | 106       | 106     | 146.127       |
+| octane       | `select-1k`       | ok         | 5       | 12        | 12      | 14.363        |
+| octane       | `swap-1k`         | ok         | 5       | 42        | 42      | 44.288        |
+| octane       | `remove-1k`       | ok         | 5       | 32        | 32      | 45.633        |
+| octane       | `create-10k`      | ok         | 5       | 196       | 196     | 214.853       |
+| octane       | `append-10k`      | ok         | 5       | 122       | 122     | 141.36        |
+| octane       | `clear-10k`       | ok         | 5       | 45        | 45      | 48.935        |
 
 The `--official` invocations repeated the Chrome cells on the same bundles.
 Those repeats are in `officialRunLocalChromeRepeat` in the JSON receipt. Cells
 at or above 400 ms moved by at most 6.2% between the two runs. Cells under
 150 ms moved by up to 36% (Solid 2 `select-1k`: 32.727 ms, then 20.917 ms), so
 the short Chrome cells do not separate small differences at five samples. The
-Effect Frame `swap-1k` repeat failed the same way.
+Effect Frame `swap-1k` repeat failed the same way before the fix.
 
 ### Failed and repaired cells
 
-- **Effect Frame `swap-1k`, both engines: open framework defect.** All ten
-  samples timed out waiting for completion. The keyed list reorder in
+- **Effect Frame `swap-1k`, both engines: repaired framework defect.** All ten
+  samples of the first run timed out waiting for completion. The keyed list
+  reorder in
   `packages/effect-frame/src/view/runtime.ts` scans the new order from left to
   right and inserts each moved row before the next row's current node. That
   node can itself move later, so a swap of rows 1 and 998 renders the wrong
@@ -182,7 +184,16 @@ Effect Frame `swap-1k` repeat failed the same way.
   reproduction of `[1,2,3,4,5]` to `[1,4,3,2,5]` renders `[1,3,2,4,5]`. The
   official runner rejects the same bundle: `05_swap1k` fails with "expected 2,
   but was 997" at row 999. The failure receipts are
-  `/tmp/effect-frame-bench-matrix-effect-frame-failures.jsonl`.
+  `/tmp/effect-frame-bench-matrix-effect-frame-failures.jsonl`. The fix
+  (`ed2d341`) keeps the longest run of rows already in order and moves only the
+  other rows, walking backwards so each anchor is already in its final place.
+  A swap now moves two rows. The rerun at `ed2d341` passed five of five samples
+  in each engine (Chrome median 39.511 ms, min 37.223, max 44.396; WebKit
+  median 20 ms, min 19, max 20) and the official `05_swap1k` passed five of
+  five. The rerun reports only the median, min, and max, so its page and
+  controller columns are empty. The receipts are
+  `/tmp/effect-frame-bench-swapfix.log` and
+  `/tmp/effect-frame-bench-swapfix-stages.jsonl`.
 - **Solid 2 `select-1k`, both engines: repaired harness defect.** The first
   Solid 2 run failed all ten samples. The fixture passed the row class to
   Solid 2 `spread` as a function value. Solid 2 tracks getters, not function
@@ -198,35 +209,35 @@ fixture, with `--count 5 --headless --nothrottling` and Google Chrome
 `/tmp/effect-frame-bench-official-<framework>.log`, and the result files are
 under `/tmp/effect-frame-bench-official-results/`.
 
-| Framework    | Benchmark                | State  | Samples | Total median ms | Script median ms | Paint median ms |
-| ------------ | ------------------------ | ------ | ------- | --------------- | ---------------- | --------------- |
-| effect-frame | `01_run1k`               | ok     | 5       | 61.5            | 29.4             | 15.7            |
-| effect-frame | `02_replace1k`           | ok     | 5       | 121.6           | 80.8             | 16.7            |
-| effect-frame | `03_update10th1k_x16`    | ok     | 5       | 49.7            | 14.1             | 2.8             |
-| effect-frame | `04_select1k`            | ok     | 15      | 31.9            | 14.1             | 1.5             |
-| effect-frame | `05_swap1k`              | failed | 0       | —               | —                | —               |
-| effect-frame | `06_remove-one-1k`       | ok     | 5       | 49.5            | 14.1             | 5.5             |
-| effect-frame | `07_create10k`           | ok     | 5       | 722.3           | 265              | 159.7           |
-| effect-frame | `08_create1k-after1k_x2` | ok     | 5       | 124.5           | 70.4             | 18.9            |
-| effect-frame | `09_clear1k_x8`          | ok     | 5       | 41.8            | 25.7             | 0.8             |
-| solid2       | `01_run1k`               | ok     | 5       | 56.5            | 39.1             | 15.3            |
-| solid2       | `02_replace1k`           | ok     | 5       | 61.7            | 44.5             | 15.2            |
-| solid2       | `03_update10th1k_x16`    | ok     | 5       | 15.6            | 0.6              | 2.3             |
-| solid2       | `04_select1k`            | ok     | 15      | 14.8            | 1.7              | 0.6             |
-| solid2       | `05_swap1k`              | ok     | 5       | 15.8            | 0.4              | 3               |
-| solid2       | `06_remove-one-1k`       | ok     | 5       | 15.9            | 0.4              | 4.5             |
-| solid2       | `07_create10k`           | ok     | 5       | 566.3           | 386.9            | 151.3           |
-| solid2       | `08_create1k-after1k_x2` | ok     | 5       | 61.9            | 42.6             | 17.3            |
-| solid2       | `09_clear1k_x8`          | ok     | 5       | 15.3            | 2.6              | 0.3             |
-| octane       | `01_run1k`               | ok     | 5       | 29.5            | 12.4             | 15.5            |
-| octane       | `02_replace1k`           | ok     | 5       | 32.1            | 14.8             | 15.6            |
-| octane       | `03_update10th1k_x16`    | ok     | 5       | 18.2            | 10.2             | 2.3             |
-| octane       | `04_select1k`            | ok     | 15      | 14.8            | 9.3              | 0.6             |
-| octane       | `05_swap1k`              | ok     | 5       | 28.4            | 12.4             | 14.1            |
-| octane       | `06_remove-one-1k`       | ok     | 5       | 29.3            | 24.1             | 14.5            |
-| octane       | `07_create10k`           | ok     | 5       | 298.5           | 104.3            | 165.5           |
-| octane       | `08_create1k-after1k_x2` | ok     | 5       | 39.8            | 20.6             | 17.5            |
-| octane       | `09_clear1k_x8`          | ok     | 5       | 15.2            | 3.4              | 0.3             |
+| Framework    | Benchmark                | State | Samples | Total median ms | Script median ms | Paint median ms |
+| ------------ | ------------------------ | ----- | ------- | --------------- | ---------------- | --------------- |
+| effect-frame | `01_run1k`               | ok    | 5       | 61.5            | 29.4             | 15.7            |
+| effect-frame | `02_replace1k`           | ok    | 5       | 121.6           | 80.8             | 16.7            |
+| effect-frame | `03_update10th1k_x16`    | ok    | 5       | 49.7            | 14.1             | 2.8             |
+| effect-frame | `04_select1k`            | ok    | 15      | 31.9            | 14.1             | 1.5             |
+| effect-frame | `05_swap1k`              | ok    | 5       | 51.1            | 14.7             | 3.5             |
+| effect-frame | `06_remove-one-1k`       | ok    | 5       | 49.5            | 14.1             | 5.5             |
+| effect-frame | `07_create10k`           | ok    | 5       | 722.3           | 265              | 159.7           |
+| effect-frame | `08_create1k-after1k_x2` | ok    | 5       | 124.5           | 70.4             | 18.9            |
+| effect-frame | `09_clear1k_x8`          | ok    | 5       | 41.8            | 25.7             | 0.8             |
+| solid2       | `01_run1k`               | ok    | 5       | 56.5            | 39.1             | 15.3            |
+| solid2       | `02_replace1k`           | ok    | 5       | 61.7            | 44.5             | 15.2            |
+| solid2       | `03_update10th1k_x16`    | ok    | 5       | 15.6            | 0.6              | 2.3             |
+| solid2       | `04_select1k`            | ok    | 15      | 14.8            | 1.7              | 0.6             |
+| solid2       | `05_swap1k`              | ok    | 5       | 15.8            | 0.4              | 3               |
+| solid2       | `06_remove-one-1k`       | ok    | 5       | 15.9            | 0.4              | 4.5             |
+| solid2       | `07_create10k`           | ok    | 5       | 566.3           | 386.9            | 151.3           |
+| solid2       | `08_create1k-after1k_x2` | ok    | 5       | 61.9            | 42.6             | 17.3            |
+| solid2       | `09_clear1k_x8`          | ok    | 5       | 15.3            | 2.6              | 0.3             |
+| octane       | `01_run1k`               | ok    | 5       | 29.5            | 12.4             | 15.5            |
+| octane       | `02_replace1k`           | ok    | 5       | 32.1            | 14.8             | 15.6            |
+| octane       | `03_update10th1k_x16`    | ok    | 5       | 18.2            | 10.2             | 2.3             |
+| octane       | `04_select1k`            | ok    | 15      | 14.8            | 9.3              | 0.6             |
+| octane       | `05_swap1k`              | ok    | 5       | 28.4            | 12.4             | 14.1            |
+| octane       | `06_remove-one-1k`       | ok    | 5       | 29.3            | 24.1             | 14.5            |
+| octane       | `07_create10k`           | ok    | 5       | 298.5           | 104.3            | 165.5           |
+| octane       | `08_create1k-after1k_x2` | ok    | 5       | 39.8            | 20.6             | 17.5            |
+| octane       | `09_clear1k_x8`          | ok    | 5       | 15.2            | 3.4              | 0.3             |
 
 At the pinned revision, `03_` updates every 10th row of 1,000 rows over 16
 cycles, `08_` appends 1,000 rows to 1,000 rows, and `09_` clears 1,000 rows.
@@ -776,7 +787,8 @@ list, and GitHub contents-API directory listings.
 
 The harness ran the full three-framework, two-engine matrix at five samples
 per cell, and the pinned official runner at five samples per workload. The
-Effect Frame `swap-1k` cell has no timing. Every local duration is specific to
+Effect Frame `swap-1k` timings come from the rerun after the fix, not from the
+matrix run. Every local duration is specific to
 the machine, browser build, driver, page markup, and workload receipt recorded
 above. Five samples is fewer than the krausest default of 15.
 

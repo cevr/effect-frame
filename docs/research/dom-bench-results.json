@@ -105,15 +105,15 @@
         "engine": "chrome",
         "framework": "effect-frame",
         "operation": "swap-1k",
-        "state": "failed",
-        "samples": 0,
-        "failed": 5,
-        "medianMs": null,
-        "minMs": null,
-        "maxMs": null,
+        "state": "ok",
+        "samples": 5,
+        "failed": 0,
+        "medianMs": 39.511,
+        "minMs": 37.223,
+        "maxMs": 44.396,
         "medianPageOperationMs": null,
         "medianControllerMs": null,
-        "errors": ["operation completion: benchmark operation completion timed out after 15000ms"]
+        "note": "rerun at ed2d341 after the keyed reorder fix; page and controller medians not recorded"
       },
       {
         "engine": "chrome",
@@ -457,15 +457,15 @@
         "engine": "webkit",
         "framework": "effect-frame",
         "operation": "swap-1k",
-        "state": "failed",
-        "samples": 0,
-        "failed": 5,
-        "medianMs": null,
-        "minMs": null,
-        "maxMs": null,
+        "state": "ok",
+        "samples": 5,
+        "failed": 0,
+        "medianMs": 20.0,
+        "minMs": 19.0,
+        "maxMs": 20.0,
         "medianPageOperationMs": null,
         "medianControllerMs": null,
-        "errors": ["operation completion: benchmark operation completion timed out after 15000ms"]
+        "note": "rerun at ed2d341 after the keyed reorder fix; page and controller medians not recorded"
       },
       {
         "engine": "webkit",
@@ -765,7 +765,8 @@
       "reason": "benchmark operation completion timed out after 15000ms",
       "cause": "effect-frame keyed list reorder places moved rows before the next row's current node while scanning left to right. Swapping positions 1 and 998 of 1,000 rows renders the wrong order, so the completion check never accepts the DOM. The official runner rejects the same bundle (05_swap1k: expected 2 at row 999, found 997). A happy-dom reproduction of [1,2,3,4,5] to [1,4,3,2,5] renders [1,3,2,4,5].",
       "source": "packages/effect-frame/src/view/runtime.ts (list reorder)",
-      "state": "open framework defect"
+      "state": "repaired framework defect",
+      "repair": "ed2d341: keep the longest in-order run, move the rest walking backwards; rerun passed 5 of 5 in each engine and official 05_swap1k"
     }
   ],
   "supersededReceipts": [
@@ -1033,7 +1034,11 @@
       {
         "framework": "effect-frame",
         "benchmark": "05_swap1k",
-        "reason": "checkElementContainsText tbody>tr:nth-of-type(999)>td:nth-of-type(1) failed. expected 2, but was 997"
+        "samples": 5,
+        "totalMedianMs": 51.1,
+        "scriptMedianMs": 14.7,
+        "paintMedianMs": 3.5,
+        "note": "rerun at ed2d341 after the keyed reorder fix; first run failed: checkElementContainsText tbody>tr:nth-of-type(999)>td:nth-of-type(1) failed. expected 2, but was 997"
       }
     ],
     "notes": [
@@ -1106,15 +1111,16 @@
         "engine": "chrome",
         "framework": "effect-frame",
         "operation": "swap-1k",
+        "medianPageOperationMs": null,
+        "medianControllerMs": null,
         "state": "failed",
         "samples": 0,
         "failed": 5,
         "medianMs": null,
         "minMs": null,
         "maxMs": null,
-        "medianPageOperationMs": null,
-        "medianControllerMs": null,
-        "errors": ["operation completion: benchmark operation completion timed out after 15000ms"]
+        "errors": ["operation completion: benchmark operation completion timed out after 15000ms"],
+        "repairedBy": "ed2d341 (see bunWebView rerun)"
       },
       {
         "engine": "chrome",

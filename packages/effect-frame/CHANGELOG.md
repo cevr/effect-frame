@@ -1,5 +1,11 @@
 # effect-frame
 
+## 0.8.1
+
+### Patch Changes
+
+- [`b6b37a5`](https://github.com/cevr/effect-frame/commit/b6b37a586a142d9e62ddf31c8a19a212ed043481) Thanks [@cevr](https://github.com/cevr)! - Keep local actors and hosted durable implementations on their private command engines while preserving the existing actor and transport contracts.
+
 ## 0.8.0
 
 ### Minor Changes

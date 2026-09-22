@@ -287,3 +287,5 @@ export const factoryFromLayer = (layer: Layer.Layer<MailboxStore>): StoreFactory
   // its own lifetime, so the layer is built here and nowhere higher.
   // @effect-diagnostics-next-line strictEffectProvide:off
   Effect.provide(MailboxStore, layer);
+
+export * as QueryTest from "./query.js";

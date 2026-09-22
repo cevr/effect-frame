@@ -305,6 +305,14 @@ Rows this ticket restates are listed once under the deciding ticket.
 | Closing every row aborts an in-flight batch and cleans the server request                | `packages/effect-frame/tests/view/query-batch.test.tsx` — both row scopes close, `QueryCache.active` is empty, the HTTP abort reaches the host, and the resolver cleanup runs before the gate opens    | Proven |
 | A command refreshes active dependent batched keys through one resolver invocation        | `packages/effect-frame/tests/actor/query.test.ts` — "refreshes all active dependent keys through one batch resolver" accepts both refreshed values after one command reply                             | Proven |
 
+### Define public test transport and query handlers ([#59](https://github.com/cevr/effect-frame/issues/59))
+
+| Claim                                                                                      | Proof                                                                                                                                                                                                               | Status |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| A view test exercises the real QueryCache through a local host with readiness and controls | `packages/effect-frame/tests/view/query-test-layer.test.tsx` — `QueryTest.layer` serves a real query through `Loading`, `readyWithStale`, and a command-driven refresh without HTTP                                 | Proven |
+| Canonical query descriptors keep batching and per-key failures typed                       | `packages/effect-frame/tests/view/query-test-layer.test.tsx` — one local batch serves one row and fails its neighbor; `packages/effect-frame/tests/actor/query-types.test.ts` — wrong args and results are rejected | Proven |
+| A local query entry releases when its owner scope closes                                   | `packages/effect-frame/tests/view/query-test-layer.test.tsx` — the third row is active in a child scope and leaves `QueryCache.active` after that scope closes                                                      | Proven |
+
 ### Decide how a client resolves an Uncertain command from the changes stream ([#29](https://github.com/cevr/effect-frame/issues/29))
 
 Rows this ticket restates are listed once under the deciding ticket.

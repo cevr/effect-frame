@@ -9,6 +9,7 @@ import {
   query,
 } from "effect-frame/actor";
 import { ref } from "effect-frame/actor/client";
+import { QueryTest } from "effect-frame/actor/testing";
 import { Context, Effect, Layer, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
@@ -77,6 +78,20 @@ const ActorReadingLive = implementQuery(ActorReading, (args) =>
   }),
 );
 
+const TestLayerQuery = implementQuery(Single, () =>
+  Effect.map(Effect.service(ApplicationValue), (service) => ({ value: service.value })),
+);
+
+// @ts-expect-error A handler receives the contract's decoded argument shape.
+implementQuery(Single, (args: { readonly wrong: string }) => Effect.succeed({ value: args.wrong }));
+
+// @ts-expect-error A handler returns the contract's declared result shape.
+implementQuery(Single, () => Effect.succeed({ value: "wrong" }));
+
+const testLayerWithApplicationRequirement = QueryTest.layer({
+  queries: [TestLayerQuery],
+});
+
 const host = ActorHost.layerMemory([ProbeLive], [SingleLive, BatchedLive, ActorReadingLive]).pipe(
   Layer.provide(Layer.succeed(ApplicationValue, ApplicationValue.of({ value: 40 }))),
 );
@@ -94,12 +109,18 @@ const missingApplicationValueIsVisible: Equals<
 /** Providing the service discharges only that application requirement. */
 const hostRequirementsAreDischarged: Equals<Layer.Services<typeof host>, never> = true;
 
+const queryTestRequirementsArePreserved: Equals<
+  Layer.Services<typeof testLayerWithApplicationRequirement>,
+  ApplicationValue
+> = true;
+
 describe("query implementation service requirements", () => {
   it.scoped.layer(host)("preserves application services through ActorHost", () =>
     Effect.gen(function* () {
       const transport = yield* ActorTransport;
       expect(missingApplicationValueIsVisible).toBe(true);
       expect(hostRequirementsAreDischarged).toBe(true);
+      expect(queryTestRequirementsArePreserved).toBe(true);
       batchReleases.current = 0;
       const single = yield* transport.query({ query: Single.name, version: 1, args: "{}" });
       expect(single).toBe('{"value":40}');

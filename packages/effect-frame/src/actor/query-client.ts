@@ -16,7 +16,7 @@ import {
 import type { AnyQuery, ArgsOf, QueryFailure, QueryKey, QueryState, ResultOf } from "./query.js";
 import { Failed, Loading, Ready, canonicalize, keyOf, markStale } from "./query.js";
 import type { Source } from "./source.js";
-import type { Refreshed } from "./transport.js";
+import type { Refreshed, TransportService } from "./transport.js";
 import { ActorTransport } from "./transport.js";
 import { Unreachable } from "./vocabulary.js";
 
@@ -397,6 +397,17 @@ const make = (): Effect.Effect<QueryCacheService> =>
   });
 
 export const layer: LayerType.Layer<QueryCache> = Layer.effect(QueryCache, make());
+
+export namespace QueryCache {
+  /**
+   * Builds the real cache against an in-process host. The host owns all
+   * handler behavior; this helper only composes the cache and transport.
+   */
+  export const layerTest = <R>(
+    host: Effect.Effect<TransportService, never, R | Scope.Scope>,
+  ): LayerType.Layer<QueryCache | ActorTransport, never, R> =>
+    Layer.merge(layer, ActorTransport.layerLocal(host));
+}
 
 /**
  * Declare one query and get its entry. The view-facing name; it is

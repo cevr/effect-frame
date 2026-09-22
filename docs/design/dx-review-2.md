@@ -137,6 +137,8 @@ Tests today drive a real host through the HTTP transport, or build `QueryState` 
 
 Ask: `QueryCache.layerTest({ [contract.name]: (args) => Effect<Result> })` and `ActorTransport.layerLocal(host)`, so a view test names its data in the test.
 
+Resolution: `ActorTransport.layerLocal(host)` is the in-process transport boundary. `QueryTest.layer({ queries: [implementQuery(...), Query.batched(...)], implementations })` composes that transport with the real `QueryCache` and host. The query descriptors remain the canonical server implementations, so argument, result, and service requirements stay typed. A view test can therefore exercise readiness, controls, batching, failures, actor invalidation, and scope release without HTTP.
+
 ## Band C: small, but people will ask
 
 - `classList={{ on: source }}` or `class={bind(source, fn)}` is fine; document the idiom.

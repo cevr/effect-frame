@@ -1,5 +1,5 @@
-import type { Layer as LayerType } from "effect";
-import { Context, Effect, Layer, Option, Semaphore, Stream } from "effect";
+import type { Layer as LayerType, Scope } from "effect";
+import { Context, Effect, Option, Semaphore, Stream } from "effect";
 import type { Address } from "./contract.js";
 import type { AnyImplementation, HostedInstance } from "./implement.js";
 import { MailboxStore } from "./mailbox-store.js";
@@ -53,7 +53,9 @@ const unknownQueryRefresh = (key: QueryKey): Refreshed => ({
   error: UnknownQuery.make({ query: key.query }),
 });
 
-const make = <R>(options: HostOptions<R>) =>
+export const make = <R>(
+  options: HostOptions<R>,
+): Effect.Effect<TransportService, never, R | Scope.Scope> =>
   Effect.gen(function* () {
     const hostScope = yield* Effect.scope;
     const context = yield* Effect.context<R>();
@@ -198,7 +200,7 @@ const make = <R>(options: HostOptions<R>) =>
  * and the server in one runtime.
  */
 export const layer = <R>(options: HostOptions<R>): LayerType.Layer<ActorTransport, never, R> =>
-  Layer.effect(ActorTransport, make(options));
+  ActorTransport.layerLocal<R>(make(options));
 
 export const layerMemory = <R>(
   implementations: ReadonlyArray<AnyImplementation<R>>,

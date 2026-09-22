@@ -8,8 +8,8 @@ import {
   SubscriptionRef,
 } from "effect";
 import type { Scope } from "effect";
-import { Match, Show } from "./control.js";
-import type { Node } from "./jsx-runtime.js";
+import { Match } from "./control.js";
+import type { Node, RetainedNode } from "./jsx-runtime.js";
 import type { QueryState } from "./query-state.js";
 import { held } from "./query-state.js";
 
@@ -316,15 +316,21 @@ const derive = <A,>(
 // The scope views
 // ---------------------------------------------------------------------------
 
+const retained = (when: Source<boolean>, fallback: Node, content: Node): RetainedNode => ({
+  _tag: "Retained",
+  when,
+  fallback,
+  content,
+});
+
 /**
  * Provide a `LoadingScope` to the children and show `fallback` until every
  * query registered under it has a first value. Afterwards the content stays,
  * whatever the queries do next.
  *
- * `Show` is the whole mechanism: the fallback and the content are both built,
- * and the derived pending source picks which one is in the tree. Nothing is
- * thrown, so nothing has to be caught, and the content's host nodes are never
- * discarded once they exist.
+ * The runtime retains the content owner while a fallback is presented. Its
+ * host writes are staged until the content is visible, so setup, keyed rows,
+ * and their registrations can begin without leaking hidden output.
  */
 export const Loading = <E, R>(
   props: LoadingProps<E, R>,
@@ -332,16 +338,14 @@ export const Loading = <E, R>(
   Effect.gen(function* () {
     const registry = yield* makeRegistry;
     const content = yield* Effect.provideService(props.children, LoadingScope, registry);
-    // Build the content before taking the first pending snapshot. Child setup
-    // has completed at this boundary, so every registration made by the
-    // initial tree contributes to the server's one frame. Later registrations
-    // still arrive through the registry source.
+    // The immediate children Effect runs before this snapshot, so registrations
+    // made there contribute at once. Deferred producers register through the
+    // retained runtime node and still drive this source after mount.
     const pending = yield* pendingOf(registry);
-    return (
-      <>
-        <Show when={pending}>{props.fallback}</Show>
-        <Show when={select(pending, (value) => !value)}>{content}</Show>
-      </>
+    return retained(
+      select(pending, (value) => !value),
+      props.fallback,
+      content,
     );
   });
 
@@ -371,17 +375,15 @@ export const Errored = <E, R>(
   Effect.gen(function* () {
     const registry = yield* makeRegistry;
     const content = yield* Effect.provideService(props.children, ErroredScope, registry);
-    // Build the content before taking the first failure snapshot. Child setup
-    // has completed at this boundary, so an already Failed query contributes
-    // to the server's one frame. Later failures still arrive through the
-    // registry source.
+    // The immediate children Effect runs before this snapshot, so an already
+    // Failed registration contributes at once. Deferred producers register
+    // through the retained runtime node and still drive this source later.
     const failure = yield* derive(registry, firstFailure);
     const failed = select(failure, Option.isSome);
-    return (
-      <>
-        <Show when={failed}>{props.fallback(failure)}</Show>
-        <Show when={select(failed, (value) => !value)}>{content}</Show>
-      </>
+    return retained(
+      select(failed, (value) => !value),
+      props.fallback(failure),
+      content,
     );
   });
 

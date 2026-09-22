@@ -94,8 +94,25 @@ export interface PortalNode {
   readonly children: Node;
 }
 
+/**
+ * A readiness boundary keeps its content owner alive while presenting a
+ * fallback. The runtime owns this node; views only receive it through
+ * `Loading` and `Errored`.
+ */
+export interface RetainedNode {
+  readonly _tag: "Retained";
+  readonly when: Source<boolean>;
+  readonly fallback: Node;
+  readonly content: Node;
+}
+
 /** Control flow in the tree. `control.ts` builds it; `runtime.ts` reads it. */
-export type ControlNode = ForNode<unknown> | ShowNode<unknown> | MatchNode<unknown> | PortalNode;
+export type ControlNode =
+  | ForNode<unknown>
+  | ShowNode<unknown>
+  | MatchNode<unknown>
+  | PortalNode
+  | RetainedNode;
 
 export const Empty: EmptyNode = { _tag: "Empty" };
 

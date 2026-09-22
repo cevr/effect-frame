@@ -29,6 +29,7 @@ import type {
   Node,
   PortalNode,
   PropValue,
+  RetainedNode,
   ShowNode,
 } from "./jsx-runtime.js";
 import type { Attached, Bound, Handler, Prepared, View } from "./view.js";
@@ -212,6 +213,303 @@ interface HostWrite<HostNode> {
 interface TrackedHost<HostNode> extends Host<HostNode> {
   readonly cleanup: () => void;
 }
+
+interface PresentationHost<HostNode> extends Host<HostNode> {
+  readonly show: () => void;
+  readonly hide: () => void;
+  readonly dispose: () => void;
+}
+
+/**
+ * Present content through a host without closing its owner while it is
+ * hidden. Nodes made by this host can still build their detached descendants;
+ * inserts into an external parent are kept as a logical child list until the
+ * presentation is shown. The host is private to a retained readiness node.
+ */
+const presentationHost = <HostNode>(
+  host: Host<HostNode>,
+  initiallyVisible: boolean,
+): PresentationHost<HostNode> => {
+  const created = new Set<HostNode>();
+  const physicalParent = new Map<HostNode, HostNode>();
+  const physicalChildren = new Map<HostNode, Set<HostNode>>();
+  const externalParent = new Map<HostNode, HostNode>();
+  const externalChildren = new Map<HostNode, Array<HostNode>>();
+  const mounted = new Map<HostNode, HostNode>();
+  const attachments = new Map<HostNode, Array<(node: HostNode) => void>>();
+  let visible = initiallyVisible;
+
+  const childrenOf = (parent: HostNode): Set<HostNode> => {
+    const createdChildren = new Set<HostNode>();
+    return Option.match(Option.fromNullishOr(physicalChildren.get(parent)), {
+      onNone: () => {
+        physicalChildren.set(parent, createdChildren);
+        return createdChildren;
+      },
+      onSome: (current) => current,
+    });
+  };
+
+  const rememberPhysical = (parent: HostNode, node: HostNode): void => {
+    Option.match(Option.fromNullishOr(physicalParent.get(node)), {
+      onNone: () => {},
+      onSome: (previous) => {
+        if (previous !== parent) {
+          childrenOf(previous).delete(node);
+        }
+      },
+    });
+    physicalParent.set(node, parent);
+    childrenOf(parent).add(node);
+  };
+
+  const forgetPhysical = (parent: HostNode, node: HostNode): void => {
+    if (
+      !Option.exists(
+        Option.fromNullishOr(physicalParent.get(node)),
+        (current) => current === parent,
+      )
+    ) {
+      return;
+    }
+    physicalParent.delete(node);
+    Option.match(Option.fromNullishOr(physicalChildren.get(parent)), {
+      onNone: () => {},
+      onSome: (children) => {
+        children.delete(node);
+        if (children.size === 0) {
+          physicalChildren.delete(parent);
+        }
+      },
+    });
+  };
+
+  const dropAttachments = (root: HostNode): void => {
+    const pending: Array<HostNode> = [root];
+    while (pending.length > 0) {
+      Option.match(Option.fromNullishOr(pending.pop()), {
+        onNone: () => {},
+        onSome: (node) => {
+          attachments.delete(node);
+          Option.match(Option.fromNullishOr(physicalChildren.get(node)), {
+            onNone: () => {},
+            onSome: (children) => {
+              for (const child of children) {
+                pending.push(child);
+              }
+            },
+          });
+        },
+      });
+    }
+  };
+
+  const removeExternalChild = (parent: HostNode, node: HostNode): void => {
+    Option.match(Option.fromNullishOr(externalChildren.get(parent)), {
+      onNone: () => {},
+      onSome: (children) => {
+        const index = children.indexOf(node);
+        if (index >= 0) {
+          children.splice(index, 1);
+        }
+        if (children.length === 0) {
+          externalChildren.delete(parent);
+        }
+      },
+    });
+  };
+
+  const rememberExternalChild = (
+    parent: HostNode,
+    node: HostNode,
+    anchor: Option.Option<HostNode>,
+  ): void => {
+    Option.match(Option.fromNullishOr(externalParent.get(node)), {
+      onNone: () => {},
+      onSome: (previous) => {
+        if (previous !== parent) {
+          removeExternalChild(previous, node);
+        }
+      },
+    });
+    const children = Option.match(Option.fromNullishOr(externalChildren.get(parent)), {
+      onNone: () => new Array<HostNode>(),
+      onSome: (current) => current,
+    });
+    const currentIndex = children.indexOf(node);
+    if (currentIndex >= 0) {
+      children.splice(currentIndex, 1);
+    }
+    const anchorIndex = Option.match(anchor, {
+      onNone: () => -1,
+      onSome: (before) => children.indexOf(before),
+    });
+    if (anchorIndex >= 0) {
+      children.splice(anchorIndex, 0, node);
+    } else {
+      children.push(node);
+    }
+    externalChildren.set(parent, children);
+    externalParent.set(node, parent);
+  };
+
+  const removeExternal = (parent: HostNode, node: HostNode): void => {
+    removeExternalChild(parent, node);
+    if (
+      Option.exists(Option.fromNullishOr(externalParent.get(node)), (current) => current === parent)
+    ) {
+      externalParent.delete(node);
+    }
+    if (mounted.get(node) === parent) {
+      host.remove(parent, node);
+      mounted.delete(node);
+      forgetPhysical(parent, node);
+    }
+    dropAttachments(node);
+  };
+
+  const insertExternal = (
+    parent: HostNode,
+    node: HostNode,
+    anchor: Option.Option<HostNode>,
+  ): void => {
+    Option.match(Option.fromNullishOr(physicalParent.get(node)), {
+      onNone: () => {},
+      onSome: (previous) => {
+        if (previous !== parent) {
+          host.remove(previous, node);
+          forgetPhysical(previous, node);
+          mounted.delete(node);
+        }
+      },
+    });
+    rememberExternalChild(parent, node, anchor);
+    if (!visible) {
+      return;
+    }
+    host.insert(parent, node, anchor);
+    rememberPhysical(parent, node);
+    mounted.set(node, parent);
+  };
+
+  const insertCreated = (
+    parent: HostNode,
+    node: HostNode,
+    anchor: Option.Option<HostNode>,
+  ): void => {
+    Option.match(Option.fromNullishOr(physicalParent.get(node)), {
+      onNone: () => {},
+      onSome: (previous) => {
+        if (previous !== parent) {
+          host.remove(previous, node);
+          forgetPhysical(previous, node);
+          mounted.delete(node);
+        }
+      },
+    });
+    host.insert(parent, node, anchor);
+    rememberPhysical(parent, node);
+  };
+
+  const runPendingAttachments = (): void => {
+    const pending = [...attachments.entries()];
+    for (const [node, runs] of pending) {
+      if (!attachments.has(node)) {
+        continue;
+      }
+      attachments.delete(node);
+      for (const run of runs) {
+        host.attach(node, run);
+      }
+    }
+  };
+
+  const show = (): void => {
+    if (visible) {
+      return;
+    }
+    visible = true;
+    for (const [parent, children] of externalChildren) {
+      for (const node of children) {
+        if (mounted.has(node)) {
+          continue;
+        }
+        host.insert(parent, node, Option.none());
+        rememberPhysical(parent, node);
+        mounted.set(node, parent);
+      }
+    }
+    runPendingAttachments();
+  };
+
+  const hide = (): void => {
+    if (!visible) {
+      return;
+    }
+    const writes = [...mounted.entries()].reverse();
+    for (const [node, parent] of writes) {
+      host.remove(parent, node);
+      forgetPhysical(parent, node);
+      mounted.delete(node);
+    }
+    visible = false;
+  };
+
+  const dispose = (): void => {
+    hide();
+    attachments.clear();
+    externalParent.clear();
+    externalChildren.clear();
+    mounted.clear();
+    physicalParent.clear();
+    physicalChildren.clear();
+    created.clear();
+  };
+
+  return {
+    createElement: (tag, staticProps) => {
+      const node = host.createElement(tag, staticProps);
+      created.add(node);
+      return node;
+    },
+    createText: (text) => {
+      const node = host.createText(text);
+      created.add(node);
+      return node;
+    },
+    setProperty: host.setProperty,
+    insert: (parent, node, anchor) => {
+      if (created.has(parent)) {
+        insertCreated(parent, node, anchor);
+        return;
+      }
+      insertExternal(parent, node, anchor);
+    },
+    remove: (parent, node) => {
+      if (created.has(parent)) {
+        host.remove(parent, node);
+        forgetPhysical(parent, node);
+        dropAttachments(node);
+        return;
+      }
+      removeExternal(parent, node);
+    },
+    setText: host.setText,
+    addEventListener: host.addEventListener,
+    attach: (node, run) => {
+      if (visible) {
+        host.attach(node, run);
+        return;
+      }
+      const runs = attachments.get(node) ?? [];
+      runs.push(run);
+      attachments.set(node, runs);
+    },
+    show,
+    hide,
+    dispose,
+  };
+};
 
 /**
  * Keep every node this mount hands to the host. A slot is a logical view
@@ -462,6 +760,7 @@ const plan = <HostNode>(renderer: Renderer<HostNode>, node: Node): Build<HostNod
       Show: (branch) => planShow(renderer, branch),
       Match: (matched) => planMatch(renderer, matched),
       Portal: (portal) => planPortal(renderer, portal),
+      Retained: (retained) => planRetained(renderer, retained),
     }),
   );
 
@@ -534,6 +833,75 @@ const planShow = <HostNode, A>(
     () => plan(renderer, branch.render(signalSource(value))),
     () => plan(renderer, branch.fallback),
   );
+};
+
+/**
+ * A readiness boundary starts its content owner once and only switches the
+ * presented host writes. The fallback uses the ordinary destructive branch
+ * machinery, so a fallback's own resources still end when content appears.
+ */
+const planRetained = <HostNode>(
+  renderer: Renderer<HostNode>,
+  node: RetainedNode,
+): Build<HostNode> => {
+  const visible = renderer.tracker.track(node.when);
+  return (parent, slot, changed) => {
+    const contentSlot: Slot<HostNode> = { nodes: [] };
+    const presentation = presentationHost(renderer.host, visible());
+    const contentRenderer: Renderer<HostNode> = {
+      host: presentation,
+      tracker: renderer.tracker,
+    };
+    let presented = visible();
+    const contentChanged = (): void => {
+      if (presented) {
+        slot.nodes = contentSlot.nodes;
+        changed();
+      }
+    };
+
+    const contentOwner = renderer.tracker.owned(() =>
+      createRoot((disposeContent) => {
+        renderer.tracker.register(() => presentation.dispose);
+        untrack(() => plan(contentRenderer, node.content)(parent, contentSlot, contentChanged));
+        return disposeContent;
+      }),
+    );
+    renderer.tracker.register(() => contentOwner.close);
+
+    const fallbackSlot: Slot<HostNode> = { nodes: [] };
+    const fallback = show(
+      renderer.tracker,
+      renderer.host,
+      () => !visible(),
+      () => plan(renderer, node.fallback),
+      () => nothing(),
+    );
+    fallback(parent, fallbackSlot, () => {
+      if (!presented) {
+        slot.nodes = fallbackSlot.nodes;
+        changed();
+      }
+    });
+
+    const apply = (next: boolean): void => {
+      if (next === presented) {
+        return;
+      }
+      presented = next;
+      if (presented) {
+        presentation.show();
+        slot.nodes = contentSlot.nodes;
+      } else {
+        presentation.hide();
+        slot.nodes = fallbackSlot.nodes;
+      }
+      changed();
+    };
+
+    apply(presented);
+    createRenderEffect(visible, apply, { defer: true });
+  };
 };
 
 /**

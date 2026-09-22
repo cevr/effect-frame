@@ -225,6 +225,72 @@ describe("scoped view test harness", () => {
     }),
   );
 
+  it.scoped("closes the predicate to waiter registration race with its revision handshake", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      let observedHost: Option.Option<Host<Node>> = Option.none();
+      const page = yield* ViewTest.make({
+        host: Dom.host,
+        root,
+        setup: (host, mountRoot) => {
+          observedHost = Option.some(host);
+          return mount(
+            CountPage,
+            { count: { get: Effect.succeed(0), changes: Stream.empty } },
+            host,
+            mountRoot,
+          );
+        },
+      });
+      const originalAdd = Set.prototype.add;
+      let injected = false;
+      let writeDuringRegistration = false;
+      // Test-only fault injection. The actual observed host write runs while
+      // the waiter's Set registration is in progress.
+      // oxlint-disable-next-line no-extend-native
+      Set.prototype.add = function <T>(this: Set<T>, value: T): Set<T> {
+        if (
+          !injected &&
+          // oxlint-disable-next-line effect/noRuntimeTypeof, effect/noNullish
+          typeof value === "object" &&
+          // oxlint-disable-next-line effect/noNullish
+          value !== null &&
+          "afterRevision" in value &&
+          "resume" in value
+        ) {
+          injected = true;
+          const host = observedHost;
+          if (Option.isSome(host)) {
+            const count = Option.fromNullishOr(root.querySelector("#count"));
+            Option.match(count, {
+              onNone: () => {},
+              onSome: (node) => {
+                writeDuringRegistration = true;
+                host.value.setText(node, "raced");
+              },
+            });
+          }
+        }
+        return originalAdd.call(this, value);
+      };
+
+      yield* Effect.ensuring(
+        page.waitFor({
+          label: "registration race",
+          timeout: "100 millis",
+          until: (actualRoot) => countText(actualRoot) === "raced",
+        }),
+        Effect.sync(() => {
+          // oxlint-disable-next-line no-extend-native
+          Set.prototype.add = originalAdd;
+        }),
+      );
+      expect(injected).toBe(true);
+      expect(writeDuringRegistration).toBe(true);
+      expect(countText(root)).toBe("raced");
+    }),
+  );
+
   it.scoped.layer(searchLayer)("observes loading while a real QueryTest handler is blocked", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;

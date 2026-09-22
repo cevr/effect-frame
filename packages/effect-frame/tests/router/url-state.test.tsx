@@ -7,7 +7,18 @@ import type { LocationService } from "effect-frame/router";
 import { Behavior, Value, spawn } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
 import { Dom, View, render } from "effect-frame/view";
-import { Effect, Exit, Option, Queue, Ref, Schema, SchemaGetter, Stream } from "effect";
+import {
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Option,
+  Queue,
+  Ref,
+  Schema,
+  SchemaGetter,
+  Stream,
+} from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 interface FakeLocation {
@@ -63,6 +74,23 @@ const PaneSearch = Route.search(
 );
 const PageSearch = Route.search(
   Schema.Struct({ page: Schema.String.pipe(Route.withDefault("home")) }),
+);
+const ViewSearch = Route.search(Schema.Struct({ view: Schema.String.pipe(Route.withDefault("")) }));
+const OpaqueRouteSearch = Route.SearchRecord.pipe(
+  Schema.decodeTo(Schema.Struct({ route: Schema.String.pipe(Route.withDefault("")) }), {
+    decode: SchemaGetter.transform((record) => ({
+      route: Option.getOrElse(
+        Option.flatMap(Option.fromNullishOr(record["route"]), (values) =>
+          Option.fromNullishOr(values[0]),
+        ),
+        () => "",
+      ),
+    })),
+    encode: SchemaGetter.transform((value): Route.SearchRecord => ({
+      route: [value.route ?? ""],
+      view: ["OVERWRITTEN"],
+    })),
+  }),
 );
 const Workspace = Route.SearchRecord.pipe(
   Schema.decodeTo(Schema.Struct({ panes: Schema.Array(Schema.String) }), {
@@ -129,6 +157,9 @@ let workspaceWrongKeysState: Option.Option<UrlState.State<(typeof Workspace)["Ty
   Option.none();
 let routeSearchProps: Option.Option<Route.RouteProps<{}, (typeof PageSearch)["Type"]>> =
   Option.none();
+let opaqueRouteReplace: Option.Option<
+  Route.RouteProps<{}, (typeof OpaqueRouteSearch)["Type"]>["replaceSearch"]
+> = Option.none();
 let reusableItems: Option.Option<(items: ReadonlyArray<string>) => Effect.Effect<void>> =
   Option.none();
 const Counter = (_props: Route.RouteProps<{}, {}>) =>
@@ -255,6 +286,21 @@ const routeAndView = Route.client("route-and-view", {
   view: RouteAndViewState,
 });
 
+const OpaqueRouteView = (props: Route.RouteProps<{}, (typeof OpaqueRouteSearch)["Type"]>) =>
+  Effect.gen(function* () {
+    opaqueRouteReplace = Option.some(props.replaceSearch);
+    yield* UrlState.make(ViewSearch);
+    return <span id="opaque-route">{View.bind(props.search, (value) => value.route)}</span>;
+  });
+
+const opaqueRoute = Route.client("opaque-route", {
+  path: "/opaque-route",
+  params: Nothing,
+  search: OpaqueRouteSearch,
+  searchKeys: ["route"],
+  view: OpaqueRouteView,
+});
+
 const ReusableClaims = (_props: Route.RouteProps<{}, {}>) =>
   Effect.gen(function* () {
     const items = yield* spawn(Behavior.value<ReadonlyArray<string>>(["first"]));
@@ -280,6 +326,31 @@ const reusableClaims = Route.client("reusable-claims", {
   params: Nothing,
   search: Nothing,
   view: ReusableClaims,
+});
+
+const InterruptedClaim = (_props: Route.RouteProps<{}, {}>) =>
+  Effect.gen(function* () {
+    const ready = yield* Deferred.make<void>();
+    const fiber = yield* Effect.forkScoped(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* UrlState.make(PaneSearch);
+          yield* Deferred.succeed(ready, void 0);
+          return yield* Effect.never;
+        }),
+      ),
+    );
+    yield* Deferred.await(ready);
+    yield* Fiber.interrupt(fiber);
+    yield* UrlState.make(PaneSearch);
+    return <span id="interrupted-claim">ok</span>;
+  });
+
+const interruptedClaim = Route.client("interrupted-claim", {
+  path: "/interrupted-claim",
+  params: Nothing,
+  search: Nothing,
+  view: InterruptedClaim,
 });
 
 const RequiredSearch = Route.search(Schema.Struct({ mode: Schema.Literals(["a", "b"]) }));
@@ -446,6 +517,24 @@ describe("UrlState", () => {
     }),
   );
 
+  it.scoped("rejects undeclared route keys before route mutation writes history", () =>
+    Effect.gen(function* () {
+      const { location, router } = yield* startWith(
+        "http://app.test/opaque-route?route=SAFE&view=SAFE",
+        [opaqueRoute],
+      );
+      const replace = Option.getOrThrow(opaqueRouteReplace);
+      const typed = yield* link(opaqueRoute, {}, { route: "next" }).pipe(
+        Effect.provideService(Router, router),
+      );
+      const replaceResult = yield* Effect.exit(replace(() => ({ route: "next" })));
+      const linkResult = yield* Effect.exit(typed.go);
+      expect(Exit.isFailure(replaceResult)).toBe(true);
+      expect(Exit.isFailure(linkResult)).toBe(true);
+      expect(location.history).toEqual([]);
+    }),
+  );
+
   it.scoped("claims custom encoded keys and preserves codec order", () =>
     Effect.gen(function* () {
       const { location } = yield* startWith(
@@ -500,6 +589,13 @@ describe("UrlState", () => {
       yield* setItems(["second"]);
       yield* render;
       expect(root.querySelectorAll("#reusable-claims span")).toHaveLength(1);
+    }),
+  );
+
+  it.scoped("releases a claim when its owning fiber is interrupted", () =>
+    Effect.gen(function* () {
+      const { root } = yield* startWith("http://app.test/interrupted-claim", [interruptedClaim]);
+      expect(root.querySelector("#interrupted-claim")?.textContent).toBe("ok");
     }),
   );
 

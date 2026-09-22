@@ -575,6 +575,23 @@ export const client = <
   );
   const searchOrder = encodedKeys(definition.search);
 
+  const encodeOwnedSearch = (searchValue: Search["Type"]): SearchRecord => {
+    const encoded = encodeSearch(searchValue);
+    if (searchKeys.known) {
+      const owned = new Set(searchKeys.keys);
+      for (const key of Object.keys(encoded)) {
+        if (!owned.has(key)) {
+          return Option.getOrThrowWith(Option.none(), () =>
+            SearchSchemaRejected.make({
+              reason: `search codec encoded undeclared URL key ${key}`,
+            }),
+          );
+        }
+      }
+    }
+    return encoded;
+  };
+
   const parse = (url: URL): Option.Option<Decoded<Params["Type"], Search["Type"]>> =>
     Option.flatMap(matchPath(parts, url.pathname), (record) =>
       Option.flatMap(decodeParams(record), (params) =>
@@ -586,22 +603,22 @@ export const client = <
     );
 
   const href = (params: Params["Type"], searchValue: Search["Type"]): string =>
-    `${printPath(parts, encodeParams(params))}${printSearch(encodeSearch(searchValue), searchOrder)}`;
+    `${printPath(parts, encodeParams(params))}${printSearch(encodeOwnedSearch(searchValue), searchOrder)}`;
 
   const hrefFromCurrent = (
     current: URL,
     params: Params["Type"],
     searchValue: Search["Type"],
   ): string => {
-    const next = new URL(href(params, searchValue), current);
+    const encoded = encodeOwnedSearch(searchValue);
+    const next = new URL(
+      `${printPath(parts, encodeParams(params))}${printSearch(encoded, searchOrder)}`,
+      current,
+    );
     next.hash = current.hash;
     if (searchKeys.known) {
       next.search = printSearch(
-        mergeSearchRecord(
-          readSearch(current.searchParams),
-          encodeSearch(searchValue),
-          searchKeys.keys,
-        ),
+        mergeSearchRecord(readSearch(current.searchParams), encoded, searchKeys.keys),
       );
     }
     return next.href;
@@ -615,7 +632,7 @@ export const client = <
         if (keys.length === 0) {
           return searchValue;
         }
-        const callerRecord = encodeSearch(searchValue);
+        const callerRecord = encodeOwnedSearch(searchValue);
         const currentRecord = readSearch(current.searchParams);
         const retainedRecord = retainedSearchRecord(
           currentRecord,
@@ -632,7 +649,7 @@ export const client = <
       return `${printPath(parts, encodeParams(params))}${printSearch(
         mergeSearchRecord(
           readSearch(current.searchParams),
-          encodeSearch(nextSearch),
+          encodeOwnedSearch(nextSearch),
           searchKeys.keys,
         ),
       )}`;

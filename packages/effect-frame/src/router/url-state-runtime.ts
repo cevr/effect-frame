@@ -94,15 +94,6 @@ export const makeRuntime = (
           }),
         );
       }
-      const routeKeySet = new Set(routeKeys.keys);
-      for (const key of keys) {
-        if (routeKeySet.has(key)) {
-          return yield* Effect.die(UrlStateConflict.make({ key }));
-        }
-        if (owners.has(key)) {
-          return yield* Effect.die(UrlStateConflict.make({ key }));
-        }
-      }
 
       const decode = Schema.decodeUnknownOption(codec);
       const empty = decode(Object.create(null));
@@ -114,19 +105,29 @@ export const makeRuntime = (
         );
       }
       const fallback = Option.getOrThrow(empty);
-      const owner: Owner = { keys, active: true };
-      for (const key of keys) {
-        owners.set(key, owner);
-      }
-      yield* Effect.addFinalizer(() =>
-        Effect.sync(() => {
-          owner.active = false;
-          for (const key of owner.keys) {
-            if (owners.get(key) === owner) {
-              owners.delete(key);
+      const owner = yield* Effect.acquireRelease(
+        Effect.gen(function* () {
+          const routeKeySet = new Set(routeKeys.keys);
+          for (const key of keys) {
+            if (routeKeySet.has(key) || owners.has(key)) {
+              return yield* Effect.die(UrlStateConflict.make({ key }));
             }
           }
+          const claimed: Owner = { keys, active: true };
+          for (const key of claimed.keys) {
+            owners.set(key, claimed);
+          }
+          return claimed;
         }),
+        (claimed) =>
+          Effect.sync(() => {
+            claimed.active = false;
+            for (const key of claimed.keys) {
+              if (owners.get(key) === claimed) {
+                owners.delete(key);
+              }
+            }
+          }),
       );
 
       const state = select(router.current, (match) => decodeUrl(codec, keys, fallback, match.url));

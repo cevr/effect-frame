@@ -4,49 +4,57 @@ Date: 2026-09-21.
 Ticket: [Verify which DOM benchmarks Solid publishes against and how to run them locally](https://github.com/cevr/effect-frame/issues/60).
 Harness: [Set up the DOM benchmark harness and record the frame against Solid 2 and Octane](https://github.com/cevr/effect-frame/issues/61).
 Method: primary source review of benchmark repositories, their READMEs, and their manifests.
-Status: research complete. The local harness now has bounded first measurements and
-control receipts. The full matrix remains open because one Bun.WebView Chrome
-cell exceeded its child-process deadline.
+Status: research complete. The local matrix and the official runner ran on
+2026-09-22. 52 of 54 local cells passed. The Effect Frame `swap-1k` cell fails
+in both engines and in the official runner because of a keyed-list reorder
+defect in Effect Frame. Issue 61 stays open for that defect and for the final
+rerun after the remaining map tickets.
 
-The first receipts are in [dom-bench-results.json](./dom-bench-results.json).
-They record Bun.WebView Chrome and WebKit `create-1k` cells for Effect Frame,
-Solid 2, and Octane, a standard Chrome same-bundle control, plain DOM and Solid
-signals controls, and one successful run through the pinned krausest Playwright
-runner. The
-`effect-frame/chrome/update-10th-10k` cell has no timing. The harness records
-that failure at `/tmp/effect-frame-dom-bench-update-timeout.jsonl` and exits
-non-zero for the requested cell.
+The receipts are in [dom-bench-results.json](./dom-bench-results.json). These
+are local measurements on one machine. They are not a ranking of the
+frameworks, and no comparative performance claim follows from them.
 
 ## Local harness
 
 Run one framework through both required Bun.WebView engines with:
 
 ```sh
-bun run bench --framework effect-frame --count 1
+bun run bench --framework effect-frame --count 5
 ```
 
 Use `--engine chrome` or `--engine webkit` to select one backend. Use
-`--only create-1k` to bound a first check to one workload. Each cell runs in a
-child Bun process. `DOM_BENCH_CELL_TIMEOUT_MS` sets the deadline and is capped
-at 60 seconds. A timed-out cell writes a JSONL receipt and makes the command
-fail.
+`--only create-1k` to bound a check to one workload. Each sample runs in a
+child Bun process. `DOM_BENCH_CELL_TIMEOUT_MS` sets the deadline, which
+defaults to 30 seconds and is capped at 60 seconds. Each wait on the page, such
+as operation completion, has a 15-second deadline. A failed sample writes a
+JSONL receipt to `DOM_BENCH_FAILURE_RECEIPT` and makes the command fail.
 
-The `--official` option runs the pinned krausest Playwright runner. Set
-`KRAUSEST_DIR` to the checkout and `KRAUSEST_PORT` to its server port. The
-option reads the checkout `HEAD` and rejects any revision other than
-`f2df01a8679de05225c32714ca8cecbea3d78c5d`. It records that revision beside
-the official runner line and reports the result as a separate measurement.
+The `--official` option runs the pinned krausest Playwright runner after the
+local cells. Set `KRAUSEST_DIR` to the checkout and `KRAUSEST_PORT` to its
+server port. The option reads the checkout `HEAD` and rejects any revision
+other than `f2df01a8679de05225c32714ca8cecbea3d78c5d`. Without `--only` it runs
+all nine CPU workloads, `01_` through `09_`. Each workload runs in its own
+runner process with a 60-second deadline, and a failed workload does not stop
+the others. The official results are a separate measurement.
 
 ### Timing boundary and comparability
 
 Each cell serves its page from an owned `127.0.0.1` server on an ephemeral
-port and stops it when the cell ends. The page is not a `data:` URL. Every row
-has two `<a href="#">` links, and both engines resolve each link against the
-document URL during style resolution. With the bundle inlined in a `data:` URL,
-that URL is megabytes long. After a 10,000-row render, macOS `sample` showed the
-WebKit renderer main thread in `computeVisitedLinkHash`, and the Chrome renderer
-main thread in `memmove`, for more than ten seconds. The same bundle served over
-loopback did not stall.
+port and stops it when the cell ends. Every navigation goes through
+`requireServedPageUrl`, which refuses any page that is not `http://127.0.0.1`,
+and `tests/page.test.ts` fails if a harness source builds a `data:` page or
+navigates without that check.
+
+The reason is a measured stall. Every row has two `<a href="#">` links, and
+both engines resolve each link against the document URL during style
+resolution. The earlier harness inlined the bundle in a `data:` URL, so that
+URL was megabytes long. After a 10,000-row render, macOS `sample` showed the
+WebKit renderer main thread in `computeVisitedLinkHash`, and the Chrome
+renderer main thread in `memmove`, for more than ten seconds. The same bundle
+served over loopback did not stall. That stall, together with a completion
+helper that ran full validation on every mutation, caused the earlier
+`effect-frame/chrome/update-10th-10k` timeout. With both repaired, that cell
+passes in every sample below.
 
 The local loopback page intentionally has no Bootstrap stylesheet. The
 official staged page links krausest's `/css/currentStyle.css`. This changes
@@ -60,39 +68,177 @@ Observer and manual notifications share one pending check, which runs as a
 zero-delay timer task. The owner rejects notifications after success or
 cancellation, and before the click and version change, without reading the DOM.
 Arming a new owner cancels the old one, and an old owner never clears a newer
-owner's `__benchCommit`. The WebKit duration ends when that pending check
-accepts the DOM, so it can include the wait for that timer task.
-`DOM_BENCH_STAGE_RECEIPT` appends one JSONL line per cell with controller wait
-times, page operation times, and completion counters. Controller wait time is
-not page CPU time. The harness records
-`effect-frame-dom-bench-complete` with `Tracing.recordClockSyncMarker`, waits
-for two render frames, and then calls `Tracing.end`. The reducer requires a
-same-process Commit after that mark. It rejects an earlier Commit when the
-trace does not prove the completed DOM render. Raw Chrome events are kept
-under `/tmp/effect-frame-dom-bench-traces/` by default.
+owner's `__benchCommit`. The harness records `effect-frame-dom-bench-complete`
+with `Tracing.recordClockSyncMarker`, waits for two render frames, and then
+calls `Tracing.end`. The reducer requires a same-process Commit after that
+mark. After completion, the harness checks the full row list, a sample of DOM
+node identities, and the fixture's own invariant.
 
-Local timings include Bun.WebView driver round trips and browser frame
-scheduling. They are not pure renderer cost or proof of exact upstream
-algorithm parity. The saved Solid 2 and Octane Chrome traces predate the
-completion marker rule. They lack that marker and remain earlier-method
-receipts pending the final matrix rerun.
+Three durations are recorded for each sample, from `DOM_BENCH_STAGE_RECEIPT`:
 
-| Acceptance cell                                                            | Result                                                            |
-| -------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Effect Frame through Bun.WebView Chrome, `create-1k`                       | Passed; 1,051.839 ms in the replacement sample.                   |
-| Effect Frame through Bun.WebView WebKit, `create-1k`                       | Passed; 354 ms in the recorded sample.                            |
-| Solid 2 through Bun.WebView Chrome, `create-1k`                            | Earlier-method receipt; 1,140.851 ms; pending final matrix rerun. |
-| Solid 2 through Bun.WebView WebKit, `create-1k`                            | Passed; 53 ms in the recorded sample.                             |
-| Octane through Bun.WebView Chrome, `create-1k`                             | Earlier-method receipt; 921.420 ms; pending final matrix rerun.   |
-| Octane through Bun.WebView WebKit, `create-1k`                             | Passed; 19 ms in the recorded sample.                             |
-| Effect Frame bundle through standard Chrome, `create-1k`                   | Passed; six buttons and 1,000 rows.                               |
-| Plain DOM control, 10,000-row partial update                               | Passed; 1,000 labels changed.                                     |
-| Solid signals control, 10,000-row partial update                           | Passed; 1,000 labels changed.                                     |
-| Effect Frame through Bun.WebView Chrome, `update-10th-10k`                 | Failed at the bounded deadline; no timing claimed.                |
-| Pinned krausest Playwright runner, Effect Frame staged fixture, `01_run1k` | Passed; official runner reported 59.550 ms total.                 |
-| Pinned krausest Playwright runner, Solid 2 staged fixture, `01_run1k`      | Passed; official runner reported 58.993 ms total.                 |
-| Pinned krausest Playwright runner, Octane staged fixture, `01_run1k`       | Passed; official runner reported 28.722 ms total.                 |
-| Full three-framework, two-engine matrix                                    | Open.                                                             |
+- **Median ms** is the reported cell duration. In Chrome it is the trace
+  reduction, from the click to the Commit that shows the completed DOM. In
+  WebKit it is the page operation time below, which WebKit clamps to whole
+  milliseconds.
+- **Page ms** is in-page `performance.now` from the captured click to the
+  completion check that accepts the DOM. It can include the wait for that
+  zero-delay timer task.
+- **Controller ms** is the controller wall time of the click and completion
+  wait stages. It includes Bun.WebView round trips and is not page CPU time.
+
+Local timings include driver round trips and browser frame scheduling. They are
+not pure renderer cost or proof of exact upstream algorithm parity.
+
+## Local matrix, 2026-09-22
+
+Machine: Apple M4 Pro, 12 cores, 48 GiB, macOS 15.7.7 (24G720), on AC power.
+Bun 1.4.2, Node v24.11.1, Google Chrome 153.0.8010.53, system WebKit
+20621.3.11.11.3 (Safari 26.5), Playwright 1.61.1. Five samples per cell, one
+fresh page per sample, cells run serially. Effect Frame and Octane ran at
+`41a7a7e`; Solid 2 ran at `be52b88`, after the fixture fix below. Logs are
+`/tmp/effect-frame-bench-matrix-<framework>.log`, stage receipts are
+`/tmp/effect-frame-bench-matrix-<framework>-stages.jsonl`, and Chrome traces
+are under `/tmp/effect-frame-bench-matrix-traces/`.
+
+### Bun.WebView Chrome
+
+| Framework    | Operation         | State           | Samples | Median ms | Page ms | Controller ms |
+| ------------ | ----------------- | --------------- | ------- | --------- | ------- | ------------- |
+| effect-frame | `create-1k`       | ok              | 5       | 128.458   | 109.6   | 122.205       |
+| effect-frame | `replace-1k`      | ok              | 5       | 134.084   | 120.8   | 151.011       |
+| effect-frame | `update-10th-10k` | ok              | 5       | 750.312   | 693.6   | 861.384       |
+| effect-frame | `select-1k`       | ok              | 5       | 37.597    | 28.7    | 59.615        |
+| effect-frame | `swap-1k`         | failed (5 of 5) | 0       | —         | —       | —             |
+| effect-frame | `remove-1k`       | ok              | 5       | 40.646    | 35.6    | 66.42         |
+| effect-frame | `create-10k`      | ok              | 5       | 1,194.542 | 1,123.1 | 1,138.868     |
+| effect-frame | `append-10k`      | ok              | 5       | 788.897   | 783.5   | 953.934       |
+| effect-frame | `clear-10k`       | ok              | 5       | 418.192   | 410.3   | 585.138       |
+| solid2       | `create-1k`       | ok              | 5       | 79.579    | 66.4    | 76.393        |
+| solid2       | `replace-1k`      | ok              | 5       | 74.147    | 66.9    | 81.155        |
+| solid2       | `update-10th-10k` | ok              | 5       | 487.567   | 486.7   | 563.35        |
+| solid2       | `select-1k`       | ok              | 5       | 32.727    | 17.7    | 33.075        |
+| solid2       | `swap-1k`         | ok              | 5       | 19.989    | 6.2     | 21.045        |
+| solid2       | `remove-1k`       | ok              | 5       | 22.223    | 9       | 26.662        |
+| solid2       | `create-10k`      | ok              | 5       | 976.43    | 972.7   | 983.68        |
+| solid2       | `append-10k`      | ok              | 5       | 596.376   | 595.4   | 671.731       |
+| solid2       | `clear-10k`       | ok              | 5       | 40.087    | 27.9    | 104.9         |
+| octane       | `create-1k`       | ok              | 5       | 45.382    | 36.6    | 48.252        |
+| octane       | `replace-1k`      | ok              | 5       | 48.966    | 36      | 54.894        |
+| octane       | `update-10th-10k` | ok              | 5       | 567.521   | 566.7   | 587.55        |
+| octane       | `select-1k`       | ok              | 5       | 32.722    | 19.3    | 36.112        |
+| octane       | `swap-1k`         | ok              | 5       | 43.983    | 29.6    | 45.731        |
+| octane       | `remove-1k`       | ok              | 5       | 43.172    | 32.4    | 49.759        |
+| octane       | `create-10k`      | ok              | 5       | 723.234   | 717.4   | 736.515       |
+| octane       | `append-10k`      | ok              | 5       | 665.052   | 663.5   | 684.209       |
+| octane       | `clear-10k`       | ok              | 5       | 44.669    | 34.9    | 55.669        |
+
+### Bun.WebView WebKit
+
+| Framework    | Operation         | State           | Samples | Median ms | Page ms | Controller ms |
+| ------------ | ----------------- | --------------- | ------- | --------- | ------- | ------------- |
+| effect-frame | `create-1k`       | ok              | 5       | 77        | 77      | 90.457        |
+| effect-frame | `replace-1k`      | ok              | 5       | 120       | 120     | 127.574       |
+| effect-frame | `update-10th-10k` | ok              | 5       | 205       | 205     | 269.412       |
+| effect-frame | `select-1k`       | ok              | 5       | 18        | 18      | 29.078        |
+| effect-frame | `swap-1k`         | failed (5 of 5) | 0       | —         | —       | —             |
+| effect-frame | `remove-1k`       | ok              | 5       | 20        | 20      | 23.124        |
+| effect-frame | `create-10k`      | ok              | 5       | 556       | 556     | 569.389       |
+| effect-frame | `append-10k`      | ok              | 5       | 214       | 214     | 278.233       |
+| effect-frame | `clear-10k`       | ok              | 5       | 543       | 543     | 607.051       |
+| solid2       | `create-1k`       | ok              | 5       | 32        | 32      | 55.716        |
+| solid2       | `replace-1k`      | ok              | 5       | 40        | 40      | 44.209        |
+| solid2       | `update-10th-10k` | ok              | 5       | 15        | 15      | 54.382        |
+| solid2       | `select-1k`       | ok              | 5       | 3         | 3       | 6.054         |
+| solid2       | `swap-1k`         | ok              | 5       | 3         | 3       | 5.249         |
+| solid2       | `remove-1k`       | ok              | 5       | 3         | 3       | 5.067         |
+| solid2       | `create-10k`      | ok              | 5       | 237       | 237     | 245.434       |
+| solid2       | `append-10k`      | ok              | 5       | 34        | 34      | 51.543        |
+| solid2       | `clear-10k`       | ok              | 5       | 47        | 47      | 48.808        |
+| octane       | `create-1k`       | ok              | 5       | 23        | 23      | 48.17         |
+| octane       | `replace-1k`      | ok              | 5       | 31        | 31      | 34.352        |
+| octane       | `update-10th-10k` | ok              | 5       | 106       | 106     | 146.127       |
+| octane       | `select-1k`       | ok              | 5       | 12        | 12      | 14.363        |
+| octane       | `swap-1k`         | ok              | 5       | 42        | 42      | 44.288        |
+| octane       | `remove-1k`       | ok              | 5       | 32        | 32      | 45.633        |
+| octane       | `create-10k`      | ok              | 5       | 196       | 196     | 214.853       |
+| octane       | `append-10k`      | ok              | 5       | 122       | 122     | 141.36        |
+| octane       | `clear-10k`       | ok              | 5       | 45        | 45      | 48.935        |
+
+The `--official` invocations repeated the Chrome cells on the same bundles.
+Those repeats are in `officialRunLocalChromeRepeat` in the JSON receipt. Cells
+at or above 400 ms moved by at most 6.2% between the two runs. Cells under
+150 ms moved by up to 36% (Solid 2 `select-1k`: 32.727 ms, then 20.917 ms), so
+the short Chrome cells do not separate small differences at five samples. The
+Effect Frame `swap-1k` repeat failed the same way.
+
+### Failed and repaired cells
+
+- **Effect Frame `swap-1k`, both engines: open framework defect.** All ten
+  samples timed out waiting for completion. The keyed list reorder in
+  `packages/effect-frame/src/view/runtime.ts` scans the new order from left to
+  right and inserts each moved row before the next row's current node. That
+  node can itself move later, so a swap of rows 1 and 998 renders the wrong
+  order and the completion check never accepts the DOM. A happy-dom
+  reproduction of `[1,2,3,4,5]` to `[1,4,3,2,5]` renders `[1,3,2,4,5]`. The
+  official runner rejects the same bundle: `05_swap1k` fails with "expected 2,
+  but was 997" at row 999. The failure receipts are
+  `/tmp/effect-frame-bench-matrix-effect-frame-failures.jsonl`.
+- **Solid 2 `select-1k`, both engines: repaired harness defect.** The first
+  Solid 2 run failed all ten samples. The fixture passed the row class to
+  Solid 2 `spread` as a function value. Solid 2 tracks getters, not function
+  values, so the `danger` class never rendered. The fixture now exposes a
+  getter (`be52b88`), and the whole Solid 2 matrix was rerun. The superseded
+  receipts are `/tmp/effect-frame-bench-matrix-solid2-prefix*.{log,jsonl}`.
+
+## Official runner, 2026-09-22
+
+The pinned krausest Playwright runner ran every CPU workload for each staged
+fixture, with `--count 5 --headless --nothrottling` and Google Chrome
+153.0.8010.53. `04_select1k` adds ten runs, so it has 15 samples. Logs are
+`/tmp/effect-frame-bench-official-<framework>.log`, and the result files are
+under `/tmp/effect-frame-bench-official-results/`.
+
+| Framework    | Benchmark                | State  | Samples | Total median ms | Script median ms | Paint median ms |
+| ------------ | ------------------------ | ------ | ------- | --------------- | ---------------- | --------------- |
+| effect-frame | `01_run1k`               | ok     | 5       | 61.5            | 29.4             | 15.7            |
+| effect-frame | `02_replace1k`           | ok     | 5       | 121.6           | 80.8             | 16.7            |
+| effect-frame | `03_update10th1k_x16`    | ok     | 5       | 49.7            | 14.1             | 2.8             |
+| effect-frame | `04_select1k`            | ok     | 15      | 31.9            | 14.1             | 1.5             |
+| effect-frame | `05_swap1k`              | failed | 0       | —               | —                | —               |
+| effect-frame | `06_remove-one-1k`       | ok     | 5       | 49.5            | 14.1             | 5.5             |
+| effect-frame | `07_create10k`           | ok     | 5       | 722.3           | 265              | 159.7           |
+| effect-frame | `08_create1k-after1k_x2` | ok     | 5       | 124.5           | 70.4             | 18.9            |
+| effect-frame | `09_clear1k_x8`          | ok     | 5       | 41.8            | 25.7             | 0.8             |
+| solid2       | `01_run1k`               | ok     | 5       | 56.5            | 39.1             | 15.3            |
+| solid2       | `02_replace1k`           | ok     | 5       | 61.7            | 44.5             | 15.2            |
+| solid2       | `03_update10th1k_x16`    | ok     | 5       | 15.6            | 0.6              | 2.3             |
+| solid2       | `04_select1k`            | ok     | 15      | 14.8            | 1.7              | 0.6             |
+| solid2       | `05_swap1k`              | ok     | 5       | 15.8            | 0.4              | 3               |
+| solid2       | `06_remove-one-1k`       | ok     | 5       | 15.9            | 0.4              | 4.5             |
+| solid2       | `07_create10k`           | ok     | 5       | 566.3           | 386.9            | 151.3           |
+| solid2       | `08_create1k-after1k_x2` | ok     | 5       | 61.9            | 42.6             | 17.3            |
+| solid2       | `09_clear1k_x8`          | ok     | 5       | 15.3            | 2.6              | 0.3             |
+| octane       | `01_run1k`               | ok     | 5       | 29.5            | 12.4             | 15.5            |
+| octane       | `02_replace1k`           | ok     | 5       | 32.1            | 14.8             | 15.6            |
+| octane       | `03_update10th1k_x16`    | ok     | 5       | 18.2            | 10.2             | 2.3             |
+| octane       | `04_select1k`            | ok     | 15      | 14.8            | 9.3              | 0.6             |
+| octane       | `05_swap1k`              | ok     | 5       | 28.4            | 12.4             | 14.1            |
+| octane       | `06_remove-one-1k`       | ok     | 5       | 29.3            | 24.1             | 14.5            |
+| octane       | `07_create10k`           | ok     | 5       | 298.5           | 104.3            | 165.5           |
+| octane       | `08_create1k-after1k_x2` | ok     | 5       | 39.8            | 20.6             | 17.5            |
+| octane       | `09_clear1k_x8`          | ok     | 5       | 15.2            | 3.4              | 0.3             |
+
+At the pinned revision, `03_` updates every 10th row of 1,000 rows over 16
+cycles, `08_` appends 1,000 rows to 1,000 rows, and `09_` clears 1,000 rows.
+The local `update-10th-10k`, `append-10k`, and `clear-10k` cells use 10,000
+rows, so those official and local workloads differ. For the Effect Frame
+fixture, 31 trace reductions logged "No commit event found according to
+filter" and used krausest's fallback, the last Commit after the click. The
+Solid 2 and Octane logs have no such line.
+
+The first official attempt passed all nine workloads to one runner process,
+which exceeded its 60-second deadline. Those receipts are kept under
+`/tmp/effect-frame-bench-official-attempt1/`.
 
 ## Result
 
@@ -628,10 +774,11 @@ the Octane benchmarks page, the Octane benchmarks README and its `js-framework`
 suite README, the reactivity benchmark's adapter interface and registration
 list, and GitHub contents-API directory listings.
 
-The bounded harness ran selected Bun.WebView and control cells. It did not
-complete the full three-framework, two-engine matrix. Every local duration is
-specific to the machine, browser build, driver, page markup, and workload
-receipt recorded above.
+The harness ran the full three-framework, two-engine matrix at five samples
+per cell, and the pinned official runner at five samples per workload. The
+Effect Frame `swap-1k` cell has no timing. Every local duration is specific to
+the machine, browser build, driver, page markup, and workload receipt recorded
+above. Five samples is fewer than the krausest default of 15.
 
 Not established: the Chrome and Node versions behind Octane's published table;
 whether the four-command `js-reactivity-benchmark` sequence completes; what

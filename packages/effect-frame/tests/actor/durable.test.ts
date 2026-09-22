@@ -15,7 +15,16 @@ import {
 import { Event, Machine, State } from "effect-machine";
 import { TestClock } from "effect/testing";
 import { describe, expect, it, yieldFibers } from "effect-bun-test";
-import { Behavior, CommandId, MailboxStore, durable } from "effect-frame/actor";
+import {
+  ActorStopped,
+  Behavior,
+  CommandConflict,
+  CommandId,
+  MailboxStore,
+  Uncertain,
+  committedRevision,
+  durable,
+} from "effect-frame/actor";
 import type { DurableOptions } from "effect-frame/actor";
 
 const Add = Schema.TaggedStruct("Add", { amount: Schema.Finite });
@@ -98,7 +107,7 @@ describe("durable actor", () => {
         commandId: id("c1"),
         timeout: "1 second",
       });
-      expect(applied).toEqual({ revision: 1, state: 3 });
+      expect(applied).toEqual({ revision: committedRevision(1), state: 3 });
       expect(yield* counter.state.get).toBe(3);
     }),
   );
@@ -115,8 +124,14 @@ describe("durable actor", () => {
         timeout: "1 second",
       });
       expect(retry).toEqual(first);
-      const receipt = yield* counter.send(add(3), { commandId: id("c1") });
-      expect(receipt.committed).toEqual(Option.some(1));
+      const again = yield* counter.send(add(3), { commandId: id("c1") });
+      expect(again.commandId).toBe(id("c1"));
+      expect(yield* again.settled).toEqual({
+        _tag: "Applied",
+        admitted: 1,
+        revision: committedRevision(1),
+        state: 3,
+      });
       expect(yield* counter.state.get).toBe(3);
     }),
   );
@@ -136,8 +151,8 @@ describe("durable actor", () => {
 
       const first = yield* counter.call(add(1), { commandId: id("older"), timeout: "1 second" });
       const newer = yield* counter.call(add(2), { commandId: id("newer"), timeout: "1 second" });
-      expect(first).toEqual({ revision: 1, state: 1 });
-      expect(newer).toEqual({ revision: 2, state: 3 });
+      expect(first).toEqual({ revision: committedRevision(1), state: 1 });
+      expect(newer).toEqual({ revision: committedRevision(2), state: 3 });
 
       const autonomousWaiting = yield* Effect.forkScoped(
         Stream.runHead(Stream.filter(counter.state.changes, (state) => state === 99)),
@@ -159,8 +174,12 @@ describe("durable actor", () => {
     Effect.gen(function* () {
       const counter = yield* durable(counterOptions);
       yield* counter.call(add(3), { commandId: id("c1"), timeout: "1 second" });
-      const failure = yield* Effect.flip(counter.send(add(4), { commandId: id("c1") }));
-      expect(failure._tag).toBe("CommandConflict");
+      const conflicting = yield* counter.send(add(4), { commandId: id("c1") });
+      expect(yield* conflicting.settled).toEqual({
+        _tag: "Rejected",
+        reason: CommandConflict.make({ commandId: id("c1") }),
+      });
+      expect(yield* counter.state.get).toBe(3);
     }),
   );
 
@@ -180,12 +199,12 @@ describe("durable actor", () => {
         commandId: id("c1"),
         timeout: "1 second",
       });
-      expect(retried).toEqual({ revision: 1, state: 3 });
+      expect(retried).toEqual({ revision: committedRevision(1), state: 3 });
       const next = yield* after.call(add(5), {
         commandId: id("c2"),
         timeout: "1 second",
       });
-      expect(next).toEqual({ revision: 2, state: 8 });
+      expect(next).toEqual({ revision: committedRevision(2), state: 8 });
     }),
   );
 
@@ -201,7 +220,7 @@ describe("durable actor", () => {
         commandId: id("c1"),
         timeout: "1 second",
       });
-      expect(applied).toEqual({ revision: 1, state: 7 });
+      expect(applied).toEqual({ revision: committedRevision(1), state: 7 });
       expect(yield* store.pending).toEqual([]);
     }),
   );
@@ -221,7 +240,7 @@ describe("durable actor", () => {
         commandId: id("c1"),
         timeout: "1 second",
       });
-      expect(retried).toEqual({ revision: 1, state: 1 });
+      expect(retried).toEqual({ revision: committedRevision(1), state: 1 });
     }),
   );
 
@@ -278,39 +297,47 @@ describe("durable actor", () => {
     }),
   );
 
-  withStore("a stopped send refuses before message encoding", () =>
-    Effect.gen(function* () {
-      const life = yield* Scope.make();
-      let encodes = 0;
-      const message = Schema.String.pipe(
-        Schema.decodeTo(
-          Schema.Finite,
-          SchemaTransformation.transformEffect({
-            decode: (value: string) => Effect.succeed(Number(value)),
-            encode: (value: number) =>
-              Effect.sync(() => {
-                encodes += 1;
-                return String(value);
-              }),
+  withStore(
+    "a stopped send refuses before message encoding and keeps a supplied ID uncertain",
+    () =>
+      Effect.gen(function* () {
+        const life = yield* Scope.make();
+        let encodes = 0;
+        const message = Schema.String.pipe(
+          Schema.decodeTo(
+            Schema.Finite,
+            SchemaTransformation.transformEffect({
+              decode: (value: string) => Effect.succeed(Number(value)),
+              encode: (value: number) =>
+                Effect.sync(() => {
+                  encodes += 1;
+                  return String(value);
+                }),
+            }),
+          ),
+        );
+        const counter = yield* durable({
+          behavior: Behavior.reducer<number, number>({
+            initial: 0,
+            reduce: (state, amount) => state + amount,
           }),
-        ),
-      );
-      const counter = yield* durable({
-        behavior: Behavior.reducer<number, number>({
-          initial: 0,
-          reduce: (state, amount) => state + amount,
-        }),
-        state: Schema.fromJsonString(Schema.Finite),
-        message,
-      }).pipe(Scope.provide(life));
-      yield* Scope.close(life, Exit.void);
+          state: Schema.fromJsonString(Schema.Finite),
+          message,
+        }).pipe(Scope.provide(life));
+        yield* Scope.close(life, Exit.void);
 
-      const failure = yield* Effect.flip(
-        counter.send(1, { commandId: id("stopped-before-encode") }),
-      );
-      expect(failure._tag).toBe("ActorStopped");
-      expect(encodes).toBe(0);
-    }),
+        const fresh = yield* counter.send(1);
+        expect(yield* fresh.settled).toEqual({ _tag: "Rejected", reason: ActorStopped.make() });
+        const supplied = yield* counter.send(1, { commandId: id("stopped-before-encode") });
+        expect(yield* supplied.state.get).toEqual({
+          _tag: "Uncertain",
+          attempt: 0,
+          admitted: Option.none(),
+        });
+        const call = yield* Effect.flip(counter.call(1, { timeout: "1 second" }));
+        expect(call).toEqual(ActorStopped.make());
+        expect(encodes).toBe(0);
+      }),
   );
 
   withStore("machine work interrupted by a restart resumes and commits its own transition", () =>
@@ -327,7 +354,7 @@ describe("durable actor", () => {
         commandId: id("c1"),
         timeout: "1 second",
       });
-      expect(started.revision).toBe(1);
+      expect(started.revision.value).toBe(1);
       expect(started.state._tag).toBe("Uploading");
       yield* Scope.close(firstLife, Exit.void);
 
@@ -352,11 +379,11 @@ describe("durable actor", () => {
         commandId: id("c1"),
         timeout: "1 second",
       });
-      expect(started.revision).toBe(1);
+      expect(started.revision.value).toBe(1);
     }),
   );
 
-  withStore("closing the scope fails a waiting call with ActorStopped", () =>
+  withStore("closing the scope ends a waiting call as Uncertain: the row may still commit", () =>
     Effect.gen(function* () {
       const life = yield* Scope.make();
       const counter = yield* durable({ ...counterOptions, behavior: slowBehavior }).pipe(
@@ -368,7 +395,7 @@ describe("durable actor", () => {
       yield* TestClock.adjust("10 millis");
       yield* Scope.close(life, Exit.void);
       const failure = yield* Fiber.join(waiting);
-      expect(failure._tag).toBe("ActorStopped");
+      expect(failure).toEqual(Uncertain.make({ commandId: id("c1") }));
     }),
   );
 });

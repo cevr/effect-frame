@@ -184,7 +184,11 @@ describe("private command owner", () => {
       const counter = heldCounter();
       const { owner, wire } = yield* remoteOwner(counter.behavior);
       const message = counted(add(3));
-      const command = yield* owner.submit(Option.none(), message.prepare, noKeys);
+      const command = yield* owner.submit(
+        yield* Commands.identify(Option.none()),
+        message.prepare,
+        noKeys,
+      );
       expect(command.identity).toBe("fresh");
       expect(command.commandId).toMatch(uuidV4);
       const settled = yield* command.settled;
@@ -201,7 +205,11 @@ describe("private command owner", () => {
       expect(message.encodes()).toBe(1);
       expect(yield* owner.retained).toEqual([]);
 
-      const other = yield* owner.submit(Option.none(), counted(add(1)).prepare, noKeys);
+      const other = yield* owner.submit(
+        yield* Commands.identify(Option.none()),
+        counted(add(1)).prepare,
+        noKeys,
+      );
       expect(other.commandId).not.toBe(command.commandId);
       expect(other.commandId).toMatch(uuidV4);
     }),
@@ -217,11 +225,23 @@ describe("private command owner", () => {
         message: MessageCodec,
       }).pipe(Effect.provideContext(store));
       const owner = yield* Commands.make(durableCommands(engine));
-      const first = yield* owner.submit(Option.some(id("older")), counted(add(1)).prepare, noKeys);
+      const first = yield* owner.submit(
+        yield* Commands.identify(Option.some(id("older"))),
+        counted(add(1)).prepare,
+        noKeys,
+      );
       expect(yield* first.settled).toMatchObject({ committed: { revision: 1, state: 1 } });
-      const newer = yield* owner.submit(Option.some(id("newer")), counted(add(2)).prepare, noKeys);
+      const newer = yield* owner.submit(
+        yield* Commands.identify(Option.some(id("newer"))),
+        counted(add(2)).prepare,
+        noKeys,
+      );
       expect(yield* newer.settled).toMatchObject({ committed: { revision: 2, state: 3 } });
-      const again = yield* owner.submit(Option.some(id("older")), counted(add(1)).prepare, noKeys);
+      const again = yield* owner.submit(
+        yield* Commands.identify(Option.some(id("older"))),
+        counted(add(1)).prepare,
+        noKeys,
+      );
       expect(again.identity).toBe("supplied");
       expect(yield* again.settled).toEqual({
         _tag: "Applied",
@@ -242,7 +262,11 @@ describe("private command owner", () => {
             Effect.fail(Unauthorized.make({ contract: target.contract })),
         }),
       );
-      const fresh = yield* owner.submit(Option.none(), counted(add(1)).prepare, noKeys);
+      const fresh = yield* owner.submit(
+        yield* Commands.identify(Option.none()),
+        counted(add(1)).prepare,
+        noKeys,
+      );
       const rejected = yield* fresh.settled;
       expect(rejected._tag).toBe("Rejected");
       expect(rejected._tag === "Rejected" && rejected.reason._tag).toBe("Unauthorized");
@@ -251,7 +275,11 @@ describe("private command owner", () => {
       // A supplied string shaped exactly like a framework ID is still supplied.
       // oxlint-disable-next-line effect/noGlobals -- the test needs a real framework-shaped ID
       const lookalike = id(crypto.randomUUID());
-      const supplied = yield* owner.submit(Option.some(lookalike), counted(add(1)).prepare, noKeys);
+      const supplied = yield* owner.submit(
+        yield* Commands.identify(Option.some(lookalike)),
+        counted(add(1)).prepare,
+        noKeys,
+      );
       expect(supplied.identity).toBe("supplied");
       yield* yieldFibers;
       expect(yield* supplied.lifecycle.get).toEqual({
@@ -274,7 +302,11 @@ describe("private command owner", () => {
       const { owner, wire } = yield* remoteOwner(counter.behavior);
       wire.controls.dropCalls = true;
       const message = counted(add(1));
-      const command = yield* owner.submit(Option.none(), message.prepare, noKeys);
+      const command = yield* owner.submit(
+        yield* Commands.identify(Option.none()),
+        message.prepare,
+        noKeys,
+      );
       const payload = Option.getOrThrow(owner.payloadOf(command.commandId));
       yield* TestClock.adjust("5 minutes");
       expect(yield* command.lifecycle.get).toEqual({
@@ -333,7 +365,11 @@ describe("private command owner", () => {
       const counter = heldCounter();
       const { owner, wire } = yield* remoteOwner(counter.behavior);
       wire.controls.hangSends = true;
-      const hungSend = yield* owner.submit(Option.none(), counted(add(1)).prepare, noKeys);
+      const hungSend = yield* owner.submit(
+        yield* Commands.identify(Option.none()),
+        counted(add(1)).prepare,
+        noKeys,
+      );
       yield* yieldFibers;
       yield* TestClock.adjust("9999 millis");
       expect(yield* hungSend.lifecycle.get).toEqual({ _tag: "Sent" });
@@ -351,7 +387,11 @@ describe("private command owner", () => {
       });
 
       wire.controls.hangCalls = true;
-      const hungCall = yield* owner.submit(Option.none(), counted(add(1)).prepare, noKeys);
+      const hungCall = yield* owner.submit(
+        yield* Commands.identify(Option.none()),
+        counted(add(1)).prepare,
+        noKeys,
+      );
       yield* yieldFibers;
       expect(yield* hungCall.lifecycle.get).toEqual({ _tag: "Admitted", admitted: 2 });
       yield* TestClock.adjust("10 seconds");
@@ -375,11 +415,19 @@ describe("private command owner", () => {
       const counter = heldCounter();
       const { owner, wire } = yield* remoteOwner(counter.behavior);
       yield* counter.hold;
-      const first = yield* owner.submit(Option.some(id("x")), counted(add(1)).prepare, noKeys);
+      const first = yield* owner.submit(
+        yield* Commands.identify(Option.some(id("x"))),
+        counted(add(1)).prepare,
+        noKeys,
+      );
       yield* yieldFibers;
-      const joined = yield* owner.submit(Option.some(id("x")), counted(add(1)).prepare, noKeys);
+      const joined = yield* owner.submit(
+        yield* Commands.identify(Option.some(id("x"))),
+        counted(add(1)).prepare,
+        noKeys,
+      );
       const conflicting = yield* owner.submit(
-        Option.some(id("x")),
+        yield* Commands.identify(Option.some(id("x"))),
         counted(add(2)).prepare,
         noKeys,
       );
@@ -395,7 +443,11 @@ describe("private command owner", () => {
       expect(counter.applies()).toBe(1);
 
       // After collection the server decides: different bytes are a real conflict.
-      const late = yield* owner.submit(Option.some(id("x")), counted(add(2)).prepare, noKeys);
+      const late = yield* owner.submit(
+        yield* Commands.identify(Option.some(id("x"))),
+        counted(add(2)).prepare,
+        noKeys,
+      );
       const refused = yield* late.settled;
       expect(refused._tag === "Rejected" && refused.reason._tag).toBe("CommandConflict");
     }),
@@ -417,7 +469,11 @@ describe("private command owner", () => {
       );
       const owner = yield* Commands.make(durableCommands(engine));
       yield* counter.hold;
-      const command = yield* owner.submit(Option.none(), counted(add(5)).prepare, noKeys);
+      const command = yield* owner.submit(
+        yield* Commands.identify(Option.none()),
+        counted(add(5)).prepare,
+        noKeys,
+      );
       yield* yieldFibers;
       expect(yield* command.lifecycle.get).toEqual({ _tag: "Admitted", admitted: 1 });
       yield* Scope.close(firstLife, Exit.void);
@@ -456,7 +512,11 @@ describe("private command owner", () => {
           ),
       }).pipe(Scope.provide(lifetime));
       yield* counter.hold;
-      const command = yield* owner.submit(Option.none(), counted(add(2)).prepare, noKeys);
+      const command = yield* owner.submit(
+        yield* Commands.identify(Option.none()),
+        counted(add(2)).prepare,
+        noKeys,
+      );
       yield* yieldFibers;
       expect(yield* command.lifecycle.get).toEqual({ _tag: "Admitted", admitted: 1 });
       const waiting = yield* Effect.forkScoped(command.settled);
@@ -467,12 +527,20 @@ describe("private command owner", () => {
 
       yield* command.retry;
       const late = counted(add(9));
-      const refused = yield* owner.submit(Option.none(), late.prepare, noKeys);
+      const refused = yield* owner.submit(
+        yield* Commands.identify(Option.none()),
+        late.prepare,
+        noKeys,
+      );
       expect(yield* refused.settled).toMatchObject({
         _tag: "Rejected",
         reason: { _tag: "ActorStopped" },
       });
-      const supplied = yield* owner.submit(Option.some(id("kept")), late.prepare, noKeys);
+      const supplied = yield* owner.submit(
+        yield* Commands.identify(Option.some(id("kept"))),
+        late.prepare,
+        noKeys,
+      );
       expect(yield* supplied.lifecycle.get).toEqual({
         _tag: "Uncertain",
         attempt: 0,
@@ -505,13 +573,21 @@ describe("private command owner", () => {
       );
       const baseline = finalizerCount(lifetime);
       for (let index = 0; index < 20; index += 1) {
-        const command = yield* owner.submit(Option.none(), counted(add(1)).prepare, noKeys);
+        const command = yield* owner.submit(
+          yield* Commands.identify(Option.none()),
+          counted(add(1)).prepare,
+          noKeys,
+        );
         yield* command.settled;
       }
       expect(finalizerCount(lifetime)).toBe(baseline);
 
       wire.controls.dropCalls = true;
-      const command = yield* owner.submit(Option.none(), counted(add(1)).prepare, noKeys);
+      const command = yield* owner.submit(
+        yield* Commands.identify(Option.none()),
+        counted(add(1)).prepare,
+        noKeys,
+      );
       for (let cycle = 0; cycle < 3; cycle += 1) {
         yield* TestClock.adjust("5 minutes");
         expect(yield* command.lifecycle.get).toMatchObject({ _tag: "Uncertain", attempt: 8 });

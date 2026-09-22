@@ -79,7 +79,7 @@ const rowCounterSurvivesKill = async (node: Node): Promise<Node> => {
   report.check(
     "e",
     "a call over the generic wire commits and returns revision 1",
-    first.revision === 1 && first.state === 3,
+    first.revision.value === 1 && first.state === 3,
     `applied ${show(first)}`,
   );
 
@@ -90,7 +90,7 @@ const rowCounterSurvivesKill = async (node: Node): Promise<Node> => {
   report.check(
     "e",
     "after SIGKILL and restart the committed state is restored",
-    restored.revision === 1 && restored.state === 3,
+    restored.revision.value === 1 && restored.state === 3,
     `applied ${show(restored)}`,
   );
 
@@ -102,7 +102,7 @@ const rowCounterSurvivesKill = async (node: Node): Promise<Node> => {
   report.check(
     "e",
     "the retried command ID returns the stored receipt and does not reapply",
-    retried.revision === 1 && retried.state === 3,
+    retried.revision.value === 1 && retried.state === 3,
     `applied ${show(retried)}`,
   );
 
@@ -114,7 +114,7 @@ const rowCounterSurvivesKill = async (node: Node): Promise<Node> => {
   report.check(
     "e",
     "a new command after the restart reaches revision 2 and state 8",
-    next.revision === 2 && next.state === 8,
+    next.revision.value === 2 && next.state === 8,
     `applied ${show(next)}`,
   );
   return restarted;
@@ -145,20 +145,23 @@ const runCounter = <A>(
 const rowConflict = async (node: Node): Promise<void> => {
   const key = "row-e";
   const failure = await runCounter(node.port, key, (counter) =>
-    Effect.orDie(Effect.flip(counter.send({ _tag: "Add", amount: 99 }, { commandId: id("e1") }))),
+    Effect.flatMap(
+      counter.send({ _tag: "Add", amount: 99 }, { commandId: id("e1") }),
+      (handle) => handle.settled,
+    ),
   );
   report.check(
     "f",
-    "the same ID with a different payload is a typed CommandConflict",
-    failure._tag === "CommandConflict",
-    `failure ${show(failure)}`,
+    "the same ID with a different payload settles Rejected with a typed CommandConflict",
+    failure._tag === "Rejected" && failure.reason._tag === "CommandConflict",
+    `settled ${show(failure)}`,
   );
 
   const state = await runCounter(node.port, key, (counter) => counter.applied.get);
   report.check(
     "f",
     "the rejected command left the committed state alone",
-    state.revision === 2 && state.state === 8,
+    state.revision.value === 2 && state.state === 8,
     `applied ${show(state)}`,
   );
 };
@@ -189,7 +192,7 @@ const rowMachineResumes = async (node: Node): Promise<Node> => {
       }),
     ),
   );
-  const uploadingAt = started.revision;
+  const uploadingAt = started.revision.value;
   report.check(
     "g",
     "the Start command commits Uploading",
@@ -209,7 +212,7 @@ const rowMachineResumes = async (node: Node): Promise<Node> => {
   report.check(
     "g",
     "the wake snapshot shows the machine still in Uploading, work unfinished",
-    woken.revision === uploadingAt && woken.state._tag === "Uploading",
+    woken.revision.value === uploadingAt && woken.state._tag === "Uploading",
     `applied ${show(woken)}`,
   );
 
@@ -228,7 +231,7 @@ const rowMachineResumes = async (node: Node): Promise<Node> => {
     "g",
     "machine work resumed after the restart and committed Done one revision on",
     Option.isSome(applied) &&
-      applied.value.revision === uploadingAt + 1 &&
+      applied.value.revision.value === uploadingAt + 1 &&
       applied.value.state._tag === "Done",
     `applied ${show(Option.getOrUndefined(applied))}`,
   );
@@ -243,7 +246,7 @@ const rowMachineResumes = async (node: Node): Promise<Node> => {
   report.check(
     "g",
     "the snapshot after the resume is Done, so the mailbox drained",
-    settled.revision === uploadingAt + 1 && settled.state._tag === "Done",
+    settled.revision.value === uploadingAt + 1 && settled.state._tag === "Done",
     `applied ${show(settled)}`,
   );
   return restarted;
@@ -278,12 +281,12 @@ const rowChangesStream = async (node: Node): Promise<void> => {
     Effect.gen(function* () {
       const waiting = yield* Effect.forkScoped(
         Stream.runHead(
-          Stream.filter(counter.applied.changes, (committed) => committed.revision === 1),
+          Stream.filter(counter.applied.changes, (committed) => committed.revision.value === 1),
         ),
       );
       // Let the subscription open before the command changes the revision.
       yield* Effect.sleep(Duration.millis(300));
-      yield* Effect.orDie(counter.send({ _tag: "Add", amount: 4 }, { commandId: id("h1") }));
+      yield* counter.send({ _tag: "Add", amount: 4 }, { commandId: id("h1") });
       return yield* Effect.timeoutOption(Fiber.join(waiting), Duration.seconds(15));
     }),
   );
@@ -291,7 +294,7 @@ const rowChangesStream = async (node: Node): Promise<void> => {
   report.check(
     "h",
     "the changes event stream delivers the new revision over the wire",
-    Option.isSome(applied) && applied.value.revision === 1 && applied.value.state === 4,
+    Option.isSome(applied) && applied.value.revision.value === 1 && applied.value.state === 4,
     `event ${show(Option.getOrUndefined(applied))}`,
   );
 };

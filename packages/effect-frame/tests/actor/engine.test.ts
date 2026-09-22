@@ -17,6 +17,7 @@ import {
   MailboxStore,
   contract,
   CommandId,
+  committedRevision,
   implementTransparent,
   ref,
   spawn,
@@ -118,7 +119,7 @@ describe("private actor engines", () => {
         Effect.provideService(LocalValue, LocalValue.of({ amount: 4 })),
       );
       const applied = yield* actor.call({ _tag: "EngineAdd", amount: 3 });
-      expect(applied).toEqual({ revision: 1, state: 7 });
+      expect(applied).toEqual({ revision: committedRevision(1), state: 7 });
       expect(actor.kind).toBe("local");
       const localRef: LocalActorRef<number, Add> = actor;
       expect(localRef.derive).toBeDefined();
@@ -138,7 +139,7 @@ describe("private actor engines", () => {
       const applied = yield* run.pipe(
         Effect.provideService(HostValue, HostValue.of({ amount: 100 })),
       );
-      expect(applied).toEqual({ revision: 1, state: 11 });
+      expect(applied).toEqual({ revision: committedRevision(1), state: 11 });
     }),
   );
 

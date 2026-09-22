@@ -1,43 +1,77 @@
-import type { Effect } from "effect";
+import { Context, Effect, Option, Schema, Stream } from "effect";
+import type { Scope } from "effect";
 import { describe, expect, test } from "bun:test";
+import { Cell, durable, spawn } from "effect-frame/actor";
 import type {
   ActorRef,
   ActorStopped,
   Applied,
+  Behavior,
+  CommandAdmitted,
+  CommandApplied,
   CommandConflict,
-  DurableReceipt,
-  RemoteFailure,
+  CommandHandle,
+  CommandId,
+  CommandRejected,
+  CommandSent,
+  CommandState,
+  CommandUncertain,
+  CommittedRevision,
+  ContractMismatch,
+  IdentifiedCommandHandle,
+  LocalActorRef,
+  MailboxStore,
+  Provisional,
+  ProvisionalRevision,
+  Rejection,
   SetValue,
+  Unauthorized,
   Uncertain,
+  UnknownContract,
 } from "effect-frame/actor";
+import { committedRevision, contract, resumeCodec } from "effect-frame/actor/client";
+import type { RefOptions } from "effect-frame/actor/client";
 
 /**
  * Compile-time checks. Placement is visible in the reference type: a local
- * reference cannot be uncertain and needs no command ID; a durable reference
- * requires both.
+ * command has no ID and is never uncertain; a durable or remote command has
+ * an ID, a retry, and an Uncertain state. Only a committed revision is a
+ * number a client may compare or resume from.
  */
 declare const local: ActorRef<number, SetValue<number>, "local">;
-declare const remote: ActorRef<number, SetValue<number>, "durable">;
+declare const store: ActorRef<number, SetValue<number>, "durable">;
 declare const wire: ActorRef<number, SetValue<number>, "remote">;
 declare const message: SetValue<number>;
-declare const commandId: DurableReceipt["commandId"];
+declare const commandId: CommandId;
+declare const localHandle: CommandHandle<number, "local">;
+declare const provisional: Provisional<number>;
+declare const applied: Applied<number>;
 
 type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 const localCall = () => local.call(message);
 const localSend = () => local.send(message);
-const durableCall = () => remote.call(message, { commandId, timeout: "1 second" });
-const durableSend = () => remote.send(message, { commandId });
+const durableCall = () => store.call(message, { commandId, timeout: "1 second" });
+const durableFreshCall = () => store.call(message, { timeout: "1 second" });
+const durableSend = () => store.send(message, { commandId });
+const durableFreshSend = () => store.send(message);
+const wireCall = () => wire.call(message, { commandId, timeout: "1 second" });
+const wireSend = () => wire.send(message);
 
 const localCallErrorIsStoppedOnly: Equals<
   ReturnType<typeof localCall>,
   Effect.Effect<Applied<number>, ActorStopped>
 > = true;
 
-const localSendErrorIsStoppedOnly: Equals<
+const localSendNeverFails: Equals<
   ReturnType<typeof localSend>,
-  Effect.Effect<{ readonly admitted: number }, ActorStopped>
+  Effect.Effect<CommandHandle<number, "local">>
+> = true;
+
+const localStateCannotBeUncertain: Equals<
+  CommandState<number, "local">,
+  CommandAdmitted | CommandApplied<number> | CommandRejected<ActorStopped>
 > = true;
 
 const durableCallCanBeUncertain: Equals<
@@ -45,30 +79,155 @@ const durableCallCanBeUncertain: Equals<
   Effect.Effect<Applied<number>, ActorStopped | CommandConflict | Uncertain>
 > = true;
 
-const durableSendCanConflict: Equals<
+const durableFreshCallIsTheSameType: Equals<
+  ReturnType<typeof durableFreshCall>,
+  ReturnType<typeof durableCall>
+> = true;
+
+const durableSendReturnsAnIdentifiedHandle: Equals<
   ReturnType<typeof durableSend>,
-  Effect.Effect<DurableReceipt, ActorStopped | CommandConflict>
+  Effect.Effect<IdentifiedCommandHandle<number, "durable">>
 > = true;
 
-const wireCall = () => wire.call(message, { commandId, timeout: "1 second" });
+const durableFreshSendIsTheSameType: Equals<
+  ReturnType<typeof durableFreshSend>,
+  ReturnType<typeof durableSend>
+> = true;
 
-const remoteCallAddsTransportFailures: Equals<
+const durableState: Equals<
+  CommandState<number, "durable">,
+  | CommandSent
+  | CommandAdmitted
+  | CommandApplied<number>
+  | CommandRejected<ActorStopped | CommandConflict>
+  | CommandUncertain
+> = true;
+
+const remoteCallReportsALostReplyAsUncertain: Equals<
   ReturnType<typeof wireCall>,
-  Effect.Effect<Applied<number>, ActorStopped | CommandConflict | Uncertain | RemoteFailure>
+  Effect.Effect<
+    Applied<number>,
+    ActorStopped | CommandConflict | Unauthorized | ContractMismatch | UnknownContract | Uncertain
+  >
 > = true;
 
-// @ts-expect-error a durable call requires a command ID and a timeout
-const _durableCallWithoutOptions = () => remote.call(message);
+const remoteSendReturnsAnIdentifiedHandle: Equals<
+  ReturnType<typeof wireSend>,
+  Effect.Effect<IdentifiedCommandHandle<number, "remote">>
+> = true;
 
-// @ts-expect-error a durable send requires a command ID
-const _durableSendWithoutOptions = () => remote.send(message);
+const remoteRejection: Equals<
+  Rejection["remote"],
+  ActorStopped | CommandConflict | Unauthorized | ContractMismatch | UnknownContract
+> = true;
+
+const appliedIsCommitted: Equals<Applied<number>["revision"], CommittedRevision> = true;
+
+// Requirements stay exact: the local engine adds only the scope, the durable
+// engine adds the store, and neither adds a Crypto or Random service.
+class Needed extends Context.Service<Needed, { readonly amount: number }>()(
+  "effect-frame/tests/actor/types.test/Needed",
+) {}
+const needing: Behavior.Behavior<number, SetValue<number>, Needed> = {
+  initial: 0,
+  open: () =>
+    Effect.gen(function* () {
+      const needed = yield* Needed;
+      return {
+        apply: (_state: number, next: SetValue<number>) =>
+          Effect.succeed(next.value + needed.amount),
+        changes: Stream.empty,
+      };
+    }),
+};
+const spawnNeeding = () => spawn(needing);
+const localRequirementsAreExact: Equals<
+  Effect.Services<ReturnType<typeof spawnNeeding>>,
+  Needed | Scope.Scope
+> = true;
+const localRefType: Equals<
+  Effect.Success<ReturnType<typeof spawnNeeding>>,
+  LocalActorRef<number, SetValue<number>>
+> = true;
+const durableNeeding = () =>
+  durable({
+    behavior: needing,
+    state: Schema.fromJsonString(Schema.Finite),
+    message: Schema.fromJsonString(
+      Schema.Struct({ _tag: Schema.tag("Set"), value: Schema.Finite }),
+    ),
+  });
+const durableRequirementsAreExact: Equals<
+  Effect.Services<ReturnType<typeof durableNeeding>>,
+  Needed | MailboxStore | Scope.Scope
+> = true;
+const cellMake = () => Cell.make(0);
+const cellNeedsOnlyAScope: Equals<Effect.Services<ReturnType<typeof cellMake>>, Scope.Scope> = true;
+
+// @ts-expect-error a durable call requires a timeout
+const _durableCallWithoutOptions = () => store.call(message);
+
+// @ts-expect-error a local send takes no command options
+const _localSendWithOptions = () => local.send(message, { commandId });
+
+// @ts-expect-error a local handle has no command ID
+const _localHandleId = () => localHandle.commandId;
+
+// @ts-expect-error a local handle has no retry
+const _localHandleRetry = () => localHandle.retry;
+
+const _localUncertain = (state: CommandState<number, "local">) =>
+  // @ts-expect-error a local command is never uncertain
+  state._tag === "Uncertain";
+
+// @ts-expect-error a committed revision is not a number to compare directly
+const _compareRevision = () => applied.revision > 1;
+
+const _provisionalAsCommitted = (): CommittedRevision =>
+  // @ts-expect-error a provisional revision is never a committed revision
+  provisional.revision;
+
+const _provisionalAsApplied = (): Applied<number> =>
+  // @ts-expect-error a provisional state is never an applied result
+  provisional;
+
+const Counter = contract("TypesCounter", {
+  version: 1,
+  key: Schema.String,
+  snapshot: Schema.Finite,
+  message: Schema.Finite,
+});
+
+const _resumeProvisional = (): RefOptions<typeof Counter>["resume"] =>
+  // @ts-expect-error resume data holds only a committed revision
+  Option.some(provisional);
+
+const _provisionalRevision: ProvisionalRevision = { _tag: "Provisional", base: 1, depth: 1 };
 
 describe("reference types", () => {
   test("placement is visible in the type", () => {
     expect(localCallErrorIsStoppedOnly).toBe(true);
-    expect(localSendErrorIsStoppedOnly).toBe(true);
+    expect(localSendNeverFails).toBe(true);
+    expect(localStateCannotBeUncertain).toBe(true);
     expect(durableCallCanBeUncertain).toBe(true);
-    expect(durableSendCanConflict).toBe(true);
-    expect(remoteCallAddsTransportFailures).toBe(true);
+    expect(durableFreshCallIsTheSameType).toBe(true);
+    expect(durableSendReturnsAnIdentifiedHandle).toBe(true);
+    expect(durableFreshSendIsTheSameType).toBe(true);
+    expect(durableState).toBe(true);
+    expect(remoteCallReportsALostReplyAsUncertain).toBe(true);
+    expect(remoteSendReturnsAnIdentifiedHandle).toBe(true);
+    expect(remoteRejection).toBe(true);
+    expect(appliedIsCommitted).toBe(true);
+    expect(localRequirementsAreExact).toBe(true);
+    expect(localRefType).toBe(true);
+    expect(durableRequirementsAreExact).toBe(true);
+    expect(cellNeedsOnlyAScope).toBe(true);
+  });
+
+  test("resume data keeps a numeric revision on the wire and decodes it as committed", () => {
+    const codec = resumeCodec(Counter);
+    const decoded = Schema.decodeSync(codec)('{"revision":2,"state":5}');
+    expect(decoded).toEqual({ revision: committedRevision(2), state: 5 });
+    expect(Schema.encodeSync(codec)(decoded)).toBe('{"revision":2,"state":5}');
   });
 });

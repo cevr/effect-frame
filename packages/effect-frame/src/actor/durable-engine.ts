@@ -32,7 +32,7 @@ export interface DurableEngineOptions<State, Message, R> {
 }
 
 /** The private durable engine surface shared by the public and hosted adapters. */
-export interface DurableEngine<State, Message> {
+export interface DurableEngine<State> {
   readonly committed: Source<Committed<State>>;
   /** True once the engine scope has begun to close. */
   readonly isClosed: Effect.Effect<boolean>;
@@ -46,14 +46,6 @@ export interface DurableEngine<State, Message> {
     commandId: CommandId,
     prepare: Effect.Effect<string>,
     timeout: Duration.Input,
-  ) => Effect.Effect<Committed<State>, ActorStopped | CommandConflict | Uncertain>;
-  readonly send: (
-    message: Message,
-    options: { readonly commandId: CommandId },
-  ) => Effect.Effect<DurableReceipt, ActorStopped | CommandConflict>;
-  readonly call: (
-    message: Message,
-    options: { readonly commandId: CommandId; readonly timeout: Duration.Input },
   ) => Effect.Effect<Committed<State>, ActorStopped | CommandConflict | Uncertain>;
   /** Submit a validated, prepared payload without running its encoder again. */
   readonly sendEncoded: (
@@ -100,7 +92,6 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <State, M
   const host = yield* DurableHostConfig;
   const encodeState = Schema.encodeEffect(options.state);
   const decodeState = Schema.decodeEffect(options.state);
-  const encodeMessage = Schema.encodeEffect(options.message);
   const decodeMessage = Schema.decodeEffect(options.message);
 
   const restored = yield* Effect.flatMap(store.latest, (latest) =>
@@ -223,13 +214,6 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <State, M
     return yield* sendEncoded(commandId, payload);
   });
 
-  const send = Effect.fn("Actor.durable.send")(function* (
-    message: Message,
-    sendOptions: { readonly commandId: CommandId },
-  ) {
-    return yield* sendPrepared(sendOptions.commandId, Effect.orDie(encodeMessage(message)));
-  });
-
   const awaitReceipt = Effect.fn("Actor.durable.awaitReceipt")(function* (
     commandId: CommandId,
     subscription: PubSub.Subscription<StoredReceipt>,
@@ -303,17 +287,6 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <State, M
     return yield* toCommitted(outcome.value);
   });
 
-  const call = Effect.fn("Actor.durable.call")(function* (
-    message: Message,
-    callOptions: { readonly commandId: CommandId; readonly timeout: Duration.Input },
-  ) {
-    return yield* callPrepared(
-      callOptions.commandId,
-      Effect.orDie(encodeMessage(message)),
-      callOptions.timeout,
-    );
-  });
-
   const committedSource = fromSubscriptionRef(committed);
 
   const registry = yield* Effect.serviceOption(Inspection.Registry);
@@ -335,9 +308,7 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <State, M
     isClosed: Deferred.isDone(closed),
     sendPrepared,
     callPrepared,
-    send,
-    call,
     sendEncoded,
     callEncoded,
-  } satisfies DurableEngine<State, Message>;
+  } satisfies DurableEngine<State>;
 });

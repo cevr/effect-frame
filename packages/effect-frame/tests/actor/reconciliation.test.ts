@@ -6,11 +6,11 @@ import {
   Deferred,
   Effect,
   Exit,
-  Fiber,
   Layer,
   Option,
   Queue,
   Ref,
+  Result,
   Schema,
   Scope,
   Stream,
@@ -27,7 +27,7 @@ import {
   implement,
   ref,
 } from "effect-frame/actor";
-import type { ActorRef, Applied } from "effect-frame/actor";
+import type { ActorRef, Applied, IdentifiedCommandHandle } from "effect-frame/actor";
 import type { Address, Projection, TransportService } from "effect-frame/actor/client";
 import { Unauthorized, Unreachable } from "effect-frame/actor/client";
 import type { Behavior } from "../../src/actor/behavior.js";
@@ -261,10 +261,27 @@ const waitForApplied = <State, Message, Kind extends "local" | "durable" | "remo
 ): Effect.Effect<Applied<State>> =>
   Effect.gen(function* () {
     const current = yield* actor.applied.get;
-    if (current.revision >= revision) return current;
+    if (current.revision.value >= revision) return current;
     return yield* Stream.runHead(
-      Stream.filter(actor.applied.changes, (applied) => applied.revision >= revision),
+      Stream.filter(actor.applied.changes, (applied) => applied.revision.value >= revision),
     ).pipe(Effect.map(Option.getOrThrow));
+  });
+
+const admittedOf = <State>(handle: IdentifiedCommandHandle<State, "remote">) =>
+  Effect.map(
+    Stream.runHead(
+      Stream.filterMap(handle.state.changes, (state) => {
+        if (state._tag === "Admitted") return Result.succeed({ admitted: state.admitted });
+        return Result.failVoid;
+      }),
+    ),
+    Option.getOrThrow,
+  );
+
+const settledApplied = <State>(handle: IdentifiedCommandHandle<State, "remote">) =>
+  Effect.flatMap(handle.settled, (settled) => {
+    if (settled._tag === "Applied") return Effect.succeed(settled);
+    return Effect.die(`expected Applied, got ${settled._tag}`);
   });
 
 const initialReconciliation = (
@@ -450,16 +467,21 @@ describe("issue 67 reconciliation prototype", () => {
     Effect.gen(function* () {
       const harness = yield* makeHarness(gatedBehavior(undefined, undefined));
       const actor = yield* makeReference(harness);
-      const b = yield* actor.send(add("B"), { commandId: id("B") });
       const holdB = yield* Deferred.make<void>();
       harness.controls.calls.set("B", { hold: holdB });
-      const waitingB = yield* Effect.forkScoped(
-        actor.call(add("B"), { commandId: id("B"), timeout: "1 second" }),
-      );
-      const candidateB = yield* waitForApplied(actor, 1);
-      const a = yield* actor.send(add("A"), { commandId: id("A") });
-      const exactA = yield* actor.call(add("A"), { commandId: id("A"), timeout: "1 second" });
-      const publicA: Candidate<PublicState> = exactA;
+      const sentB = yield* actor.send(add("B"), { commandId: id("B") });
+      const b = yield* admittedOf(sentB);
+      const applied = yield* waitForApplied(actor, 1);
+      const candidateB: Candidate<PublicState> = {
+        revision: applied.revision.value,
+        state: applied.state,
+      };
+      const exactA = yield* settledApplied(yield* actor.send(add("A"), { commandId: id("A") }));
+      const a = { admitted: exactA.admitted };
+      const publicA: Candidate<PublicState> = {
+        revision: exactA.revision.value,
+        state: exactA.state,
+      };
       const delayed = reconcile(
         initialReconciliation(),
         candidateB,
@@ -479,7 +501,8 @@ describe("issue 67 reconciliation prototype", () => {
       expect(delayed.held).toEqual(candidateB);
 
       yield* Deferred.succeed(holdB, void 0);
-      const exactB = yield* Fiber.join(waitingB);
+      const settledB = yield* settledApplied(sentB);
+      const exactB = { revision: settledB.revision.value };
       expect(exactB.revision).toBe(1);
       const published = reconcile(
         delayed,

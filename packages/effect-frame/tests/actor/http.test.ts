@@ -7,8 +7,16 @@ import {
   HttpServer,
   implementTransparent,
 } from "effect-frame/actor";
-import { HttpTransport, Unauthorized, contract, ref } from "effect-frame/actor/client";
-import type { Address } from "effect-frame/actor/client";
+import {
+  ActorTransport,
+  CommandConflict,
+  HttpTransport,
+  Unauthorized,
+  committedRevision,
+  contract,
+  ref,
+} from "effect-frame/actor/client";
+import type { Address, CommandSettled } from "effect-frame/actor/client";
 
 const Add = Schema.TaggedStruct("Add", { amount: Schema.Finite });
 type Add = Schema.Schema.Type<typeof Add>;
@@ -65,22 +73,49 @@ describe("http transport in process", () => {
       const writer = yield* ref(Counter, alice);
       const reader = yield* ref(Counter, alice);
       const applied = yield* writer.call(add(3), { commandId: id("c1"), timeout: "1 second" });
-      expect(applied).toEqual({ revision: 1, state: 3 });
+      expect(applied).toEqual({ revision: committedRevision(1), state: 3 });
       const seen = yield* Stream.runHead(Stream.filter(reader.state.changes, (n) => n === 3));
       expect(seen).toEqual(Option.some(3));
       const fresh = yield* ref(Counter, alice);
-      expect(yield* fresh.applied.get).toEqual({ revision: 1, state: 3 });
+      expect(yield* fresh.applied.get).toEqual({ revision: committedRevision(1), state: 3 });
     }),
   );
 
   withInProcess("a receipt round-trips with its Option", () =>
     Effect.gen(function* () {
+      const transport = yield* ActorTransport;
+      const address: Address = {
+        contract: Counter.name,
+        version: Counter.version,
+        key: yield* Schema.encodeEffect(Counter.key)(alice),
+      };
+      const payload = yield* Schema.encodeEffect(Counter.message)(add(1));
+      const first = yield* transport.send(address, id("c1"), payload, []);
+      expect(first.receipt).toEqual({
+        commandId: id("c1"),
+        admitted: 1,
+        committed: Option.none(),
+      });
+      yield* transport.call(address, id("c1"), payload, "1 second", []);
+      const again = yield* transport.send(address, id("c1"), payload, []);
+      expect(again.receipt.committed).toEqual(Option.some(1));
+    }),
+  );
+
+  withInProcess("a command handle settles over the wire, and a resend gets its stored result", () =>
+    Effect.gen(function* () {
       const counter = yield* ref(Counter, alice);
-      const first = yield* counter.send(add(1), { commandId: id("c1") });
-      expect(first.admitted).toBe(1);
-      yield* counter.call(add(1), { commandId: id("c1"), timeout: "1 second" });
-      const again = yield* counter.send(add(1), { commandId: id("c1") });
-      expect(again.committed).toEqual(Option.some(1));
+      const first = yield* counter.send(add(1));
+      const applied: CommandSettled<number, "remote"> = {
+        _tag: "Applied",
+        admitted: 1,
+        revision: committedRevision(1),
+        state: 1,
+      };
+      expect(yield* first.settled).toEqual(applied);
+      const again = yield* counter.send(add(1), { commandId: first.commandId });
+      expect(yield* again.settled).toEqual(applied);
+      expect(yield* counter.state.get).toBe(1);
     }),
   );
 
@@ -88,8 +123,11 @@ describe("http transport in process", () => {
     Effect.gen(function* () {
       const counter = yield* ref(Counter, alice);
       yield* counter.call(add(1), { commandId: id("c1"), timeout: "1 second" });
-      const conflict = yield* Effect.flip(counter.send(add(2), { commandId: id("c1") }));
-      expect(conflict._tag).toBe("CommandConflict");
+      const conflict = yield* counter.send(add(2), { commandId: id("c1") });
+      expect(yield* conflict.settled).toEqual({
+        _tag: "Rejected",
+        reason: CommandConflict.make({ commandId: id("c1") }),
+      });
       const denied = yield* Effect.flip(ref(Counter, { tenant: "other", id: "x" }));
       expect(denied._tag).toBe("Unauthorized");
       const Stale = contract("Counter", {
@@ -153,9 +191,9 @@ describe("http transport over a real socket", () => {
 
       yield* writer.call(add(1), { commandId: id("c2"), timeout: "1 second" });
       const two = yield* Stream.runHead(
-        Stream.filter(reader.applied.changes, (committed) => committed.revision === 2),
+        Stream.filter(reader.applied.changes, (committed) => committed.revision.value === 2),
       );
-      expect(two).toEqual(Option.some({ revision: 2, state: 2 }));
+      expect(two).toEqual(Option.some({ revision: committedRevision(2), state: 2 }));
     }),
   );
 });

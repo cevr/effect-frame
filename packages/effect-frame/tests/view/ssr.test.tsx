@@ -166,7 +166,7 @@ describe("server render and hydration", () => {
       expect(html).toBe(
         '<article><h1>&lt;script&gt;alert("x")&lt;/script&gt; &amp; co</h1><p id="count">0</p></article>',
       );
-      expect(snapshot.revision).toBe(1);
+      expect(snapshot.revision.value).toBe(1);
       expect(page).not.toContain("</script></script>");
       expect(page).toContain("\\u003c/script\\u003e");
     }),
@@ -229,7 +229,7 @@ describe("server render and hydration", () => {
       const main = yield* install(html, script);
       const { page, report } = yield* hydrate(main, "n4");
       expect(report.mismatches).toEqual([]);
-      expect(snapshot.revision).toBe(0);
+      expect(snapshot.revision.value).toBe(0);
       yield* page.waitFor({
         label: "hydrated revision catches up",
         until: (root) => textAt(root, "#count") === "2",

@@ -71,6 +71,24 @@ export const retrySchedule = (policy: CommandPolicySettings) => {
 /** How the command ID was obtained. A supplied ID never becomes fresh. */
 export type Identity = "fresh" | "supplied";
 
+/** One command ID with its provenance. Only `identify` creates a fresh one. */
+export interface Identified {
+  readonly commandId: CommandId;
+  readonly identity: Identity;
+}
+
+/**
+ * Omitted means the framework mints a secure fresh ID. Supplied means
+ * supplied, whatever the string looks like: provenance is never inferred
+ * from the ID itself.
+ */
+export const identify = (supplied: Option.Option<CommandId>): Effect.Effect<Identified> =>
+  Option.match(supplied, {
+    onNone: () =>
+      Effect.map(freshCommandId, (commandId): Identified => ({ commandId, identity: "fresh" })),
+    onSome: (commandId) => Effect.succeed<Identified>({ commandId, identity: "supplied" }),
+  });
+
 /** The owner's numeric lifecycle. Public adapters project it. */
 export type Lifecycle<State, Rejection> =
   | { readonly _tag: "Sent" }
@@ -172,7 +190,7 @@ export interface CommandOwner<State, Rejection> {
    * after the closed check, and never again for this command.
    */
   readonly submit: (
-    commandId: Option.Option<CommandId>,
+    identified: Identified,
     prepare: Effect.Effect<string>,
     active: Effect.Effect<ReadonlyArray<QueryKey>>,
   ) => Effect.Effect<OwnedCommand<State, Rejection>>;
@@ -437,18 +455,11 @@ export const make = Effect.fn("Actor.commands.make")(function* <
   const isStopped = Effect.map(adapter.closed, (actorClosed) => actorClosed || closing());
 
   const submit = Effect.fn("Actor.commands.submit")(function* (
-    supplied: Option.Option<CommandId>,
+    identified: Identified,
     prepare: Effect.Effect<string>,
     activeKeys: Effect.Effect<ReadonlyArray<QueryKey>>,
   ) {
-    let identity: Identity = "fresh";
-    let commandId: CommandId;
-    if (Option.isSome(supplied)) {
-      identity = "supplied";
-      commandId = supplied.value;
-    } else {
-      commandId = yield* freshCommandId;
-    }
+    const { commandId, identity } = identified;
     if (yield* isStopped) {
       return yield* stoppedBeforeWork(commandId, identity);
     }
@@ -496,9 +507,9 @@ export const make = Effect.fn("Actor.commands.make")(function* <
       return yield* rejected(commandId, identity, adapter.conflict(commandId));
     }
     const record = placed.record;
-    if (placed.created) {
-      yield* startSequence(record);
-    }
+    // A new record starts its first sequence. Resubmitting the same bytes to
+    // a retained, idle record is a retry: it starts one new bounded sequence.
+    yield* startSequence(record);
     return view(record.commandId, record.identity, record.state, record.terminal, retryOf(record));
   });
 

@@ -1,4 +1,5 @@
-import { Schema } from "effect";
+import { Schema, SchemaTransformation } from "effect";
+import { CommittedRevision, committedRevision } from "./vocabulary.js";
 
 /** A schema whose codecs need no services. Contracts cross the wire alone. */
 export type Pure = Schema.Codec<unknown, unknown>;
@@ -59,16 +60,36 @@ export const contract = <
 });
 
 /**
- * The codec for a revisioned snapshot a server hands a client, so the
- * client's reference can resume from it. One JSON string carries both.
+ * A committed revision as JSON carries it: a plain number. Only a committed
+ * revision can be written here; a provisional value has no number to write.
+ */
+export const CommittedRevisionFromNumber = Schema.Finite.pipe(
+  Schema.decodeTo(
+    CommittedRevision,
+    SchemaTransformation.transform({
+      decode: (value: number) => committedRevision(value),
+      encode: (revision: CommittedRevision) => revision.value,
+    }),
+  ),
+);
+
+/**
+ * The codec for a committed snapshot a server hands a client, so the
+ * client's reference can resume from it. One JSON string carries both; the
+ * revision stays a number on the wire and decodes to a committed revision.
  */
 export type ResumeCodec<C extends AnyContract> = Schema.fromJsonString<
-  Schema.Struct<{ readonly revision: typeof Schema.Finite; readonly state: C["raw"]["snapshot"] }>
+  Schema.Struct<{
+    readonly revision: typeof CommittedRevisionFromNumber;
+    readonly state: C["raw"]["snapshot"];
+  }>
 >;
 
 export const resumeCodec = <C extends AnyContract>(definition: C): ResumeCodec<C> => {
   const snapshot: C["raw"]["snapshot"] = definition.raw.snapshot;
-  return Schema.fromJsonString(Schema.Struct({ revision: Schema.Finite, state: snapshot }));
+  return Schema.fromJsonString(
+    Schema.Struct({ revision: CommittedRevisionFromNumber, state: snapshot }),
+  );
 };
 
 /** Where one actor instance lives on the wire. Every field is a string. */

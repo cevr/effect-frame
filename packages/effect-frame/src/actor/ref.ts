@@ -1,11 +1,22 @@
 import { Effect, Option, Schema, Stream, SubscriptionRef } from "effect";
+import { callThrough, identifiedHandle, suppliedId, toApplied } from "./command-handle.js";
+import * as Commands from "./command-owner.js";
+import type { Committed } from "./engine-types.js";
+import { remoteCommands } from "./remote-commands.js";
+import type { RemoteRejection } from "./remote-commands.js";
 import type { Address, AnyContract, KeyOf, MessageOf, SnapshotOf } from "./contract.js";
 import type { QueryKey } from "./query.js";
 import { QueryCache } from "./query-client.js";
 import { fromSubscriptionRef, select } from "./source.js";
 import type { Projection, Refreshed, TransportReadError } from "./transport.js";
 import { ActorTransport } from "./transport.js";
-import type { ActorRef, Applied, DurableCallOptions, DurableSendOptions } from "./vocabulary.js";
+import type {
+  ActorRef,
+  Applied,
+  DurableCallOptions,
+  DurableSendOptions,
+  IdentifiedCommandHandle,
+} from "./vocabulary.js";
 
 export type RemoteActorRef<C extends AnyContract> = ActorRef<SnapshotOf<C>, MessageOf<C>, "remote">;
 
@@ -22,9 +33,13 @@ const fetchInitial = <C extends AnyContract>(
   contract: C,
   address: Address,
   options: RefOptions<C>,
-): Effect.Effect<Applied<SnapshotOf<C>>, TransportReadError, ActorTransport> =>
+): Effect.Effect<Committed<SnapshotOf<C>>, TransportReadError, ActorTransport> =>
   Option.match(options.resume, {
-    onSome: (resumed) => Effect.succeed(resumed),
+    onSome: (resumed) =>
+      Effect.succeed<Committed<SnapshotOf<C>>>({
+        revision: resumed.revision.value,
+        state: resumed.state,
+      }),
     onNone: () =>
       Effect.gen(function* () {
         const transport = yield* ActorTransport;
@@ -36,14 +51,14 @@ const fetchInitial = <C extends AnyContract>(
 const decodeProjection = <C extends AnyContract>(
   contract: C,
   projection: Projection,
-): Effect.Effect<Applied<SnapshotOf<C>>> =>
+): Effect.Effect<Committed<SnapshotOf<C>>> =>
   Effect.map(
     Effect.orDie(Schema.decodeEffect(contract.snapshot)(projection.snapshot)),
-    (state): Applied<SnapshotOf<C>> => ({ revision: projection.revision, state }),
+    (state): Committed<SnapshotOf<C>> => ({ revision: projection.revision, state }),
   );
 
 /** Revisions arrive from two paths (subscription and call); keep the newest. */
-const newest = <A>(current: Applied<A>, next: Applied<A>): Applied<A> => {
+const newest = <A>(current: Committed<A>, next: Committed<A>): Committed<A> => {
   if (next.revision > current.revision) {
     return next;
   }
@@ -54,7 +69,12 @@ const newest = <A>(current: Applied<A>, next: Applied<A>): Applied<A> => {
  * A client-side reference to an actor hosted elsewhere. The client holds the
  * contract, the key, and a transport. It never holds the behavior. `state`
  * is the latest snapshot the transport delivered; `applied` carries its
- * revision so a later reference can resume without a gap.
+ * committed revision so a later reference can resume without a gap.
+ *
+ * Commands go through one private owner in this scope. `send` returns an
+ * identified handle at once; the owner runs one send and one same-ID call per
+ * pass, retries a lost pass within its bound, and keeps the exact bytes
+ * while the command is unresolved.
  */
 export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
   contract: C,
@@ -62,18 +82,19 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
   options: RefOptions<C> = { resume: Option.none() },
 ) {
   const transport = yield* ActorTransport;
+  const cache = yield* Effect.serviceOption(QueryCache);
   const encodedKey = yield* Effect.orDie(Schema.encodeEffect(contract.key)(key));
   const address: Address = { contract: contract.name, version: contract.version, key: encodedKey };
   const encodeMessage = Schema.encodeEffect(contract.message);
 
   const initial = yield* fetchInitial(contract, address, options);
   const applied = yield* SubscriptionRef.make(initial);
+  const observe = (next: Committed<SnapshotOf<C>>) =>
+    SubscriptionRef.update(applied, (current) => newest(current, next));
 
   yield* Effect.forkScoped(
     Stream.runForEach(transport.changes(address, initial.revision), (projection) =>
-      Effect.flatMap(decodeProjection(contract, projection), (next) =>
-        SubscriptionRef.update(applied, (current) => newest(current, next)),
-      ),
+      Effect.flatMap(decodeProjection(contract, projection), observe),
     ),
   );
 
@@ -82,64 +103,71 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
    * A client with no cache declares none and the reply refreshes nothing:
    * the single-flight field is additive, never required.
    */
-  const declareActive: Effect.Effect<ReadonlyArray<QueryKey>> = Effect.flatMap(
-    Effect.serviceOption(QueryCache),
-    (cache) =>
-      Option.match(cache, {
-        onNone: () => Effect.succeed<ReadonlyArray<QueryKey>>([]),
-        onSome: (service) => service.active,
-      }),
-  );
+  const declareActive: Effect.Effect<ReadonlyArray<QueryKey>> = Option.match(cache, {
+    onNone: () => Effect.succeed<ReadonlyArray<QueryKey>>([]),
+    onSome: (service) => service.active,
+  });
 
-  /**
-   * Marks dependent entries stale as the command leaves, then accepts the
-   * refreshed values the reply carried. The view shows stale content for
-   * the whole round trip instead of a gap.
-   */
+  /** Accepts the refreshed values a settlement call carried. */
   const settle = (refreshed: ReadonlyArray<Refreshed>) =>
-    Effect.flatMap(Effect.serviceOption(QueryCache), (cache) =>
-      Option.match(cache, {
-        onNone: () => Effect.void,
-        onSome: (service) => service.apply(refreshed),
-      }),
-    );
-
-  const markDependentsStale = Effect.flatMap(Effect.serviceOption(QueryCache), (cache) =>
     Option.match(cache, {
       onNone: () => Effect.void,
-      onSome: (service) => service.invalidate(contract.name),
-    }),
+      onSome: (service) => service.apply(refreshed),
+    });
+
+  /**
+   * Marks dependent entries stale as the command leaves. The view shows
+   * stale content for the whole round trip instead of a gap.
+   */
+  const markDependentsStale = Option.match(cache, {
+    onNone: () => Effect.void,
+    onSome: (service) => service.invalidate(contract.name),
+  });
+
+  const adapter = remoteCommands(transport, address, (projection) =>
+    decodeProjection(contract, projection),
   );
+  const owner = yield* Commands.make<SnapshotOf<C>, RemoteRejection>({
+    ...adapter,
+    call: (commandId, payload, deadline, active) =>
+      adapter
+        .call(commandId, payload, deadline, active)
+        .pipe(
+          Effect.tap((settlement) =>
+            Effect.andThen(observe(settlement.committed), settle(settlement.refreshed)),
+          ),
+        ),
+  });
 
-  const send = (message: MessageOf<C>, sendOptions: DurableSendOptions) =>
-    Effect.gen(function* () {
-      const payload = yield* Effect.orDie(encodeMessage(message));
-      const active = yield* declareActive;
-      yield* markDependentsStale;
-      const result = yield* transport.send(address, sendOptions.commandId, payload, active);
-      yield* settle(result.refreshed);
-      return result.receipt;
-    });
+  const submit = (message: MessageOf<C>, identified: Commands.Identified) =>
+    Effect.andThen(
+      markDependentsStale,
+      owner.submit(identified, Effect.orDie(encodeMessage(message)), declareActive),
+    );
 
-  const call = (message: MessageOf<C>, callOptions: DurableCallOptions) =>
-    Effect.gen(function* () {
-      const payload = yield* Effect.orDie(encodeMessage(message));
-      const active = yield* declareActive;
-      yield* markDependentsStale;
-      const result = yield* transport.call(
-        address,
-        callOptions.commandId,
-        payload,
-        callOptions.timeout,
-        active,
-      );
-      const next = yield* decodeProjection(contract, result.projection);
-      yield* SubscriptionRef.update(applied, (current) => newest(current, next));
-      yield* settle(result.refreshed);
-      return next;
-    });
+  const send = Effect.fn("Actor.ref.send")(function* (
+    message: MessageOf<C>,
+    sendOptions: DurableSendOptions | void,
+  ) {
+    const identified = yield* Commands.identify(suppliedId(sendOptions));
+    const owned = yield* submit(message, identified);
+    return identifiedHandle(owned) satisfies IdentifiedCommandHandle<SnapshotOf<C>, "remote">;
+  });
 
-  const appliedSource = fromSubscriptionRef(applied);
+  const call = Effect.fn("Actor.ref.call")(function* (
+    message: MessageOf<C>,
+    callOptions: DurableCallOptions,
+  ) {
+    const identified = yield* Commands.identify(suppliedId(callOptions));
+    return yield* callThrough(
+      submit(message, identified),
+      identified.commandId,
+      callOptions.timeout,
+      owner.closed,
+    );
+  });
+
+  const appliedSource = select(fromSubscriptionRef(applied), toApplied);
   const reference: RemoteActorRef<C> = {
     kind: "remote",
     applied: appliedSource,

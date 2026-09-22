@@ -1,4 +1,4 @@
-import { Context, Deferred, Effect, Fiber, Layer, Option, Ref, Schema, Stream } from "effect";
+import { Context, Deferred, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import {
   ActorHost,
@@ -10,6 +10,7 @@ import {
 import {
   ActorTransport,
   QueryCache,
+  committedRevision,
   contract,
   query,
   ref,
@@ -118,15 +119,14 @@ describe("ActorHost command admission refresh", () => {
 
       const counter = yield* ref(HeldCounter, "one");
       const commandId = id("held-before-commit");
-      const sending = yield* Effect.forkScoped(counter.send(1, { commandId }));
+      const handle = yield* counter.send(1, { commandId });
       yield* Deferred.await(control.started);
-      const admitted = yield* Fiber.join(sending);
+      const admitted = yield* Stream.runHead(
+        Stream.filter(handle.state.changes, (state) => state._tag === "Admitted"),
+      );
 
-      expect(admitted).toEqual({
-        commandId,
-        admitted: 1,
-        committed: Option.none(),
-      });
+      expect(handle.commandId).toBe(commandId);
+      expect(admitted).toEqual(Option.some({ _tag: "Admitted", admitted: 1 }));
       expect(yield* counter.state.get).toBe(0);
       expect(yield* value.state.get).toEqual({
         _tag: "Ready",
@@ -137,7 +137,7 @@ describe("ActorHost command admission refresh", () => {
 
       yield* Deferred.succeed(control.release, void 0);
       const applied = yield* counter.call(1, { commandId, timeout: "1 second" });
-      expect(applied).toEqual({ revision: 1, state: 1 });
+      expect(applied).toEqual({ revision: committedRevision(1), state: 1 });
       expect(yield* counter.state.get).toBe(1);
       expect(yield* value.state.get).toEqual({
         _tag: "Ready",
@@ -146,8 +146,20 @@ describe("ActorHost command admission refresh", () => {
       });
       expect(yield* Ref.get(control.queryReads)).toBe(2);
 
+      expect(yield* handle.settled).toEqual({
+        _tag: "Applied",
+        admitted: 1,
+        revision: committedRevision(1),
+        state: 1,
+      });
+
       const duplicate = yield* counter.send(1, { commandId });
-      expect(duplicate.committed).toEqual(Option.some(1));
+      expect(yield* duplicate.settled).toEqual({
+        _tag: "Applied",
+        admitted: 1,
+        revision: committedRevision(1),
+        state: 1,
+      });
       expect(yield* counter.state.get).toBe(1);
       expect(yield* value.state.get).toEqual({
         _tag: "Ready",

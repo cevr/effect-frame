@@ -27,6 +27,11 @@ export interface LocalAdmission<State> {
 
 export interface LocalEngine<State, Message> {
   readonly committed: Source<Committed<State>>;
+  /**
+   * True once the engine has stopped. The worker is interrupted before this
+   * turns true, so a reply that is still empty then will never be filled.
+   */
+  readonly isClosed: Effect.Effect<boolean>;
   readonly admit: (
     derive: (state: State) => Message,
   ) => Effect.Effect<LocalAdmission<State>, ActorStopped>;
@@ -115,6 +120,7 @@ export const openLocal = Effect.fn("Actor.local.open")(function* <State, Message
   }
   return {
     committed: fromSubscriptionRef(committed),
+    isClosed: Ref.get(stopped),
     admit,
     awaitReply,
   } satisfies LocalEngine<State, Message>;

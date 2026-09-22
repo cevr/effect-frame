@@ -194,7 +194,10 @@ describe("notes end to end", () => {
 
       const target = yield* browser.applied.get;
       yield* settle(
-        Effect.map(terminal.applied.get, (applied) => applied.revision === target.revision),
+        Effect.map(
+          terminal.applied.get,
+          (applied) => applied.revision.value === target.revision.value,
+        ),
       );
       const frame = yield* draw(setup);
       expect(frame).toContain("walk dog");

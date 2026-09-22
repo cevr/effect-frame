@@ -7,7 +7,13 @@ import {
   implement,
   implementTransparent,
 } from "effect-frame/actor";
-import { Unauthorized, contract, ref } from "effect-frame/actor/client";
+import {
+  CommandConflict,
+  Unauthorized,
+  committedRevision,
+  contract,
+  ref,
+} from "effect-frame/actor/client";
 import type { Address } from "effect-frame/actor/client";
 
 const CounterKey = Schema.Struct({ tenant: Schema.String, id: Schema.String });
@@ -69,8 +75,8 @@ describe("remote reference", () => {
       expect(counter.kind).toBe("remote");
       expect(yield* counter.state.get).toBe(0);
       const applied = yield* counter.call(add(3), { commandId: id("c1"), timeout: "1 second" });
-      expect(applied).toEqual({ revision: 1, state: 3 });
-      expect(yield* counter.applied.get).toEqual({ revision: 1, state: 3 });
+      expect(applied).toEqual({ revision: committedRevision(1), state: 3 });
+      expect(yield* counter.applied.get).toEqual({ revision: committedRevision(1), state: 3 });
     }),
   );
 
@@ -93,8 +99,11 @@ describe("remote reference", () => {
       const a = yield* first.call(add(2), { commandId: id("c1"), timeout: "1 second" });
       const b = yield* second.call(add(2), { commandId: id("c1"), timeout: "1 second" });
       expect(b).toEqual(a);
-      const conflict = yield* Effect.flip(second.send(add(9), { commandId: id("c1") }));
-      expect(conflict._tag).toBe("CommandConflict");
+      const conflict = yield* second.send(add(9), { commandId: id("c1") });
+      expect(yield* conflict.settled).toEqual({
+        _tag: "Rejected",
+        reason: CommandConflict.make({ commandId: id("c1") }),
+      });
     }),
   );
 
@@ -106,9 +115,9 @@ describe("remote reference", () => {
 
       const resumed = yield* ref(Counter, alice, { resume: Option.some(held) });
       const caughtUp = yield* Stream.runHead(
-        Stream.filter(resumed.applied.changes, (committed) => committed.revision >= 2),
+        Stream.filter(resumed.applied.changes, (committed) => committed.revision.value >= 2),
       );
-      expect(caughtUp).toEqual(Option.some({ revision: 2, state: 2 }));
+      expect(caughtUp).toEqual(Option.some({ revision: committedRevision(2), state: 2 }));
     }),
   );
 

@@ -60,14 +60,7 @@ interface DraftProps {
 
 const Composer = (props: DraftProps) =>
   Effect.succeed(
-    <input
-      width={20}
-      onInput={View.event((event) =>
-        props.draft
-          .send(Value.Set(event.value))
-          .pipe(Effect.catchTag("ActorStopped", () => Effect.void)),
-      )}
-    />,
+    <input width={20} onInput={View.event((event) => props.draft.send(Value.Set(event.value)))} />,
   );
 
 describe("terminal view", () => {

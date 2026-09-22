@@ -1,7 +1,19 @@
-import { Effect, Exit, Fiber, Option, Schema, Scope, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Option, Schema, Scope, Stream } from "effect";
 import { describe, expect, it, yieldFibers } from "effect-bun-test";
 import { Event, Machine, State } from "effect-machine";
-import { Behavior, Cell, Source, Value, modify, select, spawn, zip } from "effect-frame/actor";
+import {
+  ActorStopped,
+  Behavior,
+  Cell,
+  Source,
+  Value,
+  committedRevision,
+  modify,
+  select,
+  spawn,
+  zip,
+} from "effect-frame/actor";
+import type { CommandSettled } from "effect-frame/actor";
 
 const CounterState = State({
   Counting: { count: Schema.Finite },
@@ -53,7 +65,7 @@ describe("local actor", () => {
     Effect.gen(function* () {
       const count = yield* spawn(Behavior.value(0));
       const applied = yield* count.call(Value.Set(10));
-      expect(applied).toEqual({ revision: 1, state: 10 });
+      expect(applied).toEqual({ revision: committedRevision(1), state: 10 });
       expect(yield* count.state.get).toBe(10);
     }),
   );
@@ -86,9 +98,19 @@ describe("local actor", () => {
       const first = yield* list.send({ _tag: "Append", item: "a" });
       const second = yield* list.send({ _tag: "Append", item: "b" });
       const applied = yield* list.call({ _tag: "Append", item: "c" });
-      expect(first.admitted).toBe(1);
-      expect(second.admitted).toBe(2);
-      expect(applied).toEqual({ revision: 3, state: ["a", "b", "c"] });
+      expect(applied).toEqual({ revision: committedRevision(3), state: ["a", "b", "c"] });
+      expect(yield* first.settled).toEqual({
+        _tag: "Applied",
+        admitted: 1,
+        revision: committedRevision(1),
+        state: ["a"],
+      });
+      expect(yield* second.state.get).toEqual({
+        _tag: "Applied",
+        admitted: 2,
+        revision: committedRevision(2),
+        state: ["a", "b"],
+      });
     }),
   );
 
@@ -110,7 +132,7 @@ describe("local actor", () => {
       const counter = yield* spawn(Behavior.machine(counterMachine));
       yield* counter.send(CounterEvent.Increment);
       const applied = yield* counter.call(CounterEvent.Increment);
-      expect(applied.revision).toBe(2);
+      expect(applied.revision.value).toBe(2);
       expect(applied.state).toEqual(CounterState.Counting({ count: 2 }));
       const reset = yield* counter.call(CounterEvent.Reset);
       expect(reset.state.count).toBe(0);
@@ -129,14 +151,61 @@ describe("local actor", () => {
     }),
   );
 
+  it.scoped("a local handle is Admitted before its turn and Applied after", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+      const held: Behavior.Behavior<number, number> = {
+        initial: 0,
+        open: () =>
+          Effect.succeed({
+            apply: (state, amount) => Effect.as(Deferred.await(gate), state + amount),
+            changes: Stream.empty,
+          }),
+      };
+      const count = yield* spawn(held);
+      const handle = yield* count.send(2);
+      expect(yield* handle.state.get).toEqual({ _tag: "Admitted", admitted: 1 });
+      const states = yield* Effect.forkScoped(Stream.runCollect(handle.state.changes));
+      yield* yieldFibers;
+      yield* Deferred.succeed(gate, void 0);
+      expect(Array.from(yield* Fiber.join(states))).toEqual([
+        { _tag: "Admitted", admitted: 1 },
+        { _tag: "Applied", admitted: 1, revision: committedRevision(1), state: 2 },
+      ]);
+    }),
+  );
+
+  it.effect("a handle admitted before a stop settles Rejected, never Uncertain", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const never: Behavior.Behavior<number, number> = {
+        initial: 0,
+        open: () =>
+          Effect.succeed({
+            apply: () => Effect.never,
+            changes: Stream.empty,
+          }),
+      };
+      const count = yield* spawn(never).pipe(Scope.provide(scope));
+      const handle = yield* count.send(1);
+      yield* Scope.close(scope, Exit.void);
+      const stopped: CommandSettled<number, "local"> = {
+        _tag: "Rejected",
+        reason: ActorStopped.make(),
+      };
+      expect(yield* handle.settled).toEqual(stopped);
+      expect(yield* handle.state.get).toEqual(stopped);
+    }),
+  );
+
   it.effect("closing the scope stops the actor and fails later sends", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make();
       const count = yield* spawn(Behavior.value(0)).pipe(Scope.provide(scope));
       yield* count.call(Value.Set(1));
       yield* Scope.close(scope, Exit.void);
-      const failure = yield* Effect.flip(count.send(Value.Set(2)));
-      expect(failure._tag).toBe("ActorStopped");
+      const refused = yield* count.send(Value.Set(2));
+      expect(yield* refused.settled).toEqual({ _tag: "Rejected", reason: ActorStopped.make() });
       const callFailure = yield* Effect.flip(count.call(Value.Set(3)));
       expect(callFailure._tag).toBe("ActorStopped");
     }),

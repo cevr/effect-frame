@@ -12,8 +12,8 @@ export type DurableRejection = ActorStopped | CommandConflict;
  * The durable engine as a command adapter. A pass admits the retained bytes
  * and then waits for their exact stored receipt. No encoder runs here.
  */
-export const durableCommands = <State, Message>(
-  engine: DurableEngine<State, Message>,
+export const durableCommands = <State>(
+  engine: DurableEngine<State>,
 ): CommandAdapter<State, DurableRejection> => ({
   closed: engine.isClosed,
   send: (commandId: CommandId, payload: string) =>

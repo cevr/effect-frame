@@ -644,9 +644,9 @@ describe("browser view", () => {
       const actors = yield* Ref.get(spawned);
       expect(actors.length).toBe(1);
       const stopped = yield* Effect.forEach(actors, (actor) =>
-        Effect.exit(actor.send(Value.Set(1))),
+        Effect.flatMap(actor.send(Value.Set(1)), (handle) => handle.settled),
       );
-      expect(stopped.map(Exit.isFailure)).toEqual([true]);
+      expect(stopped.map((settled) => settled._tag)).toEqual(["Rejected"]);
     }),
   );
 

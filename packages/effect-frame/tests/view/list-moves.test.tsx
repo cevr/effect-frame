@@ -6,7 +6,7 @@ import { Behavior, Value, spawn } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
 import type { Host } from "effect-frame/view";
 import { Dom, For, View, ViewTest, mount } from "effect-frame/view";
-import { Effect, Fiber, Option, Stream } from "effect";
+import { Effect, Option } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 const makeRoot = Effect.sync(() => document.createElement("main"));
@@ -49,6 +49,20 @@ const Keyed = (props: { readonly items: Source<ReadonlyArray<string>> }) =>
     </ul>,
   );
 
+interface LabeledItem {
+  readonly key: string;
+  readonly label: string;
+}
+
+const LabeledKeyed = (props: { readonly items: Source<ReadonlyArray<LabeledItem>> }) =>
+  Effect.succeed(
+    <ul>
+      <For each={props.items} keyBy={(item) => item.key}>
+        {(item) => <li>{View.bind(item, (value) => value.label)}</li>}
+      </For>
+    </ul>,
+  );
+
 const idsIn = (root: Element): ReadonlyArray<string> =>
   Array.from(root.querySelectorAll("li")).map((li) => li.textContent ?? "");
 
@@ -60,20 +74,27 @@ const idsAt = (root: Node): ReadonlyArray<string> => {
 };
 
 describe("a keyed list moves only what moved", () => {
-  it.scoped("a change that keeps every row in place touches no node", () =>
+  it.scoped("updates labels without replacing stable keyed rows", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
       document.body.appendChild(root);
       const { host, inserted } = counting();
-      const items = yield* spawn(Behavior.value<ReadonlyArray<string>>(["a", "b", "c"]));
+      const items = yield* spawn(
+        Behavior.value<ReadonlyArray<LabeledItem>>([
+          { key: "a", label: "alpha" },
+          { key: "b", label: "beta" },
+          { key: "c", label: "gamma" },
+        ]),
+      );
       const page = yield* ViewTest.make({
         host,
         root,
         setup: (wrappedHost, mountRoot) =>
-          mount(Keyed, { items: items.state }, wrappedHost, mountRoot),
+          mount(LabeledKeyed, { items: items.state }, wrappedHost, mountRoot),
       });
-      expect(idsIn(root)).toEqual(["a", "b", "c"]);
-      const first = Option.fromNullishOr(root.querySelector("li"));
+      expect(idsIn(root)).toEqual(["alpha", "beta", "gamma"]);
+      const before = Array.from(root.querySelectorAll("li"));
+      const first = Option.fromNullishOr(before[0]);
       Option.match(first, {
         onNone: () => {},
         onSome: (li) => {
@@ -85,19 +106,28 @@ describe("a keyed list moves only what moved", () => {
       });
       expect(Option.map(first, (li) => document.activeElement === li)).toEqual(Option.some(true));
       inserted.length = 0;
-      const sourceCommit = yield* Stream.runHead(
-        Stream.filter(items.state.changes, (value) => value.join(",") === "a,b,c"),
-      ).pipe(Effect.forkChild);
 
-      yield* page.act(items.call(Value.Set(["a", "b", "c"])), {
-        label: "unchanged keyed rows remain rendered",
-        until: (actualRoot) => idsAt(actualRoot).join(",") === "a,b,c",
-      });
-      // The predicate was already true. Wait for the actor's source change
-      // before making the negative host-write assertion causal.
-      yield* Fiber.join(sourceCommit);
-      expect(inserted).toEqual([]);
+      yield* page.act(
+        items.call(
+          Value.Set([
+            { key: "a", label: "ALPHA" },
+            { key: "b", label: "BETA" },
+            { key: "c", label: "GAMMA" },
+          ]),
+        ),
+        {
+          label: "all keyed row labels update",
+          until: (actualRoot) => idsAt(actualRoot).join(",") === "ALPHA,BETA,GAMMA",
+        },
+      );
+      const after = Array.from(root.querySelectorAll("li"));
+      expect(idsIn(root)).toEqual(["ALPHA", "BETA", "GAMMA"]);
+      expect(after.length).toBe(before.length);
+      for (let index = 0; index < before.length; index += 1) {
+        expect(after[index]).toBe(before[index]);
+      }
       expect(Option.map(first, (li) => document.activeElement === li)).toEqual(Option.some(true));
+      expect(inserted).toEqual([]);
       root.remove();
     }),
   );

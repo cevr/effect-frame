@@ -62,6 +62,20 @@ Keep the cache layer alive for the full mounted application scope. Providing a
 cache only around a short setup effect closes its `RcMap` when that effect
 returns, even if an outer view scope still holds a query consumer.
 
+### Live inspection
+
+The browser-safe `effect-frame/inspection` subpath exports `Protocol` (the
+versioned wire contract) and `attach`. A development entry calls `attach` to
+connect its root to a loopback gateway. A production entry imports nothing
+from this subpath and carries none of it. The gateway and the reader are the
+`effect-frame` executable in `packages/inspect` (`effect-frame gateway`,
+`effect-frame roots`, `effect-frame inspect`), the only Bun piece. See
+[the inspection gateway design](docs/design/inspection-gateway.md).
+
+Public subpaths of `effect-frame`: `actor`, `actor/client`, `actor/testing`,
+`frame`, `inspection`, `view`, `view/testing`, `view/jsx-runtime`,
+`view/jsx-dev-runtime`, `view/opentui`, and `router`.
+
 ## Planning
 
 Read [the GitHub tracker guide](docs/wayfinder/github.md) before changing the map. Read source findings in `docs/research/` when they are available.

@@ -1,9 +1,12 @@
-# Live inspection gateway (private proof)
+# Live inspection gateway
 
-Status: private transport proof for #58. There is no public export, no
-Changeset, no new published package, and no `bin` field. The proof lives in
-the private workspace `tooling/inspection-gateway`. Root decides the public
-boundary from the evidence below.
+Status: public boundary for #58. The browser half ships as the
+`effect-frame/inspection` subpath of `effect-frame` (minor Changeset). The
+gateway and the reader ship as the `effect-frame` executable of the new
+workspace package `packages/inspect` (`@effect-frame/inspect`), which stays
+`private` until its first npm publish. The private proof workspace
+`tooling/inspection-gateway` is retired. "Public boundary" below lists what
+is public, what stays private, and the choices made while promoting it.
 
 A browser Frame root holds the state that a reader wants: mounted routes,
 query slots, local actors, and URL claims. A server process cannot inspect
@@ -43,7 +46,7 @@ reader (CLI) --HTTP--> gateway (Bun, loopback) <--WebSocket-- browser root
 ### Evidence
 
 All evidence comes from real headless WebKit (`Bun.WebView`), real loopback
-sockets, and a production-shaped root (`tests/fixture/app.tsx`: one
+sockets, and a production-shaped root (`packages/inspect/tests/fixture/app.tsx`: one
 `Frame.layer`, the real query cache through `QueryTest.layer`, the browser
 `Location`, one routed mount, and a resolver held on a `Deferred`).
 
@@ -67,7 +70,7 @@ sockets, and a production-shaped root (`tests/fixture/app.tsx`: one
 
 ## Lifecycle
 
-Attachment (`src/attach.ts`, browser):
+Attachment (`packages/effect-frame/src/inspection/attach.ts`, browser):
 
 1. The application boundary opts in. The production entry imports no
    inspection module. The development entry calls `attach` only when page
@@ -82,10 +85,10 @@ Attachment (`src/attach.ts`, browser):
 5. Closing the root scope interrupts the loop, closes the socket, and ends
    every in-flight handler. No further dials occur.
 
-Gateway (`src/gateway.ts`, Bun):
+Gateway (`packages/inspect/src/gateway.ts`, Bun):
 
 1. `make` binds `127.0.0.1` on the configured or an ephemeral port in the
-   caller's scope.
+   caller's scope. A failed bind is a typed `GatewayListenError`.
 2. Each accepted root socket becomes one incarnation with its own scope,
    close reason, and `RpcClient`. The registry maps root ID to the live
    incarnation and its metadata only. It keeps no snapshot history.
@@ -97,13 +100,15 @@ Gateway (`src/gateway.ts`, Bun):
 5. Closing the gateway scope terminates every incarnation and stops the
    server.
 
-Reader (`src/client.ts`):
+Reader (`packages/inspect/src/reader.ts`) and executable
+(`packages/inspect/src/cli.ts`, `packages/inspect/src/bin.ts`):
 
-1. `run(argv, environment)` returns `{ exitCode, stdout, stderr }`. It never
-   touches the process. `tests/fixture/cli-process.ts` shows the thin process
-   wrapper a public executable needs: argv, the token variable, SIGINT, the
-   streams, and the exit code.
-2. Each command makes one HTTP exchange with a finite deadline.
+1. `Reader.run(argv, environment)` returns `{ exitCode, stdout, stderr }`.
+   `Cli.main(io)` dispatches `gateway`, `roots`, and `inspect` and returns
+   the exit code. Neither touches the process. `bin.ts` is the only process
+   boundary: argv, the token variable, the default state directory, SIGINT,
+   the streams, and the exit code.
+2. Each reader command makes one HTTP exchange with a finite deadline.
 
 ## Protocol schema (version 1)
 
@@ -147,12 +152,19 @@ Reader API:
   `AmbiguousRoot` (409); `SnapshotTooLarge` (413); `RootDisconnected`,
   `RootProtocolError` (502); `TooManyRoots` (503); `DeadlineExceeded` (504).
 - Reader-side errors use the same envelope: `GatewayUnreachable`,
-  `GatewayTimedOut`, and `MalformedResponse`.
+  `GatewayTimedOut`, `MalformedResponse`, `InvalidArguments`,
+  `MissingCapability`, and `Interrupted`. `Reader.Document` is the schema of
+  the one document `--json` prints.
 
 ## Proof map
 
-`tests/transport.test.ts`, `tests/protocol.test.ts`, and
-`tests/build.test.ts`; 14 tests, run by the package's `test` script.
+Items 1-7 are `packages/inspect/tests/transport.test.ts`,
+`packages/inspect/tests/protocol.test.ts`, and
+`packages/inspect/tests/build.test.ts`. Item 8 is
+`packages/inspect/tests/cli.test.ts`. Item 9 is
+`packages/effect-frame/tests/inspection/`. Each package's `test` script runs
+them (18 tests in `packages/inspect`, 9 in `effect-frame`'s
+`test:inspection`).
 
 1. Held query: the CLI reads the same root while its real resolver is held.
    Root ID, mount, route, local actor, query ID, cache ID, key, and `Loading`
@@ -193,10 +205,34 @@ Reader API:
    attaches, and its app still mounts. A 512-byte limit returns
    `SnapshotTooLarge` and keeps the root attached. Text output labels each
    cut value and points to `--json`; JSON output is complete and one line.
-   CLI misuse exits 2, operational failure exits 1, and help exits 0.
-7. Build separation: the production bundle has no inspection module, no RPC
-   or socket module, and no `WebSocket`. The development bundle has the
-   attachment and protocol, and no gateway, reader, Bun, or Node module.
+   CLI misuse exits 2, operational failure exits 1, and help exits 0. The
+   SIGINT case runs the real `src/bin.ts` and ends with exactly one
+   `Interrupted` document on stdout.
+7. Build separation: the production bundle has no `effect-frame/inspection`
+   module, no RPC or socket module, and no `WebSocket`. The development bundle
+   has the attachment and protocol from `effect-frame/src/inspection`, and no
+   gateway, reader, Bun, or Node module.
+8. Executable: real child processes of `src/bin.ts`. An empty invocation
+   exits 2; `--help`, `gateway --help`, and `inspect --help` exit 0. Misuse
+   with `--json` (unknown command, a `--token` flag, a deadline over 30000, a
+   remote URL) exits 2 with one `InvalidArguments` document. An unreachable
+   gateway exits 1 with one `GatewayUnreachable` document. A running
+   `gateway` writes `attach-token` and `read-token` with mode 0600, prints
+   their paths but not their contents, and prints nothing on stdout. Readers
+   succeed with `--token-file` and with `EFFECT_FRAME_INSPECT_TOKEN`; an
+   unknown root exits 1 (`RootNotFound`), no capability exits 2
+   (`MissingCapability`), the attach capability exits 1 (`Unauthorized`), and
+   a second gateway on the same port exits 1. SIGINT stops the gateway with
+   exit 130 and removes both files. Every `--json` stdout decodes as exactly
+   one `Reader.Document` line.
+9. Public subpath: `Protocol` documents round-trip through JSON with a real
+   Frame snapshot; another version fails to decode; every `GatewayError` maps
+   to its HTTP status; the `Inspect` RPC exit codec carries a snapshot and
+   `SnapshotTooLarge`. `attach` refuses non-`ws:`, non-loopback, portless,
+   and unparsable URLs and a malformed token; against a raw loopback peer it
+   dials `/v1/attach` with its root ID, name, and both subprotocols, answers
+   `Inspect` and `SnapshotTooLarge`, and closes the socket when its scope
+   closes. The subpath bundles for a browser with no Bun or Node input.
 
 ## Limits
 
@@ -216,19 +252,31 @@ Reader API:
 - The proof runs WebKit on macOS and the system Chrome elsewhere (CI runs it on Linux Chrome). It skips on a host with neither.
 - Commands are `Available`: the text view lists each retained record (kind, lifecycle, attempt, running or idle, command ID), never its payload.
 
-## Recommendation for the public boundary
+## Public boundary
 
-Keep three pieces with three dependency classes:
+This section was the recommendation; it is now what ships. Three pieces with
+three dependency classes:
 
-- `effect-frame/inspection` (browser-safe subpath of `effect-frame`):
-  `Protocol` (schemas, `RootRpcs`, version constants) and `attach`. It
-  depends only on `effect` core (`unstable/rpc`, `unstable/socket`) and
-  `effect-frame/frame`. The build proof shows it stays out of a production
-  entry that does not import it.
-- `@effect-frame/inspect` (new package, `bin: effect-frame`): the gateway and
-  the reader. It is the only piece that imports Bun. Keeping it out of
-  `effect-frame` keeps `platform: neutral` publishing intact and keeps
-  server code out of every browser dependency graph.
+- `effect-frame/inspection` (browser-safe subpath of `effect-frame`,
+  source `packages/effect-frame/src/inspection/`). Exports: `Protocol` (a
+  namespace: `PROTOCOL_VERSION`, `ROOT_SUBPROTOCOL`, `ATTACH_TOKEN_PREFIX`,
+  `VERSION_HEADER`, `ATTACH_PATH`, `ROOTS_PATH`, `INSPECT_PATH`,
+  `MAX_DEADLINE_MILLIS`, `DEFAULT_DEADLINE_MILLIS`, `MAX_SELECTOR_LENGTH`,
+  `MAX_ROOT_NAME_LENGTH`, `SnapshotTooLarge`, `Inspect`, `RootRpcs`, `RootId`,
+  `RootInfo`, `InspectRequest`, `GatewayError`, `RootsResponse`,
+  `InspectResponse`, `ErrorResponse`, `ReaderResponse`, `statusOf`), `attach`,
+  `InvalidAttachOptions`, and the types `AttachOptions` and `AttachStatus`.
+  It depends only on `effect` core (`unstable/rpc`, `unstable/socket`,
+  `unstable/net`) and `effect-frame/frame`. The build proof shows it stays out
+  of a production entry that does not import it. Its source sits in a
+  directory because `src/inspection.ts` is the internal record registry that
+  the router and actors import.
+- `@effect-frame/inspect` (`packages/inspect`, `bin: effect-frame`, built by
+  tsdown to `dist/bin.js` with a `bun` shebang): the gateway and the reader.
+  It is the only piece that imports Bun. Keeping it out of `effect-frame`
+  keeps `platform: neutral` publishing intact and keeps server code out of
+  every browser dependency graph. It exports no library entry; the gateway
+  `make` and `Reader.run` stay internal until a consumer needs them.
 - EGW opts in from its development entry only. Its production entry imports
   nothing from `effect-frame/inspection`.
 
@@ -254,3 +302,36 @@ effect-frame inspect --url <gateway> --root <id|prefix|name> [--json]
   empty invocation; 130 SIGINT.
 - The deadline is always finite: default 5000 ms, maximum 30000 ms.
 - Never select a root implicitly when several match.
+
+### What stays private, and why
+
+- `@effect-frame/inspect` is `"private": true` with no Changeset. The release
+  workflow publishes only through npm OIDC, and `NPM_TOKEN` is empty, so the
+  first publish needs the owner to create the npm package and add a Trusted
+  Publisher. Its README says so.
+- Reader validation helpers (`hasControlCharacter`) and reader-side errors
+  (`Reader.ClientError`, `Reader.Document`) live in `packages/inspect`. They
+  describe the executable's output, not the wire between browser and gateway.
+- The internal record registry `packages/effect-frame/src/inspection.ts`
+  stays internal; only `src/inspection/index.ts` is exported.
+
+### Choices made while promoting
+
+- The repository has no Effect CLI module in use; `tooling/dom-bench` parses
+  argv by hand. The executable follows that idiom with a small hand parser.
+- `gateway --port` defaults to 4318, the port every example uses, so a
+  development entry can use a fixed attach URL; `--port 0` asks for an
+  ephemeral port.
+- `gateway --state-dir` defaults to `$XDG_STATE_HOME/effect-frame/inspect`,
+  else `~/.local/state/effect-frame/inspect`. Each capability file is
+  removed and then created exclusively with mode 0600 and `chmod`ed, so a
+  planted symlink or a wider mode is never reused. Both files are removed
+  when the gateway stops: the capabilities die with it.
+- `--origin` must be a bare `http(s)` origin; a trailing slash is accepted
+  and normalized to the browser's `Origin` value.
+- `--json` prints exactly one document for every reader exit code, including
+  invalid arguments (`InvalidArguments`), a missing capability
+  (`MissingCapability`), and SIGINT (`Interrupted`). Help is not a document;
+  it prints text and exits 0.
+- `gateway` has no `--json`. It prints nothing on stdout; its URLs and file
+  paths go to stderr.

@@ -1,5 +1,14 @@
 # effect-frame
 
+## 0.7.2
+
+### Patch Changes
+
+- [`a7a6382`](https://github.com/cevr/effect-frame/commit/a7a6382750393bcf0c043968a21a1faf39d646c6) Thanks [@cevr](https://github.com/cevr)! - Keep dependent query entries stale after an admitted command send until a
+  committed receipt or an authoritative refresh arrives. Committed duplicate
+  sends retain their existing refresh behavior without applying the command
+  again.
+
 ## 0.7.1
 
 ### Patch Changes

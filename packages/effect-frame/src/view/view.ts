@@ -87,8 +87,10 @@ export const select = selectSource;
  *
  * The handler runs on a fiber of its own, so a write it makes lands after
  * the host's callback has returned: a script that fires an event and reads
- * an actor in the same tick reads the old value. The write is observable
- * once the runtime has yielded (`render` in a test).
+ * an actor in the same tick reads the old value. Tests should supply the
+ * action or domain receipt that drives the event and wait for an observed
+ * ViewTest condition; `render` only flushes writes already reached by Solid
+ * and does not wait for a handler fiber.
  */
 export const event = (handler: Handler): Prepared => ({
   _tag: "Prepared",

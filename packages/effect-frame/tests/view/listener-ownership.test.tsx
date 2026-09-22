@@ -1,0 +1,432 @@
+import { registerDom } from "./dom-setup.js";
+
+registerDom();
+
+import { Behavior, Value, modify, spawn } from "effect-frame/actor";
+import type { LocalActorRef, SetValue, Source } from "effect-frame/actor";
+import { Dom, For, Portal, Show, View, ViewTest, mount } from "effect-frame/view";
+import type { Host } from "effect-frame/view";
+import { Effect, Exit, Option, Queue } from "effect";
+import { describe, expect, it } from "effect-bun-test";
+
+interface EventLogProps {
+  readonly events: Source<ReadonlyArray<string>>;
+  readonly record: (label: string) => Effect.Effect<void>;
+}
+
+interface ShowProps extends EventLogProps {
+  readonly open: Source<boolean>;
+}
+
+interface Task {
+  readonly id: string;
+}
+
+interface ForProps extends EventLogProps {
+  readonly tasks: Source<ReadonlyArray<Task>>;
+}
+
+interface PortalProps extends EventLogProps {
+  readonly open: Source<boolean>;
+  readonly into: Element;
+}
+
+interface ListenerReceipt {
+  readonly node: Node;
+  readonly name: string;
+}
+
+interface ListenerCounts {
+  attached: number;
+  released: number;
+}
+
+const ShowPage = (props: ShowProps) =>
+  Effect.succeed(
+    <main>
+      <output id="events">{View.bind(props.events, (labels) => labels.join(","))}</output>
+      <button id="sibling" onClick={View.event(() => props.record("sibling"))}>
+        sibling
+      </button>
+      <Show when={props.open}>
+        <button id="branch" onClick={View.event(() => props.record("branch"))}>
+          branch
+        </button>
+      </Show>
+    </main>,
+  );
+
+const ForPage = (props: ForProps) =>
+  Effect.succeed(
+    <main>
+      <output id="events">{View.bind(props.events, (labels) => labels.join(","))}</output>
+      <button id="sibling" onClick={View.event(() => props.record("sibling"))}>
+        sibling
+      </button>
+      <For each={props.tasks} keyBy={(task: Task) => task.id}>
+        {(task) => (
+          <button
+            id={View.bind(task, (value) => `row-${value.id}`)}
+            onClick={View.event(() => props.record("row"))}
+          >
+            row
+          </button>
+        )}
+      </For>
+    </main>,
+  );
+
+const PortalPage = (props: PortalProps) =>
+  Effect.succeed(
+    <main>
+      <output id="events">{View.bind(props.events, (labels) => labels.join(","))}</output>
+      <Show when={props.open}>
+        <Portal into={props.into}>
+          <button id="portal" onClick={View.event(() => props.record("portal"))}>
+            portal
+          </button>
+        </Portal>
+      </Show>
+    </main>,
+  );
+
+const listenerHost = (
+  receipts: Queue.Queue<ListenerReceipt>,
+  counts: ListenerCounts,
+): Host<Node> => ({
+  ...Dom.host,
+  addEventListener: (node, name, handler) => {
+    const cleanup = Dom.host.addEventListener(node, name, handler);
+    counts.attached += 1;
+    return () => {
+      counts.released += 1;
+      cleanup();
+      void Queue.offerUnsafe(receipts, { node, name });
+    };
+  },
+});
+
+const awaitRelease = (receipts: Queue.Queue<ListenerReceipt>) =>
+  Queue.take(receipts).pipe(Effect.timeout("1 second"));
+
+const textOf = (root: Node, selector: string): string => {
+  if (!(root instanceof Element)) {
+    return "";
+  }
+  return Option.getOrElse(
+    Option.flatMap(Option.fromNullishOr(root.querySelector(selector)), (element) =>
+      Option.fromNullishOr(element.textContent),
+    ),
+    () => "",
+  );
+};
+
+const has = (root: Node, selector: string): boolean =>
+  root instanceof Element && Option.isSome(Option.fromNullishOr(root.querySelector(selector)));
+
+const idOf = (node: Node): string => {
+  if (node instanceof Element) {
+    return node.id;
+  }
+  return "";
+};
+
+const recordWith = (
+  events: LocalActorRef<ReadonlyArray<string>, SetValue<ReadonlyArray<string>>>,
+  label: string,
+): Effect.Effect<void> =>
+  modify(events, (labels) => [...labels, label]).pipe(
+    Effect.catchTag("ActorStopped", () => Effect.void),
+    Effect.asVoid,
+  );
+
+describe("view listener ownership", () => {
+  it.scoped("turns over Show listeners while siblings and replacement branches stay live", () =>
+    Effect.gen(function* () {
+      const root = document.createElement("main");
+      const open = yield* spawn(Behavior.value(true));
+      const events = yield* spawn(Behavior.value<ReadonlyArray<string>>([]));
+      const receipts = yield* Queue.unbounded<ListenerReceipt>();
+      const counts: ListenerCounts = { attached: 0, released: 0 };
+      const host = listenerHost(receipts, counts);
+      const record = (label: string) => recordWith(events, label);
+      const page = yield* ViewTest.make({
+        host,
+        root,
+        setup: (observedHost, mountRoot) =>
+          mount(
+            ShowPage,
+            { open: open.state, events: events.state, record },
+            observedHost,
+            mountRoot,
+          ),
+      });
+
+      yield* page.waitFor({
+        label: "initial Show branch",
+        until: (actualRoot) => has(actualRoot, "#branch"),
+      });
+      expect(counts.attached).toBe(2);
+      const firstBranch = Option.getOrThrow(Option.fromNullishOr(root.querySelector("#branch")));
+
+      yield* page.act(open.call(Value.Set(false)), {
+        label: "first Show branch leaves",
+        until: (actualRoot) => !has(actualRoot, "#branch"),
+      });
+      const firstRelease = yield* awaitRelease(receipts);
+      expect(firstRelease.node).toBe(firstBranch);
+      expect(counts.released).toBe(1);
+
+      firstBranch?.dispatchEvent(new Event("click"));
+      yield* page.act(
+        Effect.sync(() => root.querySelector("#sibling")?.dispatchEvent(new Event("click"))),
+        {
+          label: "sibling remains live after branch removal",
+          until: (actualRoot) => textOf(actualRoot, "#events") === "sibling",
+        },
+      );
+
+      yield* page.act(open.call(Value.Set(true)), {
+        label: "replacement Show branch appears",
+        until: (actualRoot) => has(actualRoot, "#branch"),
+      });
+      expect(counts.attached).toBe(3);
+      const secondBranch = Option.getOrThrow(Option.fromNullishOr(root.querySelector("#branch")));
+      yield* page.act(
+        Effect.sync(() => secondBranch?.dispatchEvent(new Event("click"))),
+        {
+          label: "replacement branch handles a click",
+          until: (actualRoot) => textOf(actualRoot, "#events") === "sibling,branch",
+        },
+      );
+
+      yield* page.act(open.call(Value.Set(false)), {
+        label: "second Show branch leaves",
+        until: (actualRoot) => !has(actualRoot, "#branch"),
+      });
+      const secondRelease = yield* awaitRelease(receipts);
+      expect(secondRelease.node).toBe(secondBranch);
+      expect(counts.released).toBe(2);
+
+      yield* page.act(open.call(Value.Set(true)), {
+        label: "third Show branch appears",
+        until: (actualRoot) => has(actualRoot, "#branch"),
+      });
+      expect(counts.attached).toBe(4);
+      const thirdBranch = Option.getOrThrow(Option.fromNullishOr(root.querySelector("#branch")));
+      yield* page.act(
+        Effect.sync(() => thirdBranch?.dispatchEvent(new Event("click"))),
+        {
+          label: "third branch handles a click",
+          until: (actualRoot) => textOf(actualRoot, "#events") === "sibling,branch,branch",
+        },
+      );
+
+      yield* page.close;
+      yield* awaitRelease(receipts);
+      yield* awaitRelease(receipts);
+      expect(counts.released).toBe(4);
+      expect(root.childNodes).toHaveLength(0);
+    }),
+  );
+
+  it.scoped("turns over For row listeners without affecting siblings", () =>
+    Effect.gen(function* () {
+      const root = document.createElement("main");
+      const tasks = yield* spawn(Behavior.value<ReadonlyArray<Task>>([{ id: "a" }]));
+      const events = yield* spawn(Behavior.value<ReadonlyArray<string>>([]));
+      const receipts = yield* Queue.unbounded<ListenerReceipt>();
+      const counts: ListenerCounts = { attached: 0, released: 0 };
+      const host = listenerHost(receipts, counts);
+      const record = (label: string) => recordWith(events, label);
+      const page = yield* ViewTest.make({
+        host,
+        root,
+        setup: (observedHost, mountRoot) =>
+          mount(
+            ForPage,
+            { tasks: tasks.state, events: events.state, record },
+            observedHost,
+            mountRoot,
+          ),
+      });
+
+      yield* page.waitFor({
+        label: "initial For row",
+        until: (actualRoot) => has(actualRoot, "#row-a"),
+      });
+      expect(counts.attached).toBe(2);
+      const firstRow = Option.getOrThrow(Option.fromNullishOr(root.querySelector("#row-a")));
+
+      yield* page.act(tasks.call(Value.Set([])), {
+        label: "first For row leaves",
+        until: (actualRoot) => !has(actualRoot, "#row-a"),
+      });
+      const firstRelease = yield* awaitRelease(receipts);
+      expect(firstRelease.node).toBe(firstRow);
+      expect(counts.released).toBe(1);
+
+      firstRow?.dispatchEvent(new Event("click"));
+      yield* page.act(
+        Effect.sync(() => root.querySelector("#sibling")?.dispatchEvent(new Event("click"))),
+        {
+          label: "sibling remains live after row removal",
+          until: (actualRoot) => textOf(actualRoot, "#events") === "sibling",
+        },
+      );
+
+      yield* page.act(tasks.call(Value.Set([{ id: "b" }])), {
+        label: "replacement For row appears",
+        until: (actualRoot) => has(actualRoot, "#row-b"),
+      });
+      expect(counts.attached).toBe(3);
+      const secondRow = Option.getOrThrow(Option.fromNullishOr(root.querySelector("#row-b")));
+      yield* page.act(
+        Effect.sync(() => secondRow?.dispatchEvent(new Event("click"))),
+        {
+          label: "replacement row handles a click",
+          until: (actualRoot) => textOf(actualRoot, "#events") === "sibling,row",
+        },
+      );
+
+      yield* page.act(tasks.call(Value.Set([])), {
+        label: "second For row leaves",
+        until: (actualRoot) => !has(actualRoot, "#row-b"),
+      });
+      const secondRelease = yield* awaitRelease(receipts);
+      expect(secondRelease.node).toBe(secondRow);
+      expect(counts.released).toBe(2);
+
+      yield* page.act(tasks.call(Value.Set([{ id: "c" }])), {
+        label: "third For row appears",
+        until: (actualRoot) => has(actualRoot, "#row-c"),
+      });
+      expect(counts.attached).toBe(4);
+      const thirdRow = Option.getOrThrow(Option.fromNullishOr(root.querySelector("#row-c")));
+      yield* page.act(
+        Effect.sync(() => thirdRow?.dispatchEvent(new Event("click"))),
+        {
+          label: "third row handles a click",
+          until: (actualRoot) => textOf(actualRoot, "#events") === "sibling,row,row",
+        },
+      );
+
+      yield* page.close;
+      yield* awaitRelease(receipts);
+      yield* awaitRelease(receipts);
+      expect(counts.released).toBe(4);
+      expect(root.childNodes).toHaveLength(0);
+    }),
+  );
+
+  it.scoped("releases Portal listeners on branch turnover and keeps the replacement live", () =>
+    Effect.gen(function* () {
+      const root = document.createElement("main");
+      const into = document.createElement("section");
+      const open = yield* spawn(Behavior.value(false));
+      const events = yield* spawn(Behavior.value<ReadonlyArray<string>>([]));
+      const receipts = yield* Queue.unbounded<ListenerReceipt>();
+      const counts: ListenerCounts = { attached: 0, released: 0 };
+      const host = listenerHost(receipts, counts);
+      const record = (label: string) => recordWith(events, label);
+      const page = yield* ViewTest.make({
+        host,
+        root,
+        setup: (observedHost, mountRoot) =>
+          mount(
+            PortalPage,
+            { open: open.state, into, events: events.state, record },
+            observedHost,
+            mountRoot,
+          ),
+      });
+
+      yield* page.act(open.call(Value.Set(true)), {
+        label: "portal branch appears",
+        until: () => has(into, "#portal"),
+      });
+      expect(counts.attached).toBe(1);
+      const firstPortal = Option.getOrThrow(Option.fromNullishOr(into.querySelector("#portal")));
+
+      yield* page.act(open.call(Value.Set(false)), {
+        label: "portal branch leaves",
+        until: () => !has(into, "#portal"),
+      });
+      const firstRelease = yield* awaitRelease(receipts);
+      expect(firstRelease.node).toBe(firstPortal);
+      expect(counts.released).toBe(1);
+
+      firstPortal?.dispatchEvent(new Event("click"));
+      yield* page.act(open.call(Value.Set(true)), {
+        label: "replacement portal appears",
+        until: () => has(into, "#portal"),
+      });
+      expect(counts.attached).toBe(2);
+      const secondPortal = Option.getOrThrow(Option.fromNullishOr(into.querySelector("#portal")));
+      yield* page.act(
+        Effect.sync(() => secondPortal?.dispatchEvent(new Event("click"))),
+        {
+          label: "replacement portal handles a click",
+          until: (actualRoot) => textOf(actualRoot, "#events") === "portal",
+        },
+      );
+
+      yield* page.close;
+      yield* awaitRelease(receipts);
+      expect(counts.released).toBe(2);
+      expect(root.childNodes).toHaveLength(0);
+      expect(into.childNodes).toHaveLength(0);
+    }),
+  );
+
+  it.scoped("releases listeners from a failed mount, including a portal write", () =>
+    Effect.gen(function* () {
+      const root = document.createElement("main");
+      const into = document.createElement("section");
+      const receipts = yield* Queue.unbounded<ListenerReceipt>();
+      const counts: ListenerCounts = { attached: 0, released: 0 };
+      const baseHost = listenerHost(receipts, counts);
+      const host: Host<Node> = {
+        ...baseHost,
+        insert: (parent, node, anchor) => {
+          if (node instanceof Element && node.id === "after") {
+            Option.getOrThrow(Option.none());
+          }
+          baseHost.insert(parent, node, anchor);
+        },
+      };
+      const Broken = () =>
+        Effect.succeed(
+          <>
+            <button id="before" onClick={View.event(() => Effect.void)}>
+              before
+            </button>
+            <Portal into={into}>
+              <button id="portal" onClick={View.event(() => Effect.void)}>
+                portal
+              </button>
+            </Portal>
+            <p id="after">after</p>
+          </>,
+        );
+
+      const outcome = yield* Effect.exit(
+        ViewTest.make({
+          host,
+          root,
+          setup: (observedHost, mountRoot) => mount(Broken, {}, observedHost, mountRoot),
+        }),
+      );
+      expect(Exit.isFailure(outcome)).toBe(true);
+      expect(counts.attached).toBe(2);
+      const firstRelease = yield* awaitRelease(receipts);
+      const secondRelease = yield* awaitRelease(receipts);
+      const releasedIds = [firstRelease.node, secondRelease.node].map(idOf);
+      expect(releasedIds).toContain("before");
+      expect(releasedIds).toContain("portal");
+      expect(counts.released).toBe(2);
+      expect(root.childNodes).toHaveLength(0);
+      expect(into.childNodes).toHaveLength(0);
+    }),
+  );
+});

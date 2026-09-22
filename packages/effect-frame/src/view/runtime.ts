@@ -156,7 +156,8 @@ interface Owned<A> {
  */
 interface Tracker {
   readonly track: <A>(source: Source<A>) => Accessor<A>;
-  readonly register: (cleanup: Cleanup) => void;
+  /** Acquire a host resource and register its cleanup in the current scope. */
+  readonly register: (acquire: () => Cleanup) => void;
   readonly owned: <A>(build: (scope: Scope.Scope) => A) => Owned<A>;
   /** Run a build with `scope` current, for work that lands after `owned` returned. */
   readonly within: <A>(scope: Scope.Scope, build: () => A) => A;
@@ -313,7 +314,6 @@ const trackHostWrites = <HostNode>(host: Host<HostNode>): TrackedHost<HostNode> 
 };
 
 const makeTracker = Effect.fn("View.makeTracker")(function* () {
-  const cleanups: Array<Cleanup> = [];
   const context = yield* Effect.context<Scope.Scope>();
   const mountScope = yield* Effect.scope;
   const runSync = Effect.runSyncWith(context);
@@ -322,15 +322,6 @@ const makeTracker = Effect.fn("View.makeTracker")(function* () {
   // The scope a subscription forks into. `owned` swaps it for the duration of
   // one build, so a branch's subscriptions land in the branch's own scope.
   let current: Scope.Scope = mountScope;
-
-  yield* Effect.addFinalizer(() =>
-    Effect.sync(() => {
-      for (const cleanup of cleanups) {
-        cleanup();
-      }
-      cleanups.length = 0;
-    }),
-  );
 
   const track = <A>(source: Source<A>): Accessor<A> => {
     if (isSignalSource(source)) {
@@ -381,7 +372,13 @@ const makeTracker = Effect.fn("View.makeTracker")(function* () {
 
   return {
     track,
-    register: (cleanup: Cleanup) => void cleanups.push(cleanup),
+    register: (acquire: () => Cleanup) => {
+      void runSync(
+        Effect.acquireRelease(Effect.sync(acquire), (cleanup) => Effect.sync(cleanup)).pipe(
+          Scope.provide(current),
+        ),
+      );
+    },
     owned,
     within,
     commit,
@@ -750,7 +747,7 @@ const buildElement =
     }
     for (const [name, prepared] of element.events) {
       const run = tracker.handle(prepared.handler);
-      tracker.register(
+      tracker.register(() =>
         host.addEventListener(node, name, (event) => {
           if (prepared.preventDefault) {
             event.preventDefault();

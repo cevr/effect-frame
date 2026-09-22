@@ -101,7 +101,11 @@ command, in the record scope. While any claim for a contract is open, every
 live query entry that depends on that contract shows Ready as stale. When a
 command is Applied, the cache applies the refreshed values in the reply. Then it
 refreshes every live dependent entry that the reply did not cover and that has
-not read since the command settled. Closing the record scope releases the claim.
+not read since the command settled. Each such entry is marked stale before the
+settlement returns, and the record scope closes only after that. A read that
+started before the settlement still lands, marked stale, and a later read
+follows. The value from before the command never shows as fresh. Closing the
+record scope releases the claim.
 
 ### Inspection
 

@@ -41,6 +41,11 @@ const Unrelated = query("CommandCacheUnrelated", {
   depends: [],
 });
 
+interface ReadHold {
+  readonly reached: Deferred.Deferred<void>;
+  readonly release: Deferred.Deferred<void>;
+}
+
 /**
  * The test's hands on the real host: a gate per message amount holds that
  * message's turn, a send gate holds the admission reply, and the query
@@ -51,6 +56,8 @@ class Control extends Context.Service<
   {
     readonly gates: Map<number, Deferred.Deferred<void>>;
     readonly sendHold: Ref.Ref<Option.Option<Deferred.Deferred<void>>>;
+    /** Holds a query read after it took its snapshot, before it returns. */
+    readonly readHold: Ref.Ref<Option.Option<ReadHold>>;
     readonly started: Ref.Ref<ReadonlyArray<number>>;
     readonly reads: Ref.Ref<number>;
   }
@@ -62,6 +69,7 @@ const controlLayer = Layer.effect(
     return Control.of({
       gates: new Map(),
       sendHold: yield* Ref.make(Option.none<Deferred.Deferred<void>>()),
+      readHold: yield* Ref.make(Option.none<ReadHold>()),
       started: yield* Ref.make<ReadonlyArray<number>>([]),
       reads: yield* Ref.make(0),
     });
@@ -100,6 +108,11 @@ const CounterValueLive = implementQuery(CounterValue, (key) =>
       version: Counter.version,
       key: yield* Effect.orDie(Schema.encodeEffect(Counter.key)(key)),
     });
+    const hold = yield* Ref.get(control.readHold);
+    if (Option.isSome(hold)) {
+      yield* Deferred.succeed(hold.value.reached, void 0);
+      yield* Deferred.await(hold.value.release);
+    }
     return yield* Schema.decodeEffect(Counter.snapshot)(projection.snapshot);
   }),
 );
@@ -163,6 +176,17 @@ const until = <A>(entry: QueryEntry<A, QueryFailure>, done: (state: Shown<A>) =>
 
 const ready = <A>(value: A, stale: boolean): Shown<A> => ({ _tag: "Ready", value, stale });
 
+/** Every state an entry shows from now on, in order. */
+const recordStates = <A>(entry: QueryEntry<A, QueryFailure>) =>
+  Effect.gen(function* () {
+    const seen: Array<Shown<A>> = [];
+    yield* Effect.forkScoped(
+      Stream.runForEach(entry.state.changes, (state) => Effect.sync(() => seen.push(state))),
+    );
+    yield* yieldFibers;
+    return seen;
+  });
+
 const isReady =
   <A>(value: A, stale: boolean) =>
   (state: Shown<A>) =>
@@ -219,13 +243,47 @@ describe("cache command ownership", () => {
       const late = yield* useQuery(CounterValue, "one");
       expect(yield* until(late, (state) => state._tag === "Ready")).toEqual(ready(0, true));
       expect(yield* reads).toBe(1);
+      const seen = yield* recordStates(late);
 
       yield* Deferred.succeed(held, void 0);
       expect((yield* command.settled)._tag).toBe("Applied");
       // The command's captured keys predate this entry, so its reply did not
-      // cover it. The cache reads it again after settlement.
+      // cover it. The cache reads it again after settlement, and the value
+      // from before the command never shows as fresh on the way.
       yield* until(late, isReady(1, false));
       expect(yield* reads).toBe(2);
+      expect(seen).not.toContainEqual(ready(0, false));
+      expect(seen.at(-1)).toEqual(ready(1, false));
+    }),
+  );
+
+  withApp("a read in flight when the command settles lands stale and reads again", () =>
+    Effect.gen(function* () {
+      const control = yield* Control;
+      const held = yield* gate(1);
+      const counter = yield* ref(Counter, "one");
+      const command = yield* counter.send(1);
+      yield* startedTurns(1);
+
+      const readHold: ReadHold = {
+        reached: yield* Deferred.make<void>(),
+        release: yield* Deferred.make<void>(),
+      };
+      yield* Ref.set(control.readHold, Option.some(readHold));
+      const late = yield* useQuery(CounterValue, "one");
+      const seen = yield* recordStates(late);
+      // The first read took its snapshot before the command applied.
+      yield* Deferred.await(readHold.reached);
+      yield* Ref.set(control.readHold, Option.none());
+
+      yield* Deferred.succeed(held, void 0);
+      expect((yield* command.settled)._tag).toBe("Applied");
+      yield* yieldFibers;
+      yield* Deferred.succeed(readHold.release, void 0);
+      yield* until(late, isReady(1, false));
+      expect(yield* reads).toBe(2);
+      expect(seen).not.toContainEqual(ready(0, false));
+      expect(seen.at(-1)).toEqual(ready(1, false));
     }),
   );
 

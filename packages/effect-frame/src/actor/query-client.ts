@@ -141,10 +141,13 @@ interface CacheSlot {
   readonly recount: (count: () => number) => Effect.Effect<void>;
   readonly refresh: Effect.Effect<void>;
   /**
-   * Makes sure a read started after this point in the cache's sequence. A
-   * read in flight that started earlier is awaited first, then read again.
+   * A settled command's demand on this entry. In one step it marks the entry
+   * stale and makes any read that started at or before `sequence` land
+   * stale; then it makes sure a read started after this point. It returns
+   * once the entry is stale, before that read runs, so a settlement can
+   * release its ownership without the old value ever showing as fresh.
    */
-  readonly refreshSince: (sequence: number) => Effect.Effect<void>;
+  readonly readAfter: (sequence: number) => Effect.Effect<void>;
   /** Marks the entry stale in place. Used when a dependency commits. */
   readonly markStale: Effect.Effect<void>;
   /** Replaces the entry from an encoded result a command reply delivered. */
@@ -301,6 +304,9 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
     });
   // The sequence number at which the latest read started.
   let readStarted = -1;
+  // A read must start after this number to count as fresh. A settled command
+  // raises it; a read that started earlier still lands, marked stale.
+  let freshAfter = -1;
   const openedAt = clock.monotonicTimeNanosUnsafe();
 
   // A read in flight, so a second `refresh` joins it instead of repeating it.
@@ -309,11 +315,12 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
   // before the bump is older than what the entry now holds, and is dropped.
   let generation = 0;
 
-  const accept = (encoded: string) =>
+  const land = (encoded: string, stale: boolean) =>
     Effect.suspend(() => {
       generation += 1;
-      return write(() => Ready(encoded, false));
+      return write(() => Ready(encoded, stale));
     });
+  const accept = (encoded: string) => land(encoded, false);
   const reject = (error: QueryFailure) =>
     Effect.suspend(() => {
       generation += 1;
@@ -329,7 +336,8 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
 
   const read = Effect.suspend(() => {
     const started = generation;
-    readStarted = ownership.next();
+    const startedAt = ownership.next();
+    readStarted = startedAt;
     const commit = (publish: Effect.Effect<void>) =>
       Effect.suspend(() => {
         if (started === generation) {
@@ -349,7 +357,9 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
         }),
     });
     return request.pipe(
-      Effect.flatMap((encoded) => commit(accept(encoded))),
+      Effect.flatMap((encoded) =>
+        commit(Effect.suspend(() => land(encoded, startedAt <= freshAfter))),
+      ),
       Effect.catch((error) => reject(error).pipe(commit)),
     );
   });
@@ -385,6 +395,19 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
       });
     });
 
+  const readAfter = (sequence: number): Effect.Effect<void> =>
+    Effect.suspend(() => {
+      if (readStarted > sequence) {
+        return Effect.void;
+      }
+      freshAfter = Math.max(freshAfter, sequence);
+      // The read belongs to the slot; the settlement only waits for stale.
+      return Effect.andThen(
+        write(markStale),
+        Effect.asVoid(Effect.forkIn(refreshSince(sequence), scope)),
+      );
+    });
+
   const slot: CacheSlot = {
     key,
     depends: contract.depends,
@@ -393,7 +416,7 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
     write,
     recount,
     refresh,
-    refreshSince,
+    readAfter,
     markStale: write(markStale),
     accept,
     reject,
@@ -631,9 +654,12 @@ const make = (): Effect.Effect<QueryCacheService, never, Scope.Scope> =>
             const settledAt = next();
             yield* apply(refreshed);
             const covered = new Set(refreshed.map((one) => keyOf(one.key)));
+            // Each uncovered dependent is stale before this returns, and the
+            // owner releases the claim only after it returns: the value from
+            // before the command never shows as fresh in between.
             for (const slot of dependents(contractName)) {
               if (!covered.has(keyOf(slot.key))) {
-                yield* Effect.forkIn(slot.refreshSince(settledAt), slot.scope);
+                yield* slot.readAfter(settledAt);
               }
             }
           });

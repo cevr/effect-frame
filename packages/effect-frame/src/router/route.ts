@@ -79,6 +79,9 @@ export const parseTemplate = (
 const segmentsOf = (path: string): ReadonlyArray<string> =>
   path.split("/").filter((segment) => segment !== "");
 
+/** The non-empty pathname segments, still percent-encoded. */
+export const pathSegments = segmentsOf;
+
 const decodeSegment = Option.liftThrowable(decodeURIComponent);
 
 /** What the path parts decode to, before the params Schema sees it. */
@@ -88,14 +91,24 @@ export const PathRecord = Schema.Record(
 );
 export type PathRecord = Schema.Schema.Type<typeof PathRecord>;
 
-/** Match a pathname against parts. Every segment is percent-decoded first. */
-export const matchPath = (
+/** A prefix match: the record the parts decoded and the next unread segment. */
+export interface PrefixMatch {
+  readonly record: PathRecord;
+  readonly next: number;
+}
+
+/**
+ * Match parts against the segments that start at `start`. Every segment is
+ * percent-decoded first. A tail takes every remaining segment. The match
+ * need not reach the end: a nested segment leaves the rest to its children.
+ */
+export const matchPrefix = (
   parts: ReadonlyArray<Part>,
-  pathname: string,
-): Option.Option<PathRecord> => {
-  const segments = segmentsOf(pathname);
+  segments: ReadonlyArray<string>,
+  start: number,
+): Option.Option<PrefixMatch> => {
   const record: Record<string, string | ReadonlyArray<string>> = {};
-  let index = 0;
+  let index = start;
   for (const part of parts) {
     if (part._tag === "Tail") {
       const rest = Option.all(segments.slice(index).map(decodeSegment));
@@ -119,10 +132,21 @@ export const matchPath = (
     }
     record[part.name] = segment.value;
   }
-  if (index !== segments.length) {
-    return Option.none();
-  }
-  return Option.some(record);
+  return Option.some({ record, next: index });
+};
+
+/** Match a pathname against parts. Every segment is percent-decoded first. */
+export const matchPath = (
+  parts: ReadonlyArray<Part>,
+  pathname: string,
+): Option.Option<PathRecord> => {
+  const segments = segmentsOf(pathname);
+  return Option.flatMap(matchPrefix(parts, segments, 0), (matched) => {
+    if (matched.next !== segments.length) {
+      return Option.none();
+    }
+    return Option.some(matched.record);
+  });
 };
 
 /** Print parts from a record. Total for a record the params Schema produced. */

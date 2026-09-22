@@ -1,5 +1,11 @@
 # effect-frame
 
+## 0.10.1
+
+### Patch Changes
+
+- [`adba70c`](https://github.com/cevr/effect-frame/commit/adba70c5b1182b35e5304e9d75e6dd66d355d548) Thanks [@cevr](https://github.com/cevr)! - Type `Frame.DiagnosticValue` as a `Schema.Codec`, not a `Schema.Schema`. A `Frame.Snapshot` schema then has no unknown encoding or decoding services, so a typed encode, decode, or RPC schema of a snapshot type checks. The runtime schema is unchanged.
+
 ## 0.10.0
 
 ### Minor Changes

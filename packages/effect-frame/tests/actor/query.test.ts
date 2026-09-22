@@ -26,6 +26,7 @@ import {
   ActorTransport,
   QueryCache,
   Unauthorized,
+  Wire,
   contract,
   followQuery,
   keyOf,
@@ -167,6 +168,18 @@ const Unpoliced = query("Unpoliced", {
 // The server: handlers read the actor's snapshot through the transport
 // ---------------------------------------------------------------------------
 
+/**
+ * Every query handler run, by query name. A handler that did not run did no
+ * work, which is how a test proves a refresh never happened.
+ */
+const handlerRuns = new Map<string, number>();
+const countRun = (name: string) =>
+  Effect.sync(() => {
+    handlerRuns.set(name, runsOf(name) + 1);
+  });
+const runsOf = (name: string): number =>
+  Option.getOrElse(Option.fromNullishOr(handlerRuns.get(name)), () => 0);
+
 const readBook = (tenant: string) =>
   Effect.gen(function* () {
     const book = yield* ref(OrderBook, { tenant });
@@ -174,14 +187,58 @@ const readBook = (tenant: string) =>
   });
 
 const RevenueLive = implementQuery(Revenue, (args) =>
-  Effect.map(readBook(args.tenant), (state) => ({ total: state.revenue })),
+  Effect.andThen(
+    countRun(Revenue.name),
+    Effect.map(readBook(args.tenant), (state) => ({ total: state.revenue })),
+  ),
 );
 
 const TopSkuLive = implementQuery(TopSku, (args) =>
-  Effect.map(readBook(args.tenant), (state) => ({
-    sku: state.lastSku,
-    orders: state.count,
-  })),
+  Effect.andThen(
+    countRun(TopSku.name),
+    Effect.map(readBook(args.tenant), (state) => ({
+      sku: state.lastSku,
+      orders: state.count,
+    })),
+  ),
+);
+
+/** A dependent whose handler a test can make throw, to fail one refresh. */
+const Funnel = query("Funnel", {
+  version: 1,
+  args: TenantArgs,
+  result: Schema.Struct({ orders: Schema.Finite }),
+  policy: "tenant-member",
+  depends: [OrderBook],
+});
+
+const funnelDown = { current: false };
+
+const FunnelLive = implementQuery(Funnel, (args) =>
+  Effect.gen(function* () {
+    yield* countRun(Funnel.name);
+    if (funnelDown.current) {
+      return yield* Effect.fail("funnel store is down");
+    }
+    const state = yield* readBook(args.tenant);
+    return { orders: state.count };
+  }),
+);
+
+/**
+ * Record arguments encode in the order the caller spelled them, so only the
+ * canonical key makes `{a, b}` and `{b, a}` one entry.
+ */
+const Pair = query("Pair", {
+  version: 1,
+  args: Schema.Record(Schema.String, Schema.String),
+  result: Schema.String,
+  policy: "public",
+  depends: [],
+});
+
+const PairLive = implementQuery(Pair, (args) =>
+  Effect.as(countRun(Pair.name), `${args["a"]}${args["b"]}`),
 );
 
 const rates = new Map<string, number>([["USDEUR", 0.92]]);
@@ -309,10 +366,39 @@ const hostLayer = ActorHost.layerMemory(
     CountedLive,
     BatchedLookupLive,
     ChronologyLive,
+    FunnelLive,
+    PairLive,
   ],
 ).pipe(Layer.provide(acmeOnly), Layer.provide(policies));
 
 let batchRequests = 0;
+
+/** One `/call` exchange as the wire carried it: the keys declared and the refreshes answered. */
+interface CallExchange {
+  readonly active: ReadonlyArray<string>;
+  readonly refreshed: ReadonlyArray<Wire.WireRefreshed>;
+}
+
+/** Every `/call` exchange, in order. A test reads the ones after its own mark. */
+const calls: Array<CallExchange> = [];
+
+const decodeCallBody = Schema.decodeUnknownEffect(Schema.fromJsonString(Wire.CallBody));
+const decodeApplied = Schema.decodeUnknownEffect(Schema.fromJsonString(Wire.WireApplied));
+
+const recordCall = (request: Request, response: Response) =>
+  Effect.gen(function* () {
+    const body = yield* Effect.orDie(decodeCallBody(yield* Effect.promise(() => request.text())));
+    // A refused call has no refreshes to record.
+    const reply = yield* Effect.option(
+      decodeApplied(yield* Effect.promise(() => response.clone().text())),
+    );
+    if (Option.isSome(reply)) {
+      calls.push({
+        active: body.active.map((key) => keyOf(key)),
+        refreshed: reply.value.refreshed,
+      });
+    }
+  });
 
 const inProcess = Layer.unwrap(
   Effect.gen(function* () {
@@ -323,7 +409,13 @@ const inProcess = Layer.unwrap(
       if (input.endsWith("/query/batch")) {
         batchRequests += 1;
       }
-      return run(server(new Request(input, init)));
+      const request = new Request(input, init);
+      if (input.endsWith("/call")) {
+        return run(
+          Effect.tap(server(request.clone()), (response) => recordCall(request, response)),
+        );
+      }
+      return run(server(request));
     };
     return HttpTransport.layer({
       baseUrl: "http://actors.test/actors",
@@ -380,12 +472,32 @@ describe("Query: the Dashboard shape", () => {
       expect(valueOf(yield* revenue.state.get)).toEqual(Option.some({ total: 0 }));
       expect(valueOf(yield* topSku.state.get)).toEqual(Option.some({ sku: "", orders: 0 }));
       expect(valueOf(yield* rate.state.get)).toEqual(Option.some({ rate: 0.92 }));
+      const mark = calls.length;
+      const revenueRuns = runsOf(Revenue.name);
+      const topSkuRuns = runsOf(TopSku.name);
 
       // One command. Its reply carries both dependent queries, refreshed.
       yield* book.call(
         { _tag: "PlaceOrder", sku: "widget", amount: 30 },
         { commandId: id("order-1"), timeout: "1 second" },
       );
+
+      // One call on the wire. It declared the three active keys and its reply
+      // answered the two that depend on the order book, and only those.
+      const exchanges = calls.slice(mark);
+      expect(exchanges).toHaveLength(1);
+      expect(exchanges[0]?.active.toSorted()).toEqual(
+        [revenue.key, topSku.key, rate.key].map(keyOf).toSorted(),
+      );
+      expect(exchanges[0]?.refreshed.map((one) => [one._tag, keyOf(one.key)]).toSorted()).toEqual(
+        [
+          ["Refreshed", keyOf(revenue.key)],
+          ["Refreshed", keyOf(topSku.key)],
+        ].toSorted(),
+      );
+      // Each dependent handler ran once, for the reply; no second read followed.
+      expect(runsOf(Revenue.name) - revenueRuns).toBe(1);
+      expect(runsOf(TopSku.name) - topSkuRuns).toBe(1);
 
       const afterRevenue = yield* revenue.state.get;
       const afterTopSku = yield* topSku.state.get;
@@ -404,12 +516,53 @@ describe("Query: the Dashboard shape", () => {
     }),
   );
 
+  withDashboard("the same command refreshes nothing when neither dependent is active", () =>
+    Effect.gen(function* () {
+      const cache = yield* QueryCache;
+      // Both dependents were on screen once, and their views have gone.
+      const screen = yield* Scope.make();
+      const [shownRevenue, shownTopSku] = yield* Scope.provide(
+        Effect.all([useQuery(Revenue, acme), useQuery(TopSku, acme)]),
+        screen,
+      );
+      yield* Effect.all([settledEntry(shownRevenue), settledEntry(shownTopSku)]);
+      yield* Scope.close(screen, Exit.void);
+      const rate = yield* useQuery(ExchangeRate, { pair: "USDEUR" });
+      yield* settledEntry(rate);
+      expect((yield* cache.active).map(keyOf)).toEqual([keyOf(rate.key)]);
+      const mark = calls.length;
+      const revenueRuns = runsOf(Revenue.name);
+      const topSkuRuns = runsOf(TopSku.name);
+
+      const book = yield* ref(OrderBook, acme);
+      yield* book.call(
+        { _tag: "PlaceOrder", sku: "offscreen", amount: 3 },
+        { commandId: id("order-offscreen"), timeout: "1 second" },
+      );
+
+      const exchanges = calls.slice(mark);
+      expect(exchanges).toEqual([{ active: [keyOf(rate.key)], refreshed: [] }]);
+      expect(runsOf(Revenue.name)).toBe(revenueRuns);
+      expect(runsOf(TopSku.name)).toBe(topSkuRuns);
+    }),
+  );
+
   withDashboard("a commit to an actor no query depends on refreshes nothing", () =>
     Effect.gen(function* () {
       const revenue = yield* useQuery(Revenue, acme);
-      yield* settledEntry(revenue);
+      const topSku = yield* useQuery(TopSku, acme);
+      yield* Effect.all([settledEntry(revenue), settledEntry(topSku)]);
+      const mark = calls.length;
+      const runs = [...handlerRuns.entries()];
       const heartbeat = yield* ref(Heartbeat, acme);
       yield* heartbeat.call({ _tag: "Ping" }, { commandId: id("beat-1"), timeout: "1 second" });
+      // The call declared both active keys; the host found no dependent of
+      // Heartbeat among them, so its reply is empty and no handler ran.
+      const exchanges = calls.slice(mark);
+      expect(exchanges).toHaveLength(1);
+      expect(exchanges[0]?.active).toHaveLength(2);
+      expect(exchanges[0]?.refreshed).toEqual([]);
+      expect([...handlerRuns.entries()]).toEqual(runs);
       // Not stale: Heartbeat is in no `depends` list, so nothing invalidated.
       expect(yield* revenue.state.get).toEqual({
         _tag: "Ready",
@@ -421,17 +574,76 @@ describe("Query: the Dashboard shape", () => {
 
   withDashboard("the cache key is canonical: field order does not split an entry", () =>
     Effect.gen(function* () {
-      const Pair = query("Pair", {
-        version: 1,
-        args: Schema.Struct({ b: Schema.String, a: Schema.String }),
-        result: Schema.String,
-        policy: "public",
-        depends: [],
-      });
+      const cache = yield* QueryCache;
+      const before = runsOf(Pair.name);
       const first = yield* useQuery(Pair, { a: "1", b: "2" });
       const second = yield* useQuery(Pair, { b: "2", a: "1" });
       expect(keyOf(first.key)).toBe(keyOf(second.key));
       expect(first.key.args).toBe('{"a":"1","b":"2"}');
+      // One entry: one active key and one server read serve both declarations.
+      expect((yield* cache.active).map(keyOf)).toEqual([keyOf(first.key)]);
+      yield* Effect.all([settledEntry(first), settledEntry(second)]);
+      expect(runsOf(Pair.name) - before).toBe(1);
+      expect(yield* second.state.get).toEqual({ _tag: "Ready", value: "12", stale: false });
+    }),
+  );
+
+  withDashboard("a failed refresh answers RefreshFailed and does not undo the command", () =>
+    Effect.gen(function* () {
+      const revenue = yield* useQuery(Revenue, acme);
+      const funnel = yield* useQuery(Funnel, acme);
+      yield* Effect.all([settledEntry(revenue), settledEntry(funnel)]);
+      const book = yield* ref(OrderBook, acme);
+      const before = yield* book.state.get;
+      const mark = calls.length;
+      const commandId = id("order-funnel-down");
+      const message: PlaceOrder = { _tag: "PlaceOrder", sku: "gear", amount: 7 };
+
+      funnelDown.current = true;
+      const applied = yield* Effect.ensuring(
+        book.call(message, { commandId, timeout: "1 second" }),
+        Effect.sync(() => {
+          funnelDown.current = false;
+        }),
+      );
+
+      // The command committed. Its reply carries the good refresh and the
+      // failed one side by side; the failure never became the command's.
+      expect(applied.state).toEqual({
+        count: before.count + 1,
+        revenue: before.revenue + 7,
+        lastSku: "gear",
+      });
+      const exchanges = calls.slice(mark);
+      expect(exchanges).toHaveLength(1);
+      const refreshed = exchanges[0]?.refreshed ?? [];
+      expect(refreshed.find((one) => keyOf(one.key) === keyOf(revenue.key))).toEqual({
+        _tag: "Refreshed",
+        key: revenue.key,
+        result: yield* Schema.encodeEffect(Revenue.result)({ total: before.revenue + 7 }),
+      });
+      expect(refreshed.find((one) => keyOf(one.key) === keyOf(funnel.key))).toMatchObject({
+        _tag: "RefreshFailed",
+        key: funnel.key,
+        error: { _tag: "QueryFailed", query: Funnel.name, detail: "funnel store is down" },
+      });
+      const failed = yield* funnel.state.get;
+      expect(failed._tag).toBe("Failed");
+      if (failed._tag === "Failed") {
+        expect(failed.error._tag).toBe("QueryFailed");
+      }
+      expect(yield* revenue.state.get).toEqual({
+        _tag: "Ready",
+        value: { total: before.revenue + 7 },
+        stale: false,
+      });
+
+      // The stored receipt still carries the commit: the same ID answers with
+      // it and applies nothing a second time.
+      const again = yield* book.send(message, { commandId });
+      const resettled = yield* again.settled;
+      expect(resettled).toMatchObject({ _tag: "Applied", revision: applied.revision });
+      expect(yield* book.state.get).toEqual(applied.state);
     }),
   );
 

@@ -234,6 +234,44 @@ describe("cache command ownership", () => {
     }),
   );
 
+  withApp("a dependent shows stale from send until the reply's value lands", () =>
+    Effect.gen(function* () {
+      const control = yield* Control;
+      const value = yield* useQuery(CounterValue, "one");
+      yield* until(value, isReady(0, false));
+      const seen = yield* recordStates(value);
+      const admission = yield* Deferred.make<void>();
+      yield* Ref.set(control.sendHold, Option.some(admission));
+      const turn = yield* gate(1);
+      const counter = yield* ref(Counter, "one");
+
+      const command = yield* counter.send(1);
+      // No reply has arrived: the command is only sent, and the value is
+      // already stale.
+      expect(yield* command.state.get).toEqual({ _tag: "Sent" });
+      expect(yield* value.state.get).toEqual(ready(0, true));
+
+      yield* Ref.set(control.sendHold, Option.none());
+      yield* Deferred.succeed(admission, void 0);
+      yield* firstState(command, "Admitted");
+      yield* startedTurns(1);
+      // Admitted and applying: still the old value, still stale, not re-read.
+      expect(yield* value.state.get).toEqual(ready(0, true));
+      expect(yield* reads).toBe(1);
+
+      yield* Deferred.succeed(turn, void 0);
+      expect((yield* command.settled)._tag).toBe("Applied");
+      yield* yieldFibers;
+      // The whole round trip, every emission: fresh; stale from the send; the
+      // reply's value accepted while the claim is still open, so still stale;
+      // fresh once the claim closes. The old value never shows fresh after
+      // the send. The reply carried the new value, so the only read after the
+      // first is the one the host ran for the reply.
+      expect(seen).toEqual([ready(0, false), ready(0, true), ready(1, true), ready(1, false)]);
+      expect(yield* reads).toBe(2);
+    }),
+  );
+
   withApp("a query mounted after the command began is stale and reads again after it", () =>
     Effect.gen(function* () {
       const held = yield* gate(1);

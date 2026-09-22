@@ -1,8 +1,17 @@
 import { describe, expect, it } from "bun:test";
 import { apply, initialState, labelFor, makeRows } from "../src/common.js";
-import { reduceChromeTrace, type ChromeTraceEvent } from "../src/trace.js";
+import {
+  decodeChromeTraceEvents,
+  reduceChromeTrace,
+  traceCompletionMark,
+  type ChromeTraceEvent,
+} from "../src/trace.js";
 
 describe("krausest trace reduction", () => {
+  it("decodes untrusted trace entries before reduction", () => {
+    expect(() => decodeChromeTraceEvents([{ ts: "not-a-number" }])).toThrow();
+  });
+
   it("reduces one native click to the next same-process Commit", () => {
     const events: ReadonlyArray<ChromeTraceEvent> = [
       {
@@ -14,6 +23,7 @@ describe("krausest trace reduction", () => {
         args: { data: { type: "click" } },
       },
       { name: "FunctionCall", ph: "X", ts: 110_000, dur: 10_000, pid: 1 },
+      { name: "clock_sync", ph: "c", ts: 121_000, pid: 99, args: { sync_id: traceCompletionMark } },
       { name: "Commit", ph: "X", ts: 125_000, dur: 5_000, pid: 1 },
     ];
     const result = reduceChromeTrace(events);
@@ -34,6 +44,7 @@ describe("krausest trace reduction", () => {
         args: { data: { type: "click" } },
       },
       { name: "Commit", ph: "X", ts: 120_000, dur: 5_000, pid: 2 },
+      { name: traceCompletionMark, ph: "R", ts: 121_000, pid: 1 },
       { name: "Commit", ph: "X", ts: 125_000, dur: 5_000, pid: 1 },
     ];
     const result = reduceChromeTrace(events);
@@ -54,10 +65,47 @@ describe("krausest trace reduction", () => {
         args: { data: { type: "click" } },
       },
       { name: "FunctionCall", ph: "X", ts: 110_000, dur: 10_000, pid: 1 },
+      { name: traceCompletionMark, ph: "R", ts: 121_000, pid: 1 },
       { name: "Commit", ph: "X", ts: 125_000, dur: 5_000, pid: 1 },
       { name: "FunctionCall", ph: "X", ts: 200_000, dur: 50_000, pid: 1 },
     ];
     expect(reduceChromeTrace(events).durationMs).toBe(30);
+  });
+
+  it("rejects an early Commit when completed DOM work has no later Commit", () => {
+    const events: ReadonlyArray<ChromeTraceEvent> = [
+      {
+        name: "EventDispatch",
+        ph: "X",
+        ts: 100_000,
+        dur: 1_000,
+        pid: 1,
+        args: { data: { type: "click" } },
+      },
+      { name: "Commit", ph: "X", ts: 105_000, dur: 1_000, pid: 1 },
+      { name: traceCompletionMark, ph: "R", ts: 110_000, pid: 1 },
+      { name: "FunctionCall", ph: "X", ts: 111_000, dur: 70_000, pid: 1 },
+    ];
+    expect(() => reduceChromeTrace(events)).toThrow("no Commit event after completed DOM");
+  });
+
+  it("rejects the upstream inconsistent animation-frame case", () => {
+    const events: ReadonlyArray<ChromeTraceEvent> = [
+      {
+        name: "EventDispatch",
+        ph: "X",
+        ts: 100_000,
+        dur: 5_000,
+        pid: 1,
+        args: { data: { type: "click" } },
+      },
+      { name: "RequestAnimationFrame", ts: 101_000, pid: 1 },
+      { name: "RequestAnimationFrame", ts: 102_000, pid: 1 },
+      { name: traceCompletionMark, ph: "R", ts: 110_000, pid: 1 },
+      { name: "FireAnimationFrame", ph: "X", ts: 111_000, dur: 1_000, pid: 1 },
+      { name: "Commit", ph: "X", ts: 120_000, dur: 1_000, pid: 1 },
+    ];
+    expect(() => reduceChromeTrace(events)).toThrow("one FireAnimationFrame");
   });
 
   it("applies keyed operation state with the benchmark's expected row counts", () => {

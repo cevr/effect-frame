@@ -4,33 +4,26 @@ import { spawn } from "node:child_process";
 import { appendFile, mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Schema } from "effect";
-import { apply, adjectives, colors, initialState, nouns, type InvariantResult } from "./common.js";
-import { reduceChromeTrace, type ChromeTraceEvent } from "./trace.js";
-
-const FrameworkSchema = Schema.Literals(["effect-frame", "solid2", "octane"]);
-const EngineSchema = Schema.Literals(["chrome", "webkit"]);
-const OperationNameSchema = Schema.Literals([
-  "create-1k",
-  "replace-1k",
-  "update-10th-10k",
-  "select-1k",
-  "swap-1k",
-  "remove-1k",
-  "create-10k",
-  "append-10k",
-  "clear-10k",
-]);
-type FrameworkName = Schema.Schema.Type<typeof FrameworkSchema>;
-type EngineName = Schema.Schema.Type<typeof EngineSchema>;
-type OperationName = Schema.Schema.Type<typeof OperationNameSchema>;
-
-interface BenchOptions {
-  readonly framework: FrameworkName;
-  readonly engines: ReadonlyArray<EngineName>;
-  readonly count: number;
-  readonly official: boolean;
-  readonly only?: OperationName;
-}
+import {
+  apply,
+  assertInvariant,
+  adjectives,
+  colors,
+  initialState,
+  nouns,
+  type InvariantResult,
+} from "./common.js";
+import { cleanupProcessGroup, listenForProcessSignals, runProcess } from "./process.js";
+import {
+  EngineSchema,
+  FrameworkSchema,
+  OperationNameSchema,
+  helpText,
+  isInvalidOptionsError,
+  parseOptions,
+} from "./options.js";
+import type { EngineName, FrameworkName, OperationName } from "./options.js";
+import { decodeChromeTraceEvents, reduceChromeTrace, traceCompletionMark } from "./trace.js";
 
 interface Operation {
   readonly name: OperationName;
@@ -140,6 +133,21 @@ const chromePathCandidates = [
   "/usr/bin/chromium",
 ];
 
+const krausestRevision = "f2df01a8679de05225c32714ca8cecbea3d78c5d";
+
+const readGitRevision = async (root: string): Promise<string> => {
+  const command = Bun.spawn(["git", "-C", root, "rev-parse", "HEAD"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const revision = (await new Response(command.stdout).text()).trim();
+  const exitCode = await command.exited;
+  if (exitCode !== 0 || !/^[0-9a-f]{40}$/.test(revision)) {
+    throw new Error(`cannot read krausest checkout revision at ${root}`);
+  }
+  return revision;
+};
+
 const timeout = async <A>(
   promise: Promise<A>,
   label: string,
@@ -159,68 +167,6 @@ const timeout = async <A>(
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
-};
-
-const parseFramework = (value: string | undefined): FrameworkName | undefined => {
-  if (value !== undefined && Schema.is(FrameworkSchema)(value)) return value;
-  return undefined;
-};
-
-const parseEngine = (value: string | undefined): EngineName | undefined => {
-  if (value !== undefined && Schema.is(EngineSchema)(value)) return value;
-  return undefined;
-};
-
-const parseOperation = (value: string | undefined): OperationName | undefined => {
-  if (value !== undefined && Schema.is(OperationNameSchema)(value)) return value;
-  return undefined;
-};
-
-const parseOptions = (argv: ReadonlyArray<string>): BenchOptions => {
-  let framework: FrameworkName = "effect-frame";
-  let engines: ReadonlyArray<EngineName> = ["chrome", "webkit"];
-  let count = 1;
-  let official = false;
-  let only: OperationName | undefined;
-  for (let index = 0; index < argv.length; index += 1) {
-    const argument = argv[index];
-    if (argument === undefined) continue;
-    switch (argument) {
-      case "--framework": {
-        const candidate = parseFramework(argv[index + 1]);
-        if (candidate !== undefined) framework = candidate;
-        index += 1;
-        break;
-      }
-      case "--engine": {
-        const candidate = parseEngine(argv[index + 1]);
-        if (candidate !== undefined) engines = [candidate];
-        index += 1;
-        break;
-      }
-      case "--count": {
-        const value = Number(argv[index + 1]);
-        if (Number.isInteger(value) && value > 0 && value <= 100) count = value;
-        index += 1;
-        break;
-      }
-      case "--official":
-        official = true;
-        break;
-      case "--only": {
-        const candidate = parseOperation(argv[index + 1]);
-        if (candidate !== undefined) only = candidate;
-        index += 1;
-        break;
-      }
-      default: {
-        const candidate = parseFramework(argument);
-        if (candidate !== undefined) framework = candidate;
-        break;
-      }
-    }
-  }
-  return { framework, engines, count, official, only };
 };
 
 const findChromePath = async (): Promise<string | undefined> => {
@@ -496,7 +442,7 @@ const measureChrome = async (
   selector: string,
   tracePath: string,
 ): Promise<number> => {
-  const entries: Array<ChromeTraceEvent> = [];
+  const entries: Array<unknown> = [];
   let finish = (): void => {};
   const complete = new Promise<void>((resolveComplete) => {
     finish = resolveComplete;
@@ -515,12 +461,18 @@ const measureChrome = async (
   });
   await click(view, selector);
   await awaitCompletion(view);
-  // Completion checks the final DOM contract before Tracing.end flushes the
-  // trace, so an earlier Commit cannot satisfy the benchmark cell.
+  await view.cdp("Tracing.recordClockSyncMarker", { syncId: traceCompletionMark });
+  await timeout(
+    view.evaluate<void>(
+      "new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))",
+    ),
+    "Chrome completed-DOM render",
+  );
   await view.cdp("Tracing.end");
   await timeout(complete, "Chrome trace completion");
-  await Bun.write(tracePath, JSON.stringify(entries));
-  return reduceChromeTrace(entries).durationMs;
+  const decodedEntries = decodeChromeTraceEvents(entries);
+  await Bun.write(tracePath, JSON.stringify(decodedEntries));
+  return reduceChromeTrace(decodedEntries).durationMs;
 };
 
 const seed = async (
@@ -590,6 +542,7 @@ const measure = async (
       ),
       "final benchmark invariant",
     );
+    assertInvariant(operation.name, result);
     return { engine, framework, operation: operation.name, durationMs, invariant: result };
   } finally {
     view.close();
@@ -628,62 +581,6 @@ const printMeasurements = (measurements: ReadonlyArray<Measurement>): void => {
     );
   }
 };
-
-const terminateProcess = (child: ReturnType<typeof spawn>, signal: NodeJS.Signals): void => {
-  if (child.pid !== undefined && process.platform !== "win32") {
-    try {
-      process.kill(-child.pid, signal);
-      return;
-    } catch {
-      // The process may have exited between the deadline and group signal.
-    }
-  }
-  child.kill(signal);
-};
-
-const runProcess = (
-  cwd: string,
-  command: string,
-  args: ReadonlyArray<string>,
-  env: NodeJS.ProcessEnv,
-  milliseconds = 60_000,
-): Promise<void> =>
-  new Promise((resolveProcess, rejectProcess) => {
-    const child = spawn(command, args, {
-      cwd,
-      env,
-      stdio: "inherit",
-      detached: process.platform !== "win32",
-    });
-    let finished = false;
-    let exited = false;
-    const timer = setTimeout(() => {
-      if (finished) return;
-      finished = true;
-      terminateProcess(child, "SIGTERM");
-      setTimeout(() => {
-        if (!exited) terminateProcess(child, "SIGKILL");
-      }, 1_000);
-      rejectProcess(new Error(`${command} timed out after ${milliseconds}ms`));
-    }, milliseconds);
-    child.once("error", (error) => {
-      if (finished) return;
-      finished = true;
-      clearTimeout(timer);
-      rejectProcess(error);
-    });
-    child.once("exit", (code, signal) => {
-      exited = true;
-      if (finished) return;
-      finished = true;
-      clearTimeout(timer);
-      if (code === 0) resolveProcess();
-      else
-        rejectProcess(
-          new Error(`${command} exited with ${code ?? `signal ${signal ?? "unknown"}`}`),
-        );
-    });
-  });
 
 const configuredCellTimeoutMs = Number(Bun.env["DOM_BENCH_CELL_TIMEOUT_MS"] ?? 30_000);
 const cellTimeoutMs =
@@ -737,7 +634,6 @@ const runCellWithDeadline = async (request: CellRequest): Promise<Measurement> =
   await Bun.write(requestPath, JSON.stringify(request));
 
   let child: ReturnType<typeof spawn> | undefined;
-  let exited = false;
   let exitResolve: (value: {
     readonly code: number | null;
     readonly signal: NodeJS.Signals | null;
@@ -750,6 +646,11 @@ const runCellWithDeadline = async (request: CellRequest): Promise<Measurement> =
     exitResolve = resolveExit;
     exitReject = rejectExit;
   });
+  let rejectInterruption: (error: Error) => void = () => {};
+  const interrupted = new Promise<Measurement>((_, reject) => {
+    rejectInterruption = reject;
+  });
+  let removeSignals = (): void => {};
   try {
     child = spawn(process.execPath, [import.meta.filename], {
       env: {
@@ -760,13 +661,14 @@ const runCellWithDeadline = async (request: CellRequest): Promise<Measurement> =
       stdio: "ignore",
       detached: process.platform !== "win32",
     });
+    removeSignals = listenForProcessSignals((signal) => {
+      process.exitCode = signal === "SIGINT" ? 130 : 143;
+      rejectInterruption(new Error(`benchmark cell interrupted by ${signal}`));
+    });
     child.once("error", (error) =>
       exitReject(error instanceof Error ? error : new Error(String(error))),
     );
-    child.once("exit", (code, signal) => {
-      exited = true;
-      exitResolve({ code, signal });
-    });
+    child.once("exit", (code, signal) => exitResolve({ code, signal }));
     const completed = exitedPromise.then(async ({ code, signal }) => {
       if (code !== 0)
         throw new Error(`benchmark cell exited with ${code ?? `signal ${signal ?? "unknown"}`}`);
@@ -782,6 +684,7 @@ const runCellWithDeadline = async (request: CellRequest): Promise<Measurement> =
     try {
       return await Promise.race([
         completed,
+        interrupted,
         new Promise<Measurement>((_, reject) => {
           timer = setTimeout(
             () => reject(new Error(`benchmark cell timed out after ${cellTimeoutMs}ms`)),
@@ -793,11 +696,8 @@ const runCellWithDeadline = async (request: CellRequest): Promise<Measurement> =
       if (timer !== undefined) clearTimeout(timer);
     }
   } finally {
-    if (child !== undefined && !exited) {
-      terminateProcess(child, "SIGTERM");
-      await Promise.race([exitedPromise.catch(() => undefined), Bun.sleep(1_000)]);
-      if (!exited) terminateProcess(child, "SIGKILL");
-    }
+    removeSignals();
+    if (child !== undefined) await cleanupProcessGroup(child);
     await rm(requestPath, { force: true });
     await rm(resultPath, { force: true });
   }
@@ -828,23 +728,11 @@ const officialBenchmarkId = (operation: OperationName | undefined): string => {
   }
 };
 
-const runOfficial = async (
+const stageOfficialFixture = async (
+  root: string,
   framework: FrameworkName,
-  count: number,
-  chromePath: string | undefined,
   script: string,
-  operation?: OperationName,
-): Promise<void> => {
-  const root = Bun.env["KRAUSEST_DIR"];
-  if (root === undefined || root.length === 0) {
-    throw new Error("--official requires KRAUSEST_DIR pointing to the pinned krausest checkout");
-  }
-  const runner = join(root, "webdriver-ts", "dist", "benchmarkRunner.js");
-  if (!(await Bun.file(runner).exists())) {
-    throw new Error(
-      `krausest Playwright runner is missing: ${runner}; run npm ci and npm run compile in webdriver-ts`,
-    );
-  }
+): Promise<string> => {
   const stagedName = `${framework}-effect-frame-local`;
   const staged = join(root, "frameworks", "keyed", stagedName);
   await mkdir(staged, { recursive: true });
@@ -884,39 +772,91 @@ const runOfficial = async (
       2,
     ),
   );
+  return stagedName;
+};
+
+interface OfficialServer {
+  readonly process: ReturnType<typeof spawn> | undefined;
+}
+
+const startOfficialServer = async (
+  root: string,
+  port: number,
+  interrupted: () => Error | undefined,
+): Promise<OfficialServer> => {
+  const base = `http://127.0.0.1:${port}`;
+  let ready = false;
+  try {
+    ready = (await fetch(`${base}/ls`)).ok;
+  } catch {
+    ready = false;
+  }
+  if (ready) return { process: undefined };
+  const server = spawn("npm", ["start"], {
+    cwd: join(root, "server"),
+    env: { ...process.env, PORT: String(port) },
+    stdio: "inherit",
+    detached: process.platform !== "win32",
+  });
+  try {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const error = interrupted();
+      if (error !== undefined) throw error;
+      // oxlint-disable-next-line no-await-in-loop -- readiness polling is intentionally sequential.
+      await Bun.sleep(100);
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- each probe follows the previous bounded delay.
+        ready = (await fetch(`${base}/ls`)).ok;
+      } catch {
+        ready = false;
+      }
+      if (ready) return { process: server };
+    }
+    throw new Error(`krausest server did not become ready at ${base}`);
+  } catch (error) {
+    await cleanupProcessGroup(server);
+    throw error;
+  }
+};
+
+const runOfficial = async (
+  framework: FrameworkName,
+  count: number,
+  chromePath: string | undefined,
+  script: string,
+  operation?: OperationName,
+): Promise<void> => {
+  const root = Bun.env["KRAUSEST_DIR"];
+  if (root === undefined || root.length === 0) {
+    throw new Error("--official requires KRAUSEST_DIR pointing to the pinned krausest checkout");
+  }
+  const revision = await readGitRevision(root);
+  if (revision !== krausestRevision) {
+    throw new Error(
+      `--official requires krausest revision ${krausestRevision}; found ${revision} at ${root}`,
+    );
+  }
+  const runner = join(root, "webdriver-ts", "dist", "benchmarkRunner.js");
+  if (!(await Bun.file(runner).exists())) {
+    throw new Error(
+      `krausest Playwright runner is missing: ${runner}; run npm ci and npm run compile in webdriver-ts`,
+    );
+  }
+  const stagedName = await stageOfficialFixture(root, framework, script);
 
   const port = Number(Bun.env["KRAUSEST_PORT"] ?? Bun.env["PORT"] ?? 8080);
   if (!Number.isInteger(port) || port <= 0)
     throw new Error("KRAUSEST_PORT must be a positive integer");
-  const base = `http://127.0.0.1:${port}`;
   let server: ReturnType<typeof spawn> | undefined;
-  let ready = false;
+  let interrupted: Error | undefined;
+  const removeSignals = listenForProcessSignals((signal) => {
+    process.exitCode = signal === "SIGINT" ? 130 : 143;
+    interrupted = new Error(`official benchmark interrupted by ${signal}`);
+  });
   try {
-    try {
-      ready = (await fetch(`${base}/ls`)).ok;
-    } catch {
-      ready = false;
-    }
-    if (!ready) {
-      server = spawn("npm", ["start"], {
-        cwd: join(root, "server"),
-        env: { ...process.env, PORT: String(port) },
-        stdio: "inherit",
-        detached: process.platform !== "win32",
-      });
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        // oxlint-disable-next-line no-await-in-loop -- readiness polling is intentionally sequential.
-        await Bun.sleep(100);
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- each probe follows the previous bounded delay.
-          ready = (await fetch(`${base}/ls`)).ok;
-        } catch {
-          ready = false;
-        }
-        if (ready) break;
-      }
-    }
-    if (!ready) throw new Error(`krausest server did not become ready at ${base}`);
+    const serverResult = await startOfficialServer(root, port, () => interrupted);
+    server = serverResult.process;
+    if (interrupted !== undefined) throw interrupted;
     const args = [
       runner,
       "--runner",
@@ -932,14 +872,15 @@ const runOfficial = async (
     ];
     if (chromePath !== undefined) args.push("--chromeBinary", chromePath);
     console.log(
-      `official\tkrausest-playwright\t${framework}\t${officialBenchmarkId(operation)}\t${root}`,
+      `official\tkrausest-playwright\t${framework}\t${officialBenchmarkId(operation)}\t${revision}\t${root}`,
     );
     await runProcess(join(root, "webdriver-ts"), "node", args, {
       ...process.env,
       PORT: String(port),
     });
   } finally {
-    if (server !== undefined) terminateProcess(server, "SIGTERM");
+    removeSignals();
+    if (server !== undefined) await cleanupProcessGroup(server);
   }
 };
 
@@ -1000,6 +941,7 @@ const runEngine = async (
     (candidate) => only === undefined || candidate.name === only,
   );
   for (const operation of selectedOperations) {
+    if (process.exitCode === 130 || process.exitCode === 143) break;
     for (let sample = 0; sample < count; sample += 1) {
       // oxlint-disable-next-line no-await-in-loop -- cells run serially to avoid cross-cell browser and CPU contention.
       const result = await runOneCell(framework, engine, operation.name, chromePath, scriptPath);
@@ -1010,6 +952,7 @@ const runEngine = async (
         // oxlint-disable-next-line no-await-in-loop -- failure receipts preserve cell order.
         await recordFailure(result.failure);
       }
+      if (process.exitCode === 130 || process.exitCode === 143) break;
     }
   }
   return { measurements, failures };
@@ -1017,6 +960,10 @@ const runEngine = async (
 
 const main = async (): Promise<void> => {
   const options = parseOptions(Bun.argv.slice(2));
+  if (options.help) {
+    console.log(helpText);
+    return;
+  }
   const script = await bundle(options.framework);
   const scriptPath = resolve(import.meta.dir, "../.generated/fixture.js");
   const chromePath = options.engines.includes("chrome") ? await findChromePath() : undefined;
@@ -1045,7 +992,7 @@ const main = async (): Promise<void> => {
     }
     process.exitCode = 1;
   }
-  if (options.official) {
+  if (options.official && process.exitCode !== 130 && process.exitCode !== 143) {
     await runOfficial(options.framework, options.count, chromePath, script, options.only).catch(
       (error) => {
         const reason = error instanceof Error ? error.message : String(error);
@@ -1058,8 +1005,14 @@ const main = async (): Promise<void> => {
 
 const cellRequestPath = Bun.env["DOM_BENCH_CELL_REQUEST"];
 const cellResultPath = Bun.env["DOM_BENCH_CELL_RESULT"];
-if (cellRequestPath !== undefined && cellResultPath !== undefined) {
-  await runCellWorker(cellRequestPath, cellResultPath);
-} else {
-  await main();
+if (import.meta.main) {
+  if (cellRequestPath !== undefined && cellResultPath !== undefined) {
+    await runCellWorker(cellRequestPath, cellResultPath);
+  } else {
+    await main().catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(message);
+      process.exitCode = isInvalidOptionsError(error) ? 2 : 1;
+    });
+  }
 }

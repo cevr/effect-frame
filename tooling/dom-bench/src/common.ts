@@ -212,6 +212,13 @@ export const inspectDom = (root: ParentNode, state: BenchmarkState): InvariantRe
   return { ok: true, rows: actual.length, selected: state.selected };
 };
 
+export const assertInvariant = (operation: string, result: InvariantResult): InvariantResult => {
+  if (result.ok) return result;
+  const reason = result.reason ?? "unknown final DOM state";
+  // oxlint-disable-next-line effect/noNewError, effect/noThrowStatement -- a failed cell must cross the worker boundary as a bounded CLI failure.
+  throw new Error(`${operation}: final benchmark invariant failed: ${reason}`);
+};
+
 export const initialState: BenchmarkState = { rows: [], selected: null, nextId: 1 };
 
 declare global {

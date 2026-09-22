@@ -17,10 +17,11 @@
         "engine": "chrome",
         "operation": "create-1k",
         "samples": 1,
-        "durationMs": 5.468,
+        "durationMs": 1051.839,
         "state": "ok",
         "log": "/tmp/effect-frame-dom-bench-current-create-chrome.log",
-        "rawTrace": "/tmp/effect-frame-dom-bench-traces/effect-frame-chrome-create-1k-13098.json"
+        "rawTrace": "/tmp/effect-frame-dom-bench-traces-final/effect-frame-chrome-create-1k-24051.json",
+        "traceCompletionMark": "effect-frame-dom-bench-complete"
       },
       {
         "engine": "webkit",

@@ -33,7 +33,9 @@ fail.
 
 The `--official` option runs the pinned krausest Playwright runner. Set
 `KRAUSEST_DIR` to the checkout and `KRAUSEST_PORT` to its server port. The
-option reports the official runner result as a separate measurement.
+option reads the checkout `HEAD` and rejects any revision other than
+`f2df01a8679de05225c32714ca8cecbea3d78c5d`. It records that revision beside
+the official runner line and reports the result as a separate measurement.
 
 ### Timing boundary and comparability
 
@@ -44,14 +46,16 @@ timings are separate receipts. They are not a direct comparison.
 
 Chrome tracing starts immediately before the requested click. The page
 completion promise checks the expected row ids, order, labels, selection, and
-row count after the operation. The harness calls `Tracing.end` only after
-that DOM contract completes. The reducer then selects the same-process
-click-to-Commit window and drops later host work. Raw Chrome events are kept
+row count after the operation. The harness records
+`effect-frame-dom-bench-complete` with `Tracing.recordClockSyncMarker`, waits
+for two render frames, and then calls `Tracing.end`. The reducer requires a
+same-process Commit after that mark. It rejects an earlier Commit when the
+trace does not prove the completed DOM render. Raw Chrome events are kept
 under `/tmp/effect-frame-dom-bench-traces/` by default.
 
 | Acceptance cell                                                            | Result                                             |
 | -------------------------------------------------------------------------- | -------------------------------------------------- |
-| Effect Frame through Bun.WebView Chrome, `create-1k`                       | Passed; 5.468 ms in the recorded sample.           |
+| Effect Frame through Bun.WebView Chrome, `create-1k`                       | Passed; 1,051.839 ms in the replacement sample.    |
 | Effect Frame through Bun.WebView WebKit, `create-1k`                       | Passed; 354 ms in the recorded sample.             |
 | Solid 2 through Bun.WebView Chrome, `create-1k`                            | Passed; 1,140.851 ms in the recorded sample.       |
 | Solid 2 through Bun.WebView WebKit, `create-1k`                            | Passed; 53 ms in the recorded sample.              |

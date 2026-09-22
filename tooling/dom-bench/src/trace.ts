@@ -1,17 +1,25 @@
-/* oxlint-disable effect/noNewError, effect/noNullish, effect/noTernary, effect/noThrowStatement -- this reducer mirrors the official trace parser and reports malformed external trace data as a bounded CLI failure. */
+/* oxlint-disable effect/noNewError, effect/noNullish, effect/noRuntimeTypeof, effect/noTernary, effect/noThrowStatement, effect/noUnknownParameters -- this reducer mirrors the official trace parser and reports malformed external trace data as a bounded CLI failure. */
 
-export interface ChromeTraceEvent {
-  readonly name?: string;
-  readonly ph?: string;
-  readonly ts?: number;
-  readonly dur?: number;
-  readonly pid?: number;
-  readonly args?: {
-    readonly data?: {
-      readonly type?: string;
-    };
-  };
-}
+import { Schema } from "effect";
+
+export const traceCompletionMark = "effect-frame-dom-bench-complete";
+
+const ChromeTraceEventSchema = Schema.Struct({
+  name: Schema.optionalKey(Schema.String),
+  ph: Schema.optionalKey(Schema.String),
+  ts: Schema.optionalKey(Schema.Finite),
+  dur: Schema.optionalKey(Schema.Finite),
+  pid: Schema.optionalKey(Schema.Finite),
+  args: Schema.optionalKey(Schema.Unknown),
+});
+
+const ChromeTraceEventsSchema = Schema.Array(ChromeTraceEventSchema);
+
+export type ChromeTraceEvent = Schema.Schema.Type<typeof ChromeTraceEventSchema>;
+
+export const decodeChromeTraceEvents = (
+  entries: ReadonlyArray<unknown>,
+): ReadonlyArray<ChromeTraceEvent> => Schema.decodeUnknownSync(ChromeTraceEventsSchema)(entries);
 
 interface TimingEvent {
   readonly type: string;
@@ -68,12 +76,47 @@ const xEvent = (
   }
 };
 
+const eventData = (args: unknown): object | undefined => {
+  if (typeof args !== "object" || args === null || !("data" in args)) return undefined;
+  const data = args.data;
+  return typeof data === "object" && data !== null ? data : undefined;
+};
+
+const eventType = (args: unknown): string | undefined => {
+  const data = eventData(args);
+  if (data === undefined || !("type" in data)) return undefined;
+  const type = data.type;
+  return typeof type === "string" ? type : undefined;
+};
+
+const eventMessage = (args: unknown): string | undefined => {
+  const data = eventData(args);
+  if (data === undefined || !("message" in data)) return undefined;
+  const message = data.message;
+  return typeof message === "string" ? message : undefined;
+};
+
+const eventSyncId = (args: unknown): string | undefined => {
+  if (typeof args !== "object" || args === null || !("sync_id" in args)) return undefined;
+  const syncId = args.sync_id;
+  return typeof syncId === "string" ? syncId : undefined;
+};
+
 const toTimingEvent = (entry: ChromeTraceEvent): TimingEvent | undefined => {
   const ts = numberOrZero(entry.ts);
   const dur = numberOrZero(entry.dur);
   const pid = numberOrZero(entry.pid);
+  if (entry.name === traceCompletionMark) {
+    return makeTimingEvent("completion", ts, 0, pid);
+  }
+  if (entry.name === "TimeStamp" && eventMessage(entry.args) === traceCompletionMark) {
+    return makeTimingEvent("completion", ts, 0, pid);
+  }
+  if (entry.name === "clock_sync" && eventSyncId(entry.args) === traceCompletionMark) {
+    return makeTimingEvent("completion", ts, 0, pid);
+  }
   if (entry.name === "EventDispatch") {
-    const type = entry.args?.data?.type;
+    const type = eventType(entry.args);
     if (type === "click" || type === "mousedown" || type === "pointerup") {
       return makeTimingEvent(type, ts, dur, pid);
     }
@@ -94,18 +137,17 @@ const relevantEvents = (entries: ReadonlyArray<ChromeTraceEvent>): Array<TimingE
   return events;
 };
 
-const hasType = (types: ReadonlyArray<string>, event: TimingEvent): boolean =>
-  types.includes(event.type);
-
 /**
- * Reduce the Chrome trace with the same click-to-Commit rule as krausest.
+ * Reduce the Chrome trace with the click-to-Commit rule from krausest and an
+ * explicit mark for the completed DOM state.
  * Trace timestamps and durations are in microseconds; the result is ms.
  */
 export const reduceChromeTrace = (
   entries: ReadonlyArray<ChromeTraceEvent>,
   startLogicEvent = "click",
 ): TraceReduction => {
-  const events = relevantEvents(entries).sort((left, right) => left.end - right.end);
+  const decodedEntries = decodeChromeTraceEvents(entries);
+  const events = relevantEvents(decodedEntries).sort((left, right) => left.end - right.end);
   const clicks = events.filter((event) => event.type === startLogicEvent);
   if (clicks.length !== 1) {
     throw new Error(`expected one ${startLogicEvent} event, found ${clicks.length}`);
@@ -115,23 +157,20 @@ export const reduceChromeTrace = (
     throw new Error(`missing ${startLogicEvent} event`);
   }
   const during = events.filter((event) => event.ts > click.end || event.type === "click");
-  const main = during.filter((event) => event.pid === click.pid);
-  const dropped = main.length !== during.length;
+  const measured = during.filter((event) => event.type !== "completion");
+  const main = measured.filter((event) => event.pid === click.pid);
+  const dropped = main.length !== measured.length;
   const commits = main.filter((event) => event.type === "commit");
   if (commits.length === 0) {
     throw new Error("no Commit event after click");
   }
-  const startFrom = main.filter((event) =>
-    hasType([startLogicEvent, "fireAnimationFrame", "timerFire", "layout", "functioncall"], event),
-  );
-  const start = startFrom.at(-1);
-  if (start === undefined) {
-    throw new Error("no post-click trace event from which to find Commit");
+  const completion = events.find((event) => event.type === "completion" && event.ts > click.end);
+  if (completion === undefined) {
+    throw new Error(`missing ${traceCompletionMark} trace mark`);
   }
-  const firstCommit = commits.find((event) => event.ts > start.end);
-  const commit = firstCommit ?? commits.at(-1);
+  const commit = commits.find((event) => event.ts > completion.end);
   if (commit === undefined) {
-    throw new Error("no Commit event after trace start");
+    throw new Error("no Commit event after completed DOM");
   }
   const rafs = events.filter(
     (event) =>
@@ -147,6 +186,10 @@ export const reduceChromeTrace = (
     if (waitDelayMs > 16 && !layouts.some((event) => event.ts < (frames[0]?.ts ?? 0))) {
       rafLongDelayMs = waitDelayMs - 16;
     }
+  } else if (rafs.length > 0 && frames.length === 1) {
+    throw new Error(
+      `one FireAnimationFrame with ${rafs.length} RequestAnimationFrame events is not a valid trace`,
+    );
   }
   let maxDeltaBetweenCommitsMs = 0;
   if (commits.length > 1) {

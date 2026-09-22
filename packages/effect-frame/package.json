@@ -1,6 +1,6 @@
 {
   "name": "effect-frame",
-  "version": "0.9.2",
+  "version": "0.10.0",
   "private": false,
   "description": "Actors, queries, views and a router on Effect.",
   "license": "MIT",

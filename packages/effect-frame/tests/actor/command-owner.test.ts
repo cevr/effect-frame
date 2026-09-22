@@ -5,6 +5,7 @@ import {
   Exit,
   Fiber,
   Layer,
+  Logger,
   Option,
   Scheduler,
   Schema,
@@ -730,6 +731,75 @@ describe("private command owner", () => {
       expect(yield* Fiber.join(waiting)).toEqual(
         Option.some({ _tag: "Applied", admitted: 1, committed: { revision: 1, state: 1 } }),
       );
+    }),
+  );
+
+  it.scoped("a pass that dies is logged and leaves the record Uncertain for retry", () =>
+    Effect.gen(function* () {
+      const logs: Array<string> = [];
+      const collector = Logger.make((options) => {
+        logs.push(`${options.logLevel} ${String(options.message)}`);
+      });
+      let calls = 0;
+      const owner = yield* Commands.make(
+        fakeAdapter({
+          call: () =>
+            Effect.suspend(() => {
+              calls += 1;
+              if (calls === 1) {
+                return Effect.die(new Error("secret decoded state"));
+              }
+              return Effect.succeed({ committed: { revision: 1, state: 1 }, refreshed: [] });
+            }),
+        }),
+      ).pipe(Effect.provideService(Logger.CurrentLoggers, new Set([collector])));
+      const command = yield* owner.submit(
+        { commandId: id("dies"), identity: "supplied" },
+        Effect.succeed("{}"),
+        noKeys,
+      );
+      yield* yieldFibers;
+      expect(yield* command.lifecycle.get).toEqual({
+        _tag: "Uncertain",
+        attempt: 1,
+        admitted: Option.some(1),
+      });
+      expect((yield* owner.retained).map((record) => record.running)).toEqual([false]);
+      expect(logs).toEqual([
+        "Error command.pass.defect kind=durable commandId=dies attempt=1 defect=Error",
+      ]);
+
+      yield* command.retry;
+      expect(yield* command.settled).toEqual({
+        _tag: "Applied",
+        admitted: 1,
+        committed: { revision: 1, state: 1 },
+      });
+    }),
+  );
+
+  it.scoped("a settlement hook that dies is logged and the command still settles Applied", () =>
+    Effect.gen(function* () {
+      const logs: Array<string> = [];
+      const collector = Logger.make((options) => {
+        logs.push(`${options.logLevel} ${String(options.message)}`);
+      });
+      const owner = yield* Commands.make(
+        fakeAdapter({
+          own: () => Effect.succeed(() => Effect.die(new TypeError("secret refreshed value"))),
+        }),
+      ).pipe(Effect.provideService(Logger.CurrentLoggers, new Set([collector])));
+      const command = yield* owner.submit(
+        { commandId: id("hook-dies"), identity: "supplied" },
+        Effect.succeed("{}"),
+        noKeys,
+      );
+      yield* yieldFibers;
+      expect(yield* command.lifecycle.get).toMatchObject({ _tag: "Applied" });
+      expect(yield* owner.retained).toEqual([]);
+      expect(logs).toEqual([
+        "Error command.settle.defect kind=durable commandId=hook-dies defect=TypeError",
+      ]);
     }),
   );
 });

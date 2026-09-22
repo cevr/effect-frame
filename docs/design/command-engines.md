@@ -71,6 +71,14 @@ Adapters give it `identify`, `submit`, one healthy `pass`, and `own`.
   when no admission was possible. After a possible admission, ActorStopped is a
   lost pass, and Unauthorized, ContractMismatch, and UnknownContract hold the
   record Uncertain.
+- Defects. A pass that dies (for example a reply that does not decode) ends
+  the sequence with the record `Uncertain` and idle, and marks a possible
+  admission, so `retry` can resume it and a later refusal is not conclusive.
+  Uncertain is the honest state: the send may have reached admission. The
+  owner logs `command.pass.defect kind=… commandId=… attempt=… defect=<class>`.
+  A settlement hook that dies is logged as `command.settle.defect`, and the
+  command still settles Applied, because it is applied. Log lines name the
+  defect class only: its message can carry decoded state.
 - Owner closure. A fresh send after closure is Rejected(ActorStopped). A
   supplied send after closure is `Uncertain{attempt: 0}`. Open handles keep
   their last nonterminal state, and their `settled` can stay pending.

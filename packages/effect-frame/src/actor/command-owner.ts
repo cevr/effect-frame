@@ -1,4 +1,5 @@
 import {
+  Cause,
   Context,
   Deferred,
   Duration,
@@ -440,13 +441,32 @@ export const make = Effect.fn("Actor.commands.make")(function* <
       });
     });
 
+  /**
+   * A defect names its class only. Its message can carry decoded state or a
+   * refreshed query value, and the log never carries payloads.
+   */
+  const defectOf = (cause: Cause.Cause<unknown>): string => {
+    const defect = Cause.squash(cause);
+    if (defect instanceof Error) {
+      return defect.name;
+    }
+    return "unknown";
+  };
+
   const sequence = (record: CommandRecord<State, Rejection>) =>
     Effect.gen(function* () {
       const outcome = yield* Effect.exit(Effect.retry(pass(record), { schedule, while: isLost }));
       if (Exit.isSuccess(outcome)) {
         const admitted = Option.getOrElse(record.admitted, () => 0);
         if (Option.isSome(record.settle)) {
-          yield* record.settle.value(outcome.value);
+          // The command is applied whatever its hook does: a defect there is
+          // logged and never keeps the record from settling.
+          const hooked = yield* Effect.exit(record.settle.value(outcome.value));
+          if (Exit.isFailure(hooked) && Cause.hasDies(hooked.cause)) {
+            yield* Effect.logError(
+              `command.settle.defect kind=${adapter.kind} commandId=${record.commandId} defect=${defectOf(hooked.cause)}`,
+            );
+          }
         }
         yield* finish(record, {
           _tag: "Applied",
@@ -457,6 +477,16 @@ export const make = Effect.fn("Actor.commands.make")(function* <
       }
       const failure = Exit.findErrorOption(outcome);
       if (Option.isNone(failure)) {
+        // No typed outcome. An interrupted worker belongs to a record that
+        // is ending. A pass that died left the command unknown: it may have
+        // been admitted, so it is Uncertain and idle, and retry can resume it.
+        if (Cause.hasDies(outcome.cause)) {
+          record.possibleAdmission = true;
+          yield* Effect.logError(
+            `command.pass.defect kind=${adapter.kind} commandId=${record.commandId} attempt=${record.attempt} defect=${defectOf(outcome.cause)}`,
+          );
+          yield* idle(record);
+        }
         return;
       }
       if (failure.value._tag === "Reject") {

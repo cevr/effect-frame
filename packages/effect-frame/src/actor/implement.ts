@@ -2,7 +2,7 @@ import type { Duration } from "effect";
 import { Effect, Layer, Schema, Scope, Stream } from "effect";
 import type { Behavior } from "./behavior.js";
 import type { AnyContract, MessageOf, SnapshotOf } from "./contract.js";
-import { durable } from "./durable.js";
+import { openDurable } from "./durable-engine.js";
 import type { MailboxStore } from "./mailbox-store.js";
 import type { Projection } from "./transport.js";
 import type {
@@ -77,7 +77,7 @@ const openWith = <C extends AnyContract, State, R>(
   scope: Scope.Scope,
 ): Effect.Effect<HostedInstance, never, R | MailboxStore> =>
   Effect.gen(function* () {
-    const actor = yield* durable({
+    const actor = yield* openDurable({
       behavior: options.behavior,
       state: options.state,
       message: contract.message,
@@ -89,14 +89,19 @@ const openWith = <C extends AnyContract, State, R>(
         (snapshot): Projection => ({ revision: committed.revision, snapshot }),
       );
     const decodeMessage = Schema.decodeEffect(contract.message);
+    const encodeMessage = Schema.encodeEffect(contract.message);
+    const prepareMessage = (payload: string) =>
+      Effect.flatMap(Effect.orDie(decodeMessage(payload)), (message) =>
+        Effect.orDie(encodeMessage(message)),
+      );
     const instance: HostedInstance = {
       send: (commandId, payload) =>
-        Effect.flatMap(Effect.orDie(decodeMessage(payload)), (message) =>
-          actor.send(message, { commandId }),
+        Effect.flatMap(prepareMessage(payload), (prepared) =>
+          actor.sendEncoded(commandId, prepared),
         ),
       call: (commandId, payload, timeout) =>
-        Effect.flatMap(Effect.orDie(decodeMessage(payload)), (message) =>
-          Effect.flatMap(actor.call(message, { commandId, timeout }), project),
+        Effect.flatMap(prepareMessage(payload), (prepared) =>
+          Effect.flatMap(actor.callEncoded(commandId, prepared, timeout), project),
         ),
       snapshot: Effect.flatMap(actor.applied.get, project),
       changes: (after) =>

@@ -6,6 +6,7 @@ import {
   Fiber,
   Hash,
   Option,
+  Queue,
   Schema,
   Scope,
   Stream,
@@ -116,6 +117,40 @@ describe("durable actor", () => {
       const receipt = yield* counter.send(add(3), { commandId: id("c1") });
       expect(receipt.committed).toEqual(Option.some(1));
       expect(yield* counter.state.get).toBe(3);
+    }),
+  );
+
+  withStore("a retry returns its older exact receipt after newer and autonomous state", () =>
+    Effect.gen(function* () {
+      const autonomous = yield* Queue.unbounded<number>();
+      const behavior: Behavior.Behavior<number, Add> = {
+        initial: 0,
+        open: () =>
+          Effect.succeed({
+            apply: (state, message) => Effect.succeed(state + message.amount),
+            changes: Stream.fromQueue(autonomous),
+          }),
+      };
+      const counter = yield* durable({ ...counterOptions, behavior });
+
+      const first = yield* counter.call(add(1), { commandId: id("older"), timeout: "1 second" });
+      const newer = yield* counter.call(add(2), { commandId: id("newer"), timeout: "1 second" });
+      expect(first).toEqual({ revision: 1, state: 1 });
+      expect(newer).toEqual({ revision: 2, state: 3 });
+
+      const autonomousWaiting = yield* Effect.forkScoped(
+        Stream.runHead(Stream.filter(counter.state.changes, (state) => state === 99)),
+      );
+      yield* yieldFibers;
+      yield* Queue.offer(autonomous, 99);
+      const autonomousState = yield* Fiber.join(autonomousWaiting);
+      expect(autonomousState).toEqual(Option.some(99));
+      const retry = yield* counter.call(add(1), {
+        commandId: id("older"),
+        timeout: "1 second",
+      });
+      expect(retry).toEqual(first);
+      expect(yield* counter.state.get).toBe(99);
     }),
   );
 

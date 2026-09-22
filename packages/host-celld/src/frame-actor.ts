@@ -1,6 +1,18 @@
-import { Duration, Effect, Match, Option, Result, Schema, Stream } from "effect";
-import type { ActorRef, Behavior } from "effect-frame/actor";
-import { CommandId, MailboxStore, durable } from "effect-frame/actor";
+import {
+  Context,
+  Duration,
+  Effect,
+  Layer,
+  Match,
+  Option,
+  Result,
+  Schema,
+  Scope,
+  Stream,
+} from "effect";
+import type { Behavior, HostedInstance } from "effect-frame/actor";
+import { CommandId, MailboxStore, implementTransparent } from "effect-frame/actor";
+import { contract } from "effect-frame/actor/client";
 import type { DurableStorage } from "./storage.js";
 import * as StorageStore from "./storage-store.js";
 
@@ -21,9 +33,6 @@ export class Add extends Schema.TaggedClass<Add>()("Add", {
 
 export const CounterState = Schema.Struct({ total: Schema.Finite });
 export type CounterState = Schema.Schema.Type<typeof CounterState>;
-
-const StateCodec = Schema.fromJsonString(CounterState);
-const MessageCodec = Schema.fromJsonString(Add);
 
 const delayOf = (message: Add): Duration.Duration =>
   Option.match(Option.fromNullishOr(message.delayMs), {
@@ -48,14 +57,22 @@ export const counter: Behavior.Behavior<CounterState, Add> = {
     }),
 };
 
+const CounterContract = contract("FrameActorCounter", {
+  version: 1,
+  key: Schema.String,
+  snapshot: CounterState,
+  message: Add,
+});
+
+const CounterLive = implementTransparent(CounterContract, counter);
+
 // ---------------------------------------------------------------------------
 // The hosted runtime
 // ---------------------------------------------------------------------------
 
 export interface HostedActor {
-  readonly ref: ActorRef<CounterState, Add, "durable">;
+  readonly instance: HostedInstance;
   readonly pending: Effect.Effect<ReadonlyArray<CommandId>>;
-  readonly latest: Effect.Effect<Option.Option<{ revision: number; state: string }>>;
 }
 
 /**
@@ -65,15 +82,12 @@ export interface HostedActor {
  */
 export const host = Effect.fn("FrameActor.host")(function* (storage: DurableStorage) {
   const store = yield* StorageStore.make(storage);
-  const ref = yield* Effect.provideService(
-    durable({ behavior: counter, state: StateCodec, message: MessageCodec }),
-    MailboxStore,
-    store,
-  );
+  const context = yield* Effect.context<Scope.Scope>();
+  const scope = Context.get(context, Scope.Scope);
+  const instance = yield* CounterLive.open(Layer.succeed(MailboxStore, store), scope);
   return {
-    ref,
+    instance,
     pending: store.pending,
-    latest: store.latest,
   } satisfies HostedActor;
 });
 
@@ -102,15 +116,13 @@ export interface Reply {
 
 const decodeCommandId = Schema.decodeSync(CommandId);
 
-const decodeState = Schema.decodeEffect(StateCodec);
+const decodeState = Schema.decodeEffect(CounterContract.snapshot);
+const encodeMessage = Schema.encodeEffect(CounterContract.message);
 
 const stateReply = Effect.fn("FrameActor.stateReply")(function* (actor: HostedActor) {
-  const latest = yield* actor.latest;
-  if (Option.isNone(latest)) {
-    return { status: 200, body: { revision: 0, state: counter.initial } } satisfies Reply;
-  }
-  const state = yield* Effect.orDie(decodeState(latest.value.state));
-  return { status: 200, body: { revision: latest.value.revision, state } } satisfies Reply;
+  const projection = yield* actor.instance.snapshot;
+  const state = yield* Effect.orDie(decodeState(projection.snapshot));
+  return { status: 200, body: { revision: projection.revision, state } } satisfies Reply;
 });
 
 const sendReply = Effect.fn("FrameActor.sendReply")(function* (
@@ -118,7 +130,8 @@ const sendReply = Effect.fn("FrameActor.sendReply")(function* (
   commandId: CommandId,
   message: Add,
 ) {
-  const outcome = yield* Effect.result(actor.ref.send(message, { commandId }));
+  const payload = yield* Effect.orDie(encodeMessage(message));
+  const outcome = yield* Effect.result(actor.instance.send(commandId, payload));
   return Result.match(outcome, {
     onFailure: (error): Reply => ({ status: 409, body: { error: error._tag } }),
     onSuccess: (receipt): Reply => ({
@@ -138,13 +151,20 @@ const callReply = Effect.fn("FrameActor.callReply")(function* (
   message: Add,
   timeout: Duration.Duration,
 ) {
-  const outcome = yield* Effect.result(actor.ref.call(message, { commandId, timeout }));
-  return Result.match(outcome, {
-    onFailure: (error): Reply => ({ status: 409, body: { error: error._tag } }),
-    onSuccess: (applied): Reply => ({
-      status: 200,
-      body: { revision: applied.revision, state: applied.state },
-    }),
+  const payload = yield* Effect.orDie(encodeMessage(message));
+  const outcome = yield* Effect.result(actor.instance.call(commandId, payload, timeout));
+  return yield* Result.match(outcome, {
+    onFailure: (error) =>
+      Effect.succeed({ status: 409, body: { error: error._tag } } satisfies Reply),
+    onSuccess: (applied) =>
+      Effect.map(
+        Effect.orDie(decodeState(applied.snapshot)),
+        (state) =>
+          ({
+            status: 200,
+            body: { revision: applied.revision, state },
+          }) satisfies Reply,
+      ),
   });
 });
 

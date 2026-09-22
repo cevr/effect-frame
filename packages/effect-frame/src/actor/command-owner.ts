@@ -348,6 +348,16 @@ export const make = Effect.fn("Actor.commands.make")(function* <
     admitted: record.admitted,
   });
 
+  /** A record that never started: it leaves the owner with no settlement. */
+  const discard = (record: CommandRecord<State, Rejection>) =>
+    Effect.suspend(() => {
+      record.done = true;
+      if (records.get(record.commandId) === record) {
+        records.delete(record.commandId);
+      }
+      return Scope.close(record.scope, Exit.void);
+    });
+
   /** Terminal settlement. The record leaves the owner; its handle keeps the value. */
   const finish = (record: CommandRecord<State, Rejection>, terminal: Terminal<State, Rejection>) =>
     Effect.suspend(() => {
@@ -657,7 +667,11 @@ export const make = Effect.fn("Actor.commands.make")(function* <
         return Effect.void;
       }
       if (placement.created) {
-        return Effect.andThen(adopt(placement.record), startSequence(placement.record));
+        // A defect while adopting leaves a record nothing would run: remove it
+        // and release what it registered, so the same ID starts fresh later.
+        return Effect.andThen(adopt(placement.record), startSequence(placement.record)).pipe(
+          Effect.onError(() => discard(placement.record)),
+        );
       }
       return startSequence(placement.record);
     };

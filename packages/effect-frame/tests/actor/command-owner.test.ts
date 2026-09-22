@@ -782,6 +782,45 @@ describe("private command owner", () => {
     }),
   );
 
+  it.scoped("an ownership step that dies leaves no record, so the same ID starts fresh", () =>
+    Effect.gen(function* () {
+      let owns = 0;
+      const owner = yield* Commands.make(
+        fakeAdapter({
+          own: (active) =>
+            Effect.suspend(() => {
+              owns += 1;
+              if (owns === 1) {
+                return Effect.die(new Error("ownership broke"));
+              }
+              return Commands.ownNothing(active);
+            }),
+        }),
+      );
+      const first = yield* Effect.exit(
+        owner.submit(
+          { commandId: id("own-dies"), identity: "supplied" },
+          Effect.succeed("{}"),
+          noKeys,
+        ),
+      );
+      expect(Exit.hasDies(first)).toBe(true);
+      // Nothing retains a record that no worker will run.
+      expect(yield* owner.retained).toEqual([]);
+
+      const again = yield* owner.submit(
+        { commandId: id("own-dies"), identity: "supplied" },
+        Effect.succeed("{}"),
+        noKeys,
+      );
+      expect(yield* again.settled).toEqual({
+        _tag: "Applied",
+        admitted: 1,
+        committed: { revision: 1, state: 1 },
+      });
+    }),
+  );
+
   it.scoped("a settlement hook that dies is logged and the command still settles Applied", () =>
     Effect.gen(function* () {
       const logs: Array<string> = [];

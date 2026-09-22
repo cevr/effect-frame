@@ -287,6 +287,18 @@ const editSegment = Branch.child(tenantSegment, "edit", {
   }),
 });
 
+/** Two actors: a stay can hold the second read while the first is subscribed. */
+const pairSegment = Branch.child(tenantSegment, "pair", {
+  path: "pairs/:postId",
+  params: PostParams,
+  data: ({ params }) => ({
+    first: Branch.actor(Draft, { tenant: params.tenant, postId: params.postId }),
+    second: Branch.actor(Draft, { tenant: params.tenant, postId: `${params.postId}-second` }),
+    // A layout's Loading shows its fallback until the child registers a read.
+    post: Branch.query(PostBody, { tenant: params.tenant, postId: params.postId }),
+  }),
+});
+
 /** Local actor revisions tell the layout's, the post view's and the edit view's actors apart. */
 const LayoutRevision = 30;
 const PostRevision = 40;
@@ -388,9 +400,21 @@ const makeTree = (probes: Probes) => {
       );
     });
 
+  const PairView = (props: Branch.PropsOf<typeof pairSegment>) =>
+    Effect.map(ready(props.data.post.state, ""), (title) => (
+      <article id="pair">
+        <h2 id="pair-title">{View.bind(title)}</h2>
+        <p id="pair-param">{View.bind(props.params, (params) => params.postId)}</p>
+      </article>
+    ));
+
   const tree = Branch.layout(
     tenantSegment,
-    [Branch.leaf(postSegment, PostView), Branch.leaf(editSegment, EditView)],
+    [
+      Branch.leaf(postSegment, PostView),
+      Branch.leaf(editSegment, EditView),
+      Branch.leaf(pairSegment, PairView),
+    ],
     (props) =>
       Effect.gen(function* () {
         yield* Ref.update(probes.layoutSetups, (setups) => setups + 1);
@@ -929,21 +953,43 @@ describe("private nested transition", () => {
       Effect.gen(function* () {
         const root = yield* makeRoot;
         const probes = yield* makeProbes;
-        const { page, router } = yield* mountApp(makeTree(probes), root, "/app/t1/posts/1");
-        yield* readyPage(page, "1");
+        const { page, router } = yield* mountApp(makeTree(probes), root, "/app/t1/pairs/1");
+        yield* page.waitFor({
+          label: "pair 1",
+          until: (actual) =>
+            textAt(actual, "#pair-param") === "1" &&
+            textAt(actual, "#pair-title") === "value:post:t1/1" &&
+            textAt(actual, "#tenant-name") === "value:tenant:t1",
+        });
+        expect(yield* subscriptionsOf("t1", "1")).toBe(1);
+        expect(yield* subscriptionsOf("t1", "1-second")).toBe(1);
 
-        const snapshot2 = yield* holdSnapshot("t1", "2");
-        const moving = yield* Effect.forkChild(router.navigate("/app/t1/posts/2"));
-        yield* Deferred.await(snapshot2.started);
+        // The second read is held; the first completes and opens its changes.
+        const second2 = yield* holdSnapshot("t1", "2-second");
+        const moving = yield* Effect.forkChild(router.navigate("/app/t1/pairs/2"));
+        yield* Deferred.await(second2.started);
+        while ((yield* subscriptionsOf("t1", "2")) === 0) {
+          yield* Effect.yieldNow;
+        }
+
+        // Acquired but unpublished: after a flush the view still shows pair 1.
+        yield* page.waitFor({
+          label: "pair 1 params while the stay is held",
+          until: (actual) => textAt(actual, "#pair-param") === "1",
+        });
+        expect(yield* subscriptionsOf("t1", "2")).toBe(1);
+        expect(yield* subscriptionsOf("t1", "1")).toBe(1);
 
         yield* page.close;
-        yield* Deferred.succeed(snapshot2.gate, void 0);
+        yield* Deferred.succeed(second2.gate, void 0);
         yield* Fiber.await(moving);
 
-        expect(yield* Ref.get(probes.postSetups)).toEqual(["1"]);
-        expect(yield* Ref.get(probes.closeOrder)).toEqual(["post", "layout"]);
-        expect(yield* subscriptionsOf("t1", "1")).toBe(0);
+        expect(yield* Ref.get(probes.closeOrder)).toEqual(["layout"]);
+        // The acquired but unpublished interest is released with the root.
         expect(yield* subscriptionsOf("t1", "2")).toBe(0);
+        expect(yield* subscriptionsOf("t1", "2-second")).toBe(0);
+        expect(yield* subscriptionsOf("t1", "1")).toBe(0);
+        expect(yield* subscriptionsOf("t1", "1-second")).toBe(0);
         const closed = yield* Frame.inspect;
         expect(closed.actors.filter((record) => record.kind === "local")).toHaveLength(0);
         expect(closed.queries).toHaveLength(0);

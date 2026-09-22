@@ -2,9 +2,9 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Behavior, spawn } from "effect-frame/actor";
+import { Behavior, Value, spawn } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
-import { Dom, For, Portal, View, mount } from "effect-frame/view";
+import { Dom, For, Portal, Show, View, mount, render } from "effect-frame/view";
 import type { Host } from "effect-frame/view";
 import { Deferred, Effect, Exit, Fiber, Option, Scope } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -37,6 +37,41 @@ const Composite = (props: CompositeProps) =>
       <p id="after">after</p>
     </>,
   );
+
+interface TurnoverProps {
+  readonly open: Source<boolean>;
+  readonly tasks: Source<ReadonlyArray<Task>>;
+}
+
+const Turnover = (props: TurnoverProps) =>
+  Effect.succeed(
+    <>
+      <Show when={props.open}>
+        <section id="branch">
+          <p id="branch-child">branch</p>
+        </section>
+      </Show>
+      <For each={props.tasks} keyBy={(task: Task) => task.id}>
+        {(task) => (
+          <article id={View.bind(task, (value) => `row-${value.id}`)}>
+            <span id={View.bind(task, (value) => `row-child-${value.id}`)}>
+              {View.bind(task, (value) => value.title)}
+            </span>
+          </article>
+        )}
+      </For>
+    </>,
+  );
+
+const hostLabel = (node: Node): string => {
+  if (node instanceof Element) {
+    if (node.id.length > 0) {
+      return node.id;
+    }
+    return node.tagName.toLowerCase();
+  }
+  return Option.getOrElse(Option.fromNullishOr(node.textContent), () => "");
+};
 
 describe("mount failure ownership", () => {
   it.scoped("removes partial list, fragment, keyed row, and portal writes only", () =>
@@ -79,6 +114,47 @@ describe("mount failure ownership", () => {
       expect(root.querySelector("#first")).toBeNull();
       expect(root.querySelector("li")).toBeNull();
       expect(into.querySelector("#portal")).toBeNull();
+    }),
+  );
+
+  it.scoped("forgets nested host ownership through repeated branch and row turnover", () =>
+    Effect.gen(function* () {
+      const root = document.createElement("main");
+      const open = yield* spawn(Behavior.value(true));
+      const tasks = yield* spawn(
+        Behavior.value<ReadonlyArray<Task>>([
+          { id: "a", title: "alpha" },
+          { id: "b", title: "beta" },
+        ]),
+      );
+      const removed: Array<string> = [];
+      const host: Host<Node> = {
+        ...Dom.host,
+        remove: (parent, node) => {
+          removed.push(hostLabel(node));
+          Dom.host.remove(parent, node);
+        },
+      };
+      const caller = yield* Scope.make();
+      yield* Scope.provide(
+        mount(Turnover, { open: open.state, tasks: tasks.state }, host, root),
+        caller,
+      );
+
+      yield* open.call(Value.Set(false));
+      yield* tasks.call(Value.Set([{ id: "b", title: "beta" }]));
+      yield* render;
+      yield* open.call(Value.Set(true));
+      yield* tasks.call(Value.Set([{ id: "c", title: "gamma" }]));
+      yield* render;
+      yield* open.call(Value.Set(false));
+      yield* tasks.call(Value.Set([]));
+      yield* render;
+
+      const beforeClose = [...removed];
+      yield* Scope.close(caller, Exit.void);
+      expect(root.childNodes).toHaveLength(0);
+      expect(removed).toEqual(beforeClose);
     }),
   );
 

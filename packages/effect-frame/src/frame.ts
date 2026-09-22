@@ -144,21 +144,21 @@ const MAX_ENTRIES = 32;
 const MAX_NODES = 128;
 const MAX_STRING_LENGTH = 512;
 const MAX_PROPERTY_NAME_LENGTH = 128;
-const MAX_DIAGNOSTIC_BYTES = 16_384;
+const MAX_DIAGNOSTIC_COST = 16_384;
 
 interface DiagnosticBudget {
   remainingNodes: number;
-  remainingBytes: number;
+  remainingCost: number;
 }
 
 const opaque = (reason: string): DiagnosticValue => ({ _tag: "Opaque", reason });
 const truncated = (reason: string): DiagnosticValue => ({ _tag: "Truncated", reason });
 
-const spend = (budget: DiagnosticBudget, bytes: number): boolean => {
-  if (bytes > budget.remainingBytes) {
+const spend = (budget: DiagnosticBudget, cost: number): boolean => {
+  if (cost > budget.remainingCost) {
     return false;
   }
-  budget.remainingBytes -= bytes;
+  budget.remainingCost -= cost;
   return true;
 };
 
@@ -171,6 +171,18 @@ const spendNode = (budget: DiagnosticBudget): boolean => {
 };
 
 const stringCost = (value: string): number => value.length * 2 + 32;
+
+/**
+ * This budget measures traversal cost. It reserves a fixed node cost and a
+ * UTF-16 string cost, so output stays finite without claiming to count the
+ * final JSON or UTF-8 encoding byte for byte.
+ */
+
+const ownPropertyDescriptor = <Input extends {}>(
+  input: Input,
+  name: string,
+): Option.Option<Option.Option<PropertyDescriptor>> =>
+  Option.liftThrowable(() => Option.fromNullishOr(Object.getOwnPropertyDescriptor(input, name)))();
 
 type DiagnosticInput = Schema.Schema.Type<typeof Schema.Unknown>;
 
@@ -217,9 +229,16 @@ const diagnosticArray = (
   if (!Schema.is(Schema.ObjectKeyword)(input)) {
     return opaque("unsupported-value");
   }
-  const lengthDescriptor = Option.fromNullishOr(Object.getOwnPropertyDescriptor(input, "length"));
+  const readLength = ownPropertyDescriptor(input, "length");
+  if (Option.isNone(readLength)) {
+    return opaque("unreadable-object");
+  }
+  const lengthDescriptor = readLength.value;
   if (Option.isNone(lengthDescriptor)) {
     return truncated("maximum-entries");
+  }
+  if ("get" in lengthDescriptor.value || "set" in lengthDescriptor.value) {
+    return opaque("accessor");
   }
   const length = lengthDescriptor.value.value;
   if (!Schema.is(Schema.Finite)(length) || !Number.isSafeInteger(length) || length > MAX_ENTRIES) {
@@ -232,7 +251,11 @@ const diagnosticArray = (
     if (!spend(budget, 20)) {
       return truncated("maximum-size");
     }
-    const descriptor = Option.fromNullishOr(Object.getOwnPropertyDescriptor(input, String(index)));
+    const readDescriptor = ownPropertyDescriptor(input, String(index));
+    if (Option.isNone(readDescriptor)) {
+      return opaque("unreadable-object");
+    }
+    const descriptor = readDescriptor.value;
     if (Option.isNone(descriptor)) {
       values.push(opaque("array-hole"));
     } else if ("get" in descriptor.value || "set" in descriptor.value) {
@@ -253,7 +276,11 @@ const diagnosticRecord = (
   if (!Schema.is(Schema.ObjectKeyword)(input)) {
     return opaque("unsupported-value");
   }
-  const keys = Object.keys(input);
+  const readableKeys = Option.liftThrowable(() => Object.keys(input))();
+  if (Option.isNone(readableKeys)) {
+    return opaque("unreadable-object");
+  }
+  const keys = readableKeys.value;
   if (keys.length > MAX_ENTRIES) {
     return truncated("maximum-entries");
   }
@@ -267,7 +294,11 @@ const diagnosticRecord = (
     if (!spend(budget, stringCost(key))) {
       return truncated("maximum-size");
     }
-    const descriptor = Option.fromNullishOr(Object.getOwnPropertyDescriptor(input, key));
+    const readDescriptor = ownPropertyDescriptor(input, key);
+    if (Option.isNone(readDescriptor)) {
+      return opaque("unreadable-object");
+    }
+    const descriptor = readDescriptor.value;
     if (Option.isNone(descriptor)) {
       continue;
     }
@@ -293,19 +324,18 @@ const diagnosticObject = (
   if (!Schema.is(Schema.ObjectKeyword)(input)) {
     return opaque("unsupported-value");
   }
-  const readable = Option.liftThrowable(() => Object.getPrototypeOf(input))();
+  const readable = Option.liftThrowable(() => ({
+    array: Array.isArray(input),
+    prototype: Object.getPrototypeOf(input),
+  }))();
   if (Option.isNone(readable)) {
     return opaque("unreadable-object");
   }
-  const prototype = readable.value;
-  if (
-    prototype !== Object.prototype &&
-    Option.isSome(Option.fromNullishOr(prototype)) &&
-    !Array.isArray(input)
-  ) {
+  const { array, prototype } = readable.value;
+  if (prototype !== Object.prototype && Option.isSome(Option.fromNullishOr(prototype)) && !array) {
     return opaque("unsupported-object");
   }
-  if (Array.isArray(input)) {
+  if (array) {
     return diagnosticArray(input, depth, ancestors, budget);
   }
   return diagnosticRecord(input, depth, ancestors, budget);
@@ -339,7 +369,7 @@ const diagnostic = (
 const toDiagnostic = (input: DiagnosticInput): DiagnosticValue =>
   diagnostic(input, 0, new Set(), {
     remainingNodes: MAX_NODES,
-    remainingBytes: MAX_DIAGNOSTIC_BYTES,
+    remainingCost: MAX_DIAGNOSTIC_COST,
   });
 
 const identity = (value: string): Identity => Schema.decodeUnknownSync(Identity)(value);

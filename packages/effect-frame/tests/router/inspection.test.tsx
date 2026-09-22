@@ -131,6 +131,24 @@ const routeNamed = (snapshot: Frame.Snapshot, name: string) =>
     Option.fromNullishOr(snapshot.routes.find((route) => route.routeName === name)),
   );
 
+const DiagnosticRecord = Schema.Record(Schema.String, Frame.DiagnosticValue);
+
+const containsDiagnosticReason = (value: Frame.DiagnosticValue, reason: string): boolean => {
+  if (value._tag === "Truncated") {
+    return value.reason === reason;
+  }
+  if (value._tag === "Opaque") {
+    return false;
+  }
+  if (Array.isArray(value.value)) {
+    return value.value.some((child) => containsDiagnosticReason(child, reason));
+  }
+  if (Schema.is(DiagnosticRecord)(value.value)) {
+    return Object.values(value.value).some((child) => containsDiagnosticReason(child, reason));
+  }
+  return false;
+};
+
 const urlStateFor = (snapshot: Frame.Snapshot, key: string) =>
   Option.getOrThrow(
     Option.fromNullishOr(snapshot.urlStates.find((state) => state.keys.includes(key))),
@@ -388,9 +406,6 @@ describe("Frame router inspection", () => {
         const wide = Object.fromEntries(
           Array.from({ length: 33 }, (_, index) => [`key-${index}`, "value"]),
         );
-        for (let index = 0; index < 33; index += 1) {
-          wide[`key-${index}`] = "value";
-        }
         const DiagnosticParams = Route.PathRecord.pipe(
           Schema.decodeTo(Schema.Unknown, {
             decode: SchemaGetter.transform(() => ({ longObject, nested, deep, accessor, wide })),
@@ -520,6 +535,78 @@ describe("Frame router inspection", () => {
             wide: { _tag: "Truncated", reason: "maximum-entries" },
           },
         });
+      }),
+  );
+
+  it.scoped.layer(Frame.layer({ name: "diagnostic-reflection" }))(
+    "turns unreadable record and array reflection into opaque values",
+    () =>
+      Effect.gen(function* () {
+        const unreadable = (): never => Option.getOrThrow(Option.none());
+        const unreadableRecord = new Proxy({}, { ownKeys: unreadable });
+        const unreadableArray = new Proxy([], { getOwnPropertyDescriptor: unreadable });
+        const paramsFor = <Value,>(value: Value) =>
+          Route.PathRecord.pipe(
+            Schema.decodeTo(Schema.Unknown, {
+              decode: SchemaGetter.transform(() => value),
+              encode: SchemaGetter.transform((): Route.PathRecord => ({ id: "1" })),
+            }),
+          );
+        const recordRoute = Route.client("unreadable-record", {
+          path: "/unreadable-record/:id",
+          params: paramsFor(unreadableRecord),
+          search: Route.search(Nothing),
+          view: () => Effect.succeed(<p>record</p>),
+        });
+        const arrayRoute = Route.client("unreadable-array", {
+          path: "/unreadable-array/:id",
+          params: paramsFor(unreadableArray),
+          search: Route.search(Nothing),
+          view: () => Effect.succeed(<p>array</p>),
+        });
+        const { router } = yield* makeStart("http://app.test/unreadable-record/1", [
+          recordRoute,
+          arrayRoute,
+        ]);
+
+        let snapshot = yield* Frame.inspect;
+        expect(routeNamed(snapshot, "unreadable-record").params).toEqual({
+          _tag: "Opaque",
+          reason: "unreadable-object",
+        });
+
+        yield* router.navigate("/unreadable-array/1");
+        snapshot = yield* Frame.inspect;
+        expect(routeNamed(snapshot, "unreadable-array").params).toEqual({
+          _tag: "Opaque",
+          reason: "unreadable-object",
+        });
+      }),
+  );
+
+  it.scoped.layer(Frame.layer({ name: "diagnostic-cost" }))(
+    "truncates values that exhaust the aggregate diagnostic cost",
+    () =>
+      Effect.gen(function* () {
+        const heavy = Object.fromEntries(
+          Array.from({ length: 20 }, (_, index) => [`value-${index}`, "x".repeat(512)]),
+        );
+        const params = Route.PathRecord.pipe(
+          Schema.decodeTo(Schema.Unknown, {
+            decode: SchemaGetter.transform(() => ({ heavy })),
+            encode: SchemaGetter.transform((): Route.PathRecord => ({ id: "1" })),
+          }),
+        );
+        const route = Route.client("cost", {
+          path: "/cost/:id",
+          params,
+          search: Route.search(Nothing),
+          view: () => Effect.succeed(<p>cost</p>),
+        });
+        yield* makeStart("http://app.test/cost/1", [route]);
+
+        const value = routeNamed(yield* Frame.inspect, "cost").params;
+        expect(containsDiagnosticReason(value, "maximum-size")).toBe(true);
       }),
   );
 

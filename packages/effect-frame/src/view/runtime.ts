@@ -210,6 +210,29 @@ const trackHostWrites = <HostNode>(host: Host<HostNode>): TrackedHost<HostNode> 
   // Map uses host-node identity, so keyed-list inserts and removals stay
   // constant time even when a mount owns a large tree.
   const writes = new Map<HostNode, HostWrite<HostNode>>();
+  const children = new Map<HostNode, Set<HostNode>>();
+
+  const rememberChild = (parent: HostNode, node: HostNode): void => {
+    const current = Option.fromNullishOr(children.get(parent));
+    const owned = Option.getOrElse(current, () => {
+      const created = new Set<HostNode>();
+      children.set(parent, created);
+      return created;
+    });
+    owned.add(node);
+  };
+
+  const forgetChild = (parent: HostNode, node: HostNode): void => {
+    Option.match(Option.fromNullishOr(children.get(parent)), {
+      onNone: () => {},
+      onSome: (owned) => {
+        owned.delete(node);
+        if (owned.size === 0) {
+          children.delete(parent);
+        }
+      },
+    });
+  };
 
   const remember = (parent: HostNode, node: HostNode): void => {
     // Record before delegating. A host may mutate and then report an insert
@@ -217,13 +240,40 @@ const trackHostWrites = <HostNode>(host: Host<HostNode>): TrackedHost<HostNode> 
     Option.match(Option.fromNullishOr(writes.get(node)), {
       onNone: () => {
         writes.set(node, { parent, node });
+        rememberChild(parent, node);
       },
       onSome: (write) => {
         if (write.parent !== parent) {
+          forgetChild(write.parent, node);
           writes.set(node, { parent, node });
+          rememberChild(parent, node);
         }
       },
     });
+  };
+
+  const forgetSubtree = (root: HostNode): void => {
+    const pending: Array<HostNode> = [root];
+    while (pending.length > 0) {
+      const current = Option.getOrThrow(Option.fromNullishOr(pending[pending.length - 1]));
+      pending.length -= 1;
+      Option.match(Option.fromNullishOr(children.get(current)), {
+        onNone: () => {},
+        onSome: (owned) => {
+          for (const child of owned) {
+            pending.push(child);
+          }
+          children.delete(current);
+        },
+      });
+      Option.match(Option.fromNullishOr(writes.get(current)), {
+        onNone: () => {},
+        onSome: (write) => {
+          forgetChild(write.parent, current);
+          writes.delete(current);
+        },
+      });
+    }
   };
 
   const forget = (parent: HostNode, node: HostNode): void => {
@@ -231,7 +281,7 @@ const trackHostWrites = <HostNode>(host: Host<HostNode>): TrackedHost<HostNode> 
       onNone: () => {},
       onSome: (write) => {
         if (write.parent === parent) {
-          writes.delete(node);
+          forgetSubtree(node);
         }
       },
     });
@@ -257,6 +307,7 @@ const trackHostWrites = <HostNode>(host: Host<HostNode>): TrackedHost<HostNode> 
         host.remove(write.parent, write.node);
       }
       writes.clear();
+      children.clear();
     },
   };
 };

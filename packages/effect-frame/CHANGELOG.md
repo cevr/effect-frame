@@ -1,5 +1,11 @@
 # effect-frame
 
+## 0.8.0
+
+### Minor Changes
+
+- [`6359ee8`](https://github.com/cevr/effect-frame/commit/6359ee89d8f3367982507cddbd363ea9fb24f08a) Thanks [@cevr](https://github.com/cevr)! - Include bounded, optional Frame snapshots in failed ViewTest condition receipts.
+
 ## 0.7.2
 
 ### Patch Changes

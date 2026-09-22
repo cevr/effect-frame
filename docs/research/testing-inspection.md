@@ -149,6 +149,10 @@ explicit connection to the running root. A later bounded event history can
 add causal IDs, transitions, interruption, and failure details. Keep current
 state separate from history. Missing history is not proof that no actor exists.
 
+The [Effect primitive review](./effect-primitives.md) selects `RcMap` for active
+query ownership. It also records the limits of `PersistedQueue` and `EventLog`
+for Frame's command receipts and current-state inspection.
+
 ## Delivery and acceptance
 
 1. Keep #59's published QueryTest seam. Finish the reviewed migration of

@@ -1,5 +1,15 @@
 # effect-frame
 
+## 0.5.0
+
+### Minor Changes
+
+- [`d4eed34`](https://github.com/cevr/effect-frame/commit/d4eed349bd528dc1fba51f33adc5c3dd7efb1562) Thanks [@cevr](https://github.com/cevr)! - View-owned URL state with scoped encoded-key claims, canonical URL sources, serialized set and update operations, and explicit push operations.
+
+### Patch Changes
+
+- [`2647ee1`](https://github.com/cevr/effect-frame/commit/2647ee1e574eeb56628717a3e2e5225d8e524b48) Thanks [@cevr](https://github.com/cevr)! - Readiness registrations now leave `Loading` and `Errored` scopes with their owner scope, so removed or disposed view branches cannot keep a boundary pending or failed.
+
 ## 0.4.0
 
 ### Minor Changes

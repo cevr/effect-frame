@@ -84,6 +84,22 @@ _Avoid_: Cached query, subscribed query.
 What a client can observe about one submitted command at one moment: sent, admitted, applied at a revision, rejected with a reason, or uncertain. Never two of these at once. A command is admitted before it is applied, and a client sees those separately.
 _Avoid_: Pending, isSubmitting, mutation status.
 
+**Command handle**:
+What `send` returns at once: the command's state as a source, and an effect that waits until it settles. A durable or remote handle also carries the command's identity and a retry. The handle does not own the work; the actor reference does, so the handle can be dropped and an event can return before the command settles.
+_Avoid_: Promise, future, mutation result.
+
+**Uncertain**:
+The command state a client holds when it cannot know whether a command committed: a reply was lost, a pass ran out of time, or the host stopped after it may have admitted the command. It carries the pass count and the admission sequence, if one was seen. It never becomes a refusal by running out of passes; only the same command identity sent again can settle it.
+_Avoid_: Failed, timed out, unknown error.
+
+**Committed revision**:
+A revision a server has committed, as a client sees it: a tagged value, never a bare number, so it cannot be confused with a provisional revision. Wire, store, and change stream revisions stay plain numbers.
+_Avoid_: Version, revision number.
+
+**Command claim**:
+A client cache's record that one unsettled command may change a contract's queries. While any claim is open, every active query that depends on that contract shows its value as stale. The claim closes with the command's record.
+_Avoid_: Pending mutation, invalidation.
+
 **Provisional revision**:
 A state a client computed itself by applying a command it has sent but that no server has committed. It carries the committed revision it was computed from rather than a revision number of its own, so it can never be mistaken for, ordered against, or resumed from a committed revision. A committed revision replaces it; it is never merged with one.
 _Avoid_: Optimistic update, local revision, pending state.

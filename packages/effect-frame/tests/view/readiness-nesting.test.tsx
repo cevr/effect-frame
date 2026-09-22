@@ -95,15 +95,21 @@ const connectedRoot = Effect.acquireRelease(
   (root) => Effect.sync(() => root.remove()),
 );
 
-/** Let pending microtasks and timers settle, then collect twice per turn. */
-const collect = Effect.gen(function* () {
-  for (let turn = 0; turn < 4; turn += 1) {
-    // A heap observation needs a real event-loop turn between collections.
-    // oxlint-disable-next-line effect/noNewPromise, effect/noGlobals
-    yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
-    yield* Effect.sync(() => Bun.gc(true));
-  }
-});
+/**
+ * Collect on real event-loop turns until `released` holds, for at most 64
+ * turns. How many turns the collector needs depends on the whole process
+ * heap, including earlier test files, so a fixed count is not the property.
+ * A node that stays reachable fails after the bound.
+ */
+const collectUntil = (released: () => boolean) =>
+  Effect.gen(function* () {
+    for (let turn = 0; turn < 64 && !released(); turn += 1) {
+      // A heap observation needs a real event-loop turn between collections.
+      // oxlint-disable-next-line effect/noNewPromise, effect/noGlobals
+      yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
+      yield* Effect.sync(() => Bun.gc(true));
+    }
+  });
 
 const orders: ReadonlyArray<readonly [Kind, Kind]> = [
   ["Errored", "Loading"],
@@ -277,10 +283,9 @@ describe("nested readiness presentation", () => {
           timeout: "2 seconds",
           until: () => wrapper.childNodes.length === 0 && rowClosed,
         });
-        yield* collect;
-        expect(Option.flatMap(rowRef(), (ref) => Option.fromNullishOr(ref.deref()))).toEqual(
-          Option.none(),
-        );
+        const liveRow = () => Option.flatMap(rowRef(), (ref) => Option.fromNullishOr(ref.deref()));
+        yield* collectUntil(() => Option.isNone(liveRow()));
+        expect(liveRow()).toEqual(Option.none());
 
         yield* page.act(outer.call(Value.Set(readyState)), {
           label: "outer reveals the empty wrapper",

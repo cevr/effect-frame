@@ -411,10 +411,13 @@ export const make = Effect.fn("Actor.commands.make")(function* <
       return settled.value;
     }).pipe(
       Effect.tapError((outcome) => {
-        if (outcome._tag === "Reject") {
-          return Effect.void;
+        // A lost pass that the schedule will follow shows Uncertain now. The
+        // pass that ends the sequence is published by the sequence itself,
+        // after the record is idle, so a retry that sees it can start.
+        if (outcome._tag === "Lost" && record.attempt < policy.passes) {
+          return publish(record, uncertain(record));
         }
-        return publish(record, uncertain(record));
+        return Effect.void;
       }),
     );
 
@@ -434,9 +437,17 @@ export const make = Effect.fn("Actor.commands.make")(function* <
         return;
       }
       const failure = Exit.findErrorOption(outcome);
-      if (Option.isSome(failure) && failure.value._tag === "Reject") {
-        yield* finish(record, { _tag: "Rejected", reason: failure.value.reason });
+      if (Option.isNone(failure)) {
+        return;
       }
+      if (failure.value._tag === "Reject") {
+        yield* finish(record, { _tag: "Rejected", reason: failure.value.reason });
+        return;
+      }
+      // Exhausted or held: the record stays retained and Uncertain, and is
+      // idle before anyone can see that state.
+      record.running = false;
+      yield* publish(record, uncertain(record));
     });
 
   const startSequence = (record: CommandRecord<State, Rejection>): Effect.Effect<void> =>

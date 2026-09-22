@@ -86,9 +86,14 @@ export interface NotFoundProps {
   readonly url: Source<URL>;
 }
 
-export interface MountOptions<R, HostNode> {
+/**
+ * `R` is what the routes' views require and `N` what the not-found view
+ * requires. They are separate so neither has to widen to fit the other: a
+ * not-found view that links home needs `Router` even when no route does.
+ */
+export interface MountOptions<R, HostNode, N = R> {
   readonly routes: ReadonlyArray<AnyRoute<R>>;
-  readonly notFound: View.View<NotFoundProps, never, R>;
+  readonly notFound: View.View<NotFoundProps, never, N>;
   readonly host: Host<HostNode>;
   readonly root: HostNode;
 }
@@ -173,16 +178,19 @@ type Request =
  * the route's own requirements are met where the router was mounted.
  * `Router` is provided to every route's view.
  */
-export const mount: <R, HostNode>(
-  options: MountOptions<R, HostNode>,
+export const mount: <R, HostNode, N = R>(
+  options: MountOptions<R, HostNode, N>,
 ) => Effect.Effect<
   RouterService,
   never,
-  Exclude<Exclude<Exclude<R, Router>, UrlStateRuntime>, Scope.Scope> | Location | Scope.Scope
-> = Effect.fn("Router.mount")(function* <R, HostNode>(options: MountOptions<R, HostNode>) {
+  Exclude<Exclude<Exclude<R | N, Router>, UrlStateRuntime>, Scope.Scope> | Location | Scope.Scope
+> = Effect.fn("Router.mount")(function* <R, HostNode, N = R>(
+  options: MountOptions<R, HostNode, N>,
+) {
   const location = yield* Location;
   const scope = yield* Effect.scope;
-  const fallback = notFoundRoute(options.notFound);
+  const routes: ReadonlyArray<AnyRoute<R | N>> = options.routes;
+  const fallback: AnyRoute<R | N> = notFoundRoute(options.notFound);
   const initial = yield* location.current;
   const navigations = yield* SubscriptionRef.make<NavigationSample>({
     url: initial,
@@ -192,7 +200,7 @@ export const mount: <R, HostNode>(
   const requests = yield* Queue.unbounded<Request>();
   const pending = new Set<Request>();
   let closed = false;
-  let mounted: Option.Option<Mounted<R>> = Option.none();
+  let mounted: Option.Option<Mounted<R | N>> = Option.none();
   const registry = yield* Effect.serviceOption(Inspection.Registry);
   let routerOwner = Option.none<Inspection.OwnerToken>();
   if (Option.isSome(registry)) {
@@ -258,9 +266,9 @@ export const mount: <R, HostNode>(
     replace: (href, instance) => enqueue("replace", href, instance),
   };
 
-  const show = (url: URL, resolved?: Resolved<R>) =>
+  const show = (url: URL, resolved?: Resolved<R | N>) =>
     Effect.gen(function* () {
-      const target = resolved ?? resolve(options.routes, fallback, url, navigation);
+      const target = resolved ?? resolve(routes, fallback, url, navigation);
       if (Option.isSome(mounted) && mounted.value.route === target.route) {
         yield* mounted.value.entered.update(url);
         return;
@@ -360,7 +368,7 @@ export const mount: <R, HostNode>(
 
   const move = (url: URL, kind: Navigation["kind"]) =>
     Effect.gen(function* () {
-      const target = resolve(options.routes, fallback, url, navigation);
+      const target = resolve(routes, fallback, url, navigation);
       yield* SubscriptionRef.set(navigations, { url, kind, routeName: target.route.name });
       yield* show(url, target);
     });
@@ -406,7 +414,7 @@ export const mount: <R, HostNode>(
       ),
     );
 
-  const initialTarget = resolve(options.routes, fallback, initial, navigation);
+  const initialTarget = resolve(routes, fallback, initial, navigation);
   const initialNavigation: NavigationSample = {
     url: initial,
     kind: "initial",

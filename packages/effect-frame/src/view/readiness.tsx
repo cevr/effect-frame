@@ -7,6 +7,7 @@ import {
   Stream,
   SubscriptionRef,
 } from "effect";
+import type { Scope } from "effect";
 import { Match, Show } from "./control.js";
 import type { Node } from "./jsx-runtime.js";
 import type { QueryState } from "./query-state.js";
@@ -54,18 +55,28 @@ const noFailure: Source<Option.Option<unknown>> = {
 /**
  * The shared machinery behind both scopes. A scope holds the registrations
  * made under it and publishes a revision whenever the set changes, so the
- * derived pending source recomputes when a query registers after first paint.
+ * derived pending source recomputes when a query registers or leaves after
+ * first paint.
  */
 interface Registry {
-  readonly register: (registration: Registration) => Effect.Effect<void>;
-  /** Every registration made so far, republished whenever one is added. */
+  /** The caller's Scope owns the registration and removes it on close. */
+  readonly register: (registration: Registration) => Effect.Effect<void, never, Scope.Scope>;
+  /** Every live registration, republished whenever one is added or removed. */
   readonly entries: Source<ReadonlyArray<Registration>>;
 }
 
 const makeRegistry: Effect.Effect<Registry> = Effect.gen(function* () {
   const ref = yield* SubscriptionRef.make<ReadonlyArray<Registration>>([]);
+  // Registration and its release are one scoped acquisition. A branch or
+  // owner scope that disappears cannot leave a stale pending contribution.
+  const remove = (registration: Registration) =>
+    SubscriptionRef.update(ref, (all) => all.filter((entry) => entry !== registration));
   return {
-    register: (registration) => SubscriptionRef.update(ref, (all) => [...all, registration]),
+    register: (registration) =>
+      Effect.acquireRelease(
+        SubscriptionRef.update(ref, (all) => [...all, registration]),
+        () => remove(registration),
+      ),
     entries: { get: SubscriptionRef.get(ref), changes: SubscriptionRef.changes(ref) },
   };
 });
@@ -104,14 +115,13 @@ export class ErroredScope extends ServiceMap.Service<ErroredScope, Registry>()(
 export const ready: <Value, Error>(
   state: Source<QueryState<Value, Error>>,
   fallback: Value,
-) => Effect.Effect<Source<Value>, never, LoadingScope> = Effect.fn("Readiness.ready")(function* <
-  Value,
-  Error,
->(state: Source<QueryState<Value, Error>>, fallback: Value) {
-  const shared = yield* registerLoading(state);
-  const first = yield* shared.get;
-  return yield* holdSome(valueOr(first, fallback), Stream.map(shared.changes, valueOf));
-});
+) => Effect.Effect<Source<Value>, never, LoadingScope | Scope.Scope> = Effect.fn("Readiness.ready")(
+  function* <Value, Error>(state: Source<QueryState<Value, Error>>, fallback: Value) {
+    const shared = yield* registerLoading(state);
+    const first = yield* shared.get;
+    return yield* holdSome(valueOr(first, fallback), Stream.map(shared.changes, valueOf));
+  },
+);
 
 /**
  * Also route this query's failure to the nearest `ErroredScope`.
@@ -126,7 +136,7 @@ export const ready: <Value, Error>(
  */
 export const orErrored: <Value, Error>(
   state: Source<QueryState<Value, Error>>,
-) => Effect.Effect<Source<QueryState<Value, Error>>, never, ErroredScope> = Effect.fn(
+) => Effect.Effect<Source<QueryState<Value, Error>>, never, ErroredScope | Scope.Scope> = Effect.fn(
   "Readiness.orErrored",
 )(function* <Value, Error>(state: Source<QueryState<Value, Error>>) {
   const erroredScope = yield* ErroredScope;
@@ -168,7 +178,7 @@ const registerLoading = Effect.fn("Readiness.registerLoading")(function* <Value,
 export const readyWithStale: <Value, Error>(
   state: Source<QueryState<Value, Error>>,
   fallback: Value,
-) => Effect.Effect<Source<ReadyValue<Value>>, never, LoadingScope> = Effect.fn(
+) => Effect.Effect<Source<ReadyValue<Value>>, never, LoadingScope | Scope.Scope> = Effect.fn(
   "Readiness.readyWithStale",
 )(function* <Value, Error>(state: Source<QueryState<Value, Error>>, fallback: Value) {
   const shared = yield* registerLoading(state);

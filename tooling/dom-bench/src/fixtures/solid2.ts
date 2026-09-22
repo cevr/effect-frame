@@ -68,7 +68,10 @@ const Benchmark = (props: { readonly root: HTMLElement }): HTMLElement => {
       {
         "data-row-id": String(id),
         "data-bench-node": nodeToken(id),
-        class: () => (selected() === id ? "danger" : ""),
+        // Solid 2 `spread` tracks getters, not function values.
+        get class() {
+          return selected() === id ? "danger" : "";
+        },
       },
       [
         element("td", { class: "col-md-1" }, [() => id]),

@@ -128,9 +128,9 @@ export const reconcile = <State>(
 ): Reconciliation<State> => {
   const newestHeld = greatest(previous.held, candidate);
   const classifiedCandidate = classifyCandidate(candidate, pending, receipts, anchor);
-  let classifiedHeld: ClassifiedCandidate<State> | undefined;
+  let classifiedPreviousHeld: ClassifiedCandidate<State> | undefined;
   if (previous.held !== undefined) {
-    classifiedHeld = classifyCandidate(previous.held, pending, receipts, anchor);
+    classifiedPreviousHeld = classifyCandidate(previous.held, pending, receipts, anchor);
   }
 
   let base = previous.base;
@@ -141,27 +141,19 @@ export const reconcile = <State>(
     base = candidate;
     visible = classifiedCandidate.visible;
   }
-  if (classifiedHeld?.classified === true && classifiedHeld.candidate.revision >= base.revision) {
-    base = classifiedHeld.candidate;
-    visible = classifiedHeld.visible;
+  if (
+    classifiedPreviousHeld?.classified === true &&
+    classifiedPreviousHeld.candidate.revision >= base.revision
+  ) {
+    base = classifiedPreviousHeld.candidate;
+    visible = classifiedPreviousHeld.visible;
   }
 
-  if (
-    held !== undefined &&
-    held.revision === candidate.revision &&
-    classifiedCandidate.classified
-  ) {
-    held = undefined;
-  }
-  if (
-    previous.held !== undefined &&
-    classifiedHeld?.classified === true &&
-    base.revision >= previous.held.revision
-  ) {
-    held = undefined;
-  }
-  if (held !== undefined && held.revision <= base.revision) {
-    held = undefined;
+  if (newestHeld !== undefined) {
+    const classifiedNewestHeld = classifyCandidate(newestHeld, pending, receipts, anchor);
+    if (classifiedNewestHeld.classified && newestHeld.revision <= base.revision) {
+      held = undefined;
+    }
   }
 
   return { base, visible, held };
@@ -351,13 +343,24 @@ export const makeCoordinator = Effect.fn("Reconciliation.makeCoordinator")(funct
   const updateCommand = Effect.fn("Reconciliation.updateCommand")(function* (
     commandId: CommandId,
     update: (command: StoredCommand<State>) => StoredCommand<State>,
+    recomputeView: boolean = false,
   ) {
     const current = yield* Ref.get(data);
     const command = current.commands.get(commandId);
     if (command === undefined) return;
     const commands = new Map(current.commands);
     commands.set(commandId, update(command));
-    yield* setData({ ...current, commands });
+    let reconciliation = current.reconciliation;
+    if (recomputeView) {
+      reconciliation = reconcile(
+        current.reconciliation,
+        current.reconciliation.base,
+        activeOverlays(commands),
+        current.receipts,
+        current.anchor,
+      );
+    }
+    yield* setData({ ...current, commands, reconciliation });
   });
 
   const recordReceipt = Effect.fn("Reconciliation.recordReceipt")(function* (
@@ -387,23 +390,28 @@ export const makeCoordinator = Effect.fn("Reconciliation.makeCoordinator")(funct
         command.possibleAdmission ||
         send.failure._tag === "Unreachable" ||
         send.failure._tag === "ActorStopped";
-      yield* updateCommand(commandId, (latest) => ({
-        ...latest,
-        possibleAdmission,
-        phase: (() => {
-          if (send.failure._tag === "CommandConflict") return "rejected";
-          if (send.failure._tag === "Unauthorized") {
-            return classifyRefusalAfterPossibleAdmission(possibleAdmission);
-          }
-          if (send.failure._tag === "ContractMismatch") {
-            return classifyRefusalAfterPossibleAdmission(possibleAdmission);
-          }
-          if (send.failure._tag === "UnknownContract") {
-            return classifyRefusalAfterPossibleAdmission(possibleAdmission);
-          }
-          return latest.phase;
-        })(),
-      }));
+      const phase: CommandPhase = (() => {
+        if (send.failure._tag === "CommandConflict") return "rejected";
+        if (send.failure._tag === "Unauthorized") {
+          return classifyRefusalAfterPossibleAdmission(possibleAdmission);
+        }
+        if (send.failure._tag === "ContractMismatch") {
+          return classifyRefusalAfterPossibleAdmission(possibleAdmission);
+        }
+        if (send.failure._tag === "UnknownContract") {
+          return classifyRefusalAfterPossibleAdmission(possibleAdmission);
+        }
+        return command.phase;
+      })();
+      yield* updateCommand(
+        commandId,
+        (latest) => ({
+          ...latest,
+          possibleAdmission,
+          phase,
+        }),
+        phase === "rejected",
+      );
       return false;
     }
     const receipt = send.success.receipt;
@@ -561,13 +569,17 @@ export const makeCoordinator = Effect.fn("Reconciliation.makeCoordinator")(funct
   ) => submit(commandId, "supplied", message, predict);
 
   const retry = Effect.fn("Reconciliation.retry")(function* (commandId: CommandId) {
-    yield* updateCommand(commandId, (command) => ({
-      ...command,
-      attempts: 0,
-      phase: "pending",
-      running: false,
-      incorporated: false,
-    }));
+    yield* updateCommand(
+      commandId,
+      (command) => ({
+        ...command,
+        attempts: 0,
+        phase: "pending",
+        running: false,
+        incorporated: false,
+      }),
+      true,
+    );
     yield* startCommand(commandId);
   });
 

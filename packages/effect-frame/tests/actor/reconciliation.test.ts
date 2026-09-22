@@ -281,12 +281,20 @@ const makeClient = (harness: Harness) => {
     address: harness.address,
     encode: (message) => Effect.orDie(Schema.encodeEffect(Counter.message)(message)),
     decode: (projection) => Effect.sync(() => decodePublicProjection(projection)),
-    timeout: "1 second",
+    timeout: "1 hour",
     retryDelay: "1 second",
     maxAttempts: 8,
   };
   return makeCoordinator(options);
 };
+
+const filterChanges = (harness: Harness, keep: (projection: Projection) => boolean): Harness => ({
+  ...harness,
+  wrapped: {
+    ...harness.wrapped,
+    changes: (address, after) => harness.wrapped.changes(address, after).pipe(Stream.filter(keep)),
+  },
+});
 
 const command = <State, Message>(
   coordinator: ClientCoordinator<State, Message>,
@@ -348,14 +356,93 @@ describe("issue 67 reconciliation prototype", () => {
       expect(held.visible).toEqual({ count: 4, publicToken: "token:3" });
       expect(held.held).toEqual({ revision: 5, state: state(5) });
 
-      const published = reconcile(held, { revision: 3, state: state(3) }, pending, new Map(), {
-        commandId: "A",
-        admitted: 1,
-        revision: 5,
-      });
+      const published = reconcile(
+        held,
+        { revision: 3, state: state(3) },
+        pending,
+        new Map([["B", { commandId: "B", admitted: 2, revision: 5 }]]),
+        { commandId: "A", admitted: 1, revision: 3 },
+      );
       expect(published.base).toEqual({ revision: 5, state: state(5) });
-      expect(published.visible).toEqual({ count: 6, publicToken: "token:5" });
+      expect(published.visible).toEqual({ count: 5, publicToken: "token:5" });
       expect(published.held).toBeUndefined();
+    }),
+  );
+
+  withStore("a classified old held value retains a newer unknown candidate", () =>
+    Effect.gen(function* () {
+      const autonomous = yield* Queue.unbounded<ServerState>();
+      const serverB = yield* Deferred.make<void>();
+      const callA = yield* Deferred.make<void>();
+      const callB = yield* Deferred.make<void>();
+      const harness = yield* makeHarness(gatedBehavior(serverB, autonomous));
+      harness.controls.sends.set("A", { drop: true });
+      harness.controls.calls.set("A", { hold: callA });
+      harness.controls.calls.set("B", { hold: callB });
+      const coordinator = yield* makeClient(
+        filterChanges(harness, (projection) => projection.revision !== 2),
+      );
+
+      yield* coordinator.submitSupplied(id("A"), add("A"), (state) => ({
+        ...state,
+        count: state.count + 1,
+      }));
+      yield* yieldFibers;
+      yield* coordinator.submitSupplied(id("B"), add("B"), (state) => ({
+        ...state,
+        count: state.count + 1,
+      }));
+      yield* yieldFibers;
+      expect((yield* coordinator.view).held?.revision).toBe(1);
+      expect((yield* command(coordinator, id("B"))).admitted).toBe(2);
+
+      harness.controls.sends.set("A", {});
+      yield* TestClock.adjust("1 second");
+      yield* yieldFibers;
+      expect((yield* command(coordinator, id("A"))).admitted).toBe(1);
+      expect((yield* command(coordinator, id("A"))).exact).toBeUndefined();
+      expect((yield* coordinator.view).held?.revision).toBe(1);
+
+      yield* Deferred.succeed(serverB, void 0);
+      yield* yieldFibers;
+      yield* Queue.offer(autonomous, {
+        count: 99,
+        serverOnly: "private:99",
+        publicToken: "public:99",
+      });
+      yield* yieldFibers;
+      const before = yield* coordinator.view;
+      yield* Deferred.succeed(callB, void 0);
+      yield* yieldFibers;
+      const after = yield* coordinator.view;
+      expect(before.base.revision).toBe(1);
+      expect(before.visible.count).toBe(2);
+      expect(before.held?.revision).toBe(3);
+      expect(after.base.revision).toBe(3);
+      expect(after.visible.count).toBe(99);
+    }),
+  );
+
+  withStore("a conclusive first-send refusal removes generated prediction", () =>
+    Effect.gen(function* () {
+      const authorizer: AuthorizerService = {
+        authorize: (address, action) => {
+          if (action === "send") return Unauthorized.make({ contract: address.contract });
+          return Effect.void;
+        },
+      };
+      const harness = yield* makeHarness(gatedBehavior(undefined, undefined), authorizer);
+      const coordinator = yield* makeClient(harness);
+      const submitted = yield* coordinator.submitGenerated(add("A"), (state) => ({
+        ...state,
+        count: state.count + 1,
+      }));
+      yield* yieldFibers;
+      const status = yield* command(coordinator, submitted.commandId);
+      expect(status.phase).toBe("rejected");
+      expect(status.attempts).toBe(1);
+      expect(status.possibleAdmission).toBe(false);
+      expect((yield* coordinator.view).visible.count).toBe(0);
     }),
   );
 
@@ -370,6 +457,7 @@ describe("issue 67 reconciliation prototype", () => {
         actor.call(add("B"), { commandId: id("B"), timeout: "1 second" }),
       );
       const candidateB = yield* waitForApplied(actor, 1);
+      const a = yield* actor.send(add("A"), { commandId: id("A") });
       const exactA = yield* actor.call(add("A"), { commandId: id("A"), timeout: "1 second" });
       const publicA: Candidate<PublicState> = exactA;
       const delayed = reconcile(
@@ -382,8 +470,8 @@ describe("issue 67 reconciliation prototype", () => {
             predict: (state) => ({ ...state, count: state.count + 1 }),
           },
         ],
-        new Map([["A", { commandId: "A", admitted: 2, revision: publicA.revision }]]),
-        { commandId: "A", admitted: 2, revision: publicA.revision },
+        new Map([["A", { commandId: "A", admitted: a.admitted, revision: publicA.revision }]]),
+        { commandId: "A", admitted: a.admitted, revision: publicA.revision },
       );
       expect(candidateB.revision).toBe(1);
       expect(publicA.revision).toBe(2);
@@ -404,10 +492,10 @@ describe("issue 67 reconciliation prototype", () => {
           },
         ],
         new Map([
-          ["A", { commandId: "A", admitted: 2, revision: publicA.revision }],
+          ["A", { commandId: "A", admitted: a.admitted, revision: publicA.revision }],
           ["B", { commandId: "B", admitted: b.admitted, revision: exactB.revision }],
         ]),
-        { commandId: "A", admitted: 2, revision: publicA.revision },
+        { commandId: "A", admitted: a.admitted, revision: publicA.revision },
       );
       expect(published.visible).toEqual(candidateB.state);
     }),
@@ -453,12 +541,30 @@ describe("issue 67 reconciliation prototype", () => {
   withStore("a public server field remains visible while a later command is pending", () =>
     Effect.gen(function* () {
       const holdB = yield* Deferred.make<void>();
+      const holdA = yield* Deferred.make<void>();
       const harness = yield* makeHarness(gatedBehavior(holdB, undefined));
+      harness.controls.defaultCallHold = holdA;
       const coordinator = yield* makeClient(harness);
       const first = yield* coordinator.submitGenerated(add("A"), (state) => ({
         ...state,
         count: state.count + 1,
       }));
+      yield* yieldFibers;
+      const second = yield* coordinator.submitGenerated(add("B"), (state) => ({
+        ...state,
+        count: state.count + 1,
+      }));
+      yield* yieldFibers;
+      expect((yield* command(coordinator, second.commandId)).admitted).toBe(2);
+      expect((yield* coordinator.view).visible).toEqual({
+        count: 2,
+        publicToken: "public:initial",
+      });
+      expect((yield* command(coordinator, second.commandId)).phase).toBe("pending");
+      expect(yield* harness.store.pending).toEqual([id(second.commandId)]);
+
+      harness.controls.defaultCallHold = undefined;
+      yield* Deferred.succeed(holdA, void 0);
       yield* yieldFibers;
       const firstCommand = yield* command(coordinator, first.commandId);
       expect(firstCommand.phase).toBe("applied");
@@ -467,21 +573,12 @@ describe("issue 67 reconciliation prototype", () => {
       const privateFirst = yield* decodePrivateReceipt(harness, first.commandId);
       expect(privateFirst.state.serverOnly).toContain("private:A");
       expect(Object.hasOwn(firstCommand.exact?.state ?? {}, "serverOnly")).toBe(false);
-
-      harness.controls.defaultSendHold = holdB;
-      const second = yield* coordinator.submitGenerated(add("B"), (state) => ({
-        ...state,
-        count: state.count + 1,
-      }));
-      yield* yieldFibers;
+      expect((yield* command(coordinator, second.commandId)).phase).toBe("pending");
       expect((yield* coordinator.view).visible).toEqual({
         count: 2,
         publicToken: firstExact.state.publicToken,
       });
-      expect((yield* command(coordinator, second.commandId)).phase).toBe("pending");
-      expect(yield* harness.store.pending).toEqual([id(second.commandId)]);
 
-      harness.controls.defaultSendHold = undefined;
       yield* Deferred.succeed(holdB, void 0);
       yield* yieldFibers;
       const secondCommand = yield* command(coordinator, second.commandId);
@@ -493,51 +590,44 @@ describe("issue 67 reconciliation prototype", () => {
   withStore("reverse durable admission keeps each real exact public result", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness(gatedBehavior(undefined, undefined));
-      const holdB = yield* Deferred.make<void>();
-      harness.controls.sends.set("B", { hold: holdB });
-      const actor = yield* makeReference(harness);
       const releaseA = yield* Deferred.make<void>();
-      const logicalOrder: Array<string> = [];
-      const sendingA = yield* Effect.forkScoped(
-        Effect.gen(function* () {
-          logicalOrder.push("A");
-          yield* Deferred.await(releaseA);
-          return yield* actor.send(add("A"), { commandId: id("A") });
-        }),
-      );
+      const transport: TransportService = {
+        ...harness.wrapped,
+        send: (address, commandId, payload, active) => {
+          if (commandId === id("A")) {
+            return Deferred.await(releaseA).pipe(
+              Effect.flatMap(() => harness.wrapped.send(address, commandId, payload, active)),
+            );
+          }
+          return harness.wrapped.send(address, commandId, payload, active);
+        },
+      };
+      const coordinator = yield* makeClient({ ...harness, wrapped: transport });
+      const a = yield* coordinator.submitSupplied(id("A"), add("A"), (state) => ({
+        ...state,
+        count: state.count + 1,
+      }));
+      const b = yield* coordinator.submitSupplied(id("B"), add("B"), (state) => ({
+        ...state,
+        count: state.count + 1,
+      }));
       yield* yieldFibers;
-      logicalOrder.push("B");
-      const sendingB = yield* Effect.forkScoped(actor.send(add("B"), { commandId: id("B") }));
-      yield* yieldFibers;
-      const exactB = yield* actor.call(add("B"), { commandId: id("B"), timeout: "1 second" });
+      const bCommand = yield* command(coordinator, b.commandId);
+      expect(harness.sendCalls.map((call) => call.commandId)).toEqual(["B"]);
+      expect(bCommand.phase).toBe("applied");
+      expect(bCommand.exact?.revision).toBe(1);
+
       yield* Deferred.succeed(releaseA, void 0);
-      const a = yield* Fiber.join(sendingA);
-      yield* Deferred.succeed(holdB, void 0);
-      const b = yield* Fiber.join(sendingB);
-      const exactA = yield* actor.call(add("A"), { commandId: id("A"), timeout: "1 second" });
-      expect(logicalOrder).toEqual(["A", "B"]);
+      yield* yieldFibers;
+      const aCommand = yield* command(coordinator, a.commandId);
       expect(harness.sendCalls.map((call) => call.commandId)).toEqual(["B", "A"]);
-      expect(b.admitted).toBe(1);
-      expect(a.admitted).toBe(2);
-      expect(exactA.revision).toBe(2);
-      expect(exactB.revision).toBe(1);
-      const classified = reconcile(
-        initialReconciliation(),
-        exactA,
-        [
-          {
-            commandId: "B",
-            admitted: b.admitted,
-            predict: (state) => ({ ...state, count: state.count + 1 }),
-          },
-        ],
-        new Map([["A", { commandId: "A", admitted: a.admitted, revision: exactA.revision }]]),
-        { commandId: "A", admitted: a.admitted, revision: exactA.revision },
-      );
-      expect(classified.visible).toEqual(exactA.state);
-      expect(exactA.state.publicToken).toMatch(/^opaque:/);
-      expect(exactB.state.publicToken).toMatch(/^opaque:/);
-      expect(exactA.state.publicToken).not.toBe(exactB.state.publicToken);
+      expect(aCommand.phase).toBe("applied");
+      expect(aCommand.exact?.revision).toBe(2);
+      expect(aCommand.exact?.state.count).toBe(2);
+      expect(bCommand.exact?.state.publicToken).not.toBe(aCommand.exact?.state.publicToken);
+      const exactA = Option.getOrThrow(Option.fromNullishOr(aCommand.exact));
+      expect((yield* coordinator.view).base).toEqual(exactA);
+      expect((yield* coordinator.view).visible.count).toBe(2);
     }),
   );
 
@@ -547,151 +637,144 @@ describe("issue 67 reconciliation prototype", () => {
       const harness = yield* makeHarness(gatedBehavior(undefined, autonomous));
       const holdB = yield* Deferred.make<void>();
       harness.controls.sends.set("B", { hold: holdB });
-      const actor = yield* makeReference(harness);
-      const exactA = yield* actor.call(add("A"), { commandId: id("A"), timeout: "1 second" });
-      const before: Reconciliation<PublicState> = {
-        base: exactA,
-        visible: exactA.state,
-        held: undefined,
-      };
-      const sendingB = yield* Effect.forkScoped(actor.send(add("B"), { commandId: id("B") }));
+      const coordinator = yield* makeClient(harness);
+      const submitted = yield* coordinator.submitSupplied(id("B"), add("B"), (state) => ({
+        ...state,
+        count: state.count + 1,
+      }));
       yield* yieldFibers;
-      yield* waitForApplied(actor, 2);
+      expect((yield* command(coordinator, submitted.commandId)).admitted).toBeUndefined();
+      expect((yield* coordinator.view).visible.count).toBe(0);
       yield* Queue.offer(autonomous, {
         count: 99,
         serverOnly: "private:remote:99",
         publicToken: "opaque:private:remote:99",
       });
-      const candidate = yield* waitForApplied(actor, 3);
-      const candidateState: Candidate<PublicState> = candidate;
-      const held = reconcile(
-        before,
-        candidateState,
-        [
-          {
-            commandId: "B",
-            admitted: undefined,
-            predict: (state) => ({ ...state, count: state.count + 1 }),
-          },
-        ],
-        new Map(),
-        undefined,
-      );
-      expect(held.visible).toEqual(before.visible);
-      expect(held.held).toEqual(candidateState);
+      yield* yieldFibers;
+      const held = yield* coordinator.view;
+      expect(held.visible.count).toBe(0);
+      expect(held.held?.state.count).toBe(99);
       yield* Deferred.succeed(holdB, void 0);
-      const b = yield* Fiber.join(sendingB);
-      const exactB = yield* actor.call(add("B"), { commandId: id("B"), timeout: "1 second" });
-      const published = reconcile(
-        held,
-        candidateState,
-        [
-          {
-            commandId: "B",
-            admitted: b.admitted,
-            predict: (state) => ({ ...state, count: state.count + 1 }),
-          },
-        ],
-        new Map([["B", { commandId: "B", admitted: b.admitted, revision: exactB.revision }]]),
-        undefined,
-      );
-      expect(published.visible).toEqual(candidateState.state);
+      yield* yieldFibers;
+      const settled = yield* command(coordinator, submitted.commandId);
+      expect(settled.phase).toBe("applied");
+      expect(settled.exact?.revision).toBe(1);
+      expect((yield* coordinator.view).base.revision).toBe(2);
+      expect((yield* coordinator.view).visible.count).toBe(99);
     }),
   );
 
   withStore("autonomous and late public receipts keep the newest base", () =>
     Effect.gen(function* () {
       const autonomous = yield* Queue.unbounded<ServerState>();
-      const holdA = yield* Deferred.make<void>();
       const harness = yield* makeHarness(gatedBehavior(undefined, autonomous));
-      harness.controls.sends.set("A", { hold: holdA });
-      const actor = yield* makeReference(harness);
-      const sendingA = yield* Effect.forkScoped(actor.send(add("A"), { commandId: id("A") }));
-      yield* waitForApplied(actor, 1);
+      const holdA = yield* Deferred.make<void>();
+      const coordinator = yield* makeClient(harness);
+      const a = yield* coordinator.submitGenerated(add("A"), (state) => ({
+        ...state,
+        count: state.count + 1,
+      }));
+      harness.controls.calls.set(a.commandId, { hold: holdA });
+      yield* yieldFibers;
+      expect((yield* coordinator.view).held?.revision).toBe(1);
       yield* Queue.offer(autonomous, {
         count: 10,
         serverOnly: "private:autonomous:10",
         publicToken: "opaque:private:autonomous:10",
       });
-      const autonomousProjection = yield* waitForApplied(actor, 2);
+      yield* yieldFibers;
+      expect((yield* coordinator.view).held?.revision).toBe(2);
+      expect((yield* coordinator.view).held?.state.count).toBe(10);
       yield* Deferred.succeed(holdA, void 0);
-      const receiptA = yield* Fiber.join(sendingA);
-      const exactA = yield* actor.call(add("A"), { commandId: id("A"), timeout: "1 second" });
-      const afterAutonomous = reconcile(
-        initialReconciliation(),
-        autonomousProjection,
-        [
-          {
-            commandId: "A",
-            admitted: receiptA.admitted,
-            predict: (state) => ({ ...state, count: state.count + 1 }),
-          },
-        ],
-        new Map([
-          ["A", { commandId: "A", admitted: receiptA.admitted, revision: exactA.revision }],
-        ]),
-        undefined,
+      yield* yieldFibers;
+      const aCommand = yield* command(coordinator, a.commandId);
+      expect(aCommand.phase).toBe("applied");
+      expect(aCommand.exact?.revision).toBe(1);
+      expect((yield* coordinator.view).base.revision).toBe(2);
+      expect((yield* coordinator.view).visible).toEqual({
+        count: 10,
+        publicToken: "opaque:private:autonomous:10",
+      });
+    }),
+  );
+
+  withStore("an actual other-client command stays newer than a late receipt", () =>
+    Effect.gen(function* () {
+      const callA = yield* Deferred.make<void>();
+      const harness = yield* makeHarness(gatedBehavior(undefined, undefined));
+      const coordinator = yield* makeClient(harness);
+      const a = yield* coordinator.submitGenerated(add("A"), (state) => ({
+        ...state,
+        count: state.count + 1,
+      }));
+      harness.controls.calls.set(a.commandId, { hold: callA });
+      yield* yieldFibers;
+      const remote = yield* harness.real.call(
+        harness.address,
+        id("remote"),
+        encodedAdd("remote", 10),
+        "1 second",
+        [],
       );
-      expect(afterAutonomous.visible).toEqual(autonomousProjection.state);
-      const exactB = yield* actor.call(add("B"), { commandId: id("B"), timeout: "1 second" });
-      const newest = reconcile(afterAutonomous, exactB, [], new Map(), undefined);
-      expect(newest.visible).toEqual(exactB.state);
-      const lateA = reconcile(newest, exactA, [], new Map(), undefined);
-      expect(lateA).toEqual(newest);
+      yield* yieldFibers;
+      expect((yield* command(coordinator, a.commandId)).phase).toBe("pending");
+      expect((yield* coordinator.view).visible.count).toBe(1);
+      expect((yield* coordinator.view).held?.revision).toBe(2);
+
+      yield* Deferred.succeed(callA, void 0);
+      yield* yieldFibers;
+      const aCommand = yield* command(coordinator, a.commandId);
+      expect(aCommand.phase).toBe("applied");
+      expect(aCommand.exact?.revision).toBe(1);
+      expect((yield* coordinator.view).base).toEqual(decodePublicProjection(remote.projection));
+      expect((yield* coordinator.view).visible.count).toBe(11);
     }),
   );
 
   withStore("a settled public command keeps its overlay until its stream base arrives", () =>
     Effect.gen(function* () {
-      const holdChange = yield* Deferred.make<void>();
-      const harness = yield* makeHarness(gatedBehavior(undefined, undefined));
-      harness.controls.changes.set(1, { hold: holdChange });
-      const stream = yield* Effect.forkScoped(
-        Stream.runHead(harness.wrapped.changes(harness.address, 0)),
-      );
+      const serverB = yield* Deferred.make<void>();
+      const sendB = yield* Deferred.make<void>();
+      const callA = yield* Deferred.make<void>();
+      const callB = yield* Deferred.make<void>();
+      const harness = yield* makeHarness(gatedBehavior(serverB, undefined));
+      harness.controls.defaultCallHold = callA;
+      harness.controls.sends.set("B", { hold: sendB });
+      harness.controls.calls.set("B", { hold: callB });
+      const coordinator = yield* makeClient(harness);
+      const a = yield* coordinator.submitGenerated(add("A"), (state) => ({
+        ...state,
+        count: state.count + 1,
+      }));
       yield* yieldFibers;
-      const applied = yield* harness.wrapped.call(
-        harness.address,
-        id("A"),
-        encodedAdd("A"),
-        "1 second",
-        [],
-      );
-      const exact = decodePublicProjection(applied.projection);
-      const stored = yield* decodePrivateReceipt(harness, "A");
-      const pending = [
-        {
-          commandId: "A",
-          admitted: stored.receipt.admitted,
-          predict: (state: PublicState): PublicState => ({ ...state, count: state.count + 1 }),
-        },
-      ];
-      const receipts = new Map([
-        ["A", { commandId: "A", admitted: stored.receipt.admitted, revision: exact.revision }],
-      ]);
-      const retained = reconcile(
-        initialReconciliation(),
-        initialReconciliation().base,
-        pending,
-        receipts,
-        undefined,
-      );
-      expect(retained.base.revision).toBe(0);
-      expect(retained.visible.count).toBe(1);
-      const noBase = reconcile(
-        retained,
-        initialReconciliation().base,
-        pending,
-        receipts,
-        undefined,
-      );
-      expect(noBase.visible.count).toBe(1);
-      expect(harness.changeRevisions).toContain(1);
-      yield* Deferred.succeed(holdChange, void 0);
-      const streamed = yield* Fiber.join(stream);
-      expect(streamed).toEqual(Option.some(applied.projection));
-      const incorporated = reconcile(noBase, exact, pending, receipts, undefined);
-      expect(incorporated.visible).toEqual(exact.state);
+      const b = yield* coordinator.submitSupplied(id("B"), add("B"), (state) => ({
+        ...state,
+        count: state.count + 1,
+      }));
+      yield* yieldFibers;
+      expect((yield* command(coordinator, b.commandId)).admitted).toBeUndefined();
+
+      harness.controls.defaultCallHold = undefined;
+      yield* Deferred.succeed(callA, void 0);
+      yield* yieldFibers;
+      const aCommand = yield* command(coordinator, a.commandId);
+      expect(aCommand.phase).toBe("applied");
+      expect(aCommand.exact?.revision).toBe(1);
+      expect((yield* coordinator.view).base.revision).toBe(0);
+      expect((yield* coordinator.view).visible.count).toBe(1);
+      expect((yield* coordinator.view).held?.revision).toBe(1);
+
+      yield* Deferred.succeed(serverB, void 0);
+      yield* Deferred.succeed(sendB, void 0);
+      yield* yieldFibers;
+      expect((yield* coordinator.view).held?.revision).toBe(2);
+      yield* Deferred.succeed(callB, void 0);
+      yield* yieldFibers;
+      const bCommand = yield* command(coordinator, b.commandId);
+      expect(bCommand.phase).toBe("applied");
+      expect(bCommand.exact?.revision).toBe(2);
+      expect((yield* coordinator.view).base.revision).toBe(2);
+      expect((yield* coordinator.view).visible.count).toBe(2);
     }),
   );
 
@@ -701,7 +784,24 @@ describe("issue 67 reconciliation prototype", () => {
       Effect.gen(function* () {
         const autonomous = yield* Queue.unbounded<ServerState>();
         const harness = yield* makeHarness(gatedBehavior(undefined, autonomous));
-        const coordinator = yield* makeClient(harness);
+        let encoded = 0;
+        const coordinator = yield* makeCoordinator({
+          transport: harness.wrapped,
+          address: harness.address,
+          encode: (message: Add) => {
+            encoded += 1;
+            return Effect.orDie(
+              Schema.encodeEffect(Counter.message)({
+                ...message,
+                label: `A:${encoded}`,
+              }),
+            );
+          },
+          decode: (projection: Projection) => Effect.sync(() => decodePublicProjection(projection)),
+          timeout: "1 second",
+          retryDelay: "1 second",
+          maxAttempts: 8,
+        });
         const commandId = id("A");
         harness.controls.sends.set("A", { drop: true });
         const submitted = yield* coordinator.submitSupplied(commandId, add("A"), (state) => ({
@@ -709,24 +809,33 @@ describe("issue 67 reconciliation prototype", () => {
           count: state.count + 1,
         }));
         const payload = submitted.payload;
-        for (let state = 1; state <= 16; state += 1) {
-          yield* Queue.offer(autonomous, {
-            count: state,
-            serverOnly: `private:remote:${state}`,
-            publicToken: `opaque:private:remote:${state}`,
-          });
-        }
         yield* yieldFibers;
         for (let attempt = 1; attempt < 8; attempt += 1) {
+          yield* Queue.offer(autonomous, {
+            count: 100 + attempt,
+            serverOnly: `private:${attempt}`,
+            publicToken: `public:${attempt}`,
+          });
           yield* TestClock.adjust("1 second");
           yield* yieldFibers;
         }
         const exhausted = yield* command(coordinator, commandId);
         expect(exhausted.attempts).toBe(8);
         expect(exhausted.phase).toBe("uncertain");
+        const priorChanges = harness.changeRevisions.length;
+        for (let state = 8; state < 12; state += 1) {
+          yield* Queue.offer(autonomous, {
+            count: 100 + state,
+            serverOnly: `private:${state}`,
+            publicToken: `public:${state}`,
+          });
+          yield* TestClock.adjust("10 seconds");
+          yield* yieldFibers;
+        }
+        expect(harness.changeRevisions.length).toBeGreaterThan(priorChanges);
         expect(harness.sendCalls).toHaveLength(8);
         expect(harness.callCalls).toHaveLength(0);
-        expect(harness.changeRevisions.length).toBeGreaterThan(0);
+        expect((yield* coordinator.workers).activeCommands).toBe(0);
 
         harness.controls.sends.set("A", {});
         yield* coordinator.retry(commandId);
@@ -736,8 +845,12 @@ describe("issue 67 reconciliation prototype", () => {
         expect(retried.attempts).toBe(1);
         expect(harness.sendCalls).toHaveLength(9);
         expect(harness.callCalls).toHaveLength(1);
-        expect(new Set(harness.sendCalls.map((call) => call.commandId))).toEqual(new Set(["A"]));
-        expect(new Set(harness.sendCalls.map((call) => call.payload))).toEqual(new Set([payload]));
+        expect(encoded).toBe(1);
+        expect(
+          [...harness.sendCalls, ...harness.callCalls].every(
+            (call) => call.commandId === "A" && call.payload === payload,
+          ),
+        ).toBe(true);
       }),
   );
 

@@ -1,10 +1,30 @@
 import { flush } from "@solidjs/signals";
 import { Clock, Context, Duration, Effect, Exit, Fiber, Option, Scope, Schema } from "effect";
+import * as Frame from "../frame.js";
 import type { Host, HostEvent, PropertyValue, StaticProps } from "./host.js";
 
 const DEFAULT_TIMEOUT: Duration.Input = "5 seconds";
+const DIAGNOSTIC_TIMEOUT: Duration.Duration = Duration.millis(100);
 const RECENT_OPERATION_LIMIT = 8;
 const ROOT_SUMMARY_LIMIT = 2048;
+
+const InspectionUnavailableReason = Schema.Literals([
+  "FrameServiceMissing",
+  "CollectionTimedOut",
+  "CollectionDefect",
+]);
+
+const InspectionUnavailable = Schema.TaggedStruct("Unavailable", {
+  reason: InspectionUnavailableReason,
+});
+
+const InspectionAvailable = Schema.TaggedStruct("Available", {
+  snapshot: Frame.Snapshot,
+});
+
+/** A sampled Frame snapshot or the bounded reason it was unavailable. */
+export const ConditionInspection = Schema.Union([InspectionAvailable, InspectionUnavailable]);
+export type ConditionInspection = Schema.Schema.Type<typeof ConditionInspection>;
 
 /** The named condition was not observed before its bounded deadline. */
 export class ConditionNotObserved extends Schema.TaggedError<ConditionNotObserved>()(
@@ -24,7 +44,7 @@ export class ConditionNotObserved extends Schema.TaggedError<ConditionNotObserve
     listenersAttached: Schema.Finite,
     listenersReleased: Schema.Finite,
     rootSummary: Schema.String,
-    inspection: Schema.Literal("unavailable"),
+    inspection: ConditionInspection,
   },
 ) {}
 
@@ -88,6 +108,9 @@ interface HarnessState<HostNode> {
   readonly root: HostNode;
   readonly rootId: string;
   readonly summarizeRoot: Option.Option<(root: HostNode) => string>;
+  readonly frame: Option.Option<Frame.FrameService>;
+  readonly liveClock: Clock.Clock;
+  readonly collectionScopes: Set<Scope.Scope>;
   readonly waiters: Set<Waiter>;
   readonly closeWaiters: Set<CloseWaiter>;
   readonly recentHostOperations: Array<string>;
@@ -281,7 +304,24 @@ const timeoutInput = <HostNode>(condition: Condition<HostNode>): Duration.Input 
     onSome: (input) => input,
   });
 
-const conditionFailure = <HostNode>(
+interface ConditionFailureData {
+  readonly label: string;
+  readonly timeoutMillis: number;
+  readonly rootId: string;
+  readonly setupFinished: boolean;
+  readonly actionFinished: boolean;
+  readonly revisionAtStart: number;
+  readonly revisionAtFailure: number;
+  readonly predicateResult: boolean;
+  readonly predicateChecked: boolean;
+  readonly recentHostOperations: ReadonlyArray<string>;
+  readonly rootDisposed: boolean;
+  readonly listenersAttached: number;
+  readonly listenersReleased: number;
+  readonly rootSummary: string;
+}
+
+const conditionFailureData = <HostNode>(
   state: HarnessState<HostNode>,
   condition: Condition<HostNode>,
   milliseconds: number,
@@ -289,26 +329,72 @@ const conditionFailure = <HostNode>(
   actionFinished: boolean,
   predicateResult: boolean,
   predicateChecked: boolean,
-): ConditionNotObserved =>
-  ConditionNotObserved.make({
-    label: condition.label,
-    timeoutMillis: milliseconds,
-    rootId: state.rootId,
-    setupFinished: true,
-    actionFinished,
-    revisionAtStart,
-    revisionAtFailure: state.revision,
-    predicateResult,
-    predicateChecked,
-    recentHostOperations: [...state.recentHostOperations],
-    rootDisposed: state.disposalComplete,
-    listenersAttached: state.listenersAttached,
-    listenersReleased: state.listenersReleased,
-    rootSummary: Option.match(state.summarizeRoot, {
-      onNone: () => "",
-      onSome: (summarize) => summarize(state.root).slice(0, ROOT_SUMMARY_LIMIT),
-    }),
-    inspection: "unavailable",
+): ConditionFailureData => ({
+  label: condition.label,
+  timeoutMillis: milliseconds,
+  rootId: state.rootId,
+  setupFinished: true,
+  actionFinished,
+  revisionAtStart,
+  revisionAtFailure: state.revision,
+  predicateResult,
+  predicateChecked,
+  recentHostOperations: [...state.recentHostOperations],
+  rootDisposed: state.disposalComplete,
+  listenersAttached: state.listenersAttached,
+  listenersReleased: state.listenersReleased,
+  rootSummary: Option.match(state.summarizeRoot, {
+    onNone: () => "",
+    onSome: (summarize) => summarize(state.root).slice(0, ROOT_SUMMARY_LIMIT),
+  }),
+});
+
+const unavailableInspection = (
+  reason: Schema.Schema.Type<typeof InspectionUnavailableReason>,
+): ConditionInspection => ({
+  _tag: "Unavailable",
+  reason,
+});
+
+const collectInspection = <HostNode>(
+  state: HarnessState<HostNode>,
+  ownerScope: Scope.Scope,
+): Effect.Effect<ConditionInspection> =>
+  Option.match(state.frame, {
+    onNone: () => Effect.succeed(unavailableInspection("FrameServiceMissing")),
+    onSome: (frame) => {
+      if (state.closed) {
+        return Effect.succeed(unavailableInspection("CollectionDefect"));
+      }
+      const collectionScope = Scope.forkUnsafe(ownerScope);
+      state.collectionScopes.add(collectionScope);
+      const diagnosticTimeout = Symbol("ViewTestDiagnosticTimeout");
+      const collection = Effect.gen(function* () {
+        const inspectionFiber = yield* Effect.forkIn(Effect.exit(frame.inspect), collectionScope);
+        const result = yield* Effect.ensuring(
+          Effect.raceFirst(
+            Fiber.join(inspectionFiber),
+            state.liveClock.sleep(DIAGNOSTIC_TIMEOUT).pipe(Effect.as(diagnosticTimeout)),
+          ),
+          Fiber.interrupt(inspectionFiber),
+        );
+        if (result === diagnosticTimeout) {
+          return unavailableInspection("CollectionTimedOut");
+        }
+        if (Exit.isSuccess(result)) {
+          return { _tag: "Available", snapshot: result.value } satisfies ConditionInspection;
+        }
+        return unavailableInspection("CollectionDefect");
+      });
+      return Effect.ensuring(
+        collection.pipe(
+          Effect.catchCause(() => Effect.succeed(unavailableInspection("CollectionDefect"))),
+        ),
+        Effect.sync(() => {
+          state.collectionScopes.delete(collectionScope);
+        }),
+      );
+    },
   });
 
 const runBounded = <HostNode, A, E, R>(
@@ -360,10 +446,22 @@ const runBounded = <HostNode, A, E, R>(
       );
       return yield* Effect.ensuring(Fiber.join(fiber), Scope.close(operationScope, Exit.void));
     });
-    const watchdog = Effect.gen(function* () {
-      const liveClock = Context.get(Context.empty(), Clock.Clock);
-      yield* liveClock.sleep(duration);
-      return yield* conditionFailure(
+    const timeoutMarker = Symbol("ViewTestTimeout");
+    const watchdog = state.liveClock.sleep(duration).pipe(Effect.as(timeoutMarker));
+    return Effect.gen(function* () {
+      const result = yield* Effect.exit(
+        Effect.raceFirst(Effect.raceFirst(work, awaitClose(state, condition.label)), watchdog),
+      );
+      if (Exit.isFailure(result)) {
+        return yield* Effect.failCause(result.cause);
+      }
+      if (result.value !== timeoutMarker) {
+        return result.value;
+      }
+
+      // Commit the timeout receipt before awaiting any asynchronous
+      // diagnostics. A later host write cannot turn this result into success.
+      const failure = conditionFailureData(
         state,
         condition,
         milliseconds,
@@ -372,8 +470,9 @@ const runBounded = <HostNode, A, E, R>(
         predicateResult,
         predicateChecked,
       );
-    }).pipe(Effect.provideService(Clock.Clock, Context.get(Context.empty(), Clock.Clock)));
-    return Effect.raceFirst(Effect.raceFirst(work, awaitClose(state, condition.label)), watchdog);
+      const inspection = yield* collectInspection(state, ownerScope);
+      return yield* ConditionNotObserved.make({ ...failure, inspection });
+    });
   });
 
 /**
@@ -388,6 +487,7 @@ export const make = Effect.fn("ViewTest.make")(function* <HostNode, A, E, R>(
 ) {
   const parentScope = yield* Effect.scope;
   const harnessScope = Scope.forkUnsafe(parentScope);
+  const frame = yield* Effect.serviceOption(Frame.Service);
   const state: HarnessState<HostNode> = {
     root: options.root,
     rootId: Option.match(Option.fromNullishOr(options.rootId), {
@@ -395,6 +495,11 @@ export const make = Effect.fn("ViewTest.make")(function* <HostNode, A, E, R>(
       onSome: (rootId) => rootId,
     }),
     summarizeRoot: Option.fromNullishOr(options.summarizeRoot),
+    frame,
+    // The test application's Clock can be TestClock. Keep the watchdog on
+    // Effect's live default without replacing the clock used by the app.
+    liveClock: Context.get(Context.empty(), Clock.Clock),
+    collectionScopes: new Set(),
     waiters: new Set(),
     closeWaiters: new Set(),
     recentHostOperations: [],
@@ -419,6 +524,11 @@ export const make = Effect.fn("ViewTest.make")(function* <HostNode, A, E, R>(
     }
   };
   const closeStateEffect = Effect.sync(closeState);
+  const closeCollectionScopes = Effect.suspend(() =>
+    Effect.forEach([...state.collectionScopes], (scope) => Scope.close(scope, Exit.void), {
+      discard: true,
+    }),
+  );
   yield* Scope.addFinalizer(
     harnessScope,
     Effect.sync(() => {
@@ -469,7 +579,10 @@ export const make = Effect.fn("ViewTest.make")(function* <HostNode, A, E, R>(
       }),
     );
 
-  const close = closeStateEffect.pipe(Effect.andThen(Scope.close(harnessScope, Exit.void)));
+  const close = closeStateEffect.pipe(
+    Effect.andThen(closeCollectionScopes),
+    Effect.andThen(Scope.close(harnessScope, Exit.void)),
+  );
 
   return { setup, root: options.root, waitFor, act, close } satisfies ViewTest<HostNode, A>;
 });

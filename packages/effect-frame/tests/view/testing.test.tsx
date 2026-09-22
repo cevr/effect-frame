@@ -825,6 +825,10 @@ describe("scoped view test harness", () => {
           if (failure.value._tag === "ConditionNotObserved") {
             expect(failure.value.rootId).toBe("no-spin");
             expect(failure.value.rootSummary.length).toBe(2048);
+            expect(failure.value.inspection).toEqual({
+              _tag: "Unavailable",
+              reason: "FrameServiceMissing",
+            });
             expect(failure.value.revisionAtFailure).toBeGreaterThanOrEqual(
               failure.value.revisionAtStart,
             );

@@ -81,6 +81,11 @@ reference's construction context and Scheduler. An event handler or a short
 Uncertain record can outlive its worker. A record's own scope closes before its
 state becomes terminal, and then the owner drops the record.
 
+`submit` runs on the caller's fiber, which a timeout or an event can interrupt.
+Insertion, adoption (`own`), and the first start run as one uninterruptible
+step. A retained record therefore always has a worker, or is idle and
+Uncertain so `retry` can start one. `own` must finish on its own.
+
 ### Cache ownership
 
 A remote reference in a Frame with a `QueryCache` takes one cache claim per

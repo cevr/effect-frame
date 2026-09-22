@@ -152,7 +152,9 @@ export interface CommandAdapter<State, Rejection> {
    * Runs once per record, before its first pass, inside the record scope.
    * Anything it registers is released when the record leaves: on terminal
    * settlement or when the owner closes. Uncertain keeps it. The returned
-   * hook receives an Applied settlement before that release.
+   * hook receives an Applied settlement before that release. It runs
+   * uninterruptibly, with the record's insertion and first start, so it must
+   * finish on its own.
    */
   readonly own: (
     active: ReadonlyArray<QueryKey>,
@@ -588,7 +590,7 @@ export const make = Effect.fn("Actor.commands.make")(function* <
     const terminal = yield* Deferred.make<Terminal<State, Rejection>>();
     // Join, refuse, or insert in one synchronous step, so two submissions of
     // one ID cannot both create a record.
-    const placed = yield* Effect.sync((): Placement<State, Rejection> => {
+    const place = Effect.sync((): Placement<State, Rejection> => {
       const existing = Option.fromNullishOr(records.get(commandId));
       if (Option.isSome(existing)) {
         if (existing.value.payload === payload) {
@@ -617,6 +619,26 @@ export const make = Effect.fn("Actor.commands.make")(function* <
       records.set(commandId, record);
       return { _tag: "Live", record, created: true };
     });
+    // A new record is adopted and starts its first sequence. Resubmitting the
+    // same bytes to a retained, idle record is a retry: it starts one new
+    // bounded sequence.
+    const enroll = (placement: Placement<State, Rejection>) => {
+      if (placement._tag !== "Live") {
+        return Effect.void;
+      }
+      if (placement.created) {
+        return Effect.andThen(adopt(placement.record), startSequence(placement.record));
+      }
+      return startSequence(placement.record);
+    };
+    // The submitter is a caller fiber: an event handler or a timed-out call
+    // can be interrupted at any point. Insertion, adoption, and the first
+    // start are one step no interruption splits, so a retained record always
+    // has a worker or is idle and Uncertain, and a later join never gets a
+    // record that nothing will run.
+    const placed = yield* Effect.uninterruptible(
+      Effect.flatMap(place, (placement) => Effect.as(enroll(placement), placement)),
+    );
     if (placed._tag === "Stopped") {
       return yield* stoppedBeforeWork(commandId, identity);
     }
@@ -624,12 +646,6 @@ export const make = Effect.fn("Actor.commands.make")(function* <
       return yield* rejected(commandId, identity, adapter.conflict(commandId));
     }
     const record = placed.record;
-    if (placed.created) {
-      yield* adopt(record);
-    }
-    // A new record starts its first sequence. Resubmitting the same bytes to
-    // a retained, idle record is a retry: it starts one new bounded sequence.
-    yield* startSequence(record);
     return view(record.commandId, record.identity, record.state, record.terminal, retryOf(record));
   });
 

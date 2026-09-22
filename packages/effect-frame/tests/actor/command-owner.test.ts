@@ -3,6 +3,7 @@ import {
   Deferred,
   Effect,
   Exit,
+  Fiber,
   Layer,
   Option,
   Scheduler,
@@ -688,5 +689,47 @@ describe("private command owner", () => {
       expect(retries).toBe(1);
       expect(sends).toBe(2);
     }).pipe(Effect.provideService(Scheduler.MaxOpsBeforeYield, 3)),
+  );
+
+  it.scoped("an interrupted submission still leaves its record a running worker", () =>
+    Effect.gen(function* () {
+      let owns = 0;
+      const owner = yield* Commands.make(
+        fakeAdapter({
+          // The first adoption suspends, as a cache claim can while it counts.
+          own: (active) =>
+            Effect.suspend(() => {
+              owns += 1;
+              if (owns === 1) {
+                return Effect.andThen(
+                  Effect.sleep("10 millis"),
+                  Commands.ownNothing<number>(active),
+                );
+              }
+              return Commands.ownNothing<number>(active);
+            }),
+        }),
+      );
+      const submit = owner.submit(
+        { commandId: id("interrupted"), identity: "supplied" },
+        Effect.succeed("{}"),
+        noKeys,
+      );
+      const first = yield* Effect.forkChild(submit);
+      yield* TestClock.adjust("1 millis");
+      const interrupting = yield* Effect.forkChild(Fiber.interrupt(first));
+      yield* TestClock.adjust("10 millis");
+      yield* Fiber.join(interrupting);
+      yield* yieldFibers;
+      // The record was created, so its first sequence ran and settled it.
+      expect(yield* owner.retained).toEqual([]);
+
+      const again = yield* submit;
+      const waiting = yield* Effect.forkChild(Effect.timeoutOption(again.settled, "1 second"));
+      yield* TestClock.adjust("1 second");
+      expect(yield* Fiber.join(waiting)).toEqual(
+        Option.some({ _tag: "Applied", admitted: 1, committed: { revision: 1, state: 1 } }),
+      );
+    }),
   );
 });

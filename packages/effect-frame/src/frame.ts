@@ -173,9 +173,10 @@ const spendNode = (budget: DiagnosticBudget): boolean => {
 const stringCost = (value: string): number => value.length * 2 + 32;
 
 /**
- * This budget measures traversal cost. It reserves a fixed node cost and a
- * UTF-16 string cost, so output stays finite without claiming to count the
- * final JSON or UTF-8 encoding byte for byte.
+ * This budget measures the structural cost of the produced diagnostic. It
+ * reserves a fixed node cost and a UTF-16 string cost. It bounds the emitted
+ * output, but it cannot bound reflection work such as Object.keys or proxy
+ * traps, and it does not count final JSON or UTF-8 encoding bytes exactly.
  */
 
 const ownPropertyDescriptor = <Input extends {}>(

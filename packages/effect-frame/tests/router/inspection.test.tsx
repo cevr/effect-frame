@@ -610,6 +610,35 @@ describe("Frame router inspection", () => {
       }),
   );
 
+  it.scoped.layer(Frame.layer({ name: "diagnostic-node-budget" }))(
+    "truncates nested values that exhaust the aggregate node budget",
+    () =>
+      Effect.gen(function* () {
+        const nested = (leaf: number) => ({
+          one: { two: { three: { four: { five: { six: leaf } } } } },
+        });
+        const branches = Object.fromEntries(
+          Array.from({ length: 32 }, (_, index) => [`branch-${index}`, nested(index)]),
+        );
+        const params = Route.PathRecord.pipe(
+          Schema.decodeTo(Schema.Unknown, {
+            decode: SchemaGetter.transform(() => branches),
+            encode: SchemaGetter.transform((): Route.PathRecord => ({ id: "1" })),
+          }),
+        );
+        const route = Route.client("node-budget", {
+          path: "/node-budget/:id",
+          params,
+          search: Route.search(Nothing),
+          view: () => Effect.succeed(<p>node budget</p>),
+        });
+        yield* makeStart("http://app.test/node-budget/1", [route]);
+
+        const value = routeNamed(yield* Frame.inspect, "node-budget").params;
+        expect(containsDiagnosticReason(value, "maximum-size")).toBe(true);
+      }),
+  );
+
   it.scoped.layer(Frame.layer({ name: "route-failure" }))(
     "closes route-owned setup resources after a failed route transition",
     () =>

@@ -48,17 +48,25 @@ const stepMachine = Machine.make({
 
 const AutonomousState = State({ Start: {}, Running: {}, Done: {} });
 const AutonomousEvent = Event({ Begin: {}, Finish: {} });
-const autonomousMachine = Machine.make({
-  state: AutonomousState,
-  event: AutonomousEvent,
-  initial: AutonomousState.Start,
-})
-  .on(AutonomousState.Start, AutonomousEvent.Begin, () => AutonomousState.Running)
-  .on(AutonomousState.Running, AutonomousEvent.Finish, () => AutonomousState.Done)
-  .task(AutonomousState.Running, () => Effect.void, {
-    onSuccess: () => AutonomousEvent.Finish,
-    onFailure: () => AutonomousEvent.Finish,
-  });
+const makeAutonomousMachine = (
+  started: Deferred.Deferred<void>,
+  release: Deferred.Deferred<void>,
+) =>
+  Machine.make({
+    state: AutonomousState,
+    event: AutonomousEvent,
+    initial: AutonomousState.Start,
+  })
+    .on(AutonomousState.Start, AutonomousEvent.Begin, () => AutonomousState.Running)
+    .on(AutonomousState.Running, AutonomousEvent.Finish, () => AutonomousState.Done)
+    .task(
+      AutonomousState.Running,
+      () => Effect.andThen(Deferred.succeed(started, void 0), Deferred.await(release)),
+      {
+        onSuccess: () => AutonomousEvent.Finish,
+        onFailure: () => AutonomousEvent.Finish,
+      },
+    );
 
 const DurableAdd = Schema.Struct({ amount: Schema.Finite });
 type DurableAdd = Schema.Schema.Type<typeof DurableAdd>;
@@ -147,13 +155,25 @@ describe("Frame.inspect actor and query records", () => {
 
   it.scoped.layer(makeFrame("autonomous"))("samples autonomous machine revisions", () =>
     Effect.gen(function* () {
-      const machine = yield* spawn(Behavior.machine(autonomousMachine));
+      const taskStarted = yield* Deferred.make<void>();
+      const taskRelease = yield* Deferred.make<void>();
+      const machine = yield* spawn(
+        Behavior.machine(makeAutonomousMachine(taskStarted, taskRelease)),
+      );
       yield* machine.call(AutonomousEvent.Begin);
-      yield* Stream.runHead(Stream.filter(machine.state.changes, (state) => state._tag === "Done"));
-      const snapshot = yield* Frame.inspect;
-      expect(snapshot.actors).toHaveLength(1);
-      expect(snapshot.actors[0]?.kind).toBe("local");
-      expect(snapshot.actors[0]?.revision).toBeGreaterThan(0);
+      yield* Deferred.await(taskStarted);
+      const running = yield* Frame.inspect;
+      const runningRevision = running.actors[0]?.revision ?? 0;
+      expect(running.actors).toHaveLength(1);
+      expect(running.actors[0]?.kind).toBe("local");
+      expect(runningRevision).toBeGreaterThan(0);
+      const completed = yield* Effect.forkScoped(
+        Stream.runHead(Stream.filter(machine.state.changes, (state) => state._tag === "Done")),
+      );
+      yield* Deferred.succeed(taskRelease, void 0);
+      yield* Fiber.join(completed);
+      const after = yield* Frame.inspect;
+      expect(after.actors[0]?.revision).toBeGreaterThan(runningRevision);
     }),
   );
 

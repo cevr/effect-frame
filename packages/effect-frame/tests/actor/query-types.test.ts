@@ -10,10 +10,11 @@ import {
 } from "effect-frame/actor";
 import { ref } from "effect-frame/actor/client";
 import { QueryTest } from "effect-frame/actor/testing";
-import type { View } from "effect-frame/view";
-import { Context, Effect, Layer, Schema } from "effect";
+import { Dom, mount, type View } from "effect-frame/view";
+import { Empty } from "effect-frame/view/jsx-runtime";
+import { Context, Effect, Layer, Schema, type Scope } from "effect";
 import { describe, expect, it } from "effect-bun-test";
-import type * as Frame from "../../src/frame.js";
+import * as Frame from "../../src/frame.js";
 
 class ApplicationValue extends Context.Service<ApplicationValue, { readonly value: number }>()(
   "effect-frame/tests/actor/query-types.test/ApplicationValue",
@@ -108,6 +109,36 @@ const viewWithApplicationChannels: View.View<
   ApplicationValue
 > = () => Effect.fail("view-error");
 
+const viewWithFrameInspection: View.View<Record<string, never>, never, Frame.Service> = () =>
+  Effect.map(Frame.Service, () => Empty);
+
+const mountApplicationView = (root: Node) => mount(viewWithApplicationChannels, {}, Dom.host, root);
+const mountApplicationViewWithFrame = (root: Node) =>
+  // @effect-diagnostics-next-line strictEffectProvide:off -- type proof for optional inspection
+  Effect.provide(mountApplicationView(root), Frame.layer());
+const mountFrameView = (root: Node) => mount(viewWithFrameInspection, {}, Dom.host, root);
+const mountFrameViewWithLayer = (root: Node) =>
+  // @effect-diagnostics-next-line strictEffectProvide:off -- type proof for the public mount channel
+  Effect.provide(mountFrameView(root), Frame.layer());
+
+/** `mount` preserves the view's error and service channels. */
+const mountedApplicationEffect: Equals<
+  ReturnType<typeof mountApplicationView>,
+  Effect.Effect<void, "view-error", ApplicationValue | Scope.Scope>
+> = true;
+const mountedApplicationEffectWithFrame: Equals<
+  ReturnType<typeof mountApplicationViewWithFrame>,
+  Effect.Effect<void, "view-error", ApplicationValue | Scope.Scope>
+> = true;
+const mountedFrameEffect: Equals<
+  ReturnType<typeof mountFrameView>,
+  Effect.Effect<void, never, Frame.Service | Scope.Scope>
+> = true;
+const mountedFrameEffectWithInspection: Equals<
+  ReturnType<typeof mountFrameViewWithLayer>,
+  Effect.Effect<void, never, Scope.Scope>
+> = true;
+
 /** View effects keep both application failures and services visible at their call site. */
 const viewErrorIsPreserved: Equals<
   Effect.Error<ReturnType<typeof viewWithApplicationChannels>>,
@@ -147,6 +178,10 @@ describe("query implementation service requirements", () => {
       expect(queryTestRequirementsArePreserved).toBe(true);
       expect(viewErrorIsPreserved).toBe(true);
       expect(viewRequirementsArePreserved).toBe(true);
+      expect(mountedApplicationEffect).toBe(true);
+      expect(mountedApplicationEffectWithFrame).toBe(true);
+      expect(mountedFrameEffect).toBe(true);
+      expect(mountedFrameEffectWithInspection).toBe(true);
       expect(inspectionRequirementsArePreserved).toBe(true);
       batchReleases.current = 0;
       const single = yield* transport.query({ query: Single.name, version: 1, args: "{}" });

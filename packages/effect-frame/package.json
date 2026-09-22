@@ -34,6 +34,11 @@
       "types": "./dist/view/index.d.ts",
       "default": "./dist/view/index.js"
     },
+    "./view/testing": {
+      "source": "./src/view/testing.ts",
+      "types": "./dist/view/testing.d.ts",
+      "default": "./dist/view/testing.js"
+    },
     "./view/jsx-runtime": {
       "source": "./src/view/jsx-runtime.ts",
       "types": "./dist/view/jsx-runtime.d.ts",

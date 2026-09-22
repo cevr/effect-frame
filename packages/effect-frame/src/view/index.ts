@@ -42,6 +42,7 @@ export type {
 } from "./jsx-runtime.js";
 export * as Dom from "./hosts/dom.js";
 export * as Html from "./hosts/html.js";
+export * as ViewTest from "./testing.js";
 
 // Readiness through context (#16).
 export * as QueryState from "./query-state.js";

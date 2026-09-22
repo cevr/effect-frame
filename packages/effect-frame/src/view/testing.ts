@@ -1,0 +1,455 @@
+import { flush } from "@solidjs/signals";
+import { Clock, Context, Duration, Effect, Exit, Fiber, Option, Scope, Schema } from "effect";
+import type { Host, HostEvent, PropertyValue, StaticProps } from "./host.js";
+
+const DEFAULT_TIMEOUT: Duration.Input = "5 seconds";
+const RECENT_OPERATION_LIMIT = 8;
+const ROOT_SUMMARY_LIMIT = 2048;
+
+/** The named condition was not observed before its bounded deadline. */
+export class ConditionNotObserved extends Schema.TaggedError<ConditionNotObserved>()(
+  "ConditionNotObserved",
+  {
+    label: Schema.String,
+    timeoutMillis: Schema.Finite,
+    rootId: Schema.String,
+    setupFinished: Schema.Boolean,
+    actionFinished: Schema.Boolean,
+    revisionAtStart: Schema.Finite,
+    revisionAtFailure: Schema.Finite,
+    predicateResult: Schema.Boolean,
+    predicateChecked: Schema.Boolean,
+    recentHostOperations: Schema.Array(Schema.String),
+    rootDisposed: Schema.Boolean,
+    listenersAttached: Schema.Finite,
+    listenersReleased: Schema.Finite,
+    rootSummary: Schema.String,
+    inspection: Schema.Literal("unavailable"),
+  },
+) {}
+
+/** The harness closed while a condition was waiting. */
+export class HarnessClosed extends Schema.TaggedError<HarnessClosed>()("HarnessClosed", {
+  label: Schema.String,
+  rootId: Schema.String,
+  revision: Schema.Finite,
+  rootDisposed: Schema.Boolean,
+  listenersAttached: Schema.Finite,
+  listenersReleased: Schema.Finite,
+}) {}
+
+export interface Condition<HostNode> {
+  /** A short description included in timeout and close failures. */
+  readonly label: string;
+  /** A synchronous, read-only predicate over the actual mounted root. */
+  readonly until: (root: HostNode) => boolean;
+  /** A finite, positive deadline. Defaults to five seconds. */
+  readonly timeout?: Duration.Input;
+}
+
+export interface ViewTestOptions<HostNode, A, E, R> {
+  readonly host: Host<HostNode>;
+  readonly root: HostNode;
+  readonly setup: (host: Host<HostNode>, root: HostNode) => Effect.Effect<A, E, R>;
+  /** An optional identity included in failure receipts. */
+  readonly rootId?: string;
+  /** An optional bounded summary for timeout receipts. */
+  readonly summarizeRoot?: (root: HostNode) => string;
+}
+
+export interface ViewTest<HostNode, A> {
+  readonly setup: A;
+  readonly root: HostNode;
+  readonly waitFor: (
+    condition: Condition<HostNode>,
+  ) => Effect.Effect<void, ConditionNotObserved | HarnessClosed>;
+  readonly act: <B, E, R>(
+    action: Effect.Effect<B, E, R>,
+    condition: Condition<HostNode>,
+  ) => Effect.Effect<B, E | ConditionNotObserved | HarnessClosed, Exclude<R, Scope.Scope>>;
+  /** Closing is idempotent and releases setup resources and pending waits. */
+  readonly close: Effect.Effect<void>;
+}
+
+interface Waiter {
+  readonly afterRevision: number;
+  readonly onClose: () => HarnessClosed;
+  readonly resume: (effect: Effect.Effect<void, HarnessClosed>) => void;
+  done: boolean;
+}
+
+interface CloseWaiter {
+  readonly onClose: () => HarnessClosed;
+  readonly resume: (effect: Effect.Effect<never, HarnessClosed>) => void;
+  done: boolean;
+}
+
+interface HarnessState<HostNode> {
+  readonly root: HostNode;
+  readonly rootId: string;
+  readonly summarizeRoot: Option.Option<(root: HostNode) => string>;
+  readonly waiters: Set<Waiter>;
+  readonly closeWaiters: Set<CloseWaiter>;
+  readonly recentHostOperations: Array<string>;
+  revision: number;
+  closed: boolean;
+  listenersAttached: number;
+  listenersReleased: number;
+}
+
+const closeError = <HostNode>(state: HarnessState<HostNode>, label: string): HarnessClosed =>
+  HarnessClosed.make({
+    label,
+    rootId: state.rootId,
+    revision: state.revision,
+    rootDisposed: state.closed,
+    listenersAttached: state.listenersAttached,
+    listenersReleased: state.listenersReleased,
+  });
+
+const finishWaiter = <HostNode>(
+  state: HarnessState<HostNode>,
+  waiter: Waiter,
+  effect: Effect.Effect<void, HarnessClosed>,
+): void => {
+  if (waiter.done) {
+    return;
+  }
+  waiter.done = true;
+  state.waiters.delete(waiter);
+  waiter.resume(effect);
+};
+
+const finishCloseWaiter = <HostNode>(
+  state: HarnessState<HostNode>,
+  waiter: CloseWaiter,
+  effect: Effect.Effect<never, HarnessClosed>,
+): void => {
+  if (waiter.done) {
+    return;
+  }
+  waiter.done = true;
+  state.closeWaiters.delete(waiter);
+  waiter.resume(effect);
+};
+
+const recordMutation = <HostNode>(state: HarnessState<HostNode>, operation: string): void => {
+  state.revision += 1;
+  state.recentHostOperations.push(operation);
+  if (state.recentHostOperations.length > RECENT_OPERATION_LIMIT) {
+    state.recentHostOperations.shift();
+  }
+  for (const waiter of [...state.waiters]) {
+    if (state.revision > waiter.afterRevision) {
+      finishWaiter(state, waiter, Effect.void);
+    }
+  }
+};
+
+const observeHost = <HostNode>(
+  host: Host<HostNode>,
+  state: HarnessState<HostNode>,
+): Host<HostNode> => {
+  const write = <A>(operation: string, run: () => A): A => {
+    const value = run();
+    recordMutation(state, operation);
+    return value;
+  };
+
+  return {
+    createElement: (tag: string, staticProps: StaticProps) => host.createElement(tag, staticProps),
+    createText: (text: string) => host.createText(text),
+    setProperty: (node: HostNode, name: string, value: PropertyValue) =>
+      write("setProperty", () => host.setProperty(node, name, value)),
+    insert: (parent: HostNode, node: HostNode, anchor) =>
+      write("insert", () => host.insert(parent, node, anchor)),
+    remove: (parent: HostNode, node: HostNode) => write("remove", () => host.remove(parent, node)),
+    setText: (node: HostNode, text: string) => write("setText", () => host.setText(node, text)),
+    addEventListener: (node: HostNode, name: string, handler: (event: HostEvent) => void) => {
+      const cleanup = host.addEventListener(node, name, handler);
+      state.listenersAttached += 1;
+      let released = false;
+      return () => {
+        if (released) {
+          return;
+        }
+        released = true;
+        state.listenersReleased += 1;
+        cleanup();
+      };
+    },
+    attach: (node: HostNode, run: (node: HostNode) => void) => host.attach(node, run),
+  };
+};
+
+const awaitRevision = <HostNode>(
+  state: HarnessState<HostNode>,
+  afterRevision: number,
+  label: string,
+): Effect.Effect<void, HarnessClosed> =>
+  Effect.callback<void, HarnessClosed>((resume) => {
+    if (state.closed) {
+      resume(Effect.fail(closeError(state, label)));
+      return;
+    }
+    if (state.revision > afterRevision) {
+      resume(Effect.void);
+      return;
+    }
+
+    const waiter: Waiter = {
+      afterRevision,
+      onClose: () => closeError(state, label),
+      resume,
+      done: false,
+    };
+    state.waiters.add(waiter);
+
+    // This second check is the handshake. It closes the gap between the
+    // initial revision read and registration if a host write happened there.
+    if (state.closed) {
+      finishWaiter(state, waiter, Effect.fail(waiter.onClose()));
+    } else if (state.revision > afterRevision) {
+      finishWaiter(state, waiter, Effect.void);
+    }
+
+    return Effect.sync(() => {
+      state.waiters.delete(waiter);
+      waiter.done = true;
+    });
+  });
+
+const awaitClose = <HostNode>(
+  state: HarnessState<HostNode>,
+  label: string,
+): Effect.Effect<never, HarnessClosed> =>
+  Effect.callback<never, HarnessClosed>((resume) => {
+    if (state.closed) {
+      resume(Effect.fail(closeError(state, label)));
+      return;
+    }
+    const waiter: CloseWaiter = {
+      onClose: () => closeError(state, label),
+      resume,
+      done: false,
+    };
+    state.closeWaiters.add(waiter);
+    if (state.closed) {
+      finishCloseWaiter(state, waiter, Effect.fail(waiter.onClose()));
+    }
+    return Effect.sync(() => {
+      state.closeWaiters.delete(waiter);
+      waiter.done = true;
+    });
+  });
+
+const conditionObservation = <HostNode>(
+  state: HarnessState<HostNode>,
+  condition: Condition<HostNode>,
+  onPredicate: (value: boolean) => void,
+): Effect.Effect<{ readonly satisfied: boolean; readonly revision: number }, never> =>
+  Effect.gen(function* () {
+    // Leave a host callback's Solid flush stack before entering the next one.
+    yield* Effect.yieldNow;
+    return yield* Effect.sync(() => {
+      flush();
+      const satisfied = condition.until(state.root);
+      onPredicate(satisfied);
+      return { satisfied, revision: state.revision };
+    });
+  });
+
+const waitForCondition = <HostNode>(
+  state: HarnessState<HostNode>,
+  condition: Condition<HostNode>,
+  onPredicate: (value: boolean) => void,
+): Effect.Effect<void, HarnessClosed> =>
+  Effect.gen(function* () {
+    while (true) {
+      const observation = yield* conditionObservation(state, condition, onPredicate);
+      if (observation.satisfied) {
+        return;
+      }
+      yield* awaitRevision(state, observation.revision, condition.label);
+    }
+  });
+
+const timeoutInput = <HostNode>(condition: Condition<HostNode>): Duration.Input =>
+  Option.match(Option.fromNullishOr(condition.timeout), {
+    onNone: () => DEFAULT_TIMEOUT,
+    onSome: (input) => input,
+  });
+
+const conditionFailure = <HostNode>(
+  state: HarnessState<HostNode>,
+  condition: Condition<HostNode>,
+  milliseconds: number,
+  revisionAtStart: number,
+  actionFinished: boolean,
+  predicateResult: boolean,
+  predicateChecked: boolean,
+): ConditionNotObserved =>
+  ConditionNotObserved.make({
+    label: condition.label,
+    timeoutMillis: milliseconds,
+    rootId: state.rootId,
+    setupFinished: true,
+    actionFinished,
+    revisionAtStart,
+    revisionAtFailure: state.revision,
+    predicateResult,
+    predicateChecked,
+    recentHostOperations: [...state.recentHostOperations],
+    rootDisposed: state.closed,
+    listenersAttached: state.listenersAttached,
+    listenersReleased: state.listenersReleased,
+    rootSummary: Option.match(state.summarizeRoot, {
+      onNone: () => "",
+      onSome: (summarize) => summarize(state.root).slice(0, ROOT_SUMMARY_LIMIT),
+    }),
+    inspection: "unavailable",
+  });
+
+const runBounded = <HostNode, A, E, R>(
+  state: HarnessState<HostNode>,
+  ownerScope: Scope.Scope,
+  condition: Condition<HostNode>,
+  operation: (
+    operationScope: Scope.Scope,
+    setActionFinished: () => void,
+    setPredicateResult: (value: boolean) => void,
+  ) => Effect.Effect<A, E | HarnessClosed, Exclude<R, Scope.Scope>>,
+): Effect.Effect<A, E | ConditionNotObserved | HarnessClosed, Exclude<R, Scope.Scope>> =>
+  Effect.suspend(() => {
+    const duration = Duration.fromInputUnsafe(timeoutInput(condition));
+    if (!Duration.isFinite(duration) || !Duration.isPositive(duration)) {
+      return Effect.die(
+        new Error(`ViewTest condition timeout must be finite and positive: ${condition.label}`),
+      );
+    }
+    const operationScope = Scope.forkUnsafe(ownerScope);
+    const milliseconds = Duration.toMillis(duration);
+    const revisionAtStart = state.revision;
+    let actionFinished = false;
+    let predicateResult = false;
+    let predicateChecked = false;
+    const markActionFinished = (): void => {
+      actionFinished = true;
+    };
+    const markPredicateResult = (value: boolean): void => {
+      predicateResult = value;
+      predicateChecked = true;
+    };
+    const work = Effect.gen(function* () {
+      const fiber = yield* Effect.forkIn(
+        operation(operationScope, markActionFinished, markPredicateResult),
+        operationScope,
+      );
+      return yield* Effect.ensuring(Fiber.join(fiber), Scope.close(operationScope, Exit.void));
+    });
+    const watchdog = Effect.gen(function* () {
+      const liveClock = Context.get(Context.empty(), Clock.Clock);
+      yield* liveClock.sleep(duration);
+      return yield* conditionFailure(
+        state,
+        condition,
+        milliseconds,
+        revisionAtStart,
+        actionFinished,
+        predicateResult,
+        predicateChecked,
+      );
+    }).pipe(Effect.provideService(Clock.Clock, Context.get(Context.empty(), Clock.Clock)));
+    return Effect.raceFirst(Effect.raceFirst(work, awaitClose(state, condition.label)), watchdog);
+  });
+
+/**
+ * Build a scoped harness around the production Host and mount function.
+ *
+ * The harness observes actual host writes. It waits for a named synchronous
+ * root condition after setup or an action. It does not infer application idle
+ * state, drain every Effect fiber, or advance the application's Clock.
+ */
+export const make = Effect.fn("ViewTest.make")(function* <HostNode, A, E, R>(
+  options: ViewTestOptions<HostNode, A, E, R>,
+) {
+  const parentScope = yield* Effect.scope;
+  const harnessScope = Scope.forkUnsafe(parentScope);
+  const state: HarnessState<HostNode> = {
+    root: options.root,
+    rootId: Option.match(Option.fromNullishOr(options.rootId), {
+      onNone: () => "",
+      onSome: (rootId) => rootId,
+    }),
+    summarizeRoot: Option.fromNullishOr(options.summarizeRoot),
+    waiters: new Set(),
+    closeWaiters: new Set(),
+    recentHostOperations: [],
+    revision: 0,
+    closed: false,
+    listenersAttached: 0,
+    listenersReleased: 0,
+  };
+  const observedHost = observeHost(options.host, state);
+
+  const closeState = (): void => {
+    if (state.closed) {
+      return;
+    }
+    state.closed = true;
+    for (const waiter of [...state.waiters]) {
+      finishWaiter(state, waiter, Effect.fail(waiter.onClose()));
+    }
+    for (const waiter of [...state.closeWaiters]) {
+      finishCloseWaiter(state, waiter, Effect.fail(waiter.onClose()));
+    }
+  };
+  const closeStateEffect = Effect.sync(closeState);
+  yield* Scope.addFinalizer(parentScope, closeStateEffect);
+
+  const setup = yield* options.setup(observedHost, options.root).pipe(
+    Effect.provideService(Scope.Scope, harnessScope),
+    Effect.onExit((exit) => {
+      if (Exit.isFailure(exit)) {
+        return closeStateEffect.pipe(Effect.andThen(Scope.close(harnessScope, exit)));
+      }
+      return Effect.void;
+    }),
+  );
+
+  const waitFor = (
+    condition: Condition<HostNode>,
+  ): Effect.Effect<void, ConditionNotObserved | HarnessClosed> =>
+    runBounded(state, harnessScope, condition, (_operationScope, _markActionFinished, mark) =>
+      Effect.gen(function* () {
+        if (state.closed) {
+          return yield* closeError(state, condition.label);
+        }
+        yield* waitForCondition(state, condition, mark);
+        return;
+      }).pipe(Effect.asVoid),
+    );
+
+  const act = <B, EA, RA>(
+    action: Effect.Effect<B, EA, RA>,
+    condition: Condition<HostNode>,
+  ): Effect.Effect<B, EA | ConditionNotObserved | HarnessClosed, Exclude<RA, Scope.Scope>> =>
+    runBounded(state, harnessScope, condition, (operationScope, markActionFinished, mark) =>
+      Effect.gen(function* () {
+        if (state.closed) {
+          return yield* closeError(state, condition.label);
+        }
+        // Establish the first observation before the action begins. The
+        // post-action check remains authoritative for the returned result.
+        yield* conditionObservation(state, condition, mark);
+        const result = yield* action.pipe(Effect.provideService(Scope.Scope, operationScope));
+        markActionFinished();
+        yield* waitForCondition(state, condition, mark);
+        return result;
+      }),
+    );
+
+  const close = closeStateEffect.pipe(Effect.andThen(Scope.close(harnessScope, Exit.void)));
+
+  return { setup, root: options.root, waitFor, act, close } satisfies ViewTest<HostNode, A>;
+});

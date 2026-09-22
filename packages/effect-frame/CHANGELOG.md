@@ -1,5 +1,12 @@
 # effect-frame
 
+## 0.6.0
+
+### Minor Changes
+
+- [`a29c9b9`](https://github.com/cevr/effect-frame/commit/a29c9b900e3df3ed4891da62eceb331e23f14234) Thanks [@cevr](https://github.com/cevr)! - Add a scoped view testing harness that observes production host writes, owns
+  mounted work, and reports bounded timeout diagnostics.
+
 ## 0.5.0
 
 ### Minor Changes

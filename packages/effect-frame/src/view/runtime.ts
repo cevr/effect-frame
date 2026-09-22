@@ -142,6 +142,55 @@ const anchorAfter = <HostNode>(
   return Option.none();
 };
 
+/**
+ * The keys a reorder can leave where they are: the longest run of `wanted`
+ * whose keys already sit in increasing document order in `placed`. Every
+ * other key moves, so the fewest rows are touched and focus, selection,
+ * and scroll survive in the rest.
+ */
+const inPlace = (
+  wanted: ReadonlyArray<string>,
+  placed: ReadonlyArray<string>,
+): ReadonlySet<string> => {
+  const position = new Map(placed.map((key, index) => [key, index]));
+  const keys: Array<string> = [];
+  const positions: Array<number> = [];
+  for (const key of wanted) {
+    Option.match(get(position, key), {
+      onNone: () => {},
+      onSome: (index) => {
+        keys.push(key);
+        positions.push(index);
+      },
+    });
+  }
+  // Patience sorting: `tails[k]` holds the index of the smallest last
+  // position of an increasing run of length k + 1; `previous` links runs back.
+  const tails: Array<number> = [];
+  const previous: Array<number> = [];
+  positions.forEach((value, index) => {
+    let low = 0;
+    let high = tails.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if ((positions[tails[middle] ?? 0] ?? 0) < value) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    previous[index] = tails[low - 1] ?? -1;
+    tails[low] = index;
+  });
+  const stable = new Set<string>();
+  let cursor = tails.at(-1) ?? -1;
+  while (cursor >= 0) {
+    stable.add(keys[cursor] ?? "");
+    cursor = previous[cursor] ?? -1;
+  }
+  return stable;
+};
+
 // ---------------------------------------------------------------------------
 // Tracking
 // ---------------------------------------------------------------------------
@@ -1374,23 +1423,20 @@ const buildFor =
       const slots = order.flatMap((key) =>
         Option.match(get(rows, key), { onNone: () => [], onSome: (row) => [row.slot] }),
       );
-      const settled = placed.filter((key) => rows.has(key));
-      let cursor = 0;
-      order.forEach((key, index) => {
+      const stable = inPlace(order, placed);
+      // Walk backwards so every anchor is a row already in its final place:
+      // a forward walk can anchor on a row that moves later.
+      for (let index = order.length - 1; index >= 0; index -= 1) {
+        const key = order[index] ?? "";
         const row = get(rows, key);
-        if (Option.isNone(row) || row.value.slot.nodes.length === 0) {
-          return;
-        }
-        if (Option.contains(at(settled, cursor), key)) {
-          cursor += 1;
-          return;
+        if (Option.isNone(row) || row.value.slot.nodes.length === 0 || stable.has(key)) {
+          continue;
         }
         const anchor = anchorAfter(slots, index);
         for (const created of row.value.slot.nodes) {
           host.insert(parent, created, anchor);
         }
-        settled.splice(settled.indexOf(key), 1);
-      });
+      }
       placed = order.filter((key) =>
         Option.match(get(rows, key), {
           onNone: () => false,

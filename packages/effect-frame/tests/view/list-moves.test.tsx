@@ -63,6 +63,29 @@ const LabeledKeyed = (props: { readonly items: Source<ReadonlyArray<LabeledItem>
     </ul>,
   );
 
+/** Rows whose element id names the key, so a test can match nodes across moves. */
+const Labeled = (props: { readonly items: Source<ReadonlyArray<string>> }) =>
+  Effect.gen(function* () {
+    const rows = yield* View.list({
+      each: props.items,
+      keyBy: (item) => item,
+      row: (item) =>
+        Effect.map(item.get, (first) => <li id={`row-${first}`}>{View.bind(item)}</li>),
+    });
+    return <ul>{rows}</ul>;
+  });
+
+/** A keyed list with a sibling after it in the same parent. */
+const Followed = (props: { readonly items: Source<ReadonlyArray<string>> }) =>
+  Effect.succeed(
+    <ul>
+      <For each={props.items} keyBy={(item) => item}>
+        {(item) => <li>{View.bind(item)}</li>}
+      </For>
+      <li>tail</li>
+    </ul>,
+  );
+
 const idsIn = (root: Element): ReadonlyArray<string> =>
   Array.from(root.querySelectorAll("li")).map((li) => li.textContent ?? "");
 
@@ -155,6 +178,99 @@ describe("a keyed list moves only what moved", () => {
       expect(after[1]).toBe(before[0]);
       expect(after[2]).toBe(before[1]);
       expect(after[0]).toBe(before[2]);
+    }),
+  );
+
+  it.scoped("swapping two rows moves only those two rows", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const { host, inserted } = counting();
+      const items = yield* spawn(
+        Behavior.value<ReadonlyArray<string>>(["a", "b", "c", "d", "e", "f"]),
+      );
+      const page = yield* ViewTest.make({
+        host,
+        root,
+        setup: (wrappedHost, mountRoot) =>
+          mount(Labeled, { items: items.state }, wrappedHost, mountRoot),
+      });
+      const before = new Map(Array.from(root.querySelectorAll("li")).map((li) => [li.id, li]));
+      inserted.length = 0;
+
+      // The benchmark's swap: the second row and the second to last.
+      yield* page.act(items.call(Value.Set(["a", "e", "c", "d", "b", "f"])), {
+        label: "keyed rows swap",
+        until: (actualRoot) => idsAt(actualRoot).join(",") === "a,e,c,d,b,f",
+      });
+      expect(idsIn(root)).toEqual(["a", "e", "c", "d", "b", "f"]);
+      for (const li of Array.from(root.querySelectorAll("li"))) {
+        expect(before.get(li.id) === li).toBe(true);
+      }
+      expect(inserted.toSorted()).toEqual(["row-b", "row-e"]);
+    }),
+  );
+
+  it.scoped("any permutation lands in order with every row node kept", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const keys = Array.from({ length: 12 }, (_, index) => String.fromCharCode(97 + index));
+      const items = yield* spawn(Behavior.value<ReadonlyArray<string>>(keys));
+      const page = yield* ViewTest.make({
+        host: Dom.host,
+        root,
+        setup: (wrappedHost, mountRoot) =>
+          mount(Labeled, { items: items.state }, wrappedHost, mountRoot),
+      });
+      const nodes = new Map(Array.from(root.querySelectorAll("li")).map((li) => [li.id, li]));
+
+      // A fixed linear congruential sequence, so a failure replays exactly.
+      let seed = 7;
+      const next = (bound: number): number => {
+        seed = (seed * 1103515245 + 12345) % 2147483648;
+        return seed % bound;
+      };
+      let current: ReadonlyArray<string> = keys;
+      for (let round = 0; round < 40; round += 1) {
+        const shuffled = [...current];
+        for (let index = shuffled.length - 1; index > 0; index -= 1) {
+          const other = next(index + 1);
+          const held = shuffled[index] ?? "";
+          shuffled[index] = shuffled[other] ?? "";
+          shuffled[other] = held;
+        }
+        if (round % 5 === 0) {
+          shuffled.reverse();
+        }
+        const wanted = shuffled.join(",");
+        yield* page.act(items.call(Value.Set(shuffled)), {
+          label: `permutation ${String(round)}`,
+          until: (actualRoot) => idsAt(actualRoot).join(",") === wanted,
+        });
+        expect(idsIn(root).join(",")).toBe(wanted);
+        current = shuffled;
+      }
+      for (const li of Array.from(root.querySelectorAll("li"))) {
+        expect(nodes.get(li.id) === li).toBe(true);
+      }
+    }),
+  );
+
+  it.scoped("a moved last row stays before content after the list", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const items = yield* spawn(Behavior.value<ReadonlyArray<string>>(["a", "b", "c"]));
+      const page = yield* ViewTest.make({
+        host: Dom.host,
+        root,
+        setup: (wrappedHost, mountRoot) =>
+          mount(Followed, { items: items.state }, wrappedHost, mountRoot),
+      });
+
+      yield* page.act(items.call(Value.Set(["b", "c", "a"])), {
+        label: "first row moves to the end",
+        until: (actualRoot) => idsAt(actualRoot).join(",") === "b,c,a,tail",
+      });
+      expect(idsIn(root)).toEqual(["b", "c", "a", "tail"]);
     }),
   );
 

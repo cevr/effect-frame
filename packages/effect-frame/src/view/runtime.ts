@@ -1,5 +1,16 @@
 import type { Source } from "effect-frame/actor";
-import { Effect, Exit, Match, Option, Predicate, Queue, Ref, Scope, Stream } from "effect";
+import {
+  Effect,
+  Exit,
+  Match,
+  Option,
+  Predicate,
+  Queue,
+  Ref,
+  Scheduler,
+  Scope,
+  Stream,
+} from "effect";
 import type { Accessor } from "@solidjs/signals";
 import {
   createRenderEffect,
@@ -318,6 +329,7 @@ const trackHostWrites = <HostNode>(host: Host<HostNode>): TrackedHost<HostNode> 
 const makeTracker = Effect.fn("View.makeTracker")(function* () {
   const context = yield* Effect.context<Scope.Scope>();
   const mountScope = yield* Effect.scope;
+  const mountScheduler = yield* Scheduler.Scheduler;
   const runSync = Effect.runSyncWith(context);
   const runFork = Effect.runForkWith(context);
 
@@ -353,6 +365,14 @@ const makeTracker = Effect.fn("View.makeTracker")(function* () {
     return { value, close: () => void runFork(Scope.close(child, Exit.void)) };
   };
 
+  const runOwned = (effect: Effect.Effect<unknown>, scope: Scope.Scope): void => {
+    // `runSync` supplies a temporary synchronous scheduler to its parent
+    // fiber. Restore the mount scheduler in the child before its work yields.
+    void runSync(
+      Effect.forkIn(Effect.provideService(effect, Scheduler.Scheduler, mountScheduler), scope),
+    );
+  };
+
   let pending: Array<() => void> = [];
   let depth = 0;
   // A build is synchronous and does not throw: a view that fails does so
@@ -386,10 +406,10 @@ const makeTracker = Effect.fn("View.makeTracker")(function* () {
     commit,
     afterCommit: (task) => void pending.push(task),
     scope: () => current,
-    run: (effect, scope) => void runSync(Effect.forkIn(effect, scope)),
+    run: runOwned,
     handle: (handler) => {
       const scope = current;
-      return (event) => void runSync(Effect.forkIn(handler(event), scope));
+      return (event) => runOwned(handler(event), scope);
     },
   } satisfies Tracker;
 });

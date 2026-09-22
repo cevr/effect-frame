@@ -49,6 +49,73 @@ interface ListenerCounts {
   released: number;
 }
 
+/* oxlint-disable effect/noGlobals, effect/noAsyncFunction, effect/noNewPromise, effect/noTernary, effect/noNullish -- this child process is the timer fairness boundary. */
+interface SchedulerProbeResult {
+  readonly timedOut: boolean;
+  readonly code: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+const runSchedulerProbe = (): Promise<SchedulerProbeResult> => {
+  const packageUrl = new URL("../..", import.meta.url);
+  const effectUrl = new URL("./node_modules/effect/dist/index.js", packageUrl);
+  const domSetupUrl = new URL("./tests/view/dom-setup.ts", packageUrl);
+  const viewUrl = new URL("./src/view/index.ts", packageUrl);
+  const jsxRuntimeUrl = new URL("./src/view/jsx-runtime.ts", packageUrl);
+  const source = `
+import { Effect, Exit, Scope } from ${JSON.stringify(effectUrl.href)};
+import { registerDom } from ${JSON.stringify(domSetupUrl.href)};
+import { Dom, View, mount } from ${JSON.stringify(viewUrl.href)};
+import { jsx } from ${JSON.stringify(jsxRuntimeUrl.href)};
+
+registerDom();
+const scope = Scope.makeUnsafe();
+const root = document.createElement("main");
+const tree = jsx("button", {
+  onClick: View.event(() => Effect.forever(Effect.yieldNow)),
+  children: "start",
+});
+await Effect.runPromise(mount(() => Effect.succeed(tree), {}, Dom.host, root).pipe(Scope.provide(scope)));
+setTimeout(() => {
+  console.log("timer ran");
+  Effect.runSync(Scope.close(scope, Exit.void));
+  console.log(JSON.stringify({ nodes: root.childNodes.length }));
+  process.exit(0);
+}, 0);
+root.querySelector("button")?.dispatchEvent(new Event("click"));
+console.log("dispatch returned");
+`;
+  const child = Bun.spawn([process.execPath, "--conditions=source", "--eval", source], {
+    cwd: packageUrl.pathname,
+    stderr: "pipe",
+    stdout: "pipe",
+  });
+  const readOutput = async (timedOut: boolean, code: number): Promise<SchedulerProbeResult> => {
+    const [stdout, stderr] = await Promise.all([
+      child.stdout === null ? Promise.resolve("") : new Response(child.stdout).text(),
+      child.stderr === null ? Promise.resolve("") : new Response(child.stderr).text(),
+    ]);
+    return { timedOut, code, stdout, stderr };
+  };
+  return new Promise((resolve) => {
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill();
+      void child.exited.then((code) => readOutput(true, code).then(resolve));
+    }, 1000);
+    void child.exited.then((code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      void readOutput(false, code).then(resolve);
+    });
+  });
+};
+/* oxlint-enable effect/noGlobals, effect/noAsyncFunction, effect/noNewPromise, effect/noTernary, effect/noNullish */
+
 const ShowPage = (props: ShowProps) =>
   Effect.succeed(
     <main>
@@ -453,6 +520,20 @@ describe("view listener ownership", () => {
       expect(counts.released).toBe(3);
       expect(counts.released).toBe(counts.attached);
       expect(root.childNodes).toHaveLength(0);
+    }),
+  );
+
+  it.scoped("keeps timers fair while a view handler yields", () =>
+    Effect.gen(function* () {
+      const result = yield* Effect.tryPromise(() => runSchedulerProbe());
+      expect(result.timedOut).toBe(false);
+      expect(result.code).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(result.stdout.trim().split("\n")).toEqual([
+        "dispatch returned",
+        "timer ran",
+        '{"nodes":0}',
+      ]);
     }),
   );
 

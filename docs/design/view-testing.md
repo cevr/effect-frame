@@ -33,6 +33,12 @@ signal and then observe the rendered result. `render` flushes the Solid graph
 that has already received source values. It does not deliver pending source
 streams.
 
+An already true condition can complete an `act` after its action succeeds
+while a descendant handler remains blocked. Use a separate completion signal
+when the handler itself is part of the contract. Solid's flush is global across
+roots, so this helper records the mounted root's host writes but cannot claim
+that another root did no work during the same flush.
+
 Each action runs in a child `Scope` of the harness. Closing the harness is
 idempotent. It interrupts actions and waits, releases host listeners, and
 closes the mounted view. A timeout uses a finite positive live-clock deadline.
@@ -44,6 +50,8 @@ unavailable until the shared inspection service is integrated.
 
 Close receipts report `rootDisposed: false` until the harness scope's
 finalizers finish. This keeps a receipt truthful while cleanup is blocked.
+The live watchdog cannot interrupt a synchronous blocked JavaScript callback or
+uninterruptible cleanup. Keep the outer test runner timeout as the final bound.
 
 The helper is a host-level test tool. Happy DOM coverage does not claim
 browser behavior. Browser-only behavior still needs a browser regression

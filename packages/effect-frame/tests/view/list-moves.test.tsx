@@ -6,7 +6,7 @@ import { Behavior, Value, spawn } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
 import type { Host } from "effect-frame/view";
 import { Dom, For, View, ViewTest, mount } from "effect-frame/view";
-import { Effect, Option } from "effect";
+import { Effect, Fiber, Option, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 const makeRoot = Effect.sync(() => document.createElement("main"));
@@ -85,11 +85,17 @@ describe("a keyed list moves only what moved", () => {
       });
       expect(Option.map(first, (li) => document.activeElement === li)).toEqual(Option.some(true));
       inserted.length = 0;
+      const sourceCommit = yield* Stream.runHead(
+        Stream.filter(items.state.changes, (value) => value.join(",") === "a,b,c"),
+      ).pipe(Effect.forkChild);
 
       yield* page.act(items.call(Value.Set(["a", "b", "c"])), {
         label: "unchanged keyed rows remain rendered",
         until: (actualRoot) => idsAt(actualRoot).join(",") === "a,b,c",
       });
+      // The predicate was already true. Wait for the actor's source change
+      // before making the negative host-write assertion causal.
+      yield* Fiber.join(sourceCommit);
       expect(inserted).toEqual([]);
       expect(Option.map(first, (li) => document.activeElement === li)).toEqual(Option.some(true));
       root.remove();

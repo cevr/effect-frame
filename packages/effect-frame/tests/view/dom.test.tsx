@@ -778,6 +778,9 @@ interface LateRowsProps {
   /** The row with this id waits for the gate before it has a body. */
   readonly slow: string;
   readonly gate: Deferred.Deferred<void>;
+  /** Receipts for proving the slow setup started and was interrupted. */
+  readonly setupStarted: Deferred.Deferred<void>;
+  readonly setupFinalized: Deferred.Deferred<void>;
 }
 
 /** One row's setup suspends: it must land in its place, not at the end. */
@@ -790,6 +793,10 @@ const LateRows = (props: LateRowsProps) =>
         Effect.gen(function* () {
           const current = yield* task.get;
           if (current.id === props.slow) {
+            yield* Effect.addFinalizer(() =>
+              Deferred.succeed(props.setupFinalized, void 0).pipe(Effect.asVoid),
+            );
+            yield* Deferred.succeed(props.setupStarted, void 0);
             yield* Deferred.await(props.gate);
           }
           return <li>{View.bind(task, (value) => value.title)}</li>;
@@ -859,7 +866,16 @@ describe("rows with a setup", () => {
           { id: "c", title: "gamma" },
         ]),
       );
-      const page = yield* pageMount(root, LateRows, { tasks: tasks.state, slow: "b", gate });
+      const setupStarted = yield* Deferred.make<void>();
+      const setupFinalized = yield* Deferred.make<void>();
+      const page = yield* pageMount(root, LateRows, {
+        tasks: tasks.state,
+        slow: "b",
+        gate,
+        setupStarted,
+        setupFinalized,
+      });
+      yield* Deferred.await(setupStarted);
       expect(titles(root)).toEqual(["alpha", "gamma"]);
 
       yield* page.act(Deferred.succeed(gate, void 0), {
@@ -874,15 +890,27 @@ describe("rows with a setup", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const gate = yield* Deferred.make<void>();
+      const setupStarted = yield* Deferred.make<void>();
+      const setupFinalized = yield* Deferred.make<void>();
       const tasks = yield* spawn(Behavior.value<ReadonlyArray<Task>>([{ id: "b", title: "beta" }]));
       const scope = yield* Scope.make();
       yield* Scope.provide(
-        mount(LateRows, { tasks: tasks.state, slow: "b", gate }, Dom.host, root),
+        mount(
+          LateRows,
+          { tasks: tasks.state, slow: "b", gate, setupStarted, setupFinalized },
+          Dom.host,
+          root,
+        ),
         scope,
       );
+      yield* Deferred.await(setupStarted);
       expect(titles(root)).toEqual([]);
 
       yield* Scope.close(scope, Exit.void);
+      // The row setup was interrupted and its finalizer ran before the gate
+      // is released. The empty root is therefore a cleanup receipt.
+      yield* Deferred.await(setupFinalized);
+      expect(titles(root)).toEqual([]);
       yield* Deferred.succeed(gate, void 0);
       expect(titles(root)).toEqual([]);
     }),

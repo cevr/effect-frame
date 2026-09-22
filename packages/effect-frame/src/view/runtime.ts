@@ -18,6 +18,7 @@ import {
   createSignal,
   flush,
   getOwner,
+  onCleanup,
   runWithOwner,
   untrack,
 } from "@solidjs/signals";
@@ -313,73 +314,32 @@ const presentationHost = <HostNode>(
   };
 
   /**
-   * Release a node and every node it owns after a real remove. Hidden nodes
-   * never call this path: `hide` only detaches mounted external children and
-   * keeps their logical graph for the next presentation.
+   * Forget one node when the owner that created it ends. `remove` is not this
+   * signal: a nested presentation removes a live node when it hides, and the
+   * node returns on reveal. The owner ending is final, so a queued
+   * attachment that never saw the document is dropped here with the rest of
+   * the node's bookkeeping.
    */
-  const release = (root: HostNode): void => {
-    const released = new Set<HostNode>();
-    const pending: Array<HostNode> = [root];
-    while (pending.length > 0) {
-      Option.match(Option.fromNullishOr(pending.pop()), {
-        onNone: () => {},
-        onSome: (node) => {
-          if (released.has(node)) {
-            return;
-          }
-          released.add(node);
-          Option.match(Option.fromNullishOr(physicalChildren.get(node)), {
-            onNone: () => {},
-            onSome: (children) => {
-              for (const child of children) {
-                pending.push(child);
-              }
-            },
-          });
-          Option.match(Option.fromNullishOr(externalChildren.get(node)), {
-            onNone: () => {},
-            onSome: (children) => {
-              for (const child of children) {
-                pending.push(child);
-              }
-            },
-          });
-        },
-      });
-    }
+  const release = (node: HostNode): void => {
+    Option.match(Option.fromNullishOr(mounted.get(node)), {
+      onNone: () => {},
+      onSome: (mountedAt) => host.remove(mountedAt, node),
+    });
+    forgetExternal(node);
+    Option.match(Option.fromNullishOr(physicalParent.get(node)), {
+      onNone: () => {},
+      onSome: (parent) => forgetPhysical(parent, node),
+    });
+    physicalChildren.delete(node);
+    mounted.delete(node);
+    attachments.delete(node);
+    created.delete(node);
+  };
 
-    for (const node of released) {
-      const parent = physicalParent.get(node);
-      const mountedParent = mounted.get(node);
-      const external = externalParent.get(node);
-      Option.match(Option.fromNullishOr(mountedParent), {
-        onNone: () => {},
-        onSome: (mountedAt) => {
-          if (!released.has(mountedAt)) {
-            host.remove(mountedAt, node);
-          }
-        },
-      });
-      Option.match(Option.fromNullishOr(external), {
-        onNone: () => {},
-        onSome: (externalParentNode) => removeExternalChild(externalParentNode, node),
-      });
-      Option.match(Option.fromNullishOr(parent), {
-        onNone: () => {},
-        onSome: (physicalParentNode) => {
-          if (!released.has(physicalParentNode)) {
-            forgetPhysical(physicalParentNode, node);
-          }
-        },
-      });
-      physicalParent.delete(node);
-      physicalChildren.delete(node);
-      externalParent.delete(node);
-      externalChildren.delete(node);
-      mounted.delete(node);
-      attachments.delete(node);
-      created.delete(node);
-    }
+  const own = (node: HostNode): HostNode => {
+    created.add(node);
+    onCleanup(() => release(node));
+    return node;
   };
 
   const rememberExternalChild = (
@@ -428,7 +388,6 @@ const presentationHost = <HostNode>(
       mounted.delete(node);
       forgetPhysical(parent, node);
     }
-    release(node);
   };
 
   const insertExternal = (
@@ -544,27 +503,19 @@ const presentationHost = <HostNode>(
 
   return {
     createElement: (tag, staticProps) => {
-      let node: HostNode;
       if (visible) {
-        node = host.createElement(tag, staticProps);
-      } else {
-        node = createDetachedElement(tag, staticProps);
+        return own(host.createElement(tag, staticProps));
       }
-      created.add(node);
-      return node;
+      return own(createDetachedElement(tag, staticProps));
     },
     createText: (text) => {
-      let node: HostNode;
       if (visible) {
-        node = host.createText(text);
-      } else {
-        node = createDetachedText(text);
+        return own(host.createText(text));
       }
-      created.add(node);
-      return node;
+      return own(createDetachedText(text));
     },
-    createDetachedElement,
-    createDetachedText,
+    createDetachedElement: (tag, staticProps) => own(createDetachedElement(tag, staticProps)),
+    createDetachedText: (text) => own(createDetachedText(text)),
     setProperty: host.setProperty,
     insert: (parent, node, anchor) => {
       if (created.has(parent)) {
@@ -577,7 +528,6 @@ const presentationHost = <HostNode>(
       if (created.has(parent)) {
         host.remove(parent, node);
         forgetPhysical(parent, node);
-        release(node);
         return;
       }
       removeExternal(parent, node);

@@ -1,0 +1,299 @@
+import { registerDom } from "./dom-setup.js";
+
+registerDom();
+
+import { Behavior, Value, spawn } from "effect-frame/actor";
+import type { QueryState, Source } from "effect-frame/actor";
+import { Dom, Errored, Loading, View, ViewTest, mount, orErrored, ready } from "effect-frame/view";
+import type { Host, Node as ViewNode } from "effect-frame/view";
+import { Effect, Option } from "effect";
+import type { Scope } from "effect";
+import { describe, expect, it } from "effect-bun-test";
+
+type Kind = "Loading" | "Errored";
+type State = QueryState<string, string>;
+
+const readyState: State = { _tag: "Ready", value: "ok", stale: false };
+
+/** The state that makes a boundary of this kind present its fallback. */
+const hiddenState = (kind: Kind): State => {
+  if (kind === "Loading") {
+    return { _tag: "Loading" };
+  }
+  return { _tag: "Failed", error: "error" };
+};
+
+/** A boundary of either kind whose content waits on `state`. */
+const boundary = (
+  kind: Kind,
+  id: string,
+  state: Source<State>,
+  content: Effect.Effect<ViewNode, never, Scope.Scope>,
+): Effect.Effect<ViewNode, never, Scope.Scope> => {
+  if (kind === "Loading") {
+    return Loading({
+      fallback: <p id={`${id}-fallback`}>{id}</p>,
+      children: Effect.gen(function* () {
+        yield* ready(state, "");
+        return yield* content;
+      }),
+    });
+  }
+  return Errored({
+    fallback: () => <p id={`${id}-fallback`}>{id}</p>,
+    children: Effect.gen(function* () {
+      yield* orErrored(state);
+      return yield* content;
+    }),
+  });
+};
+
+/**
+ * The production DOM host, with every element it creates remembered by id.
+ * Hidden content is built through the detached constructor, so both
+ * constructors report. An id in `weak` is only held weakly, so a test can
+ * observe that the runtime no longer retains that node.
+ */
+const recordingHost = (
+  made: Map<string, Node>,
+  weak: Map<string, Option.Option<WeakRef<Node>>> = new Map(),
+): Host<Node> => {
+  const create = (tag: string, props: Parameters<Host<Node>["createElement"]>[1]): Node => {
+    const node = Dom.host.createElement(tag, props);
+    Option.map(Option.fromNullishOr(props["id"]), (id) => {
+      const key = String(id);
+      if (weak.has(key)) {
+        weak.set(key, Option.some(new WeakRef(node)));
+        return;
+      }
+      made.set(key, node);
+    });
+    return node;
+  };
+  return { ...Dom.host, createElement: create, createDetachedElement: create };
+};
+
+const madeAt = (made: Map<string, Node>, id: string): Option.Option<Node> =>
+  Option.fromNullishOr(made.get(id));
+
+const parentIs = (made: Map<string, Node>, id: string, parent: Option.Option<Node>): boolean =>
+  Option.match(madeAt(made, id), {
+    onNone: () => false,
+    onSome: (node) =>
+      Option.match(parent, {
+        onNone: () => Option.isNone(Option.fromNullishOr(node.parentNode)),
+        onSome: (expected) => node.parentNode === expected,
+      }),
+  });
+
+const connectedRoot = Effect.acquireRelease(
+  Effect.sync(() => {
+    const root = document.createElement("main");
+    document.body.appendChild(root);
+    return root;
+  }),
+  (root) => Effect.sync(() => root.remove()),
+);
+
+/** Let pending microtasks and timers settle, then collect twice per turn. */
+const collect = Effect.gen(function* () {
+  for (let turn = 0; turn < 4; turn += 1) {
+    // A heap observation needs a real event-loop turn between collections.
+    // oxlint-disable-next-line effect/noNewPromise, effect/noGlobals
+    yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
+    yield* Effect.sync(() => Bun.gc(true));
+  }
+});
+
+const orders: ReadonlyArray<readonly [Kind, Kind]> = [
+  ["Errored", "Loading"],
+  ["Loading", "Errored"],
+  ["Errored", "Errored"],
+];
+
+describe("nested readiness presentation", () => {
+  for (const [outerKind, innerKind] of orders) {
+    const cases = [
+      {
+        toggleInner: false,
+        name: `runs a queued attachment once when hidden ${outerKind} reveals ${innerKind} content`,
+      },
+      {
+        toggleInner: true,
+        name: `keeps a queued attachment when ${innerKind} hides and reveals inside hidden ${outerKind}`,
+      },
+    ];
+    for (const { toggleInner, name } of cases) {
+      it.scoped(name, () =>
+        Effect.gen(function* () {
+          const outer = yield* spawn(Behavior.value<State>(hiddenState(outerKind)));
+          const inner = yield* spawn(Behavior.value<State>(readyState));
+          const attached: Array<boolean> = [];
+          const made = new Map<string, Node>();
+          const root = yield* connectedRoot;
+
+          const Page = () =>
+            boundary(
+              outerKind,
+              "outer",
+              outer.state,
+              Effect.gen(function* () {
+                const nested = yield* boundary(
+                  innerKind,
+                  "inner",
+                  inner.state,
+                  Effect.succeed(
+                    <p
+                      id="child"
+                      attach={Dom.attach((node) =>
+                        Effect.sync(() => attached.push(node.isConnected)),
+                      )}
+                    >
+                      child
+                    </p>,
+                  ),
+                );
+                return <section id="wrapper">{nested}</section>;
+              }),
+            );
+
+          const page = yield* ViewTest.make({
+            host: recordingHost(made),
+            root,
+            setup: (host, mountRoot) => mount(Page, {}, host, mountRoot),
+          });
+          const child = Option.getOrThrow(madeAt(made, "child"));
+          const wrapper = madeAt(made, "wrapper");
+          expect(root.querySelector("#outer-fallback")).not.toBeNull();
+          expect(parentIs(made, "child", wrapper)).toBe(true);
+          expect(attached).toEqual([]);
+
+          if (toggleInner) {
+            yield* page.act(inner.call(Value.Set(hiddenState(innerKind))), {
+              label: "inner hides the child inside the hidden wrapper",
+              timeout: "2 seconds",
+              until: () =>
+                parentIs(made, "child", Option.none()) && parentIs(made, "inner-fallback", wrapper),
+            });
+            expect(attached).toEqual([]);
+            yield* page.act(inner.call(Value.Set(readyState)), {
+              label: "inner restores the same child inside the hidden wrapper",
+              timeout: "2 seconds",
+              until: () =>
+                parentIs(made, "child", wrapper) && parentIs(made, "inner-fallback", Option.none()),
+            });
+            expect(attached).toEqual([]);
+            expect(root.querySelector("#child")).toBeNull();
+          }
+
+          yield* page.act(outer.call(Value.Set(readyState)), {
+            label: "outer reveals the same child",
+            timeout: "2 seconds",
+            until: () => root.querySelector("#child") === child,
+          });
+          expect(child.isConnected).toBe(true);
+          expect(root.querySelector("#outer-fallback")).toBeNull();
+          yield* page.waitFor({
+            label: "the queued attachment runs",
+            timeout: "2 seconds",
+            until: () => attached.length > 0,
+          });
+          expect(attached).toEqual([true]);
+
+          yield* page.close;
+          expect(root.innerHTML).toBe("");
+          expect(attached).toEqual([true]);
+        }),
+      );
+    }
+  }
+
+  const removals = [
+    { nested: false, name: "drops a queued attachment when its row ends before the first reveal" },
+    {
+      nested: true,
+      name: "drops a queued attachment when its row ends under a visible inner boundary before reveal",
+    },
+  ];
+  for (const { nested, name } of removals) {
+    it.scoped(name, () =>
+      Effect.gen(function* () {
+        const outer = yield* spawn(Behavior.value<State>(hiddenState("Errored")));
+        const inner = yield* spawn(Behavior.value<State>(readyState));
+        const items = yield* spawn(Behavior.value<ReadonlyArray<string>>(["row"]));
+        const attached: Array<boolean> = [];
+        let rowClosed = false;
+        const made = new Map<string, Node>();
+        const weak = new Map<string, Option.Option<WeakRef<Node>>>([["row", Option.none()]]);
+        const rowRef = (): Option.Option<WeakRef<Node>> =>
+          Option.flatten(Option.fromNullishOr(weak.get("row")));
+        const root = yield* connectedRoot;
+
+        const list = View.list({
+          each: items.state,
+          keyBy: (id) => id,
+          row: () =>
+            Effect.gen(function* () {
+              yield* Effect.addFinalizer(() =>
+                Effect.sync(() => {
+                  rowClosed = true;
+                }),
+              );
+              return (
+                <p
+                  id="row"
+                  attach={Dom.attach((node) => Effect.sync(() => attached.push(node.isConnected)))}
+                >
+                  row
+                </p>
+              );
+            }),
+        });
+        const content = Effect.map(list, (rows) => <section id="wrapper">{rows}</section>);
+        const withinInner = (): Effect.Effect<ViewNode, never, Scope.Scope> => {
+          if (nested) {
+            return boundary("Loading", "inner", inner.state, content);
+          }
+          return content;
+        };
+        const Page = () => boundary("Errored", "outer", outer.state, withinInner());
+
+        const page = yield* ViewTest.make({
+          host: recordingHost(made, weak),
+          root,
+          setup: (mountHost, mountRoot) => mount(Page, {}, mountHost, mountRoot),
+        });
+        const wrapper = Option.getOrThrow(madeAt(made, "wrapper"));
+        yield* page.waitFor({
+          label: "the row is built inside the hidden wrapper",
+          timeout: "2 seconds",
+          until: () => wrapper.childNodes.length === 1,
+        });
+        expect(Option.isSome(rowRef())).toBe(true);
+        expect(root.querySelector("#outer-fallback")).not.toBeNull();
+
+        yield* page.act(items.call(Value.Set([])), {
+          label: "the row owner ends while the outer boundary is hidden",
+          timeout: "2 seconds",
+          until: () => wrapper.childNodes.length === 0 && rowClosed,
+        });
+        yield* collect;
+        expect(Option.flatMap(rowRef(), (ref) => Option.fromNullishOr(ref.deref()))).toEqual(
+          Option.none(),
+        );
+
+        yield* page.act(outer.call(Value.Set(readyState)), {
+          label: "outer reveals the empty wrapper",
+          timeout: "2 seconds",
+          until: () => root.querySelector("#wrapper") === wrapper,
+        });
+        expect(root.querySelector("#row")).toBeNull();
+        expect(attached).toEqual([]);
+
+        yield* page.close;
+        expect(root.innerHTML).toBe("");
+        expect(attached).toEqual([]);
+      }),
+    );
+  }
+});

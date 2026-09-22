@@ -216,6 +216,83 @@ const drainsPendingOnReopen = Effect.fn("Conformance.drainsPendingOnReopen")(fun
   ];
 });
 
+/**
+ * The command owner's bound (#19): eight passes, each one admission request
+ * and one same-ID call. A store takes no clock, so the bound it sees is
+ * counted in the requests those passes make, not in time.
+ */
+const retryPasses = 8;
+
+const neverReadmits = Effect.fn("Conformance.neverReadmits")(function* (store: StoreService) {
+  const first = yield* store.append({ commandId: id("a"), payload: "1", payloadHash: 1 });
+  const whilePending = yield* store.append({ commandId: id("a"), payload: "1", payloadHash: 1 });
+  const receipt = yield* store.commit(id("a"), "s1");
+  yield* store.append({ commandId: id("b"), payload: "2", payloadHash: 2 });
+  yield* store.commit(id("b"), "s2");
+  yield* store.advance("s3");
+  const afterCommit = yield* store.append({ commandId: id("a"), payload: "1", payloadHash: 1 });
+  const pending = yield* store.pending;
+  const next = yield* store.next;
+  const fresh = yield* store.append({ commandId: id("c"), payload: "3", payloadHash: 3 });
+  return [
+    equals("first append", first, { _tag: "Admitted", admitted: 1 }),
+    equals("append while pending", whilePending, {
+      _tag: "Duplicate",
+      admitted: 1,
+      receipt: Option.none(),
+    }),
+    equals("append after commit, later commands, and an advance", afterCommit._tag, "Duplicate"),
+    equals(
+      "the duplicate keeps the first admission and its receipt",
+      {
+        admitted: afterCommit.admitted,
+        receipt: Option.map(duplicateReceipt(afterCommit), receiptFields),
+      },
+      { admitted: 1, receipt: Option.some(receiptFields(receipt)) },
+    ),
+    equals("nothing pending after the re-send", pending, []),
+    equals("no next command after the re-send", next, Option.none()),
+    // A re-send consumed no admission number.
+    equals("a new ID takes the next admission", fresh, { _tag: "Admitted", admitted: 3 }),
+  ];
+});
+
+const receiptOutlivesRetryBound = Effect.fn("Conformance.receiptOutlivesRetryBound")(function* (
+  store: StoreService,
+) {
+  yield* store.append({ commandId: id("a"), payload: "1", payloadHash: 1 });
+  const receipt = yield* store.commit(id("a"), "s1");
+  const want = Option.some(receiptFields(receipt));
+  const checks: Array<Check> = [];
+  // Every pass of the bound re-sends the command and reads its receipt,
+  // while the actor keeps committing other commands and its own changes.
+  for (let pass = 1; pass <= retryPasses; pass += 1) {
+    const resent = yield* store.append({ commandId: id("a"), payload: "1", payloadHash: 1 });
+    const read = yield* store.receipt(id("a"));
+    const other = id(`other-${String(pass)}`);
+    yield* store.append({ commandId: other, payload: String(pass), payloadHash: pass + 100 });
+    yield* store.commit(other, `other-${String(pass)}`);
+    yield* store.advance(`autonomous-${String(pass)}`);
+    checks.push(
+      equals(
+        `pass ${String(pass)} re-send`,
+        Option.map(duplicateReceipt(resent), receiptFields),
+        want,
+      ),
+      equals(`pass ${String(pass)} receipt`, Option.map(read, receiptFields), want),
+    );
+  }
+  // The bound is spent. A manual retry of the same ID still finds the receipt.
+  const retried = yield* store.append({ commandId: id("a"), payload: "1", payloadHash: 1 });
+  const read = yield* store.receipt(id("a"));
+  checks.push(
+    equals("retry after the bound", retried._tag, "Duplicate"),
+    equals("retry receipt", Option.map(duplicateReceipt(retried), receiptFields), want),
+    equals("receipt after the bound", Option.map(read, receiptFields), want),
+  );
+  return checks;
+});
+
 interface Definition {
   readonly name: string;
   /** A case may fail; `runCase` turns any failure into a failed check. */
@@ -240,6 +317,8 @@ const definitions: ReadonlyArray<Definition> = [
   },
   { name: "receipt is absent until commit and stable after it", run: receiptIsStable },
   { name: "next walks pending commands in admission order", run: drainsPendingOnReopen },
+  { name: "a seen command ID is never admitted again", run: neverReadmits },
+  { name: "a receipt outlives the retry bound", run: receiptOutlivesRetryBound },
 ];
 
 const runCase = Effect.fn("Conformance.runCase")(function* (

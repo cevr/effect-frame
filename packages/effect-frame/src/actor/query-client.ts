@@ -4,11 +4,14 @@ import {
   Context,
   Deferred,
   Effect,
+  Equal,
   Exit,
+  Hash,
   Layer,
   Option,
   Request,
   RequestResolver,
+  RcMap,
   Schema,
   Scope,
   Stream,
@@ -123,10 +126,9 @@ interface CacheSlot {
   /** The contract's `depends`, so `invalidate` needs no registry beside the slots. */
   readonly depends: ReadonlyArray<string>;
   /** Owns the read in flight. Closing it interrupts the read. */
-  readonly scope: Scope.Closeable;
+  /** Scope owned by the RcMap entry. Closing the last declaration closes it. */
+  readonly scope: Scope.Scope;
   readonly state: SubscriptionRef.SubscriptionRef<QueryState<string, QueryFailure>>;
-  /** Live declarations. The slot is dropped when this reaches zero. */
-  count: number;
   readonly refresh: Effect.Effect<void>;
   /** Marks the entry stale in place. Used when a dependency commits. */
   readonly markStale: Effect.Effect<void>;
@@ -134,6 +136,43 @@ interface CacheSlot {
   readonly accept: (encoded: string) => Effect.Effect<void>;
   /** Records a refresh that the server could not serve. */
   readonly reject: (error: QueryFailure) => Effect.Effect<void>;
+}
+
+/**
+ * RcMap installs a resource before its lookup starts. The key therefore keeps
+ * the first declaration's contract and transport beside its canonical id, so
+ * lookup never needs a second descriptor map or a cache-wide lock.
+ */
+class QueryCacheKey implements Equal.Equal {
+  readonly id: string;
+
+  constructor(
+    readonly key: QueryKey,
+    readonly contract: Option.Option<AnyQuery>,
+    readonly transport: Option.Option<ActorTransport["Service"]>,
+  ) {
+    this.id = keyOf(key);
+  }
+
+  [Equal.symbol](that: Equal.Equal): boolean {
+    return that instanceof QueryCacheKey && this.id === that.id;
+  }
+
+  [Hash.symbol](): number {
+    return Hash.string(this.id);
+  }
+
+  static acquired(
+    contract: AnyQuery,
+    key: QueryKey,
+    transport: ActorTransport["Service"],
+  ): QueryCacheKey {
+    return new QueryCacheKey(key, Option.some(contract), Option.some(transport));
+  }
+
+  static lookup(key: QueryKey): QueryCacheKey {
+    return new QueryCacheKey(key, Option.none(), Option.none());
+  }
 }
 
 /**
@@ -187,7 +226,7 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
   registry: Option.Option<Inspection.RegistryService>,
   owner: Option.Option<Inspection.OwnerToken>,
 ) {
-  const scope = yield* Scope.make();
+  const scope = yield* Effect.scope;
   const state = yield* SubscriptionRef.make<QueryState<string, QueryFailure>>(Loading());
   const openedAt = clock.monotonicTimeNanosUnsafe();
 
@@ -266,7 +305,6 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
     depends: contract.depends,
     scope,
     state,
-    count: 0,
     refresh,
     markStale: SubscriptionRef.update(state, markStale),
     accept,
@@ -304,6 +342,7 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
       scope,
     );
   }
+  yield* Effect.forkIn(slot.refresh, scope);
   return slot;
 });
 
@@ -336,7 +375,7 @@ const entryOf = <Q extends AnyQuery>(
   };
 };
 
-const make = (): Effect.Effect<QueryCacheService> =>
+const make = (): Effect.Effect<QueryCacheService, never, Scope.Scope> =>
   Effect.gen(function* () {
     const clock = yield* Clock.Clock;
     const registry = yield* Effect.serviceOption(Inspection.Registry);
@@ -344,7 +383,6 @@ const make = (): Effect.Effect<QueryCacheService> =>
     if (Option.isSome(registry)) {
       owner = Option.some(yield* Inspection.ownerFor(registry.value));
     }
-    const slots = new Map<string, CacheSlot>();
     const batchResolvers = new Map<
       AnyQuery,
       Map<ActorTransport["Service"], BatchedQueryResolver>
@@ -371,72 +409,74 @@ const make = (): Effect.Effect<QueryCacheService> =>
       return Option.some(created);
     };
 
-    const acquire = (contract: AnyQuery, key: QueryKey) =>
-      Effect.gen(function* () {
-        const id = keyOf(key);
-        const existing = Option.fromNullishOr(slots.get(id));
-        // An entry that already exists keeps its value; a second declaration
-        // of the same key must not restart it as Loading.
-        if (Option.isSome(existing)) {
-          existing.value.count += 1;
-          return existing.value;
-        }
-        const transport = yield* ActorTransport;
-        const created = yield* makeSlot(
-          contract,
-          key,
-          transport,
-          batchResolverFor(contract, transport),
-          clock,
-          registry,
-          owner,
-        );
-        created.count = 1;
-        slots.set(id, created);
-        yield* Effect.forkIn(created.refresh, created.scope);
-        return created;
-      });
+    const slots = yield* RcMap.make<QueryCacheKey, CacheSlot, never, Scope.Scope>({
+      lookup: (cacheKey) =>
+        Option.match(cacheKey.contract, {
+          onNone: () => Effect.die("query cache lookup key has no contract"),
+          onSome: (contract) =>
+            Option.match(cacheKey.transport, {
+              onNone: () => Effect.die("query cache lookup key has no transport"),
+              onSome: (transport) =>
+                makeSlot(
+                  contract,
+                  cacheKey.key,
+                  transport,
+                  batchResolverFor(contract, transport),
+                  clock,
+                  registry,
+                  owner,
+                ),
+            }),
+        }),
+    });
 
-    const release = (slot: CacheSlot) =>
-      Effect.suspend(() => {
-        slot.count -= 1;
-        if (slot.count > 0) {
-          return Effect.void;
-        }
-        slots.delete(keyOf(slot.key));
-        return Scope.close(slot.scope, Exit.void);
-      });
+    const withCachedSlot = (
+      key: QueryKey,
+      use: (slot: CacheSlot) => Effect.Effect<void>,
+    ): Effect.Effect<void> =>
+      Effect.scoped(
+        Effect.flatMap(RcMap.getOption(slots, QueryCacheKey.lookup(key)), (entry) =>
+          Option.match(entry, {
+            onNone: () => Effect.void,
+            onSome: use,
+          }),
+        ),
+      );
 
     const open = <Q extends AnyQuery>(contract: Q, args: ArgsOf<Q>) =>
       Effect.gen(function* () {
         const key = yield* encodeKey(contract, args);
-        const slot = yield* Effect.acquireRelease(acquire(contract, key), release);
+        const transport = yield* ActorTransport;
+        const slot = yield* RcMap.get(slots, QueryCacheKey.acquired(contract, key, transport));
         return entryOf(contract, slot);
       });
 
-    const active = Effect.sync(() => Array.from(slots.values(), (slot) => slot.key));
+    const active = Effect.map(RcMap.keys(slots), (keys) =>
+      Array.from(keys, (cacheKey) => cacheKey.key),
+    );
 
     const apply = (refreshed: ReadonlyArray<Refreshed>) =>
       Effect.forEach(
         refreshed,
         (one) =>
-          Option.match(Option.fromNullishOr(slots.get(keyOf(one.key))), {
-            onNone: () => Effect.void,
-            onSome: (slot) => {
-              if (one._tag === "Refreshed") {
-                return slot.accept(one.result);
-              }
-              return slot.reject(one.error);
-            },
+          withCachedSlot(one.key, (slot) => {
+            if (one._tag === "Refreshed") {
+              return slot.accept(one.result);
+            }
+            return slot.reject(one.error);
           }),
         { discard: true },
       );
 
     const invalidate = (contractName: string) =>
-      Effect.forEach(
-        Array.from(slots.values()).filter((slot) => slot.depends.includes(contractName)),
-        (slot) => slot.markStale,
-        { discard: true },
+      Effect.flatMap(RcMap.keys(slots), (keys) =>
+        Effect.forEach(
+          Array.from(keys).filter((cacheKey) =>
+            Option.exists(cacheKey.contract, (contract) => contract.depends.includes(contractName)),
+          ),
+          (cacheKey) => withCachedSlot(cacheKey.key, (slot) => slot.markStale),
+          { discard: true },
+        ),
       );
 
     const service: QueryCacheService = { open, active, apply, invalidate };

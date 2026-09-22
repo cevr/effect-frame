@@ -5,6 +5,7 @@ registerDom();
 import { Behavior, Cell, Value, modify, select, spawn } from "effect-frame/actor";
 import type { LocalActorRef, SetValue, Source } from "effect-frame/actor";
 import { Dom, For, Match, Portal, Show, View, ViewTest, mount } from "effect-frame/view";
+import type { Host } from "effect-frame/view";
 import { Deferred, Effect, Exit, Option, Ref, Scope, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
@@ -646,6 +647,35 @@ describe("browser view", () => {
         Effect.exit(actor.send(Value.Set(1))),
       );
       expect(stopped.map(Exit.isFailure)).toEqual([true]);
+    }),
+  );
+
+  it.scoped("rolls back host nodes when initial planning defects", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      let insertions = 0;
+      const host: Host<Node> = {
+        ...Dom.host,
+        insert: (parent, node, anchor) => {
+          insertions += 1;
+          if (insertions === 2) {
+            Option.getOrThrow(Option.none());
+          }
+          Dom.host.insert(parent, node, anchor);
+        },
+      };
+      const Broken = (_props: NoProps) =>
+        Effect.succeed(
+          <>
+            <p>first</p>
+            <p>second</p>
+          </>,
+        );
+
+      const outcome = yield* Effect.exit(mount(Broken, noProps, host, root));
+      expect(Exit.isFailure(outcome)).toBe(true);
+      expect(insertions).toBe(2);
+      expect(root.childNodes.length).toBe(0);
     }),
   );
 });

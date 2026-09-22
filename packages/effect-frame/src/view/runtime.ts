@@ -889,27 +889,56 @@ export const mount = Effect.fn("View.mount")(function* <Props, E, R, HostNode>(
     const tree: Node = yield* view(props);
     const tracker = yield* makeTracker();
     const slot: Slot<HostNode> = { nodes: [] };
+    const removeNodes = (): void => {
+      for (const node of slot.nodes) {
+        host.remove(root, node);
+      }
+      slot.nodes = [];
+    };
 
     // Planning creates the signals a binding writes to, so it belongs inside
-    // the root that owns them.
-    const dispose = createRoot((disposeRoot) => {
-      tracker.commit(() => {
-        plan({ host, tracker }, tree)(root, slot, () => {});
-        flush();
-      });
-      return disposeRoot;
-    });
+    // the root that owns them. The acquire/release pair owns the Solid root
+    // before phase changes can yield. If planning defects after host writes,
+    // capture the defect as an Exit, close the root, and remove those writes
+    // before re-failing the acquire effect.
+    yield* Effect.acquireRelease(
+      Effect.gen(function* () {
+        let dispose: Option.Option<() => void> = Option.none();
+        const outcome = yield* Effect.exit(
+          Effect.sync(() =>
+            createRoot((disposeRoot) => {
+              dispose = Option.some(disposeRoot);
+              tracker.commit(() => {
+                plan({ host, tracker }, tree)(root, slot, () => {});
+                flush();
+              });
+              return disposeRoot;
+            }),
+          ),
+        );
+        return yield* Exit.match(outcome, {
+          onFailure: (cause) =>
+            Effect.andThen(
+              Effect.sync(() => {
+                Option.match(dispose, {
+                  onNone: () => {},
+                  onSome: (close) => close(),
+                });
+                removeNodes();
+              }),
+              Effect.failCause(cause),
+            ),
+          onSuccess: (close) => Effect.succeed(close),
+        });
+      }),
+      (close) =>
+        Effect.sync(() => {
+          close();
+          removeNodes();
+        }),
+    );
 
     yield* Ref.set(phase, "mounted");
-    yield* Effect.addFinalizer(() =>
-      Effect.sync(() => {
-        dispose();
-        for (const node of slot.nodes) {
-          host.remove(root, node);
-        }
-        slot.nodes = [];
-      }),
-    );
   });
 
   if (Option.isSome(owner)) {

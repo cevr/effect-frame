@@ -1,6 +1,7 @@
 import type { Source } from "effect-frame/actor";
 import type { Host, View } from "effect-frame/view";
 import { mount as mountView } from "effect-frame/view";
+import { read as readInspection, register as registerInspection } from "./route-inspection.js";
 import {
   Context,
   Deferred,
@@ -102,14 +103,17 @@ const notFoundRoute = <R>(view: View.View<NotFoundProps, never, R>): AnyRoute<R>
   searchKeys: { known: true, keys: [] },
   enter: (url) =>
     Option.some(
-      Effect.map(SubscriptionRef.make(url), (current): Entered<R> => ({
-        instance: { _tag: "RouteInstance" },
-        inspection: Effect.succeed({ params: {}, search: {} }),
-        setup: view({
-          url: { get: SubscriptionRef.get(current), changes: SubscriptionRef.changes(current) },
-        }),
-        update: (next) => Effect.as(SubscriptionRef.set(current, next), true),
-      })),
+      Effect.map(SubscriptionRef.make(url), (current): Entered<R> => {
+        const entered: Entered<R> = {
+          instance: { _tag: "RouteInstance" },
+          setup: view({
+            url: { get: SubscriptionRef.get(current), changes: SubscriptionRef.changes(current) },
+          }),
+          update: (next) => Effect.as(SubscriptionRef.set(current, next), true),
+        };
+        registerInspection(entered, Effect.succeed({ params: {}, search: {} }));
+        return entered;
+      }),
     ),
 });
 
@@ -274,7 +278,7 @@ export const mount: <R, HostNode>(
           registry.value.register(routeOwner.value, (id) =>
             Effect.gen(function* () {
               const mountedPhase = yield* Ref.get(phase);
-              const decoded = yield* Option.match(Option.fromNullishOr(mountedEntered.inspection), {
+              const decoded = yield* Option.match(readInspection(mountedEntered), {
                 onNone: () =>
                   Effect.succeed({ params: unavailableInspection, search: unavailableInspection }),
                 onSome: (read) => read,

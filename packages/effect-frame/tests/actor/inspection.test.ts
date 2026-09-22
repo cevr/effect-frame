@@ -1,4 +1,15 @@
-import { Context, Deferred, Effect, Exit, Layer, Schema, Scope } from "effect";
+import {
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Schema,
+  Scheduler,
+  Scope,
+  Stream,
+} from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { Event, Machine, State } from "effect-machine";
 import { Behavior, Cell, implementQuery, query, spawn, useQuery } from "effect-frame/actor";
@@ -25,6 +36,19 @@ const Blocked = query("InspectionBlocked", {
   args: Schema.Struct({ id: Schema.Finite }),
   result: Schema.Struct({ value: Schema.String }),
 });
+
+const Concurrent = query("InspectionConcurrent", {
+  args: Schema.Struct({ id: Schema.Finite }),
+  result: Schema.Finite,
+});
+
+const Failed = query("InspectionFailed", {
+  args: Schema.Struct({ id: Schema.Finite }),
+  result: Schema.Finite,
+});
+
+let concurrentReads = 0;
+let failedReads = 0;
 
 const makeFrame = (name: string) => Frame.layer({ name });
 
@@ -94,6 +118,12 @@ describe("Frame.inspect actor and query records", () => {
             return { value: "ready" };
           }),
         ),
+        implementQuery(Concurrent, () =>
+          Effect.sync(() => {
+            concurrentReads += 1;
+            return 1;
+          }),
+        ),
       ],
     }).pipe(
       Layer.provideMerge(makeFrame("queries")),
@@ -129,6 +159,86 @@ describe("Frame.inspect actor and query records", () => {
       yield* Scope.close(firstScope, Exit.void);
       expect((yield* Frame.inspect).queries).toHaveLength(1);
       yield* Scope.close(secondScope, Exit.void);
+      expect((yield* Frame.inspect).queries).toHaveLength(0);
+    }),
+  );
+
+  it.scoped.layer(
+    QueryTest.layer({
+      queries: [
+        implementQuery(Failed, () =>
+          Effect.sync(() => {
+            failedReads += 1;
+            return Effect.fail("inspection failure");
+          }).pipe(Effect.flatten),
+        ),
+      ],
+    }).pipe(Layer.provideMerge(makeFrame("query-failure"))),
+  )("samples failure, removes the owner, and reacquires a fresh slot", () =>
+    Effect.gen(function* () {
+      failedReads = 0;
+      const firstScope = yield* Scope.make();
+      const first = yield* Scope.provide(useQuery(Failed, { id: 1 }), firstScope);
+      yield* Stream.runHead(Stream.filter(first.state.changes, (state) => state._tag === "Failed"));
+
+      const failed = yield* Frame.inspect;
+      expect(failed.queries).toHaveLength(1);
+      expect(failed.queries[0]?.state).toBe("Failed");
+      const firstId = failed.queries[0]?.id;
+
+      yield* Scope.close(firstScope, Exit.void);
+      expect((yield* Frame.inspect).queries).toHaveLength(0);
+
+      const secondScope = yield* Scope.make();
+      const second = yield* Scope.provide(useQuery(Failed, { id: 1 }), secondScope);
+      yield* Stream.runHead(
+        Stream.filter(second.state.changes, (state) => state._tag === "Failed"),
+      );
+      const reacquired = yield* Frame.inspect;
+      expect(reacquired.queries).toHaveLength(1);
+      expect(reacquired.queries[0]?.id).not.toBe(firstId);
+      expect(failedReads).toBe(2);
+      yield* Scope.close(secondScope, Exit.void);
+    }),
+  );
+
+  it.scoped.layer(
+    QueryTest.layer({
+      queries: [
+        implementQuery(Concurrent, () =>
+          Effect.sync(() => {
+            concurrentReads += 1;
+            return 1;
+          }),
+        ),
+      ],
+    }).pipe(Layer.provideMerge(makeFrame("query-ownership"))),
+  )("deduplicates concurrent first declarations and releases the RcMap entry", () =>
+    Effect.gen(function* () {
+      concurrentReads = 0;
+      const scopes = yield* Effect.forEach(Array.from({ length: 10 }), () => Scope.make());
+      const entries = yield* Effect.provideService(
+        Effect.forEach(scopes, (scope) => Scope.provide(useQuery(Concurrent, { id: 1 }), scope), {
+          concurrency: 10,
+        }),
+        Scheduler.MaxOpsBeforeYield,
+        32,
+      );
+
+      yield* Effect.forEach(
+        entries,
+        (entry) =>
+          Stream.runHead(Stream.filter(entry.state.changes, (state) => state._tag !== "Loading")),
+        { concurrency: 10, discard: true },
+      );
+      expect(concurrentReads).toBe(1);
+      expect((yield* Frame.inspect).queries).toHaveLength(1);
+
+      yield* Scope.close(Option.getOrThrow(Option.fromNullishOr(scopes[0])), Exit.void);
+      expect((yield* Frame.inspect).queries).toHaveLength(1);
+      yield* Effect.forEach(scopes.slice(1), (scope) => Scope.close(scope, Exit.void), {
+        discard: true,
+      });
       expect((yield* Frame.inspect).queries).toHaveLength(0);
     }),
   );

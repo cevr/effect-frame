@@ -3,6 +3,7 @@ import { select } from "effect-frame/actor/client";
 import type { Node, View } from "effect-frame/view";
 import type { SchemaAST, Scope } from "effect";
 import { Effect, Option, Predicate, Result, Schema, SchemaGetter, SubscriptionRef } from "effect";
+import { register as registerInspection } from "./route-inspection.js";
 
 /**
  * A route is a bidirectional codec for a URL plus the view that URL shows
@@ -516,15 +517,8 @@ export interface RouteDefinition<Params extends ParamsCodec, Search extends Sear
 export interface Entered<R> {
   /** Identity for actions created by this mounted route instance. */
   readonly instance?: RouteInstance;
-  /** Framework-owned decoded memory for Frame inspection. */
-  readonly inspection?: Effect.Effect<EnteredInspection>;
   readonly setup: Effect.Effect<Node, never, R | Scope.Scope>;
   readonly update: (url: URL) => Effect.Effect<boolean>;
-}
-
-export interface EnteredInspection {
-  readonly params: unknown;
-  readonly search: unknown;
 }
 
 /** A route with its shapes erased: what a router holds. */
@@ -677,7 +671,7 @@ export const client = <
           get: SubscriptionRef.get(current),
           changes: SubscriptionRef.changes(current),
         };
-        return {
+        const entered: Entered<R> = {
           setup: definition.view({
             params: select(source, (value) => value.params),
             search: select(source, (value) => value.search),
@@ -708,16 +702,20 @@ export const client = <
               ),
           }),
           instance,
-          inspection: Effect.map(SubscriptionRef.get(current), (value) => ({
-            params: value.params,
-            search: value.search,
-          })),
           update: (next) =>
             Option.match(parse(next), {
               onNone: () => Effect.succeed(false),
               onSome: (value) => Effect.as(SubscriptionRef.set(current, value), true),
             }),
         };
+        registerInspection(
+          entered,
+          Effect.map(SubscriptionRef.get(current), (value) => ({
+            params: value.params,
+            search: value.search,
+          })),
+        );
+        return entered;
       }),
     );
 

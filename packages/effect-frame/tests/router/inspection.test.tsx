@@ -3,7 +3,7 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import { Location, Route, UrlState, mount } from "effect-frame/router";
-import type { LocationService } from "effect-frame/router";
+import type { AnyRoute, Entered, LocationService } from "effect-frame/router";
 import type { Source } from "effect-frame/actor";
 import { Dom, View, render } from "effect-frame/view";
 import { Deferred, Effect, Fiber, Option, Queue, Ref, Schema, SchemaGetter, Stream } from "effect";
@@ -280,6 +280,29 @@ describe("Frame router inspection", () => {
             },
           },
         });
+      }),
+  );
+
+  it.scoped.layer(Frame.layer({ name: "custom-route" }))(
+    "does not execute arbitrary custom route inspection work",
+    () =>
+      Effect.gen(function* () {
+        const custom: AnyRoute<never> = {
+          name: "custom",
+          searchKeys: { known: true, keys: [] },
+          enter: () =>
+            Option.some(
+              Effect.succeed<Entered<never>>({
+                setup: Effect.succeed(<p>custom</p>),
+                update: () => Effect.succeed(true),
+              }),
+            ),
+        };
+        yield* makeStart("http://app.test/custom", [custom]);
+
+        const route = routeNamed(yield* Frame.inspect, "custom");
+        expect(route.params).toEqual({ _tag: "Opaque", reason: "unsupported-value" });
+        expect(route.search).toEqual({ _tag: "Opaque", reason: "unsupported-value" });
       }),
   );
 });

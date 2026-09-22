@@ -5,11 +5,13 @@ import {
   Effect,
   Exit,
   Option,
+  Predicate,
   Schedule,
   Scheduler,
   Scope,
   SubscriptionRef,
 } from "effect";
+import * as Inspection from "../inspection.js";
 import { freshCommandId } from "./command-id.js";
 import type { Committed } from "./engine-types.js";
 import type { QueryKey } from "./query.js";
@@ -140,7 +142,21 @@ export interface Settlement<State> {
  * One placement's admission and exact-result requests. The owner runs every
  * pass through these two functions with the retained ID and exact bytes.
  */
+/** What a record's owner does with its exact settlement before it releases. */
+export type SettlementHook<State> = (settlement: Settlement<State>) => Effect.Effect<void>;
+
 export interface CommandAdapter<State, Rejection> {
+  /** The placement, as inspection reports it. */
+  readonly kind: "durable" | "remote";
+  /**
+   * Runs once per record, before its first pass, inside the record scope.
+   * Anything it registers is released when the record leaves: on terminal
+   * settlement or when the owner closes. Uncertain keeps it. The returned
+   * hook receives an Applied settlement before that release.
+   */
+  readonly own: (
+    active: ReadonlyArray<QueryKey>,
+  ) => Effect.Effect<SettlementHook<State>, never, Scope.Scope>;
   /** True when the physical actor behind this adapter can admit nothing more. */
   readonly closed: Effect.Effect<boolean>;
   /** One admission request. No active query keys travel with it. */
@@ -209,13 +225,30 @@ interface CommandRecord<State, Rejection> {
   readonly active: ReadonlyArray<QueryKey>;
   readonly state: SubscriptionRef.SubscriptionRef<Lifecycle<State, Rejection>>;
   readonly terminal: Deferred.Deferred<Terminal<State, Rejection>>;
-  /** Owns the record's workers. Closed when the record is collected. */
+  /** Owns the record's workers and registrations. Closed when the record leaves. */
   readonly scope: Scope.Closeable;
+  /** Set once the adapter owns the record. No sequence starts before that. */
+  settle: Option.Option<SettlementHook<State>>;
   possibleAdmission: boolean;
   admitted: Option.Option<number>;
   attempt: number;
   running: boolean;
   done: boolean;
+}
+
+const isOpen = Predicate.or(
+  Predicate.or(Predicate.isTagged("Sent"), Predicate.isTagged("Admitted")),
+  Predicate.isTagged("Uncertain"),
+);
+
+/** Nothing to own and nothing to do at settlement. */
+export const ownNothing = <State>(
+  _active: ReadonlyArray<QueryKey>,
+): Effect.Effect<SettlementHook<State>> => Effect.succeed(() => Effect.void);
+
+interface Inspected {
+  readonly registry: Inspection.RegistryService;
+  readonly owner: Inspection.OwnerToken;
 }
 
 /** How one pass ended when it did not produce a settlement. */
@@ -271,6 +304,14 @@ export const make = Effect.fn("Actor.commands.make")(function* <
   const schedule = retrySchedule(policy);
   const records = new Map<CommandId, CommandRecord<State, Rejection>>();
   const closedSignal = yield* Deferred.make<void>();
+  // Inspection is the root's optional registry. A sample reads the retained
+  // records themselves; no second command store exists for it.
+  const registry = yield* Effect.serviceOption(Inspection.Registry);
+  const inspection = yield* Option.match(registry, {
+    onNone: () => Effect.succeed(Option.none<Inspected>()),
+    onSome: (found) =>
+      Effect.map(Inspection.ownerFor(found), (owner) => Option.some({ registry: found, owner })),
+  });
 
   // The owner scope reads Closed from the first moment of its close, before
   // any finalizer runs, so this check refuses work during shutdown too.
@@ -314,9 +355,11 @@ export const make = Effect.fn("Actor.commands.make")(function* <
       if (records.get(record.commandId) === record) {
         records.delete(record.commandId);
       }
-      // Release the record's scope before a waiter can observe settlement.
-      return SubscriptionRef.set(record.state, terminal).pipe(
-        Effect.andThen(Scope.close(record.scope, Exit.void)),
+      // Release the record's scope, and with it the cache ownership and the
+      // inspection registration, before any reader can see the terminal
+      // state or a waiter can observe settlement.
+      return Scope.close(record.scope, Exit.void).pipe(
+        Effect.andThen(SubscriptionRef.set(record.state, terminal)),
         Effect.andThen(Deferred.succeed(record.terminal, terminal)),
       );
     });
@@ -380,6 +423,9 @@ export const make = Effect.fn("Actor.commands.make")(function* <
       const outcome = yield* Effect.exit(Effect.retry(pass(record), { schedule, while: isLost }));
       if (Exit.isSuccess(outcome)) {
         const admitted = Option.getOrElse(record.admitted, () => 0);
+        if (Option.isSome(record.settle)) {
+          yield* record.settle.value(outcome.value);
+        }
         yield* finish(record, {
           _tag: "Applied",
           admitted,
@@ -395,7 +441,7 @@ export const make = Effect.fn("Actor.commands.make")(function* <
 
   const startSequence = (record: CommandRecord<State, Rejection>): Effect.Effect<void> =>
     Effect.suspend(() => {
-      if (record.done || record.running || closing()) {
+      if (record.done || record.running || Option.isNone(record.settle) || closing()) {
         return Effect.void;
       }
       record.running = true;
@@ -409,6 +455,54 @@ export const make = Effect.fn("Actor.commands.make")(function* <
         }),
       );
       return Effect.asVoid(Effect.forkIn(owned(body), worker));
+    });
+
+  const inspectionLifecycle = (
+    record: CommandRecord<State, Rejection>,
+    lifecycle: Lifecycle<State, Rejection>,
+  ): Inspection.CommandLifecycle => {
+    if (isOpen(lifecycle)) {
+      return lifecycle;
+    }
+    // A terminal record has left before its state turns terminal, so a
+    // sample never reads this. Report the last open fact the record holds.
+    return Option.match(record.admitted, {
+      onNone: (): Inspection.CommandLifecycle => ({ _tag: "Sent" }),
+      onSome: (admitted): Inspection.CommandLifecycle => ({ _tag: "Admitted", admitted }),
+    });
+  };
+
+  /**
+   * The adapter takes ownership, and inspection registers the record, in the
+   * record scope. Both are released when the record leaves.
+   */
+  const adopt = (record: CommandRecord<State, Rejection>) =>
+    Effect.gen(function* () {
+      const hook = yield* Scope.provide(adapter.own(record.active), record.scope);
+      record.settle = Option.some(hook);
+      if (Option.isSome(inspection)) {
+        const { registry: root, owner } = inspection.value;
+        yield* Scope.provide(
+          root.register(owner, (id) =>
+            Effect.map(
+              SubscriptionRef.get(record.state),
+              (lifecycle): Inspection.CommandRecord => ({
+                _tag: "Command",
+                id,
+                ownerId: owner.id,
+                parentOwnerId: owner.parentId,
+                kind: adapter.kind,
+                commandId: record.commandId,
+                identity: record.identity,
+                attempt: record.attempt,
+                running: record.running,
+                lifecycle: inspectionLifecycle(record, lifecycle),
+              }),
+            ),
+          ),
+          record.scope,
+        );
+      }
     });
 
   const retryOf = (record: CommandRecord<State, Rejection>) =>
@@ -491,6 +585,7 @@ export const make = Effect.fn("Actor.commands.make")(function* <
         state,
         terminal,
         scope: Scope.forkUnsafe(ownerScope),
+        settle: Option.none(),
         possibleAdmission: identity === "supplied",
         admitted: Option.none(),
         attempt: 0,
@@ -507,6 +602,9 @@ export const make = Effect.fn("Actor.commands.make")(function* <
       return yield* rejected(commandId, identity, adapter.conflict(commandId));
     }
     const record = placed.record;
+    if (placed.created) {
+      yield* adopt(record);
+    }
     // A new record starts its first sequence. Resubmitting the same bytes to
     // a retained, idle record is a retry: it starts one new bounded sequence.
     yield* startSequence(record);

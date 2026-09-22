@@ -26,7 +26,7 @@ import {
   spawn,
   useQuery,
 } from "effect-frame/actor";
-import { QueryCache } from "effect-frame/actor/client";
+import { QueryCache, Uncertain } from "effect-frame/actor/client";
 import { QueryTest } from "effect-frame/actor/testing";
 import * as Frame from "../../src/frame.js";
 
@@ -233,7 +233,7 @@ describe("Frame.inspect actor and query records", () => {
   );
 
   it.scoped.layer(Layer.merge(makeFrame("durable-pending"), MailboxStore.layerMemory))(
-    "reports commands unavailable while a timed-out durable command still runs",
+    "samples a retained durable command after its call times out, then collects it",
     () =>
       Effect.gen(function* () {
         const started = yield* Deferred.make<void>();
@@ -254,8 +254,10 @@ describe("Frame.inspect actor and query records", () => {
             }),
         };
         const actor = yield* durable({ ...durableOptions, behavior: slowBehavior });
+        const empty = yield* Frame.inspect;
+        expect(empty.commands).toEqual({ _tag: "Available", records: [] });
         const waiting = yield* Effect.forkScoped(
-          Effect.exit(
+          Effect.flip(
             actor.call(
               { amount: 1 },
               { commandId: inspectionTimeoutCommandId, timeout: "1 second" },
@@ -265,17 +267,51 @@ describe("Frame.inspect actor and query records", () => {
         yield* Deferred.await(started);
         yield* TestClock.adjust("1 second");
 
+        const outcome = yield* Fiber.join(waiting);
+        expect(outcome).toEqual(Uncertain.make({ commandId: inspectionTimeoutCommandId }));
+
         const snapshot = yield* Frame.inspect;
+        const again = yield* Frame.inspect;
         expect(applyCalls).toBe(1);
         expect(snapshot.commands).toEqual({
-          _tag: "Unavailable",
-          reason: "ClientCommandLifecycleNotImplemented",
+          _tag: "Available",
+          records: [
+            expect.objectContaining({
+              _tag: "Command",
+              kind: "durable",
+              commandId: inspectionTimeoutCommandId,
+              identity: "supplied",
+              attempt: 1,
+              running: true,
+              lifecycle: { _tag: "Admitted", admitted: 1 },
+            }),
+          ],
         });
+        // Sampling does no command work: the same pass, no new turn.
+        expect(again.commands).toEqual(snapshot.commands);
+        expect(Schema.is(Frame.Snapshot)(snapshot)).toBe(true);
+        // The record carries identity and lifecycle only: no payload field.
+        expect(Object.keys(snapshot.commands.records[0] ?? {}).toSorted()).toEqual([
+          "_tag",
+          "attempt",
+          "commandId",
+          "id",
+          "identity",
+          "kind",
+          "lifecycle",
+          "ownerId",
+          "parentOwnerId",
+          "running",
+        ]);
         expect(snapshot.actors[0]?.revision).toBe(0);
 
+        // The same ID and bytes join the retained command.
+        const joined = yield* actor.send({ amount: 1 }, { commandId: inspectionTimeoutCommandId });
         yield* Deferred.succeed(release, void 0);
-        const outcome = yield* Fiber.join(waiting);
-        expect(Exit.isFailure(outcome)).toBe(true);
+        const settled = yield* joined.settled;
+        expect(settled._tag).toBe("Applied");
+        const collected = yield* Frame.inspect;
+        expect(collected.commands).toEqual({ _tag: "Available", records: [] });
       }),
   );
 

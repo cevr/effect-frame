@@ -75,7 +75,42 @@ export interface UrlStateRecord {
   readonly value: unknown;
 }
 
-export type Record = ActorRecord | QueryRecord | MountRecord | RouteRecord | UrlStateRecord;
+/** The open lifecycle of one retained command. Terminal commands are not retained. */
+export type CommandLifecycle =
+  | { readonly _tag: "Sent" }
+  | { readonly _tag: "Admitted"; readonly admitted: number }
+  | {
+      readonly _tag: "Uncertain";
+      readonly attempt: number;
+      readonly admitted: Option.Option<number>;
+    };
+
+/**
+ * One command record the owner retains now. It is read from the owner's own
+ * record; no payload or message is part of it.
+ */
+export interface CommandRecord {
+  readonly _tag: "Command";
+  readonly id: string;
+  readonly ownerId: string;
+  readonly parentOwnerId: Option.Option<string>;
+  readonly kind: "durable" | "remote";
+  readonly commandId: string;
+  readonly identity: "fresh" | "supplied";
+  /** Passes in the current or last sequence. */
+  readonly attempt: number;
+  /** True while an automatic sequence is running. */
+  readonly running: boolean;
+  readonly lifecycle: CommandLifecycle;
+}
+
+export type Record =
+  | ActorRecord
+  | QueryRecord
+  | MountRecord
+  | RouteRecord
+  | UrlStateRecord
+  | CommandRecord;
 
 export interface Sample {
   readonly rootId: string;

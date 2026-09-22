@@ -8,7 +8,7 @@ import type { Address, AnyContract, KeyOf, MessageOf, SnapshotOf } from "./contr
 import type { QueryKey } from "./query.js";
 import { QueryCache } from "./query-client.js";
 import { fromSubscriptionRef, select } from "./source.js";
-import type { Projection, Refreshed, TransportReadError } from "./transport.js";
+import type { Projection, TransportReadError } from "./transport.js";
 import { ActorTransport } from "./transport.js";
 import type {
   ActorRef,
@@ -108,42 +108,39 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
     onSome: (service) => service.active,
   });
 
-  /** Accepts the refreshed values a settlement call carried. */
-  const settle = (refreshed: ReadonlyArray<Refreshed>) =>
-    Option.match(cache, {
-      onNone: () => Effect.void,
-      onSome: (service) => service.apply(refreshed),
-    });
-
   /**
-   * Marks dependent entries stale as the command leaves. The view shows
-   * stale content for the whole round trip instead of a gap.
+   * The cache owns each unresolved command's dependents: they show stale
+   * from before the first request until the command settles or this
+   * reference closes, so the view shows stale content instead of a gap. An
+   * Applied settlement delivers its captured refreshes first. A client with
+   * no cache owns nothing.
    */
-  const markDependentsStale = Option.match(cache, {
-    onNone: () => Effect.void,
-    onSome: (service) => service.invalidate(contract.name),
-  });
+  const own = (active: ReadonlyArray<QueryKey>) =>
+    Option.match(cache, {
+      onNone: () => Commands.ownNothing<SnapshotOf<C>>(active),
+      onSome: (service) =>
+        Effect.map(
+          service.claim(contract.name),
+          (claim): Commands.SettlementHook<SnapshotOf<C>> =>
+            (settlement) =>
+              claim.settle(settlement.refreshed),
+        ),
+    });
 
   const adapter = remoteCommands(transport, address, (projection) =>
     decodeProjection(contract, projection),
   );
   const owner = yield* Commands.make<SnapshotOf<C>, RemoteRejection>({
     ...adapter,
+    own,
     call: (commandId, payload, deadline, active) =>
       adapter
         .call(commandId, payload, deadline, active)
-        .pipe(
-          Effect.tap((settlement) =>
-            Effect.andThen(observe(settlement.committed), settle(settlement.refreshed)),
-          ),
-        ),
+        .pipe(Effect.tap((settlement) => observe(settlement.committed))),
   });
 
   const submit = (message: MessageOf<C>, identified: Commands.Identified) =>
-    Effect.andThen(
-      markDependentsStale,
-      owner.submit(identified, Effect.orDie(encodeMessage(message)), declareActive),
-    );
+    owner.submit(identified, Effect.orDie(encodeMessage(message)), declareActive);
 
   const send = Effect.fn("Actor.ref.send")(function* (
     message: MessageOf<C>,

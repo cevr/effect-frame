@@ -119,10 +119,7 @@ const emptySnapshot: Frame.Snapshot = {
   actors: [],
   queries: [],
   urlStates: [],
-  commands: {
-    _tag: "Unavailable",
-    reason: "ClientCommandLifecycleNotImplemented",
-  },
+  commands: { _tag: "Available", records: [] },
 };
 
 const hasElement = (root: Node, selector: string): boolean =>
@@ -205,10 +202,7 @@ describe("ViewTest Frame inspection", () => {
         expect(snapshot.actors).toHaveLength(1);
         expect(snapshot.actors[0]?.kind).toBe("local");
         expect(snapshot.actors[0]?.revision).toBe(0);
-        expect(snapshot.commands).toEqual({
-          _tag: "Unavailable",
-          reason: "ClientCommandLifecycleNotImplemented",
-        });
+        expect(snapshot.commands).toEqual({ _tag: "Available", records: [] });
         expect(Schema.is(Frame.Snapshot)(snapshot)).toBe(true);
       }
       expect(yield* Ref.get(control.reads)).toBe(1);

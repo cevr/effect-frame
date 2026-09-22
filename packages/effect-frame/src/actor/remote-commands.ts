@@ -1,6 +1,6 @@
 import { Effect, Predicate } from "effect";
 import type { CommandAdapter } from "./command-owner.js";
-import { lost, refused } from "./command-owner.js";
+import { lost, ownNothing, refused } from "./command-owner.js";
 import type { Address } from "./contract.js";
 import type { Committed } from "./engine-types.js";
 import type { Projection, TransportCallError, TransportService } from "./transport.js";
@@ -38,6 +38,8 @@ export const remoteCommands = <State>(
   address: Address,
   decode: (projection: Projection) => Effect.Effect<Committed<State>>,
 ): CommandAdapter<State, RemoteRejection> => ({
+  kind: "remote",
+  own: ownNothing,
   closed: Effect.succeed(false),
   send: (commandId: CommandId, payload: string) =>
     transport.send(address, commandId, payload, []).pipe(

@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import type { CommandAdapter } from "./command-owner.js";
-import { lost, refused } from "./command-owner.js";
+import { lost, ownNothing, refused } from "./command-owner.js";
 import type { DurableEngine } from "./durable-engine.js";
 import type { CommandId } from "./vocabulary.js";
 import { ActorStopped, CommandConflict } from "./vocabulary.js";
@@ -15,6 +15,8 @@ export type DurableRejection = ActorStopped | CommandConflict;
 export const durableCommands = <State>(
   engine: DurableEngine<State>,
 ): CommandAdapter<State, DurableRejection> => ({
+  kind: "durable",
+  own: ownNothing,
   closed: engine.isClosed,
   send: (commandId: CommandId, payload: string) =>
     Effect.mapError(engine.sendEncoded(commandId, payload), refused),

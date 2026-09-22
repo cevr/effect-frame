@@ -128,8 +128,23 @@ interface CacheSlot {
   /** Owns the read in flight. Closing it interrupts the read. */
   /** Scope owned by the RcMap entry. Closing the last declaration closes it. */
   readonly scope: Scope.Scope;
+  /**
+   * The state a view sees: the slot's own read state, shown stale while an
+   * unresolved command owns a contract this entry depends on.
+   */
   readonly state: SubscriptionRef.SubscriptionRef<QueryState<string, QueryFailure>>;
+  /** Changes the slot's own read state. The displayed state follows. */
+  readonly write: (
+    update: (own: QueryState<string, QueryFailure>) => QueryState<string, QueryFailure>,
+  ) => Effect.Effect<void>;
+  /** Counts the unresolved dependent commands again, at the moment it runs. */
+  readonly recount: (count: () => number) => Effect.Effect<void>;
   readonly refresh: Effect.Effect<void>;
+  /**
+   * Makes sure a read started after this point in the cache's sequence. A
+   * read in flight that started earlier is awaited first, then read again.
+   */
+  readonly refreshSince: (sequence: number) => Effect.Effect<void>;
   /** Marks the entry stale in place. Used when a dependency commits. */
   readonly markStale: Effect.Effect<void>;
   /** Replaces the entry from an encoded result a command reply delivered. */
@@ -197,11 +212,30 @@ export interface QueryCacheService {
   /** Applies the refreshes a command reply carried. */
   readonly apply: (refreshed: ReadonlyArray<Refreshed>) => Effect.Effect<void>;
   /**
+   * Registers one command's ownership of a contract's dependents in the
+   * current Scope. Every live entry that depends on the contract, and every
+   * entry mounted later, shows stale until the Scope closes. Register before
+   * the command's work starts; close the Scope on terminal settlement or
+   * when the command's owner closes. Uncertain keeps the ownership.
+   */
+  readonly claim: (contractName: string) => Effect.Effect<CommandClaim, never, Scope.Scope>;
+  /**
    * Marks every cached entry whose query depends on this contract stale.
    * The client does this the moment a command is sent, so the view shows
    * stale content before the reply arrives rather than after it.
    */
   readonly invalidate: (contractName: string) => Effect.Effect<void>;
+}
+
+/** One command's ownership of cache entries. */
+export interface CommandClaim {
+  /**
+   * Accepts the refreshes an Applied command's settlement carried, then
+   * reads again every live dependent those refreshes did not cover and
+   * whose last read started before this settlement. A failed refresh stays
+   * a Failed query; it never changes the command.
+   */
+  readonly settle: (refreshed: ReadonlyArray<Refreshed>) => Effect.Effect<void>;
 }
 
 export class QueryCache extends Context.Service<QueryCache, QueryCacheService>()(
@@ -217,6 +251,25 @@ const encodeKey = <Q extends AnyQuery>(contract: Q, args: ArgsOf<Q>): Effect.Eff
     args: canonicalize(encoded),
   }));
 
+/** The cache's command ownership, as one slot sees it. */
+interface SlotOwnership {
+  /** The next number in the cache's read and settlement sequence. */
+  readonly next: () => number;
+  /** Adds the slot to the live set and counts the claims that cover it. */
+  readonly join: (slot: CacheSlot) => Effect.Effect<void, never, Scope.Scope>;
+}
+
+/** A Ready value shows stale while a dependent command is unresolved. */
+const display = (
+  state: QueryState<string, QueryFailure>,
+  pending: number,
+): QueryState<string, QueryFailure> => {
+  if (state._tag === "Ready" && pending > 0 && !state.stale) {
+    return Ready(state.value, true);
+  }
+  return state;
+};
+
 const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
   contract: AnyQuery,
   key: QueryKey,
@@ -225,9 +278,29 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
   clock: Clock.Clock,
   registry: Option.Option<Inspection.RegistryService>,
   owner: Option.Option<Inspection.OwnerToken>,
+  ownership: SlotOwnership,
 ) {
   const scope = yield* Effect.scope;
   const state = yield* SubscriptionRef.make<QueryState<string, QueryFailure>>(Loading());
+  // The slot's own read state and its dependent command count. Every change
+  // to either recomputes the displayed state inside one serialized update,
+  // so the last update to run always reflects both current values.
+  let own: QueryState<string, QueryFailure> = Loading();
+  let pending = 0;
+  const write = (
+    update: (current: QueryState<string, QueryFailure>) => QueryState<string, QueryFailure>,
+  ) =>
+    SubscriptionRef.update(state, () => {
+      own = update(own);
+      return display(own, pending);
+    });
+  const recount = (count: () => number) =>
+    SubscriptionRef.update(state, () => {
+      pending = count();
+      return display(own, pending);
+    });
+  // The sequence number at which the latest read started.
+  let readStarted = -1;
   const openedAt = clock.monotonicTimeNanosUnsafe();
 
   // A read in flight, so a second `refresh` joins it instead of repeating it.
@@ -239,12 +312,12 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
   const accept = (encoded: string) =>
     Effect.suspend(() => {
       generation += 1;
-      return SubscriptionRef.set(state, Ready(encoded, false));
+      return write(() => Ready(encoded, false));
     });
   const reject = (error: QueryFailure) =>
     Effect.suspend(() => {
       generation += 1;
-      return SubscriptionRef.set(state, Failed(error));
+      return write(() => Failed(error));
     });
 
   // The latch clears before the value is published, never after: a caller
@@ -256,6 +329,7 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
 
   const read = Effect.suspend(() => {
     const started = generation;
+    readStarted = ownership.next();
     const commit = (publish: Effect.Effect<void>) =>
       Effect.suspend(() => {
         if (started === generation) {
@@ -286,7 +360,7 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
     }
     const done = yield* Deferred.make<void>();
     inflight = Option.some(done);
-    yield* SubscriptionRef.update(state, markStale);
+    yield* write(markStale);
     const settle = Effect.andThen(clear, Deferred.succeed(done, void 0));
     // The read belongs to the slot, not to the caller: the caller may be a
     // view that unmounts first, and the slot closing is what interrupts it.
@@ -300,13 +374,27 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
     return yield* Deferred.await(done);
   });
 
+  const refreshSince = (sequence: number): Effect.Effect<void> =>
+    Effect.suspend(() => {
+      if (readStarted > sequence) {
+        return Effect.void;
+      }
+      return Option.match(inflight, {
+        onNone: () => refresh,
+        onSome: (running) => Effect.andThen(Deferred.await(running), refreshSince(sequence)),
+      });
+    });
+
   const slot: CacheSlot = {
     key,
     depends: contract.depends,
     scope,
     state,
+    write,
+    recount,
     refresh,
-    markStale: SubscriptionRef.update(state, markStale),
+    refreshSince,
+    markStale: write(markStale),
     accept,
     reject,
   };
@@ -342,6 +430,9 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
       scope,
     );
   }
+  // Join the live set, then count the claims that exist now. A claim made
+  // after the join updates this slot itself, so none is missed.
+  yield* ownership.join(slot);
   yield* Effect.forkIn(slot.refresh, scope);
   return slot;
 });
@@ -370,7 +461,7 @@ const entryOf = <Q extends AnyQuery>(
     refresh: slot.refresh,
     override: (value) =>
       Effect.flatMap(Effect.orDie(encode(value)), (encoded) =>
-        SubscriptionRef.set(slot.state, Ready(encoded, true)),
+        slot.write(() => Ready(encoded, true)),
       ),
   };
 };
@@ -383,6 +474,43 @@ const make = (): Effect.Effect<QueryCacheService, never, Scope.Scope> =>
     if (Option.isSome(registry)) {
       owner = Option.some(yield* Inspection.ownerFor(registry.value));
     }
+    // Command ownership: each live claim names one contract. `live` holds
+    // the slots that exist now; a slot leaves it when its scope closes.
+    const claims = new Map<symbol, string>();
+    const live = new Set<CacheSlot>();
+    let sequence = 0;
+    const next = () => {
+      sequence += 1;
+      return sequence;
+    };
+    const covering = (slot: CacheSlot) => {
+      let count = 0;
+      for (const contractName of claims.values()) {
+        if (slot.depends.includes(contractName)) {
+          count += 1;
+        }
+      }
+      return count;
+    };
+    // Each update counts the claims at the moment it runs, so the last
+    // update to run always leaves the current count.
+    const recount = (slot: CacheSlot) => slot.recount(() => covering(slot));
+    const dependents = (contractName: string) =>
+      Array.from(live).filter((slot) => slot.depends.includes(contractName));
+    const ownership: SlotOwnership = {
+      next,
+      join: (slot) =>
+        Effect.acquireRelease(
+          Effect.sync(() => {
+            live.add(slot);
+          }),
+          () =>
+            Effect.sync(() => {
+              live.delete(slot);
+            }),
+        ).pipe(Effect.andThen(recount(slot))),
+    };
+
     const batchResolvers = new Map<
       AnyQuery,
       Map<ActorTransport["Service"], BatchedQueryResolver>
@@ -425,6 +553,7 @@ const make = (): Effect.Effect<QueryCacheService, never, Scope.Scope> =>
                   clock,
                   registry,
                   owner,
+                  ownership,
                 ),
             }),
         }),
@@ -479,7 +608,40 @@ const make = (): Effect.Effect<QueryCacheService, never, Scope.Scope> =>
         ),
       );
 
-    const service: QueryCacheService = { open, active, apply, invalidate };
+    const claim = (contractName: string) =>
+      Effect.gen(function* () {
+        const token = Symbol(contractName);
+        yield* Effect.acquireRelease(
+          Effect.andThen(
+            Effect.sync(() => {
+              claims.set(token, contractName);
+            }),
+            Effect.forEach(dependents(contractName), recount, { discard: true }),
+          ),
+          () =>
+            Effect.andThen(
+              Effect.sync(() => {
+                claims.delete(token);
+              }),
+              Effect.forEach(dependents(contractName), recount, { discard: true }),
+            ),
+        );
+        const settle = (refreshed: ReadonlyArray<Refreshed>) =>
+          Effect.gen(function* () {
+            const settledAt = next();
+            yield* apply(refreshed);
+            const covered = new Set(refreshed.map((one) => keyOf(one.key)));
+            for (const slot of dependents(contractName)) {
+              if (!covered.has(keyOf(slot.key))) {
+                yield* Effect.forkIn(slot.refreshSince(settledAt), slot.scope);
+              }
+            }
+          });
+        const commandClaim: CommandClaim = { settle };
+        return commandClaim;
+      });
+
+    const service: QueryCacheService = { open, active, apply, claim, invalidate };
     return service;
   });
 

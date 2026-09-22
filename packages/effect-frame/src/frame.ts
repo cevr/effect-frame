@@ -1,5 +1,6 @@
 import { Context, Effect, Layer, Match, Option, Schema } from "effect";
 import type {
+  CommandLifecycle as InspectionCommandLifecycle,
   QueryValue as InspectionQueryValue,
   Record as InspectionRecord,
   Sample,
@@ -100,8 +101,38 @@ const UrlState = Schema.TaggedStruct("UrlState", {
   value: DiagnosticValue,
 });
 
-const CommandsUnavailable = Schema.TaggedStruct("Unavailable", {
-  reason: Schema.Literal("ClientCommandLifecycleNotImplemented"),
+/** The open lifecycle of one retained command. */
+const CommandLifecycle = Schema.Union([
+  Schema.TaggedStruct("Sent", {}),
+  Schema.TaggedStruct("Admitted", { admitted: Schema.Finite }),
+  Schema.TaggedStruct("Uncertain", {
+    attempt: Schema.Finite,
+    admitted: Schema.NullOr(Schema.Finite),
+  }),
+]);
+
+/**
+ * One command a durable or remote reference retains now: unresolved, or
+ * uncertain after its automatic bound. A terminal command leaves at once, so
+ * this is current retained state, not a command history. No encoded message
+ * or payload is part of it.
+ */
+const Command = Schema.TaggedStruct("Command", {
+  ...RecordFields,
+  kind: Schema.Literals(["durable", "remote"]),
+  commandId: Schema.String,
+  identity: Schema.Literals(["fresh", "supplied"]),
+  attempt: Schema.Finite,
+  running: Schema.Boolean,
+  lifecycle: CommandLifecycle,
+});
+
+/**
+ * Command inspection is implemented. An empty list means no command is
+ * retained in this root now.
+ */
+const Commands = Schema.TaggedStruct("Available", {
+  records: Schema.Array(Command),
 });
 
 export const Snapshot = Schema.Struct({
@@ -118,7 +149,7 @@ export const Snapshot = Schema.Struct({
   actors: Schema.Array(Actor),
   queries: Schema.Array(Query),
   urlStates: Schema.Array(UrlState),
-  commands: CommandsUnavailable,
+  commands: Commands,
 });
 export type Snapshot = Schema.Schema.Type<typeof Snapshot>;
 
@@ -393,12 +424,29 @@ const toQueryValue = (value: InspectionQueryValue): QueryValue =>
     }),
   )(value);
 
+type SnapshotCommandLifecycle = Snapshot["commands"]["records"][number]["lifecycle"];
+
+const toCommandLifecycle = (lifecycle: InspectionCommandLifecycle): SnapshotCommandLifecycle =>
+  Match.valueTags(lifecycle, {
+    Sent: (): SnapshotCommandLifecycle => ({ _tag: "Sent" }),
+    Admitted: (admitted): SnapshotCommandLifecycle => ({
+      _tag: "Admitted",
+      admitted: admitted.admitted,
+    }),
+    Uncertain: (uncertain): SnapshotCommandLifecycle => ({
+      _tag: "Uncertain",
+      attempt: uncertain.attempt,
+      admitted: Option.getOrNull(uncertain.admitted),
+    }),
+  });
+
 const toSnapshot = (sample: Sample): Snapshot => {
   const mounts: Array<Snapshot["mounts"][number]> = [];
   const routes: Array<Snapshot["routes"][number]> = [];
   const actors: Array<Snapshot["actors"][number]> = [];
   const queries: Array<Snapshot["queries"][number]> = [];
   const urlStates: Array<Snapshot["urlStates"][number]> = [];
+  const commands: Array<Snapshot["commands"]["records"][number]> = [];
 
   for (const record of sample.records) {
     switch (record._tag) {
@@ -440,6 +488,18 @@ const toSnapshot = (sample: Sample): Snapshot => {
           failure: Option.getOrNull(Option.map(record.failure, toDiagnostic)),
         });
         break;
+      case "Command":
+        commands.push({
+          ...base(record),
+          _tag: "Command",
+          kind: record.kind,
+          commandId: record.commandId,
+          identity: record.identity,
+          attempt: record.attempt,
+          running: record.running,
+          lifecycle: toCommandLifecycle(record.lifecycle),
+        });
+        break;
       case "UrlState":
         urlStates.push({
           ...base(record),
@@ -463,10 +523,7 @@ const toSnapshot = (sample: Sample): Snapshot => {
     actors,
     queries,
     urlStates,
-    commands: {
-      _tag: "Unavailable",
-      reason: "ClientCommandLifecycleNotImplemented",
-    },
+    commands: { _tag: "Available", records: commands },
   } satisfies Snapshot;
 };
 

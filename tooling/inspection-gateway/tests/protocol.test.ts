@@ -10,18 +10,7 @@ import { describe, expect, it } from "bun:test";
 import * as Frame from "effect-frame/frame";
 import { Effect, Exit, Schema } from "effect";
 import { Rpc, RpcSerialization } from "effect/unstable/rpc";
-import {
-  ATTACH_PATH,
-  ATTACH_TOKEN_PREFIX,
-  INSPECT_PATH,
-  Inspect,
-  ROOTS_PATH,
-  ROOT_SUBPROTOCOL,
-  ReaderResponse,
-  VERSION_HEADER,
-  type ErrorResponse,
-  type InspectResponse,
-} from "../src/protocol.js";
+import { Protocol } from "effect-frame/inspection";
 import * as H from "./harness.js";
 
 const ORIGIN = "http://127.0.0.1:9";
@@ -29,10 +18,10 @@ const ORIGIN = "http://127.0.0.1:9";
 const gateway = (options: { readonly maxSnapshotBytes?: number } = {}) =>
   H.startGateway({ allowedOrigin: ORIGIN, ...options });
 
-const decodeReader = Schema.decodeUnknownExit(ReaderResponse);
+const decodeReader = Schema.decodeUnknownExit(Protocol.ReaderResponse);
 
 /** Every reader reply is one valid, versioned JSON document. */
-const readJson = async (response: Response): Promise<ErrorResponse["error"]> => {
+const readJson = async (response: Response): Promise<Protocol.ErrorResponse["error"]> => {
   const body: unknown = await response.json();
   const decoded = decodeReader(body);
   expect(Exit.isSuccess(decoded)).toBe(true);
@@ -45,12 +34,12 @@ const readJson = async (response: Response): Promise<ErrorResponse["error"]> => 
 
 const readerHeaders = (token: string, version = "1") => ({
   authorization: `Bearer ${token}`,
-  [VERSION_HEADER]: version,
+  [Protocol.VERSION_HEADER]: version,
   "content-type": "application/json",
 });
 
 const post = (base: string, token: string, body: string, version = "1") =>
-  fetch(new URL(INSPECT_PATH, base), {
+  fetch(new URL(Protocol.INSPECT_PATH, base), {
     method: "POST",
     headers: readerHeaders(token, version),
     body,
@@ -58,14 +47,14 @@ const post = (base: string, token: string, body: string, version = "1") =>
 
 /** A peer that passes the attach checks and speaks raw frames. */
 const rawRoot = async (running: H.RunningGateway, rootId: string) => {
-  const url = new URL(ATTACH_PATH, running.gateway.attachUrl);
+  const url = new URL(Protocol.ATTACH_PATH, running.gateway.attachUrl);
   url.searchParams.set("root", rootId);
   url.searchParams.set("name", "raw");
   const frames: Array<string> = [];
   const socket = new WebSocket(url.href, {
     // @ts-expect-error The DOM lib hides Bun's constructor overload with handshake headers.
     headers: { origin: ORIGIN },
-    protocols: [ROOT_SUBPROTOCOL, `${ATTACH_TOKEN_PREFIX}${running.attachToken}`],
+    protocols: [Protocol.ROOT_SUBPROTOCOL, `${Protocol.ATTACH_TOKEN_PREFIX}${running.attachToken}`],
   });
   socket.addEventListener("message", (event) => {
     frames.push(String(event.data));
@@ -98,13 +87,15 @@ const realSnapshot = (name: string) =>
   // @effect-diagnostics-next-line strictEffectProvide:off
   Effect.runPromise(Effect.scoped(Frame.inspect.pipe(Effect.provide(Frame.layer({ name })))));
 
-const encodeExit = Schema.encodeSync(RpcSerialization.json.codecFor(Rpc.exitSchema(Inspect)));
+const encodeExit = Schema.encodeSync(
+  RpcSerialization.json.codecFor(Rpc.exitSchema(Protocol.Inspect)),
+);
 
 const exitFrame = (requestId: string | number, snapshot: Frame.Snapshot): string =>
   JSON.stringify({ _tag: "Exit", requestId, exit: encodeExit(Exit.succeed(snapshot)) });
 
 const inspectRaw = (running: H.RunningGateway, root: string, deadline: string) =>
-  H.cliJson<InspectResponse | ErrorResponse>(
+  H.cliJson<Protocol.InspectResponse | Protocol.ErrorResponse>(
     ["inspect", "--url", running.gateway.url, "--root", root, "--deadline", deadline],
     running.readToken,
   );
@@ -115,7 +106,7 @@ describe("inspection protocol failures are explicit", () => {
     const base = running.gateway.url;
     const token = running.readToken;
     try {
-      const oldHeader = await fetch(new URL(ROOTS_PATH, base), {
+      const oldHeader = await fetch(new URL(Protocol.ROOTS_PATH, base), {
         headers: readerHeaders(token, "2"),
       });
       expect(oldHeader.status).toBe(400);
@@ -163,19 +154,19 @@ describe("inspection protocol failures are explicit", () => {
         maximum: 30_000,
       });
 
-      const wrongToken = await fetch(new URL(ROOTS_PATH, base), {
+      const wrongToken = await fetch(new URL(Protocol.ROOTS_PATH, base), {
         headers: readerHeaders(running.attachToken),
       });
       expect(wrongToken.status).toBe(401);
       expect(await readJson(wrongToken)).toEqual({ _tag: "Unauthorized" });
 
-      const browserOrigin = await fetch(new URL(ROOTS_PATH, base), {
+      const browserOrigin = await fetch(new URL(Protocol.ROOTS_PATH, base), {
         headers: { ...readerHeaders(token), origin: ORIGIN },
       });
       expect(browserOrigin.status).toBe(403);
       expect(await readJson(browserOrigin)).toEqual({ _tag: "ForbiddenOrigin", origin: ORIGIN });
 
-      const rebinding = await fetch(new URL(ROOTS_PATH, base), {
+      const rebinding = await fetch(new URL(Protocol.ROOTS_PATH, base), {
         headers: { ...readerHeaders(token), host: "attacker.test" },
       });
       expect(rebinding.status).toBe(403);
@@ -185,7 +176,7 @@ describe("inspection protocol failures are explicit", () => {
       expect(await readJson(unknownPath)).toEqual({ _tag: "NotFound", path: "/v1/eval" });
 
       // The CLI keeps stdout one valid JSON document on failure.
-      const cliWrong = await H.cliJson<ErrorResponse>(
+      const cliWrong = await H.cliJson<Protocol.ErrorResponse>(
         ["roots", "--url", base],
         running.attachToken,
       );
@@ -199,7 +190,7 @@ describe("inspection protocol failures are explicit", () => {
   it("rejects root attachments with a bad origin, version, capability, or identity", async () => {
     const running = await gateway();
     const attach = (headers: Record<string, string>, query = "?root=frame-root-a") =>
-      fetch(`${running.gateway.url}${ATTACH_PATH}${query}`, {
+      fetch(`${running.gateway.url}${Protocol.ATTACH_PATH}${query}`, {
         headers: {
           connection: "Upgrade",
           upgrade: "websocket",
@@ -210,7 +201,7 @@ describe("inspection protocol failures are explicit", () => {
       });
     const good = {
       origin: ORIGIN,
-      "sec-websocket-protocol": `${ROOT_SUBPROTOCOL}, ${ATTACH_TOKEN_PREFIX}${running.attachToken}`,
+      "sec-websocket-protocol": `${Protocol.ROOT_SUBPROTOCOL}, ${Protocol.ATTACH_TOKEN_PREFIX}${running.attachToken}`,
     };
     try {
       const evil = await attach({ ...good, origin: "http://evil.test" });
@@ -222,7 +213,7 @@ describe("inspection protocol failures are explicit", () => {
 
       const v2 = await attach({
         ...good,
-        "sec-websocket-protocol": `effect-frame-inspection.v2, ${ATTACH_TOKEN_PREFIX}${running.attachToken}`,
+        "sec-websocket-protocol": `effect-frame-inspection.v2, ${Protocol.ATTACH_TOKEN_PREFIX}${running.attachToken}`,
       });
       expect(await readJson(v2)).toEqual({
         _tag: "UnsupportedProtocolVersion",
@@ -232,7 +223,7 @@ describe("inspection protocol failures are explicit", () => {
 
       const readTokenUsedToAttach = await attach({
         ...good,
-        "sec-websocket-protocol": `${ROOT_SUBPROTOCOL}, ${ATTACH_TOKEN_PREFIX}${running.readToken}`,
+        "sec-websocket-protocol": `${Protocol.ROOT_SUBPROTOCOL}, ${Protocol.ATTACH_TOKEN_PREFIX}${running.readToken}`,
       });
       expect(await readJson(readTokenUsedToAttach)).toEqual({ _tag: "Unauthorized" });
 
@@ -339,7 +330,7 @@ describe("inspection protocol failures are explicit", () => {
         const good = await H.openView(page.url("/books/7", config("large", running.attachToken)));
         views.push(good);
         await H.waitUntil(async () => (await H.stats(running)).roots === 1, "attached");
-        const reply = await H.cliJson<ErrorResponse>(
+        const reply = await H.cliJson<Protocol.ErrorResponse>(
           ["inspect", "--url", running.gateway.url, "--root", "large"],
           running.readToken,
         );
@@ -380,7 +371,7 @@ describe("inspection protocol failures are explicit", () => {
         expect(text.exitCode).toBe(0);
         expect(text.stdout).toContain("[truncated: 12 of");
         expect(text.stdout).toContain("--json returns the complete snapshot");
-        const json = await H.cliJson<InspectResponse>(base, running.readToken);
+        const json = await H.cliJson<Protocol.InspectResponse>(base, running.readToken);
         expect(json.body.snapshot.queries[0]?.key).toContain(
           "a-very-long-book-identifier-for-truncation",
         );

@@ -13,20 +13,8 @@
  * 130 interrupted. Data goes to stdout; diagnostics go to stderr.
  */
 import { Effect, Match, Option, Schema } from "effect";
-import {
-  DEFAULT_DEADLINE_MILLIS,
-  INSPECT_PATH,
-  MAX_DEADLINE_MILLIS,
-  MAX_SELECTOR_LENGTH,
-  PROTOCOL_VERSION,
-  ROOTS_PATH,
-  ReaderResponse,
-  VERSION_HEADER,
-  hasControlCharacter,
-  type InspectResponse,
-  type RootInfo,
-  type RootsResponse,
-} from "./protocol.js";
+import { Protocol } from "effect-frame/inspection";
+import { hasControlCharacter } from "./text.js";
 
 export const TOKEN_ENV = "EFFECT_FRAME_INSPECT_TOKEN";
 
@@ -64,7 +52,7 @@ Flags:
   --url <gateway>      Loopback gateway, for example http://127.0.0.1:4318
   --root <selector>    Exact root ID, unique ID prefix, or exact root name
   --json               Print one versioned JSON response on stdout
-  --deadline <ms>      Finite deadline, 1..${MAX_DEADLINE_MILLIS} (default ${DEFAULT_DEADLINE_MILLIS})
+  --deadline <ms>      Finite deadline, 1..${Protocol.MAX_DEADLINE_MILLIS} (default ${Protocol.DEFAULT_DEADLINE_MILLIS})
   --token-file <path>  Read capability file (else ${TOKEN_ENV})
   --max-text <chars>   Longest value shown in text output (default 160)
   -h, --help           Show this help
@@ -159,7 +147,7 @@ const readRoot = (command: Parsed["command"], root: Option.Option<string>) =>
     const bad = Option.exists(
       root,
       (selector) =>
-        selector.length > MAX_SELECTOR_LENGTH ||
+        selector.length > Protocol.MAX_SELECTOR_LENGTH ||
         hasControlCharacter(selector) ||
         /[?#%]/.test(selector),
     );
@@ -182,8 +170,8 @@ const parse = Effect.fn("InspectionCli.parse")(function* (argv: ReadonlyArray<st
   const deadlineMillis = yield* integerFlag(
     values,
     "--deadline",
-    DEFAULT_DEADLINE_MILLIS,
-    MAX_DEADLINE_MILLIS,
+    Protocol.DEFAULT_DEADLINE_MILLIS,
+    Protocol.MAX_DEADLINE_MILLIS,
   );
   const maxText = yield* integerFlag(values, "--max-text", 160, 100_000);
   return {
@@ -212,15 +200,15 @@ const clip = (value: string, budget: TextBudget): string => {
   return `${value.slice(0, budget.max)}… [truncated: ${budget.max} of ${value.length} chars]`;
 };
 
-const rootLine = (root: RootInfo): string =>
+const rootLine = (root: Protocol.RootInfo): string =>
   `${root.id}  ${root.name ?? "(unnamed)"}  incarnation ${root.incarnation}`;
 
-const rootsText = (response: RootsResponse): string =>
+const rootsText = (response: Protocol.RootsResponse): string =>
   response.roots.length === 0
     ? "no roots attached\n"
     : `${response.roots.map(rootLine).join("\n")}\n`;
 
-type QueryRecord = InspectResponse["snapshot"]["queries"][number];
+type QueryRecord = Protocol.InspectResponse["snapshot"]["queries"][number];
 
 const queryValueText = (value: QueryRecord["value"], budget: TextBudget): string =>
   Match.value(value).pipe(
@@ -231,7 +219,7 @@ const queryValueText = (value: QueryRecord["value"], budget: TextBudget): string
     }),
   );
 
-const inspectText = (response: InspectResponse, maxText: number): string => {
+const inspectText = (response: Protocol.InspectResponse, maxText: number): string => {
   const budget: TextBudget = { max: maxText, truncated: 0 };
   const snapshot = response.snapshot;
   const lines = [
@@ -292,12 +280,12 @@ class Failed extends Schema.TaggedError<Failed>()("Failed", { error: ClientError
 
 const clientFailure = (error: ClientError) => Effect.fail(Failed.make({ error }));
 
-const decodeResponse = Schema.decodeUnknownEffect(Schema.fromJsonString(ReaderResponse));
+const decodeResponse = Schema.decodeUnknownEffect(Schema.fromJsonString(Protocol.ReaderResponse));
 
 const requestInit = (parsed: Parsed, token: string): RequestInit => {
   const headers = {
     authorization: `Bearer ${token}`,
-    [VERSION_HEADER]: String(PROTOCOL_VERSION),
+    [Protocol.VERSION_HEADER]: String(Protocol.PROTOCOL_VERSION),
     "content-type": "application/json",
   };
   if (parsed.command === "roots") return { method: "GET", headers };
@@ -305,7 +293,7 @@ const requestInit = (parsed: Parsed, token: string): RequestInit => {
     method: "POST",
     headers,
     body: JSON.stringify({
-      version: PROTOCOL_VERSION,
+      version: Protocol.PROTOCOL_VERSION,
       root: Option.getOrElse(parsed.root, () => ""),
       deadlineMillis: parsed.deadlineMillis,
     }),
@@ -318,7 +306,10 @@ const requestInit = (parsed: Parsed, token: string): RequestInit => {
  */
 const exchange = (parsed: Parsed, token: string) =>
   Effect.gen(function* () {
-    const target = new URL(parsed.command === "roots" ? ROOTS_PATH : INSPECT_PATH, parsed.url);
+    const target = new URL(
+      parsed.command === "roots" ? Protocol.ROOTS_PATH : Protocol.INSPECT_PATH,
+      parsed.url,
+    );
     const response = yield* Effect.tryPromise({
       try: (signal) => fetch(target, { ...requestInit(parsed, token), signal }),
       catch: () => Failed.make({ error: { _tag: "GatewayUnreachable", url: parsed.url.origin } }),
@@ -378,7 +369,7 @@ const result = (exitCode: CliResult["exitCode"], stdout: string, stderr: string)
   stderr,
 });
 
-const render = (parsed: Parsed, response: ReaderResponse): CliResult =>
+const render = (parsed: Parsed, response: Protocol.ReaderResponse): CliResult =>
   Match.value(response).pipe(
     Match.tagsExhaustive({
       Error: (reply) =>
@@ -414,7 +405,7 @@ const execute = (parsed: Parsed, environment: CliEnvironment) =>
   }).pipe(
     Effect.catchTag("Failed", (failed) => {
       const error = failed.error;
-      const body = { _tag: "Error", version: PROTOCOL_VERSION, error };
+      const body = { _tag: "Error", version: Protocol.PROTOCOL_VERSION, error };
       return Effect.succeed(
         result(1, parsed.json ? `${JSON.stringify(body)}\n` : "", errorText(error)),
       );

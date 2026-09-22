@@ -4,7 +4,7 @@
  * names a gateway; otherwise this entry creates no connection either.
  */
 import { Effect, Option } from "effect";
-import { attach } from "../../src/attach.js";
+import { attach } from "effect-frame/inspection";
 import { start } from "./app.js";
 
 start((config, status) =>

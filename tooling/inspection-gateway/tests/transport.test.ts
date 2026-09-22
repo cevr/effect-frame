@@ -7,11 +7,11 @@
 import { describe, expect, it } from "bun:test";
 import { Effect } from "effect";
 import { resolve } from "node:path";
-import type { ErrorResponse, InspectResponse, RootsResponse } from "../src/protocol.js";
+import type { Protocol } from "effect-frame/inspection";
 import { TOKEN_ENV } from "../src/client.js";
 import * as H from "./harness.js";
 
-type Snapshot = InspectResponse["snapshot"];
+type Snapshot = Protocol.InspectResponse["snapshot"];
 
 const devBundle = H.bundle("main.dev.tsx");
 const prodBundle = H.bundle("main.tsx");
@@ -59,11 +59,11 @@ const rig = async (options: { readonly maxSnapshotBytes?: number } = {}): Promis
 
 const url = (r: Rig) => r.gateway.gateway.url;
 
-const roots = async (r: Rig): Promise<RootsResponse> =>
-  (await H.cliJson<RootsResponse>(["roots", "--url", url(r)], r.gateway.readToken)).body;
+const roots = async (r: Rig): Promise<Protocol.RootsResponse> =>
+  (await H.cliJson<Protocol.RootsResponse>(["roots", "--url", url(r)], r.gateway.readToken)).body;
 
 const inspect = (r: Rig, root: string, extra: ReadonlyArray<string> = []) =>
-  H.cliJson<InspectResponse | ErrorResponse>(
+  H.cliJson<Protocol.InspectResponse | Protocol.ErrorResponse>(
     ["inspect", "--url", url(r), "--root", root, ...extra],
     r.gateway.readToken,
   );
@@ -77,13 +77,17 @@ const rootIdOf = async (view: Bun.WebView): Promise<Snapshot["root"]["id"]> =>
 const waitAttached = (r: Rig, count: number) =>
   H.waitUntil(async () => (await H.stats(r.gateway)).roots === count, `${count} attached roots`);
 
-const inspection = (body: InspectResponse | ErrorResponse): InspectResponse => {
+const inspection = (
+  body: Protocol.InspectResponse | Protocol.ErrorResponse,
+): Protocol.InspectResponse => {
   if (body._tag !== "Inspection")
     throw new Error(`expected Inspection, got ${JSON.stringify(body)}`);
   return body;
 };
 
-const failure = (body: InspectResponse | ErrorResponse): ErrorResponse["error"] => {
+const failure = (
+  body: Protocol.InspectResponse | Protocol.ErrorResponse,
+): Protocol.ErrorResponse["error"] => {
   if (body._tag !== "Error") throw new Error(`expected Error, got ${body._tag}`);
   return body.error;
 };

@@ -15,8 +15,14 @@ describe("inspection build separation", () => {
   it("keeps every inspection module out of the production entry", async () => {
     const production = await H.bundle("main.tsx");
     expect(has(production.inputs, "tests/fixture/app.tsx")).toBe(true);
-    for (const module of ["src/attach.ts", "src/protocol.ts", "src/gateway.ts", "src/client.ts"]) {
-      expect({ module, bundled: has(production.inputs, `inspection-gateway/${module}`) }).toEqual({
+    for (const module of [
+      "effect-frame/src/inspection/index.ts",
+      "effect-frame/src/inspection/attach.ts",
+      "effect-frame/src/inspection/protocol.ts",
+      "inspection-gateway/src/gateway.ts",
+      "inspection-gateway/src/client.ts",
+    ]) {
+      expect({ module, bundled: has(production.inputs, module) }).toEqual({
         module,
         bundled: false,
       });
@@ -29,8 +35,8 @@ describe("inspection build separation", () => {
 
   it("keeps the gateway and reader out of the development browser entry", async () => {
     const development = await H.bundle("main.dev.tsx");
-    expect(has(development.inputs, "inspection-gateway/src/attach.ts")).toBe(true);
-    expect(has(development.inputs, "inspection-gateway/src/protocol.ts")).toBe(true);
+    expect(has(development.inputs, "effect-frame/src/inspection/attach.ts")).toBe(true);
+    expect(has(development.inputs, "effect-frame/src/inspection/protocol.ts")).toBe(true);
     expect(has(development.inputs, "inspection-gateway/src/gateway.ts")).toBe(false);
     expect(has(development.inputs, "inspection-gateway/src/client.ts")).toBe(false);
     expect(development.inputs.filter((input) => /^(bun|node:)/.test(input))).toEqual([]);

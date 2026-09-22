@@ -34,6 +34,11 @@
       "types": "./dist/frame.d.ts",
       "default": "./dist/frame.js"
     },
+    "./inspection": {
+      "source": "./src/inspection/index.ts",
+      "types": "./dist/inspection/index.d.ts",
+      "default": "./dist/inspection/index.js"
+    },
     "./view": {
       "source": "./src/view/index.ts",
       "types": "./dist/view/index.d.ts",
@@ -71,10 +76,11 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "bun --bun tsdown",
-    "test": "bun run test:actor && bun run test:view && bun run test:router",
+    "test": "bun run test:actor && bun run test:view && bun run test:router && bun run test:inspection",
     "test:actor": "bun test --conditions=source tests/actor",
     "test:view": "bun test --conditions=source tests/view",
-    "test:router": "bun test --conditions=source tests/router"
+    "test:router": "bun test --conditions=source tests/router",
+    "test:inspection": "bun test --conditions=source tests/inspection"
   },
   "dependencies": {
     "@solidjs/signals": "2.0.0-rc.8",

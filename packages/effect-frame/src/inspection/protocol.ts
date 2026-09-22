@@ -1,15 +1,16 @@
 /**
- * The browser-safe inspection protocol. Both the browser attachment and the
- * gateway import this module; it has no platform imports.
+ * The browser-safe inspection protocol, version 1. The browser attachment in
+ * this subpath and the `@effect-frame/inspect` gateway and reader import it.
+ * It has no platform imports.
  *
  * Two boundaries use it:
  *
  * - Root link: the browser dials the gateway with one WebSocket. The browser
  *   is the RPC server for `RootRpcs`; the gateway is the RPC client.
- * - Reader API: a CLI-shaped client calls the gateway over loopback HTTP with
- *   one versioned JSON request and one versioned JSON response.
+ * - Reader API: a reader calls the gateway over loopback HTTP with one
+ *   versioned JSON request and one versioned JSON response.
  */
-import * as Frame from "effect-frame/frame";
+import * as Frame from "../frame.js";
 import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/unstable/rpc";
 
@@ -26,19 +27,11 @@ export const ATTACH_PATH = "/v1/attach";
 export const ROOTS_PATH = "/v1/roots";
 export const INSPECT_PATH = "/v1/inspect";
 
-/** Limits shared by the gateway and the reader client. */
+/** Limits shared by the attachment, the gateway, and the reader. */
 export const MAX_DEADLINE_MILLIS = 30_000;
 export const DEFAULT_DEADLINE_MILLIS = 5_000;
 export const MAX_SELECTOR_LENGTH = 256;
 export const MAX_ROOT_NAME_LENGTH = 128;
-
-/** True when any UTF-16 unit is below U+0020. */
-export const hasControlCharacter = (value: string): boolean => {
-  for (let index = 0; index < value.length; index += 1) {
-    if (value.charCodeAt(index) < 0x20) return true;
-  }
-  return false;
-};
 
 // ---------------------------------------------------------------------------
 // Root link

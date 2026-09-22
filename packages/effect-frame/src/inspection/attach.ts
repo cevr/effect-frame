@@ -1,6 +1,8 @@
-/* oxlint-disable effect/noGlobals, effect/noRuntimeTypeof, effect/noTernary -- this module is the browser boundary: it measures encoded bytes with TextEncoder and dials with the global WebSocket constructor. */
+/* oxlint-disable effect/noGlobals -- this module is the browser boundary: it measures encoded bytes with TextEncoder and dials with the global WebSocket constructor. */
 /**
- * The opt-in browser attachment.
+ * The opt-in browser attachment. Import it from a development entry only; a
+ * production entry that does not import `effect-frame/inspection` carries no
+ * inspection, RPC, or socket code.
  *
  * It reads the root's existing `Frame.Service` and captures the context that
  * built it. It does not build a second Frame layer, copy records, or keep
@@ -14,8 +16,7 @@
  * to the native socket protocol as one client. A reconnect is a new client;
  * `RpcServer` interrupts the old client's handlers when its socket closes.
  */
-import * as Frame from "effect-frame/frame";
-import { Clock, Context, Duration, Effect, Layer, Option, Schema, Scope } from "effect";
+import { Clock, Context, Duration, Effect, Layer, Option, Predicate, Schema, Scope } from "effect";
 import { NetAddress } from "effect/unstable/net";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { Socket, SocketServer } from "effect/unstable/socket";
@@ -27,6 +28,7 @@ import {
   RootRpcs,
   type SnapshotTooLarge,
 } from "./protocol.js";
+import * as Frame from "../frame.js";
 
 export type AttachStatus =
   | { readonly _tag: "Connecting"; readonly attempt: number }
@@ -75,11 +77,18 @@ const gatewayAddress = Effect.fn("InspectionAttach.gatewayAddress")(function* (u
 const encoder = new TextEncoder();
 
 /** Browsers take only subprotocols; they cannot send handshake headers. */
+const browserProtocols = (
+  options: Option.Option<Socket.WebSocketConstructorOptions>,
+): string | Array<string> =>
+  Option.match(Option.filter(options, Predicate.or(Array.isArray, Predicate.isString)), {
+    onNone: () => [],
+    onSome: (protocols) => protocols,
+  });
+
 const dialWebSocket = (
   url: string,
   options?: Socket.WebSocketConstructorOptions,
-): Socket.WebSocketLike =>
-  new WebSocket(url, Array.isArray(options) || typeof options === "string" ? options : []);
+): Socket.WebSocketLike => new WebSocket(url, browserProtocols(Option.fromNullishOr(options)));
 
 const encodeSnapshot = Schema.encodeSync(Frame.Snapshot);
 

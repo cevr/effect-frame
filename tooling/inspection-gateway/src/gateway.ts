@@ -18,28 +18,8 @@ import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import type { RpcClientError } from "effect/unstable/rpc/RpcClientError";
 import { Socket } from "effect/unstable/socket";
 import type { ServerWebSocket } from "bun";
-import {
-  ATTACH_PATH,
-  ATTACH_TOKEN_PREFIX,
-  ErrorResponse,
-  GatewayError,
-  INSPECT_PATH,
-  InspectRequest,
-  InspectResponse,
-  MAX_DEADLINE_MILLIS,
-  MAX_ROOT_NAME_LENGTH,
-  MAX_SELECTOR_LENGTH,
-  PROTOCOL_VERSION,
-  ROOTS_PATH,
-  ROOT_SUBPROTOCOL,
-  RootId,
-  RootRpcs,
-  RootsResponse,
-  VERSION_HEADER,
-  hasControlCharacter,
-  statusOf,
-  type RootInfo,
-} from "./protocol.js";
+import { Protocol } from "effect-frame/inspection";
+import { hasControlCharacter } from "./text.js";
 
 export interface GatewayOptions {
   /** The one application origin allowed to attach roots. */
@@ -73,7 +53,7 @@ export interface Gateway {
   /** The attach base URL, `ws://127.0.0.1:<port>`. */
   readonly attachUrl: string;
   readonly stats: Effect.Effect<GatewayStats>;
-  readonly roots: Effect.Effect<ReadonlyArray<RootInfo>>;
+  readonly roots: Effect.Effect<ReadonlyArray<Protocol.RootInfo>>;
   /** Development control: close one root's socket from the gateway side. */
   readonly disconnectRoot: (rootId: string) => Effect.Effect<boolean>;
 }
@@ -190,12 +170,12 @@ interface RootData {
 }
 
 interface Connection {
-  readonly info: RootInfo;
+  readonly info: Protocol.RootInfo;
   readonly ws: ServerWebSocket<RootData>;
   readonly socket: AcceptedSocket;
   readonly scope: Scope.Closeable;
   readonly closed: Deferred.Deferred<CloseReason>;
-  readonly client: Deferred.Deferred<RpcClient.FromGroup<typeof RootRpcs, RpcClientError>>;
+  readonly client: Deferred.Deferred<RpcClient.FromGroup<typeof Protocol.RootRpcs, RpcClientError>>;
   terminated: boolean;
 }
 
@@ -230,10 +210,10 @@ const frameViolation = (message: string | Buffer): Option.Option<string> => {
 };
 
 class ReaderFailure extends Schema.TaggedError<ReaderFailure>()("ReaderFailure", {
-  error: GatewayError,
+  error: Protocol.GatewayError,
 }) {}
 
-const readerError = (error: GatewayError) => Effect.fail(ReaderFailure.make({ error }));
+const readerError = (error: Protocol.GatewayError) => Effect.fail(ReaderFailure.make({ error }));
 
 const json = (body: unknown, status: number): Response =>
   new Response(JSON.stringify(body), {
@@ -241,13 +221,16 @@ const json = (body: unknown, status: number): Response =>
     headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
   });
 
-const encodeError = Schema.encodeSync(ErrorResponse);
-const encodeRoots = Schema.encodeSync(RootsResponse);
-const encodeInspection = Schema.encodeSync(InspectResponse);
-const decodeInspectRequest = Schema.decodeUnknownExit(InspectRequest);
+const encodeError = Schema.encodeSync(Protocol.ErrorResponse);
+const encodeRoots = Schema.encodeSync(Protocol.RootsResponse);
+const encodeInspection = Schema.encodeSync(Protocol.InspectResponse);
+const decodeInspectRequest = Schema.decodeUnknownExit(Protocol.InspectRequest);
 
-const errorResponse = (error: GatewayError): Response =>
-  json(encodeError({ _tag: "Error", version: PROTOCOL_VERSION, error }), statusOf(error));
+const errorResponse = (error: Protocol.GatewayError): Response =>
+  json(
+    encodeError({ _tag: "Error", version: Protocol.PROTOCOL_VERSION, error }),
+    Protocol.statusOf(error),
+  );
 
 const bearer = (request: Request): string => {
   const header = request.headers.get("authorization") ?? "";
@@ -312,7 +295,7 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
 
     const build = Effect.gen(function* () {
       const socket = yield* Socket.fromWebSocket(Effect.succeed(connection.socket.like));
-      const client = yield* RpcClient.make(RootRpcs).pipe(
+      const client = yield* RpcClient.make(Protocol.RootRpcs).pipe(
         Effect.provideServiceEffect(
           RpcClient.Protocol,
           // A server-side socket cannot be redialed. The root reconnects as a
@@ -377,7 +360,7 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
     connection.socket.message(typeof message === "string" ? message : "");
   };
 
-  const upgradeError = (error: GatewayError): Response => errorResponse(error);
+  const upgradeError = (error: Protocol.GatewayError): Response => errorResponse(error);
 
   const attach = (request: Request, server: Bun.Server<RootData>): Response | undefined => {
     const origin = request.headers.get("origin") ?? "";
@@ -388,31 +371,36 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
       .split(",")
       .map((value) => value.trim())
       .filter((value) => value.length > 0);
-    if (!offered.includes(ROOT_SUBPROTOCOL)) {
+    if (!offered.includes(Protocol.ROOT_SUBPROTOCOL)) {
       return upgradeError({
         _tag: "UnsupportedProtocolVersion",
-        received: offered.filter((value) => !value.startsWith(ATTACH_TOKEN_PREFIX)).join(","),
-        supported: [PROTOCOL_VERSION],
+        received: offered
+          .filter((value) => !value.startsWith(Protocol.ATTACH_TOKEN_PREFIX))
+          .join(","),
+        supported: [Protocol.PROTOCOL_VERSION],
       });
     }
-    const token = offered.find((value) => value.startsWith(ATTACH_TOKEN_PREFIX)) ?? "";
-    if (!sameSecret(options.attachToken, token.slice(ATTACH_TOKEN_PREFIX.length))) {
+    const token = offered.find((value) => value.startsWith(Protocol.ATTACH_TOKEN_PREFIX)) ?? "";
+    if (!sameSecret(options.attachToken, token.slice(Protocol.ATTACH_TOKEN_PREFIX.length))) {
       return upgradeError({ _tag: "Unauthorized" });
     }
     const url = new URL(request.url);
     const rootId = url.searchParams.get("root") ?? "";
     const name = url.searchParams.get("name");
-    if (!Schema.is(RootId)(rootId)) {
+    if (!Schema.is(Protocol.RootId)(rootId)) {
       return upgradeError({ _tag: "MalformedRequest", detail: "root must be a Frame root ID" });
     }
-    if (name !== null && (name.length > MAX_ROOT_NAME_LENGTH || hasControlCharacter(name))) {
+    if (
+      name !== null &&
+      (name.length > Protocol.MAX_ROOT_NAME_LENGTH || hasControlCharacter(name))
+    ) {
       return upgradeError({ _tag: "MalformedRequest", detail: "root name is not printable" });
     }
     if (registry.size >= maxRoots && !registry.has(rootId)) {
       return upgradeError({ _tag: "TooManyRoots", limit: maxRoots });
     }
     const upgraded = server.upgrade(request, {
-      headers: { "Sec-WebSocket-Protocol": ROOT_SUBPROTOCOL },
+      headers: { "Sec-WebSocket-Protocol": Protocol.ROOT_SUBPROTOCOL },
       data: { rootId, name },
     });
     if (upgraded) return undefined;
@@ -421,7 +409,7 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
 
   // ------------------------------------------------------------ readers
 
-  const rootInfos = (): ReadonlyArray<RootInfo> =>
+  const rootInfos = (): ReadonlyArray<Protocol.RootInfo> =>
     [...registry.values()]
       .map((connection) => connection.info)
       .toSorted((a, b) => a.id.localeCompare(b.id));
@@ -505,18 +493,21 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
       if (!sameSecret(options.readToken, bearer(request))) {
         return yield* readerError({ _tag: "Unauthorized" });
       }
-      const version = request.headers.get(VERSION_HEADER) ?? "";
-      if (version !== String(PROTOCOL_VERSION)) {
+      const version = request.headers.get(Protocol.VERSION_HEADER) ?? "";
+      if (version !== String(Protocol.PROTOCOL_VERSION)) {
         return yield* readerError({
           _tag: "UnsupportedProtocolVersion",
           received: version.slice(0, 32),
-          supported: [PROTOCOL_VERSION],
+          supported: [Protocol.PROTOCOL_VERSION],
         });
       }
     });
 
   const handleRoots = Effect.sync(() =>
-    json(encodeRoots({ _tag: "Roots", version: PROTOCOL_VERSION, roots: rootInfos() }), 200),
+    json(
+      encodeRoots({ _tag: "Roots", version: Protocol.PROTOCOL_VERSION, roots: rootInfos() }),
+      200,
+    ),
   );
 
   const handleInspect = (request: Request) =>
@@ -539,11 +530,11 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
       if (Exit.isFailure(decoded)) {
         const version =
           typeof body === "object" && body !== null && "version" in body ? body.version : undefined;
-        if (version !== PROTOCOL_VERSION) {
+        if (version !== Protocol.PROTOCOL_VERSION) {
           return yield* readerError({
             _tag: "UnsupportedProtocolVersion",
             received: String(version).slice(0, 32),
-            supported: [PROTOCOL_VERSION],
+            supported: [Protocol.PROTOCOL_VERSION],
           });
         }
         return yield* readerError({
@@ -552,14 +543,18 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
         });
       }
       const { root, deadlineMillis } = decoded.value;
-      if (root.length === 0 || root.length > MAX_SELECTOR_LENGTH || hasControlCharacter(root)) {
+      if (
+        root.length === 0 ||
+        root.length > Protocol.MAX_SELECTOR_LENGTH ||
+        hasControlCharacter(root)
+      ) {
         return yield* readerError({ _tag: "MalformedRequest", detail: "root selector is invalid" });
       }
-      if (deadlineMillis < 1 || deadlineMillis > MAX_DEADLINE_MILLIS) {
+      if (deadlineMillis < 1 || deadlineMillis > Protocol.MAX_DEADLINE_MILLIS) {
         return yield* readerError({
           _tag: "InvalidDeadline",
           deadlineMillis,
-          maximum: MAX_DEADLINE_MILLIS,
+          maximum: Protocol.MAX_DEADLINE_MILLIS,
         });
       }
       const connection = yield* select(root);
@@ -580,7 +575,7 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
       return json(
         encodeInspection({
           _tag: "Inspection",
-          version: PROTOCOL_VERSION,
+          version: Protocol.PROTOCOL_VERSION,
           root: connection.info,
           snapshot,
         }),
@@ -591,8 +586,9 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
   const handleReader = (request: Request, path: string) =>
     Effect.gen(function* () {
       yield* readerGuard(request);
-      if (path === ROOTS_PATH && request.method === "GET") return yield* handleRoots;
-      if (path === INSPECT_PATH && request.method === "POST") return yield* handleInspect(request);
+      if (path === Protocol.ROOTS_PATH && request.method === "GET") return yield* handleRoots;
+      if (path === Protocol.INSPECT_PATH && request.method === "POST")
+        return yield* handleInspect(request);
       return yield* readerError({ _tag: "NotFound", path: path.slice(0, 128) });
     }).pipe(
       Effect.catchTag("ReaderFailure", (failure) => Effect.succeed(errorResponse(failure.error))),
@@ -611,7 +607,7 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
             });
           }
           const path = new URL(request.url).pathname;
-          if (path === ATTACH_PATH) return attach(request, bunServer);
+          if (path === Protocol.ATTACH_PATH) return attach(request, bunServer);
           return Effect.runPromiseWith(context)(handleReader(request, path), {
             signal: request.signal,
           }).catch(() => new Response(null, { status: 499 }));

@@ -32,10 +32,13 @@ import {
   Result,
   Schema,
   Scope,
+  Semaphore,
   Stream,
   SubscriptionRef,
 } from "effect";
 import { attempt } from "../view/attempt.js";
+import type { Before, Checker, NavigationKind, RouteFailure, Verdict } from "./check.js";
+import { Continue, register as registerChecks } from "./check.js";
 import type {
   AnyRoute,
   Entered,
@@ -46,7 +49,13 @@ import type {
   SearchRecord,
 } from "./route.js";
 import { matchPrefix, segmentsOf } from "./path.js";
-import { parseTemplate, printSearch, readSearch, search as searchCodec } from "./route.js";
+import {
+  parseTemplate,
+  printPath,
+  printSearch,
+  readSearch,
+  search as searchCodec,
+} from "./route.js";
 import { register as registerInspection } from "./route-inspection.js";
 
 /**
@@ -76,6 +85,17 @@ import { register as registerInspection } from "./route-inspection.js";
  * - A query binding is shaped as `FollowedQuery`. An actor binding is a
  *   `Source` of the current real `RemoteActorRef`. A moved binding holds a
  *   new ref; an old ref keeps its old address.
+ *
+ * Route slice 3 adds, still privately (see `docs/design/route-checks.md`):
+ *
+ * - A segment's `before` check. The router runs every matched segment's
+ *   check, parent first, before history moves and before this module plans
+ *   anything, so a refusal starts no child check, declaration, or setup.
+ * - A segment prints its own typed target with `href`.
+ * - A leaf or layout may fail in setup with a typed `E`; it then needs an
+ *   `errored` handler. A declared acquisition failure of the segment's own
+ *   data goes to the same handler as `Declaration`. A failed instance is
+ *   never stayed: the next navigation that matches it enters it again.
  */
 
 // ---------------------------------------------------------------------------
@@ -169,6 +189,7 @@ export interface Segment<
   Search,
   Own extends Declarations,
   Data extends Declarations,
+  CheckR = never,
 > extends AnySegment {
   readonly name: Name;
   /** Decode the accumulated path record and the URL search. None is a non-match. */
@@ -177,17 +198,43 @@ export interface Segment<
   signature(record: PathRecord, values: Values<Params, Search>): string;
   /** This segment's own declarations. Inherited ones are the parent's. */
   declare(values: Values<Params, Search>): Own;
+  /** Print this segment's URL: every ancestor's path and this segment's search. */
+  href(params: Params, search: Search): string;
+  /** This segment's own check, when it has one. Its services are `CheckR`. */
+  check(values: Values<Params, Search>, url: URL, kind: NavigationKind): Option.Option<Check>;
   /** Phantom: the declarations the view sees. */
   readonly "~data": (_: never) => Data;
+  /** Phantom: what this segment's check needs. */
+  readonly "~check": (_: never) => CheckR;
 }
 
-export interface SegmentOptions<P extends ParamsCodec, S extends SearchCodec, Own> {
+/**
+ * One check, ready to run. Its services move from the Effect to the
+ * segment's phantom `CheckR`, which every branch above it carries in
+ * `DataR`; `route` widens them back where it registers the tree's checks.
+ */
+type Check = Effect.Effect<Verdict, never>;
+
+/** Move a check's services to the phantom. See `Check`. */
+// @effect-diagnostics unsafeEffectTypeAssertion:off
+const erase = <CheckR>(check: Effect.Effect<Verdict, never, CheckR>): Check =>
+  // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- CheckR is carried by the segment's phantom and reaches the route's DataR.
+  check as Check;
+// @effect-diagnostics unsafeEffectTypeAssertion:error
+
+export interface SegmentOptions<P extends ParamsCodec, S extends SearchCodec, Own, CheckR> {
   /** A template relative to the parent. The URLPattern grammar that prints. */
   readonly path: string;
   /** Decodes the path record accumulated from the root to this segment. */
   readonly params: P;
   readonly search?: S;
   readonly data?: (values: Values<P["Type"], S["Type"]>) => Own;
+  /**
+   * Asked on every proposed navigation that matches this segment, entering
+   * or stayed, after every ancestor continued. Not asked for a same-URL or
+   * fragment-only move. It sees the candidate's values; no data is open.
+   */
+  readonly before?: Before<P["Type"], S["Type"], CheckR>;
 }
 
 const NoSearch = searchCodec(Schema.Struct({}));
@@ -210,18 +257,25 @@ const recordSignature = (record: PathRecord): string =>
     })
     .join("&");
 
+/** Every part from the root to this segment, in order. */
+const pathOf = (segment: AnySegment): ReadonlyArray<Part> => [
+  ...Option.match(segment.parent, { onNone: () => [], onSome: pathOf }),
+  ...segment.parts,
+];
+
 const makeSegment = <
   const Name extends string,
   P extends ParamsCodec,
   S extends SearchCodec,
   Own extends Declarations,
   Data extends Declarations,
+  CheckR,
 >(
   name: Name,
   parent: Option.Option<AnySegment>,
-  options: SegmentOptions<P, S, Own>,
+  options: SegmentOptions<P, S, Own, CheckR>,
   data: (values: Values<P["Type"], S["Type"]>) => Own,
-): Segment<Name, P["Type"], S["Type"], Own, Data> => {
+): Segment<Name, P["Type"], S["Type"], Own, Data, CheckR> => {
   const parts = Result.getOrThrowWith(parseTemplate(options.path), (rejected) => rejected);
   const search: SearchCodec = Option.getOrElse(
     Option.fromNullishOr(options.search),
@@ -229,12 +283,18 @@ const makeSegment = <
   );
   const decodeParams = Schema.decodeUnknownOption(options.params);
   const decodeSearch = Schema.decodeUnknownOption(search);
+  const encodeParams = Schema.encodeUnknownSync(options.params);
   const encodeSearch = Schema.encodeUnknownSync(search);
+  const before = Option.fromNullishOr(options.before);
+  const full = [...Option.match(parent, { onNone: () => [], onSome: pathOf }), ...parts];
   return {
     _tag: "Segment",
     name,
     parent,
     parts,
+    href: (params, searchValue) =>
+      `${printPath(full, encodeParams(params))}${printSearch(encodeSearch(searchValue))}`,
+    check: (values, url, kind) => Option.map(before, (ask) => erase(ask({ ...values, url, kind }))),
     decode: (record, searchRecord) =>
       Option.flatMap(decodeParams(record), (params) =>
         Option.flatMap(decodeSearch(searchRecord), (searchValue) =>
@@ -245,6 +305,7 @@ const makeSegment = <
       `${recordSignature(record)}${printSearch(encodeSearch(values.search))}`,
     declare: data,
     "~data": phantom<Data>(),
+    "~check": phantom<CheckR>(),
   };
 };
 
@@ -254,11 +315,12 @@ export const segment = <
   P extends ParamsCodec,
   S extends SearchCodec = NoSearch,
   Own extends Declarations = NoDeclarations,
+  CheckR = never,
 >(
   name: Name,
-  options: SegmentOptions<P, S, Own>,
-): Segment<Name, P["Type"], S["Type"], Own, Own> =>
-  makeSegment<Name, P, S, Own, Own>(
+  options: SegmentOptions<P, S, Own, CheckR>,
+): Segment<Name, P["Type"], S["Type"], Own, Own, CheckR> =>
+  makeSegment<Name, P, S, Own, Own, CheckR>(
     name,
     Option.none(),
     options,
@@ -272,12 +334,13 @@ export const child = <
   P extends ParamsCodec,
   S extends SearchCodec = NoSearch,
   Own extends Declarations & Disjoint<ParentData> = NoDeclarations,
+  CheckR = never,
 >(
-  parent: Segment<string, unknown, unknown, Declarations, ParentData>,
+  parent: Segment<string, unknown, unknown, Declarations, ParentData, unknown>,
   name: Name,
-  options: SegmentOptions<P, S, Own>,
-): Segment<Name, P["Type"], S["Type"], Own, ParentData & Own> => {
-  const made = makeSegment<Name, P, S, Own, ParentData & Own>(
+  options: SegmentOptions<P, S, Own, CheckR>,
+): Segment<Name, P["Type"], S["Type"], Own, ParentData & Own, CheckR> => {
+  const made = makeSegment<Name, P, S, Own, ParentData & Own, CheckR>(
     name,
     Option.some(parent),
     options,
@@ -355,22 +418,44 @@ export interface LayoutProps<
 }
 
 export type PropsOf<Seg> =
-  Seg extends Segment<string, infer P, infer S, Declarations, infer Data>
+  Seg extends Segment<string, infer P, infer S, Declarations, infer Data, unknown>
     ? SegmentProps<P, S, Data>
     : never;
 
 export type LayoutPropsOf<Seg, ChildR> =
-  Seg extends Segment<string, infer P, infer S, Declarations, infer Data>
+  Seg extends Segment<string, infer P, infer S, Declarations, infer Data, unknown>
     ? LayoutProps<P, S, Data, ChildR>
     : never;
+
+/**
+ * What a segment shows when it fails. It receives the failure as a Source
+ * so a later slice can replace attempts without rerunning this handler.
+ */
+export interface Recovery<E> {
+  readonly errored: (failure: Source<RouteFailure<E>>) => Node;
+}
+
+/**
+ * The recovery argument. A view that cannot fail may omit it; its
+ * declaration failures then fail the navigation. A view that can fail with
+ * `E` must handle exactly that `E`.
+ */
+export type RecoveryFor<E> = [E] extends [never]
+  ? readonly [] | readonly [recovery: Recovery<never>]
+  : readonly [recovery: Recovery<E>];
 
 /**
  * A mounted segment. `R` is its view's requirements. It appears only in
  * output positions, so a child branch widens into its layout's union.
  */
+/** Which branch made an instance. Compared by reference. */
+interface BranchIdentity {
+  readonly segment: string;
+}
+
 interface Instance<R> {
   readonly key: string;
-  readonly branch: object;
+  readonly branch: BranchIdentity;
   /** The view's setup, owned by this instance's view Scope. */
   readonly setup: Effect.Effect<Node, never, R>;
   /** Close descendants, the view, and the bindings, in that order. */
@@ -381,6 +466,8 @@ interface Instance<R> {
   readonly values: Effect.Effect<Values<unknown, unknown>>;
   /** The current child instance, for inspection. */
   readonly child: Effect.Effect<Option.Option<Instance<unknown>>>;
+  /** It shows `errored`. A failed instance is entered again, never stayed. */
+  readonly failed: () => boolean;
 }
 
 /** A tree mounted once: the Scope its declarations live under and its services. */
@@ -389,6 +476,12 @@ interface Tree {
   readonly cache: Option.Option<QueryCacheService>;
   readonly transport: Option.Option<TransportService>;
   readonly nextKey: (name: string) => string;
+  /**
+   * Serializes a transition with a setup failure's cleanup. Both change
+   * which child an instance holds; the router already serializes
+   * transitions among themselves, but a setup fails on a row's own fiber.
+   */
+  readonly lock: Semaphore.Semaphore;
 }
 
 /** Prepared entry of a segment and every matched descendant. Nothing is published yet. */
@@ -403,11 +496,23 @@ interface Staying {
   readonly abort: Effect.Effect<void>;
 }
 
+/**
+ * What a transition does with one slot. A stayed segment whose own move
+ * failed into its `errored` handler is entered again as a failed instance.
+ */
+type Plan<R> =
+  | { readonly _tag: "Stay"; readonly staying: Staying }
+  | { readonly _tag: "Enter"; readonly entering: Entering<R> };
+
+type ChildPlan<R> = Plan<R> | { readonly _tag: "None" };
+
 /** One matched segment and the matched remainder of its branch. */
 interface Match<R> {
-  readonly branch: object;
+  readonly branch: BranchIdentity;
+  /** Every matched segment's check for this candidate, parent first. */
+  readonly check: (url: URL, kind: NavigationKind) => Check;
   enter(tree: Tree): Effect.Effect<Entering<R>, TransportReadError>;
-  stay(instance: Instance<unknown>, tree: Tree): Effect.Effect<Staying, TransportReadError>;
+  stay(instance: Instance<unknown>, tree: Tree): Effect.Effect<Plan<R>, TransportReadError>;
 }
 
 interface MatchInput {
@@ -420,7 +525,7 @@ interface MatchInput {
 /**
  * A segment with its view and children. `ViewR` is what its view needs,
  * including every child's view requirements that the outlet carries.
- * `DataR` is what its transition needs to acquire declarations.
+ * `DataR` is what its transition needs: declarations and checks.
  */
 export interface Branch<Seg extends AnySegment, ViewR, DataR> {
   readonly _tag: "Branch";
@@ -435,8 +540,8 @@ export type AnyBranch<R> = Branch<AnySegment, R, unknown>;
 type ViewROf<B> = B extends Branch<AnySegment, infer R, unknown> ? R : never;
 type DataROf<B> = B extends Branch<AnySegment, unknown, infer R> ? R : never;
 type OwnServices<Seg> =
-  Seg extends Segment<string, unknown, unknown, infer Own, Declarations>
-    ? ServicesOf<Own[keyof Own]>
+  Seg extends Segment<string, unknown, unknown, infer Own, Declarations, infer CheckR>
+    ? ServicesOf<Own[keyof Own]> | CheckR
     : never;
 
 /** A leaf segment: it has no outlet. */
@@ -447,14 +552,24 @@ export const leaf = <
   Own extends Declarations,
   Data extends Declarations,
   R,
+  // Defaults, because TypeScript drops `never` as an inference candidate.
+  CheckR = never,
+  E = never,
 >(
-  seg: Segment<Name, Params, Search, Own, Data>,
-  view: (props: SegmentProps<Params, Search, Data>) => Effect.Effect<Node, never, R>,
+  seg: Segment<Name, Params, Search, Own, Data, CheckR>,
+  view: (props: SegmentProps<Params, Search, Data>) => Effect.Effect<Node, E, R>,
+  ...recovery: RecoveryFor<E>
 ): Branch<
-  Segment<Name, Params, Search, Own, Data>,
+  Segment<Name, Params, Search, Own, Data, CheckR>,
   Exclude<R, Scope.Scope>,
-  OwnServices<Segment<Name, Params, Search, Own, Data>>
-> => makeBranch<Name, Params, Search, Own, Data, R, never>(seg, [], (props) => view(props));
+  OwnServices<Segment<Name, Params, Search, Own, Data, CheckR>>
+> =>
+  makeBranch<Name, Params, Search, Own, Data, CheckR, E, R, never>(
+    seg,
+    [],
+    (props) => view(props),
+    recoveryOf<E>(recovery),
+  );
 
 /**
  * A layout: its view receives the outlet. Children are built first so their
@@ -469,16 +584,20 @@ export const layout = <
   Data extends Declarations,
   const Children extends ReadonlyArray<AnyBranch<unknown>>,
   R,
+  // Defaults, because TypeScript drops `never` as an inference candidate.
+  CheckR = never,
+  E = never,
 >(
-  seg: Segment<Name, Params, Search, Own, Data>,
+  seg: Segment<Name, Params, Search, Own, Data, CheckR>,
   children: Children,
   view: (
     props: LayoutProps<Params, Search, Data, ViewROf<Children[number]>>,
-  ) => Effect.Effect<Node, never, R>,
+  ) => Effect.Effect<Node, E, R>,
+  ...recovery: RecoveryFor<E>
 ): Branch<
-  Segment<Name, Params, Search, Own, Data>,
+  Segment<Name, Params, Search, Own, Data, CheckR>,
   Exclude<R, Scope.Scope>,
-  OwnServices<Segment<Name, Params, Search, Own, Data>> | DataROf<Children[number]>
+  OwnServices<Segment<Name, Params, Search, Own, Data, CheckR>> | DataROf<Children[number]>
 > => {
   for (const branch of children) {
     if (!Option.contains(branch.segment.parent, seg)) {
@@ -497,12 +616,27 @@ export const layout = <
   }
   // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- the children tuple is exactly ViewROf<Children[number]>'s branches.
   const typed = children as ReadonlyArray<AnyBranch<ViewROf<Children[number]>>>;
-  return makeBranch<Name, Params, Search, Own, Data, R, ViewROf<Children[number]>>(
+  return makeBranch<Name, Params, Search, Own, Data, CheckR, E, R, ViewROf<Children[number]>>(
     seg,
     typed,
     (props, outlet) => view({ ...props, outlet }),
+    recoveryOf<E>(recovery),
   );
 };
+
+/**
+ * The optional recovery argument as an Option. `RecoveryFor` already made
+ * it required whenever `E` is not `never`.
+ */
+const recoveryOf = <E>(
+  recovery: ReadonlyArray<Recovery<E> | Recovery<never>>,
+): Option.Option<Recovery<E>> =>
+  Option.map(
+    Option.fromNullishOr(recovery[0]),
+    // A Recovery<never> handles only declaration failures; it never sees Setup.
+    // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- errored only reads RouteFailure<E>, and E is never whenever Recovery<never> was accepted.
+    (one) => one as Recovery<E>,
+  );
 
 /** A branch the builder cannot mount. */
 export class BranchRejected extends Schema.TaggedError<BranchRejected>()("BranchRejected", {
@@ -763,20 +897,128 @@ const refsOf = (
 // The branch runtime
 // ---------------------------------------------------------------------------
 
-interface Internals<Params, Search, ChildR> {
-  readonly state: SubscriptionRef.SubscriptionRef<InstanceState<Params, Search>>;
-  readonly bindings: ReadonlyMap<string, Binding>;
+/** Where one child instance is shown: a layout's outlet. */
+interface Slot<R> {
   readonly data: DataRecord;
   readonly childrenScope: Scope.Scope;
-  readonly outlet: SubscriptionRef.SubscriptionRef<ReadonlyArray<Instance<ChildR>>>;
-  signature: string;
-  child: Option.Option<Instance<ChildR>>;
+  readonly outlet: SubscriptionRef.SubscriptionRef<ReadonlyArray<Instance<R>>>;
+  child: Option.Option<Instance<R>>;
 }
 
-type ChildPlan<ChildR> =
-  | { readonly _tag: "Stay"; readonly staying: Staying }
-  | { readonly _tag: "Enter"; readonly entering: Entering<ChildR> }
-  | { readonly _tag: "None" };
+interface Internals<Params, Search, ChildR> extends Slot<ChildR> {
+  readonly state: SubscriptionRef.SubscriptionRef<InstanceState<Params, Search>>;
+  readonly bindings: ReadonlyMap<string, Binding>;
+  signature: string;
+  failed: boolean;
+}
+
+/** The outlet's setup: a keyed list of at most one instance. */
+const slotSetup = <R>(slot: Slot<R>): Effect.Effect<Node, never, Exclude<R, Scope.Scope>> =>
+  View.list({
+    each: { get: SubscriptionRef.get(slot.outlet), changes: SubscriptionRef.changes(slot.outlet) },
+    keyBy: (instance) => instance.key,
+    row: (item) => Effect.flatMap(item.get, (instance) => instance.setup),
+  });
+
+/**
+ * Plan one slot. A failed instance is never stayed: any navigation that
+ * reaches it is a new attempt, so it is entered again.
+ */
+const prepareSlot = <R>(
+  tree: Tree,
+  input: Option.Option<Match<R>>,
+  current: Option.Option<Instance<R>>,
+): Effect.Effect<ChildPlan<R>, TransportReadError> =>
+  Option.match(input, {
+    onNone: () => Effect.succeed<ChildPlan<R>>({ _tag: "None" }),
+    onSome: (matched): Effect.Effect<ChildPlan<R>, TransportReadError> => {
+      if (
+        Option.isSome(current) &&
+        current.value.branch === matched.branch &&
+        !current.value.failed()
+      ) {
+        return matched.stay(current.value, tree);
+      }
+      return Effect.map(matched.enter(tree), (entering): ChildPlan<R> => ({
+        _tag: "Enter",
+        entering,
+      }));
+    },
+  });
+
+const abortPlan = <R>(plan: ChildPlan<R>): Effect.Effect<void> => {
+  if (plan._tag === "Stay") {
+    return plan.staying.abort;
+  }
+  if (plan._tag === "Enter") {
+    return plan.entering.abort;
+  }
+  return Effect.void;
+};
+
+/** Commit one slot: stay in place, or swap the outlet item, then exit the old one. */
+const commitSlot = Effect.fn("Branch.commitSlot")(function* <R>(slot: Slot<R>, plan: ChildPlan<R>) {
+  if (plan._tag === "Stay") {
+    return yield* plan.staying.commit;
+  }
+  const exited = slot.child;
+  let next = Option.none<Instance<R>>();
+  if (plan._tag === "Enter") {
+    next = Option.some(yield* plan.entering.create(slot.data, slot.childrenScope));
+  }
+  slot.child = next;
+  yield* SubscriptionRef.set(slot.outlet, Option.toArray(next));
+  if (Option.isSome(exited)) {
+    // The exited view closes first. Its interests are released after it.
+    yield* exited.value.close;
+    yield* exited.value.release;
+  }
+});
+
+/** A Source that holds one value. */
+const constant = <A>(value: A): Source<A> => ({
+  get: Effect.succeed(value),
+  changes: Stream.make(value),
+});
+
+/**
+ * An instance that shows only `errored`: its own declarations failed. It
+ * holds no binding and no child, and it is always entered again.
+ */
+const failedEntering = <R>(
+  tree: Tree,
+  name: string,
+  identity: BranchIdentity,
+  values: Values<unknown, unknown>,
+  node: () => Node,
+): Entering<R> => ({
+  abort: Effect.void,
+  create: (_inherited, parentScope) =>
+    Effect.map(Scope.fork(parentScope), (scope): Instance<R> => ({
+      key: tree.nextKey(name),
+      branch: identity,
+      setup: Scope.provide(
+        attempt(Effect.sync(node), (error: never): Effect.Effect<Node> => Function.absurd(error)),
+        scope,
+      ),
+      close: Scope.close(scope, Exit.void),
+      release: Effect.void,
+      values: Effect.succeed(values),
+      child: Effect.succeed(Option.none()),
+      failed: () => true,
+    })),
+});
+
+/** Which prepared part failed: this segment's own declaration, or a descendant. */
+type PartFailure =
+  | { readonly _tag: "Own"; readonly error: TransportReadError }
+  | { readonly _tag: "Descendant"; readonly error: TransportReadError };
+
+const ownPart = <A>(effect: Effect.Effect<A, TransportReadError>) =>
+  Effect.mapError(effect, (error): PartFailure => ({ _tag: "Own", error }));
+
+const descendantPart = <A>(effect: Effect.Effect<A, TransportReadError>) =>
+  Effect.mapError(effect, (error): PartFailure => ({ _tag: "Descendant", error }));
 
 /** Own declarations with their keys, in a stable name order. */
 const keyed = (declarations: Declarations) =>
@@ -810,20 +1052,23 @@ const makeBranch = <
   Search,
   Own extends Declarations,
   Data extends Declarations,
+  CheckR,
+  E,
   R,
   ChildR,
 >(
-  seg: Segment<Name, Params, Search, Own, Data>,
+  seg: Segment<Name, Params, Search, Own, Data, CheckR>,
   children: ReadonlyArray<AnyBranch<ChildR>>,
   view: (
     props: SegmentProps<Params, Search, Data>,
     outlet: Effect.Effect<Node, never, ChildR>,
-  ) => Effect.Effect<Node, never, R>,
-): Branch<Segment<Name, Params, Search, Own, Data>, Exclude<R, Scope.Scope>, never> => {
+  ) => Effect.Effect<Node, E, R>,
+  recovery: Option.Option<Recovery<E>>,
+): Branch<Segment<Name, Params, Search, Own, Data, CheckR>, Exclude<R, Scope.Scope>, never> => {
   // Typed memory of the instances this branch created. A match of this
   // branch reads it back, so no instance value is ever cast.
   const created = new WeakMap<Instance<unknown>, Internals<Params, Search, ChildR>>();
-  const identity = {};
+  const identity: BranchIdentity = { segment: seg.name };
 
   const matchChild = (input: MatchInput): Option.Option<Match<ChildR>> => {
     for (const branch of children) {
@@ -833,6 +1078,62 @@ const makeBranch = <
       }
     }
     return Option.none();
+  };
+
+  /**
+   * A typed setup failure. Under the tree lock, the instance is marked
+   * failed and its descendants and its own interests are released: the
+   * errored node reads none of them, and the next navigation enters it
+   * again. Only then is `errored` built. Without a handler `E` is `never`.
+   */
+  const setupFailed = (
+    tree: Tree,
+    internals: Internals<Params, Search, ChildR>,
+    error: E,
+  ): Effect.Effect<Node> =>
+    Option.match(recovery, {
+      onNone: () => Effect.die(error),
+      onSome: (handler) =>
+        Effect.andThen(
+          tree.lock.withPermit(
+            Effect.gen(function* () {
+              internals.failed = true;
+              const exited = internals.child;
+              internals.child = Option.none();
+              yield* SubscriptionRef.set(internals.outlet, []);
+              if (Option.isSome(exited)) {
+                yield* exited.value.close;
+                yield* exited.value.release;
+              }
+              yield* releaseAll(
+                Array.from(internals.bindings.values(), (binding) => binding.current()),
+              );
+            }),
+          ),
+          Effect.sync(() => handler.errored(constant<RouteFailure<E>>({ _tag: "Setup", error }))),
+        ),
+    });
+
+  /**
+   * An own acquisition failure goes to `errored` when there is a handler and
+   * the failure is not a refusal. A descendant's failure is not this
+   * segment's to handle.
+   */
+  const declarationFailed = <A>(
+    tree: Tree,
+    values: Values<Params, Search>,
+    failure: PartFailure,
+  ): Effect.Effect<Entering<A>, TransportReadError> => {
+    const error = failure.error;
+    if (failure._tag === "Own" && error._tag !== "Unauthorized" && Option.isSome(recovery)) {
+      const handler = recovery.value;
+      return Effect.succeed(
+        failedEntering<A>(tree, seg.name, identity, values, () =>
+          handler.errored(constant<RouteFailure<E>>({ _tag: "Declaration", error })),
+        ),
+      );
+    }
+    return Effect.fail(error);
   };
 
   const create = Effect.fn("Branch.create")(function* (
@@ -881,6 +1182,7 @@ const makeBranch = <
       outlet,
       signature,
       child: childInstance,
+      failed: false,
     };
     const props: SegmentProps<Params, Search, Data> = {
       params: {
@@ -893,11 +1195,6 @@ const makeBranch = <
       },
       data: routeData<Data>(data),
     };
-    const outletSetup = View.list({
-      each: { get: SubscriptionRef.get(outlet), changes: SubscriptionRef.changes(outlet) },
-      keyBy: (instance) => instance.key,
-      row: (item) => Effect.flatMap(item.get, (instance) => instance.setup),
-    });
     const release: Effect.Effect<void> = Effect.suspend(() =>
       Effect.andThen(
         Option.match(internals.child, {
@@ -911,11 +1208,12 @@ const makeBranch = <
       key: tree.nextKey(seg.name),
       branch: identity,
       // The view runs under an owned attempt in the instance's view Scope:
-      // a row that starts after the instance closed never runs it.
+      // a row that starts after the instance closed never runs it, and a
+      // typed failure closes the failed setup before `errored` is built.
       setup: Scope.provide(
         attempt(
-          Effect.suspend(() => view(props, outletSetup)),
-          (error: never): Effect.Effect<Node> => Function.absurd(error),
+          Effect.suspend(() => view(props, slotSetup(internals))),
+          (error: E): Effect.Effect<Node> => setupFailed(tree, internals, error),
         ),
         viewScope,
       ),
@@ -923,62 +1221,10 @@ const makeBranch = <
       release,
       values: Effect.map(SubscriptionRef.get(state), (current) => current.values),
       child: Effect.sync(() => internals.child),
+      failed: () => internals.failed,
     };
     created.set(instance, internals);
     return instance;
-  });
-
-  const prepareChild = (
-    tree: Tree,
-    input: Option.Option<Match<ChildR>>,
-    current: Option.Option<Instance<ChildR>>,
-  ): Effect.Effect<ChildPlan<ChildR>, TransportReadError> =>
-    Option.match(input, {
-      onNone: () => Effect.succeed<ChildPlan<ChildR>>({ _tag: "None" }),
-      onSome: (matched) => {
-        if (Option.isSome(current) && current.value.branch === matched.branch) {
-          return Effect.map(matched.stay(current.value, tree), (staying): ChildPlan<ChildR> => ({
-            _tag: "Stay",
-            staying,
-          }));
-        }
-        return Effect.map(matched.enter(tree), (entering): ChildPlan<ChildR> => ({
-          _tag: "Enter",
-          entering,
-        }));
-      },
-    });
-
-  const abortChild = (plan: ChildPlan<ChildR>): Effect.Effect<void> => {
-    if (plan._tag === "Stay") {
-      return plan.staying.abort;
-    }
-    if (plan._tag === "Enter") {
-      return plan.entering.abort;
-    }
-    return Effect.void;
-  };
-
-  /** Commit the child plan: stay in place, or swap the outlet item, then exit the old one. */
-  const commitChild = Effect.fn("Branch.commitChild")(function* (
-    internals: Internals<Params, Search, ChildR>,
-    plan: ChildPlan<ChildR>,
-  ) {
-    if (plan._tag === "Stay") {
-      return yield* plan.staying.commit;
-    }
-    const exited = internals.child;
-    let next = Option.none<Instance<ChildR>>();
-    if (plan._tag === "Enter") {
-      next = Option.some(yield* plan.entering.create(internals.data, internals.childrenScope));
-    }
-    internals.child = next;
-    yield* SubscriptionRef.set(internals.outlet, Option.toArray(next));
-    if (Option.isSome(exited)) {
-      // The exited view closes first. Its interests are released after it.
-      yield* exited.value.close;
-      yield* exited.value.release;
-    }
   });
 
   const stayWith = Effect.fn("Branch.stay")(function* (
@@ -988,15 +1234,15 @@ const makeBranch = <
     signature: string,
     childMatch: Option.Option<Match<ChildR>>,
   ) {
-    const own = yield* keyed(seg.declare(values));
-    const names = new Set(own.map((one) => one.name));
+    const ownDeclarations = yield* keyed(seg.declare(values));
+    const names = new Set(ownDeclarations.map((one) => one.name));
     if (
       names.size !== internals.bindings.size ||
-      own.some((one) => !internals.bindings.has(one.name))
+      ownDeclarations.some((one) => !internals.bindings.has(one.name))
     ) {
       return yield* Effect.die(`segment ${seg.name} changed its declaration names`);
     }
-    const moves = own.filter((one) =>
+    const moves = ownDeclarations.filter((one) =>
       Option.exists(
         Option.fromNullishOr(internals.bindings.get(one.name)),
         (binding) => binding.current().key !== one.key,
@@ -1005,27 +1251,40 @@ const makeBranch = <
     type Prepared =
       | { readonly _tag: "Own"; readonly name: string; readonly acquired: Acquired }
       | { readonly _tag: "Child"; readonly plan: ChildPlan<ChildR> };
-    const parts = yield* allOrNothing<Prepared, TransportReadError>(
-      [
-        ...moves.map((one) =>
-          Effect.map(acquire(tree, one.key, one.declaration), (acquired): Prepared => ({
-            _tag: "Own",
-            name: one.name,
-            acquired,
-          })),
-        ),
-        Effect.map(prepareChild(tree, childMatch, internals.child), (plan): Prepared => ({
-          _tag: "Child",
-          plan,
-        })),
-      ],
-      (part) => {
-        if (part._tag === "Own") {
-          return Scope.close(part.acquired.scope, Exit.void);
-        }
-        return abortChild(part.plan);
-      },
+    const outcome = yield* Effect.result(
+      allOrNothing<Prepared, PartFailure>(
+        [
+          ...moves.map((one) =>
+            Effect.map(ownPart(acquire(tree, one.key, one.declaration)), (acquired): Prepared => ({
+              _tag: "Own",
+              name: one.name,
+              acquired,
+            })),
+          ),
+          Effect.map(
+            descendantPart(prepareSlot(tree, childMatch, internals.child)),
+            (plan): Prepared => ({ _tag: "Child", plan }),
+          ),
+        ],
+        (part) => {
+          if (part._tag === "Own") {
+            return Scope.close(part.acquired.scope, Exit.void);
+          }
+          return abortPlan(part.plan);
+        },
+      ),
     );
+    if (Result.isFailure(outcome)) {
+      // A handled own failure replaces this instance with a failed one.
+      const entering = yield* declarationFailed<Exclude<R, Scope.Scope>>(
+        tree,
+        values,
+        outcome.failure,
+      );
+      const plan: Plan<Exclude<R, Scope.Scope>> = { _tag: "Enter", entering };
+      return plan;
+    }
+    const parts = outcome.success;
     const acquired = parts.filter(
       (part): part is Extract<Prepared, { readonly _tag: "Own" }> => part._tag === "Own",
     );
@@ -1043,7 +1302,7 @@ const makeBranch = <
     const staying: Staying = {
       abort: Effect.andThen(
         releaseAll(acquired.map((part) => part.acquired)),
-        abortChild(childPlan),
+        abortPlan(childPlan),
       ),
       commit: Effect.gen(function* () {
         const replaced: Array<Acquired> = [];
@@ -1060,11 +1319,12 @@ const makeBranch = <
             refs: yield* refsOf(internals.bindings),
           });
         }
-        yield* commitChild(internals, childPlan);
+        yield* commitSlot(internals, childPlan);
         yield* releaseAll(replaced);
       }),
     };
-    return staying;
+    const plan: Plan<Exclude<R, Scope.Scope>> = { _tag: "Stay", staying };
+    return plan;
   });
 
   const enterWith = Effect.fn("Branch.enter")(function* (
@@ -1073,37 +1333,46 @@ const makeBranch = <
     signature: string,
     childMatch: Option.Option<Match<ChildR>>,
   ) {
-    const own = yield* keyed(seg.declare(values));
+    const ownDeclarations = yield* keyed(seg.declare(values));
     type Prepared =
       | { readonly _tag: "Own"; readonly name: string; readonly acquired: Acquired }
       | { readonly _tag: "Child"; readonly entering: Entering<ChildR> };
-    const childPart: ReadonlyArray<Effect.Effect<Prepared, TransportReadError>> = Option.match(
+    const childPart: ReadonlyArray<Effect.Effect<Prepared, PartFailure>> = Option.match(
       childMatch,
       {
         onNone: () => [],
         onSome: (matched) => [
-          Effect.map(matched.enter(tree), (entering): Prepared => ({ _tag: "Child", entering })),
+          Effect.map(descendantPart(matched.enter(tree)), (entering): Prepared => ({
+            _tag: "Child",
+            entering,
+          })),
         ],
       },
     );
-    const parts = yield* allOrNothing<Prepared, TransportReadError>(
-      [
-        ...own.map((one) =>
-          Effect.map(acquire(tree, one.key, one.declaration), (acquired): Prepared => ({
-            _tag: "Own",
-            name: one.name,
-            acquired,
-          })),
-        ),
-        ...childPart,
-      ],
-      (part) => {
-        if (part._tag === "Own") {
-          return Scope.close(part.acquired.scope, Exit.void);
-        }
-        return part.entering.abort;
-      },
+    const outcome = yield* Effect.result(
+      allOrNothing<Prepared, PartFailure>(
+        [
+          ...ownDeclarations.map((one) =>
+            Effect.map(ownPart(acquire(tree, one.key, one.declaration)), (acquired): Prepared => ({
+              _tag: "Own",
+              name: one.name,
+              acquired,
+            })),
+          ),
+          ...childPart,
+        ],
+        (part) => {
+          if (part._tag === "Own") {
+            return Scope.close(part.acquired.scope, Exit.void);
+          }
+          return part.entering.abort;
+        },
+      ),
     );
+    if (Result.isFailure(outcome)) {
+      return yield* declarationFailed<Exclude<R, Scope.Scope>>(tree, values, outcome.failure);
+    }
+    const parts = outcome.success;
     const acquired = parts.filter(
       (part): part is Extract<Prepared, { readonly _tag: "Own" }> => part._tag === "Own",
     );
@@ -1151,6 +1420,22 @@ const makeBranch = <
         }
         const matched: Match<Exclude<R, Scope.Scope>> = {
           branch: identity,
+          // Parent first: a child is asked only after this segment continued.
+          check: (url, kind) =>
+            Effect.flatMap(
+              Option.getOrElse(seg.check(values, url, kind), () =>
+                Effect.succeed<Verdict>(Continue),
+              ),
+              (verdict): Check => {
+                if (verdict._tag === "Redirect") {
+                  return Effect.succeed(verdict);
+                }
+                return Option.match(childMatch, {
+                  onNone: () => Effect.succeed<Verdict>(Continue),
+                  onSome: (next) => next.check(url, kind),
+                });
+              },
+            ),
           enter: (tree) => enterWith(tree, values, signature, childMatch),
           stay: (instance, tree) =>
             Effect.flatMap(lookup(instance), (internals) =>
@@ -1197,62 +1482,92 @@ const deepest = (instance: Instance<unknown>): Effect.Effect<Values<unknown, unk
 
 /**
  * Mount a tree as one route. `update` runs the nested transition for every
- * URL the tree matches. An acquisition failure is a defect in this slice:
- * nothing is published, and the typed route failure is slice 3.
+ * URL the tree matches. The router runs the tree's checks before it moves
+ * history and before `enter` or `update`. An acquisition failure that no
+ * segment handles is a defect: nothing is published.
  */
 export const route = <const Name extends string, Seg extends AnySegment, ViewR, DataR>(
   name: Name,
   root: Branch<Seg, ViewR, DataR>,
-): AnyRoute<ViewR | DataR> & { readonly name: Name } => ({
-  name,
-  searchKeys: { known: false, keys: [] },
-  enter: (url) =>
-    Option.map(matchUrl(root, url), (first) =>
-      Effect.sync((): Entered<ViewR | DataR> => {
-        let mounted = Option.none<MountedTree<ViewR>>();
-        let counter = 0;
-        const entered: Entered<ViewR | DataR> = {
-          instance: { _tag: "RouteInstance" },
-          setup: Effect.gen(function* () {
-            const owner = yield* Effect.scope;
-            // Forked first, so it closes last: every view closes before
-            // any declaration interest is released.
-            const declarations = yield* Scope.fork(owner);
-            const tree: Tree = {
-              declarations,
-              cache: yield* Effect.serviceOption(QueryCache),
-              transport: yield* Effect.serviceOption(ActorTransport),
-              nextKey: (segmentName) => {
-                counter += 1;
-                return `${segmentName}#${String(counter)}`;
-              },
-            };
-            const entering = yield* Effect.orDie(first.enter(tree));
-            const instance = yield* entering.create(new Map(), owner);
-            mounted = Option.some({ tree, root: instance });
-            return yield* instance.setup;
-          }),
-          update: (next) =>
-            Option.match(Option.all([mounted, matchUrl(root, next)]), {
-              onNone: () => Effect.succeed(false),
-              onSome: ([current, matched]) =>
-                Effect.gen(function* () {
-                  const staying = yield* Effect.orDie(matched.stay(current.root, current.tree));
-                  yield* staying.commit;
-                  return true;
-                }),
+): AnyRoute<ViewR | DataR> & { readonly name: Name } => {
+  const mountable: AnyRoute<ViewR | DataR> & { readonly name: Name } = {
+    name,
+    searchKeys: { known: false, keys: [] },
+    enter: (url) =>
+      Option.map(matchUrl(root, url), (first) =>
+        Effect.sync((): Entered<ViewR | DataR> => {
+          let mounted = Option.none<MountedTree<ViewR>>();
+          let counter = 0;
+          const entered: Entered<ViewR | DataR> = {
+            instance: { _tag: "RouteInstance" },
+            setup: Effect.gen(function* () {
+              const owner = yield* Effect.scope;
+              // Forked first, so it closes last: every view closes before
+              // any declaration interest is released.
+              const declarations = yield* Scope.fork(owner);
+              const tree: Tree = {
+                declarations,
+                cache: yield* Effect.serviceOption(QueryCache),
+                transport: yield* Effect.serviceOption(ActorTransport),
+                nextKey: (segmentName) => {
+                  counter += 1;
+                  return `${segmentName}#${String(counter)}`;
+                },
+                lock: yield* Semaphore.make(1),
+              };
+              const entering = yield* Effect.orDie(first.enter(tree));
+              const instance = yield* entering.create(new Map(), owner);
+              mounted = Option.some({ tree, root: instance });
+              // Yielded directly, not through a list, so a host's first
+              // frame holds the root's setup.
+              return yield* instance.setup;
             }),
-        };
-        registerInspection(
-          entered,
-          Effect.suspend(() =>
-            Option.match(mounted, {
-              onNone: () => Effect.succeed({ params: {}, search: {} }),
-              onSome: (current) => deepest(current.root),
-            }),
-          ),
-        );
-        return entered;
-      }),
-    ),
-});
+            update: (next) =>
+              Option.match(Option.all([mounted, matchUrl(root, next)]), {
+                onNone: () => Effect.succeed(false),
+                // The root keeps one instance for this mount. When it must
+                // be entered again (it failed, or its own move failed into
+                // `errored`), the answer is false and the router enters the
+                // whole tree again, before it closes this one.
+                onSome: ([current, matched]) =>
+                  current.tree.lock.withPermit(
+                    Effect.gen(function* () {
+                      if (current.root.failed()) {
+                        return false;
+                      }
+                      const plan = yield* Effect.orDie(
+                        prepareSlot(current.tree, Option.some(matched), Option.some(current.root)),
+                      );
+                      if (plan._tag !== "Stay") {
+                        yield* abortPlan(plan);
+                        return false;
+                      }
+                      yield* plan.staying.commit;
+                      return true;
+                    }),
+                  ),
+              }),
+          };
+          registerInspection(
+            entered,
+            Effect.suspend(() =>
+              Option.match(mounted, {
+                onNone: () => Effect.succeed({ params: {}, search: {} }),
+                onSome: (current) => deepest(current.root),
+              }),
+            ),
+          );
+          return entered;
+        }),
+      ),
+  };
+  // `DataR` lists every segment's `CheckR`: widening the erased checks to it
+  // restores what they need, and the router runs them in the mount context.
+  const checks: Checker<DataR> = (url, kind) =>
+    Option.match(matchUrl(root, url), {
+      onNone: () => Effect.succeed<Verdict>(Continue),
+      onSome: (matched) => matched.check(url, kind),
+    });
+  registerChecks(mountable, checks);
+  return mountable;
+};

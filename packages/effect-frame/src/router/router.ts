@@ -21,6 +21,10 @@ import {
   makeRuntime as makeUrlStateRuntime,
 } from "./url-state-runtime.js";
 import * as Inspection from "../inspection.js";
+import type { NavigationKind } from "./check.js";
+import { RedirectCycle, read as readChecks, redirectLimit } from "./check.js";
+import type { NavigationResult } from "./receipt.js";
+import { Committed, Unchanged, register as registerReceipts } from "./receipt.js";
 
 /**
  * The router (#18 §7). The URL is the state: the router holds nothing about
@@ -153,17 +157,32 @@ const resolve = <R>(
   };
 };
 
+/** What a request ends with. None: the router closed before the request ran. */
+type Outcome = Deferred.Deferred<Exit.Exit<Option.Option<NavigationResult>, never>>;
+
 type Request =
   | {
       readonly operation: "push" | "replace";
       readonly href: string | UrlUpdater;
       readonly instance: Option.Option<RouteInstance>;
-      readonly done: Deferred.Deferred<Exit.Exit<void, never>>;
+      readonly done: Outcome;
     }
   | {
       readonly operation: "pop";
-      readonly done: Deferred.Deferred<Exit.Exit<void, never>>;
+      readonly done: Outcome;
     };
+
+/** A candidate URL after its checks, with the route that will show it. */
+interface Settled<R> {
+  readonly url: URL;
+  readonly target: Resolved<R>;
+}
+
+/** Only the fragment differs: a native in-document move, which no check sees. */
+const fragmentOnly = (next: URL, committed: URL): boolean =>
+  next.origin === committed.origin &&
+  next.pathname === committed.pathname &&
+  next.search === committed.search;
 
 /**
  * Mount a route tree on a host. The Scope owns the router; each shown route
@@ -210,19 +229,19 @@ export const mount: <R, HostNode, N = R>(
   const submit = (request: Request) =>
     Effect.gen(function* () {
       if (closed) {
-        return;
+        return Option.none<NavigationResult>();
       }
       pending.add(request);
       const offered = yield* Queue.offer(requests, request);
       if (!offered) {
         pending.delete(request);
-        yield* Deferred.succeed(request.done, Exit.succeed(void 0));
-        return;
+        yield* Deferred.succeed(request.done, Exit.succeed(Option.none()));
+        return Option.none<NavigationResult>();
       }
       const outcome = yield* Deferred.await(request.done);
-      yield* Exit.match(outcome, {
+      return yield* Exit.match(outcome, {
         onFailure: (cause) => Effect.failCause(cause),
-        onSuccess: () => Effect.void,
+        onSuccess: (result) => Effect.succeed(result),
       });
     });
 
@@ -232,19 +251,26 @@ export const mount: <R, HostNode, N = R>(
     instance?: RouteInstance,
   ) =>
     Effect.gen(function* () {
-      const done = yield* Deferred.make<Exit.Exit<void, never>>();
-      yield* submit({ operation, href, instance: Option.fromNullishOr(instance), done });
+      const done = yield* Deferred.make<Exit.Exit<Option.Option<NavigationResult>, never>>();
+      return yield* submit({ operation, href, instance: Option.fromNullishOr(instance), done });
     });
 
   const enqueuePop = () =>
     Effect.gen(function* () {
-      const done = yield* Deferred.make<Exit.Exit<void, never>>();
+      const done = yield* Deferred.make<Exit.Exit<Option.Option<NavigationResult>, never>>();
       yield* submit({ operation: "pop", done });
     });
 
+  /** A request the router's close ended has no result: it is interrupted. */
+  const received = (result: Option.Option<NavigationResult>): Effect.Effect<NavigationResult> =>
+    Option.match(result, {
+      onNone: () => Effect.interrupt,
+      onSome: Effect.succeed,
+    });
+
   const service: RouterService = {
-    navigate: (href) => enqueue("push", href),
-    replace: (href) => enqueue("replace", href),
+    navigate: (href) => Effect.asVoid(enqueue("push", href)),
+    replace: (href) => Effect.asVoid(enqueue("replace", href)),
     navigations: {
       get: Effect.map(SubscriptionRef.get(navigations), navigationOf),
       changes: Stream.map(SubscriptionRef.changes(navigations), navigationOf),
@@ -262,16 +288,76 @@ export const mount: <R, HostNode, N = R>(
   };
 
   const navigation: RouteNavigation = {
-    navigate: (href, instance) => enqueue("push", href, instance),
-    replace: (href, instance) => enqueue("replace", href, instance),
+    navigate: (href, instance) => Effect.asVoid(enqueue("push", href, instance)),
+    replace: (href, instance) => Effect.asVoid(enqueue("replace", href, instance)),
   };
+  registerReceipts(service, {
+    navigate: (href, instance) => Effect.flatMap(enqueue("push", href, instance), received),
+    replace: (href, instance) => Effect.flatMap(enqueue("replace", href, instance), received),
+  });
+
+  /**
+   * Run the candidate route's checks and follow redirects before history
+   * moves, so a denied URL never becomes an entry. Each hop is matched
+   * again from the top: a redirect may leave the route that asked for it.
+   * A repeated URL or too many hops is a defect of this navigation.
+   */
+  const settleFrom = (
+    candidate: URL,
+    kind: NavigationKind,
+    chain: ReadonlyArray<string>,
+  ): Effect.Effect<
+    Settled<R | N>,
+    never,
+    Exclude<Exclude<Exclude<R | N, Router>, UrlStateRuntime>, Scope.Scope>
+  > =>
+    Effect.gen(function* () {
+      const target = resolve(routes, fallback, candidate, navigation);
+      const checks = readChecks(target.route);
+      if (Option.isNone(checks)) {
+        return { url: candidate, target };
+      }
+      // Each check runs in its own temporary Scope, closed before the answer is used.
+      const verdict = yield* checks
+        .value(candidate, kind)
+        .pipe(Effect.provideService(Router, service), Effect.scoped);
+      if (verdict._tag === "Continue") {
+        return { url: candidate, target };
+      }
+      const next = new URL(verdict.target.href, candidate);
+      const visited = [...chain, next.href];
+      if (chain.includes(next.href)) {
+        return yield* Effect.die(RedirectCycle.make({ chain: visited, reason: "repeated" }));
+      }
+      if (chain.length > redirectLimit) {
+        return yield* Effect.die(RedirectCycle.make({ chain: visited, reason: "limit" }));
+      }
+      return yield* settleFrom(next, kind, visited);
+    });
+
+  const settle = (url: URL, kind: NavigationKind) =>
+    Effect.gen(function* () {
+      const committed = yield* SubscriptionRef.get(navigations);
+      if (kind !== "initial" && fragmentOnly(url, committed.url)) {
+        const settled: Settled<R | N> = {
+          url,
+          target: resolve(routes, fallback, url, navigation),
+        };
+        return settled;
+      }
+      return yield* settleFrom(url, kind, [url.href]);
+    });
 
   const show = (url: URL, resolved?: Resolved<R | N>) =>
     Effect.gen(function* () {
       const target = resolved ?? resolve(routes, fallback, url, navigation);
+      // A stayed route publishes the URL into its instance. An instance that
+      // answers false cannot stay, so the route is entered again below.
       if (Option.isSome(mounted) && mounted.value.route === target.route) {
-        yield* mounted.value.entered.update(url);
-        return;
+        const kept = yield* mounted.value.entered.update(url);
+        if (kept) {
+          return;
+        }
       }
       const child = yield* Scope.fork(scope);
       const outcome = yield* Effect.exit(
@@ -366,23 +452,26 @@ export const mount: <R, HostNode, N = R>(
       });
     });
 
-  const move = (url: URL, kind: Navigation["kind"]) =>
+  const move = (settled: Settled<R | N>, kind: Navigation["kind"]) =>
     Effect.gen(function* () {
-      const target = resolve(routes, fallback, url, navigation);
-      yield* SubscriptionRef.set(navigations, { url, kind, routeName: target.route.name });
-      yield* show(url, target);
+      yield* SubscriptionRef.set(navigations, {
+        url: settled.url,
+        kind,
+        routeName: settled.target.route.name,
+      });
+      yield* show(settled.url, settled.target);
     });
 
   const process = (request: Request) =>
     Effect.gen(function* () {
+      const base = yield* location.current;
       if (
         request.operation !== "pop" &&
         Option.isSome(request.instance) &&
         (Option.isNone(mounted) || mounted.value.entered.instance !== request.instance.value)
       ) {
-        return;
+        return Unchanged(base);
       }
-      const base = yield* location.current;
       const current = new URL(base.href);
       let href: string;
       if (request.operation === "pop") {
@@ -394,19 +483,26 @@ export const mount: <R, HostNode, N = R>(
       }
       const url = new URL(href, base);
       if (request.operation !== "pop" && url.href === base.href) {
-        return;
+        return Unchanged(base);
       }
+      const settled = yield* settle(url, request.operation);
+      if (request.operation !== "pop" && settled.url.href === base.href) {
+        return Unchanged(base);
+      }
+      // History moves once, to the settled URL. A redirected pop has already
+      // moved, so its denied entry is replaced rather than kept.
       if (request.operation === "push") {
-        yield* location.push(url);
-      } else if (request.operation === "replace") {
-        yield* location.replace(url);
+        yield* location.push(settled.url);
+      } else if (request.operation === "replace" || settled.url.href !== url.href) {
+        yield* location.replace(settled.url);
       }
-      yield* move(url, request.operation);
+      yield* move(settled, request.operation);
+      return Committed(settled.url);
     }).pipe(
       Effect.exit,
       Effect.flatMap((outcome) =>
         Effect.andThen(
-          Deferred.succeed(request.done, outcome),
+          Deferred.succeed(request.done, Exit.map(outcome, Option.some)),
           Effect.sync(() => {
             pending.delete(request);
           }),
@@ -414,14 +510,18 @@ export const mount: <R, HostNode, N = R>(
       ),
     );
 
-  const initialTarget = resolve(routes, fallback, initial, navigation);
+  const initialSettled = yield* settle(initial, "initial");
+  if (initialSettled.url.href !== initial.href) {
+    // The document already holds the initial entry: a redirect replaces it.
+    yield* location.replace(initialSettled.url);
+  }
   const initialNavigation: NavigationSample = {
-    url: initial,
+    url: initialSettled.url,
     kind: "initial",
-    routeName: initialTarget.route.name,
+    routeName: initialSettled.target.route.name,
   };
   yield* SubscriptionRef.set(navigations, initialNavigation);
-  yield* show(initial, initialTarget);
+  yield* show(initialSettled.url, initialSettled.target);
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
       closed = true;
@@ -429,7 +529,7 @@ export const mount: <R, HostNode, N = R>(
       pending.clear();
       yield* Effect.forEach(
         waiting,
-        (request) => Deferred.succeed(request.done, Exit.succeed(void 0)),
+        (request) => Deferred.succeed(request.done, Exit.succeed(Option.none())),
         {
           discard: true,
         },

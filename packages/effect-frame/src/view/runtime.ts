@@ -190,6 +190,77 @@ interface Renderer<HostNode> {
   readonly tracker: Tracker;
 }
 
+interface HostWrite<HostNode> {
+  readonly parent: HostNode;
+  readonly node: HostNode;
+}
+
+interface TrackedHost<HostNode> extends Host<HostNode> {
+  readonly cleanup: () => void;
+}
+
+/**
+ * Keep every node this mount hands to the host. A slot is a logical view
+ * position, so it can still be empty when a later sibling write fails. The
+ * write ledger covers that gap and records portal parents as well as the
+ * mount root. It only contains this mount's nodes, so cleanup preserves host
+ * nodes owned by someone else.
+ */
+const trackHostWrites = <HostNode>(host: Host<HostNode>): TrackedHost<HostNode> => {
+  // Map uses host-node identity, so keyed-list inserts and removals stay
+  // constant time even when a mount owns a large tree.
+  const writes = new Map<HostNode, HostWrite<HostNode>>();
+
+  const remember = (parent: HostNode, node: HostNode): void => {
+    // Record before delegating. A host may mutate and then report an insert
+    // failure, and that partial write still belongs to this mount.
+    Option.match(Option.fromNullishOr(writes.get(node)), {
+      onNone: () => {
+        writes.set(node, { parent, node });
+      },
+      onSome: (write) => {
+        if (write.parent !== parent) {
+          writes.set(node, { parent, node });
+        }
+      },
+    });
+  };
+
+  const forget = (parent: HostNode, node: HostNode): void => {
+    Option.match(Option.fromNullishOr(writes.get(node)), {
+      onNone: () => {},
+      onSome: (write) => {
+        if (write.parent === parent) {
+          writes.delete(node);
+        }
+      },
+    });
+  };
+
+  return {
+    createElement: host.createElement,
+    createText: host.createText,
+    setProperty: host.setProperty,
+    insert: (parent, node, anchor) => {
+      remember(parent, node);
+      host.insert(parent, node, anchor);
+    },
+    remove: (parent, node) => {
+      host.remove(parent, node);
+      forget(parent, node);
+    },
+    setText: host.setText,
+    addEventListener: host.addEventListener,
+    attach: host.attach,
+    cleanup: () => {
+      for (const write of [...writes.values()].reverse()) {
+        host.remove(write.parent, write.node);
+      }
+      writes.clear();
+    },
+  };
+};
+
 const makeTracker = Effect.fn("View.makeTracker")(function* () {
   const cleanups: Array<Cleanup> = [];
   const context = yield* Effect.context<Scope.Scope>();
@@ -866,6 +937,9 @@ export const mount = Effect.fn("View.mount")(function* <Props, E, R, HostNode>(
   host: Host<HostNode>,
   root: HostNode,
 ) {
+  const callerScope = yield* Effect.scope;
+  const mountScope = yield* Scope.fork(callerScope);
+  const trackedHost = trackHostWrites(host);
   const registry = yield* Effect.serviceOption(Inspection.Registry);
   let owner = Option.none<Inspection.OwnerToken>();
   if (Option.isSome(registry)) {
@@ -890,9 +964,7 @@ export const mount = Effect.fn("View.mount")(function* <Props, E, R, HostNode>(
     const tracker = yield* makeTracker();
     const slot: Slot<HostNode> = { nodes: [] };
     const removeNodes = (): void => {
-      for (const node of slot.nodes) {
-        host.remove(root, node);
-      }
+      trackedHost.cleanup();
       slot.nodes = [];
     };
 
@@ -909,7 +981,7 @@ export const mount = Effect.fn("View.mount")(function* <Props, E, R, HostNode>(
             createRoot((disposeRoot) => {
               dispose = Option.some(disposeRoot);
               tracker.commit(() => {
-                plan({ host, tracker }, tree)(root, slot, () => {});
+                plan({ host: trackedHost, tracker }, tree)(root, slot, () => {});
                 flush();
               });
               return disposeRoot;
@@ -941,10 +1013,24 @@ export const mount = Effect.fn("View.mount")(function* <Props, E, R, HostNode>(
     yield* Ref.set(phase, "mounted");
   });
 
-  if (Option.isSome(owner)) {
-    return yield* Effect.provideService(run, Inspection.Owner, owner.value);
-  }
-  return yield* run;
+  const ownedRun = Option.match(owner, {
+    onNone: () => run,
+    onSome: (value) => Effect.provideService(run, Inspection.Owner, value),
+  });
+  const outcome = yield* Effect.exit(
+    Scope.provide(ownedRun, mountScope).pipe(
+      Effect.onExit((exit) =>
+        Exit.match(exit, {
+          onFailure: (cause) => Scope.close(mountScope, Exit.failCause(cause)),
+          onSuccess: () => Effect.void,
+        }),
+      ),
+    ),
+  );
+  return yield* Exit.match(outcome, {
+    onFailure: (cause) => Effect.failCause(cause),
+    onSuccess: () => Effect.void,
+  });
 });
 
 /**

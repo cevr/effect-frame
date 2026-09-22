@@ -113,7 +113,7 @@ const recordIds = (snapshot: Snapshot) => ({
   queries: snapshot.queries.map((record) => [record.id, record.cacheId, record.key, record.state]),
 });
 
-describe("live Frame inspection over a browser-originated socket", () => {
+describe.skipIf(!H.hasBrowser)("live Frame inspection over a browser-originated socket", () => {
   it("1. reads a held QueryTest query from the same browser root as direct inspection", async () => {
     const r = await rig();
     try {

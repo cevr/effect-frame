@@ -80,8 +80,26 @@ export const servePage = (bundleText: string): PageServer => {
   };
 };
 
+/**
+ * The browser the proof drives: WebKit on macOS, where Bun.WebView ships it,
+ * or a system Chrome elsewhere. `undefined` when neither exists, so the
+ * browser proofs skip instead of failing on a host without a browser.
+ */
+const browserBackend = (): Bun.WebView.ConstructorOptions["backend"] | undefined => {
+  if (process.platform === "darwin") return { type: "webkit", stderr: "ignore" };
+  const chrome = Bun.which("google-chrome") ?? Bun.which("chromium") ?? undefined;
+  if (chrome === undefined) return undefined;
+  return { type: "chrome", url: false, path: chrome, stderr: "ignore" };
+};
+
+const backend = browserBackend();
+
+/** Whether this host can run the real-browser proofs. */
+export const hasBrowser = backend !== undefined;
+
 export const openView = async (url: string): Promise<Bun.WebView> => {
-  const view = new Bun.WebView({ backend: { type: "webkit", stderr: "ignore" } });
+  if (backend === undefined) throw new Error("no browser backend on this host");
+  const view = new Bun.WebView({ backend });
   await view.navigate(url);
   return view;
 };

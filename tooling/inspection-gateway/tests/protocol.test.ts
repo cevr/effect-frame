@@ -302,87 +302,97 @@ describe("inspection protocol failures are explicit", () => {
     }
   }, 20_000);
 
-  it("refuses a real browser on the wrong origin or capability and reports oversized snapshots", async () => {
-    const devBundle = await H.bundle("main.dev.tsx");
-    const page = H.servePage(devBundle.text);
-    const other = H.servePage(devBundle.text);
-    const running = await H.startGateway({ allowedOrigin: page.origin, maxSnapshotBytes: 512 });
-    const views: Array<Bun.WebView> = [];
-    try {
-      const config = (name: string, token: string) => ({
-        name,
-        gateway: { url: running.gateway.attachUrl, token },
-      });
-      views.push(
-        await H.openView(other.url("/books/7", config("wrong-origin", running.attachToken))),
-      );
-      views.push(await H.openView(page.url("/books/7", config("wrong-token", running.readToken))));
-      for (const view of views) {
-        await H.waitFor(view, "window.__fixture && window.__fixture.mountedAt > 0", "mount");
-        await H.waitFor(
-          view,
-          "window.__fixture.status.filter((s) => s._tag === 'Disconnected').length >= 2",
-          "refused dials",
+  it.skipIf(!H.hasBrowser)(
+    "refuses a real browser on the wrong origin or capability and reports oversized snapshots",
+    async () => {
+      const devBundle = await H.bundle("main.dev.tsx");
+      const page = H.servePage(devBundle.text);
+      const other = H.servePage(devBundle.text);
+      const running = await H.startGateway({ allowedOrigin: page.origin, maxSnapshotBytes: 512 });
+      const views: Array<Bun.WebView> = [];
+      try {
+        const config = (name: string, token: string) => ({
+          name,
+          gateway: { url: running.gateway.attachUrl, token },
+        });
+        views.push(
+          await H.openView(other.url("/books/7", config("wrong-origin", running.attachToken))),
         );
-        expect(
-          await view.evaluate<unknown>(
-            "window.__fixture.status.some((s) => s._tag === 'Connected')",
-          ),
-        ).toBe(false);
-      }
-      expect((await H.stats(running)).roots).toBe(0);
+        views.push(
+          await H.openView(page.url("/books/7", config("wrong-token", running.readToken))),
+        );
+        for (const view of views) {
+          await H.waitFor(view, "window.__fixture && window.__fixture.mountedAt > 0", "mount");
+          await H.waitFor(
+            view,
+            "window.__fixture.status.filter((s) => s._tag === 'Disconnected').length >= 2",
+            "refused dials",
+          );
+          expect(
+            await view.evaluate<unknown>(
+              "window.__fixture.status.some((s) => s._tag === 'Connected')",
+            ),
+          ).toBe(false);
+        }
+        expect((await H.stats(running)).roots).toBe(0);
 
-      const good = await H.openView(page.url("/books/7", config("large", running.attachToken)));
-      views.push(good);
-      await H.waitUntil(async () => (await H.stats(running)).roots === 1, "attached");
-      const reply = await H.cliJson<ErrorResponse>(
-        ["inspect", "--url", running.gateway.url, "--root", "large"],
-        running.readToken,
-      );
-      expect(reply.result.exitCode).toBe(1);
-      expect(reply.body.error._tag).toBe("SnapshotTooLarge");
-      if (reply.body.error._tag === "SnapshotTooLarge") {
-        expect(reply.body.error.limit).toBe(512);
-        expect(reply.body.error.bytes).toBeGreaterThan(512);
+        const good = await H.openView(page.url("/books/7", config("large", running.attachToken)));
+        views.push(good);
+        await H.waitUntil(async () => (await H.stats(running)).roots === 1, "attached");
+        const reply = await H.cliJson<ErrorResponse>(
+          ["inspect", "--url", running.gateway.url, "--root", "large"],
+          running.readToken,
+        );
+        expect(reply.result.exitCode).toBe(1);
+        expect(reply.body.error._tag).toBe("SnapshotTooLarge");
+        if (reply.body.error._tag === "SnapshotTooLarge") {
+          expect(reply.body.error.limit).toBe(512);
+          expect(reply.body.error.bytes).toBeGreaterThan(512);
+        }
+        // The root stays attached; the limit fails one read, not the link.
+        expect((await H.stats(running)).roots).toBe(1);
+      } finally {
+        for (const view of views) view.close();
+        await running.close();
+        page.stop();
+        other.stop();
       }
-      // The root stays attached; the limit fails one read, not the link.
-      expect((await H.stats(running)).roots).toBe(1);
-    } finally {
-      for (const view of views) view.close();
-      await running.close();
-      page.stop();
-      other.stop();
-    }
-  }, 30_000);
+    },
+    30_000,
+  );
 
-  it("labels truncated text and keeps JSON complete", async () => {
-    const devBundle = await H.bundle("main.dev.tsx");
-    const page = H.servePage(devBundle.text);
-    const running = await H.startGateway({ allowedOrigin: page.origin });
-    const view = await H.openView(
-      page.url("/books/a-very-long-book-identifier-for-truncation", {
-        name: "text",
-        gateway: { url: running.gateway.attachUrl, token: running.attachToken },
-      }),
-    );
-    try {
-      await H.waitUntil(async () => (await H.stats(running)).roots === 1, "attached");
-      const base = ["inspect", "--url", running.gateway.url, "--root", "text"];
-      const text = await H.cli([...base, "--max-text", "12"], running.readToken);
-      expect(text.exitCode).toBe(0);
-      expect(text.stdout).toContain("[truncated: 12 of");
-      expect(text.stdout).toContain("--json returns the complete snapshot");
-      const json = await H.cliJson<InspectResponse>(base, running.readToken);
-      expect(json.body.snapshot.queries[0]?.key).toContain(
-        "a-very-long-book-identifier-for-truncation",
+  it.skipIf(!H.hasBrowser)(
+    "labels truncated text and keeps JSON complete",
+    async () => {
+      const devBundle = await H.bundle("main.dev.tsx");
+      const page = H.servePage(devBundle.text);
+      const running = await H.startGateway({ allowedOrigin: page.origin });
+      const view = await H.openView(
+        page.url("/books/a-very-long-book-identifier-for-truncation", {
+          name: "text",
+          gateway: { url: running.gateway.attachUrl, token: running.attachToken },
+        }),
       );
-      expect(json.result.stdout.trim().split("\n")).toHaveLength(1);
-    } finally {
-      view.close();
-      await running.close();
-      page.stop();
-    }
-  }, 30_000);
+      try {
+        await H.waitUntil(async () => (await H.stats(running)).roots === 1, "attached");
+        const base = ["inspect", "--url", running.gateway.url, "--root", "text"];
+        const text = await H.cli([...base, "--max-text", "12"], running.readToken);
+        expect(text.exitCode).toBe(0);
+        expect(text.stdout).toContain("[truncated: 12 of");
+        expect(text.stdout).toContain("--json returns the complete snapshot");
+        const json = await H.cliJson<InspectResponse>(base, running.readToken);
+        expect(json.body.snapshot.queries[0]?.key).toContain(
+          "a-very-long-book-identifier-for-truncation",
+        );
+        expect(json.result.stdout.trim().split("\n")).toHaveLength(1);
+      } finally {
+        view.close();
+        await running.close();
+        page.stop();
+      }
+    },
+    30_000,
+  );
 
   it("maps CLI misuse to exit 2 and operational failure to exit 1", async () => {
     const token = "t".repeat(64);

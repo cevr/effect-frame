@@ -90,6 +90,20 @@ The URL is the canonical search state. The route Schema owns its decoded vocabul
 | A disposed route action cannot mutate a later reentered instance                                                 | `packages/effect-frame/tests/router/router.test.tsx` — saved push and replace actions are no-ops after `/book` exits and reenters                                                     | Proven |
 | Rate limiting stays in Source combinators                                                                        | `packages/effect-frame/tests/actor/source.test.ts` — #57 proves debounce and throttle Source combinators; #51 keeps timing out of the router                                          | Proven |
 
+### Define view-owned URL state and its collision boundary ([#52](https://github.com/cevr/effect-frame/issues/52))
+
+The URL remains the only state source. A view claims the encoded keys it owns for the lifetime of its scope.
+
+| Claim                                                                                     | Proof                                                                                                                                                | Status |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| `UrlState.make` derives its source from the current URL and set/update replace by default | `packages/effect-frame/tests/router/url-state.test.tsx` — default replacement and stayed-node assertions                                             | Proven |
+| Explicit push operations create history entries and concurrent owners keep both changes   | `packages/effect-frame/tests/router/url-state.test.tsx` — push updates and serialized two-owner updates                                              | Proven |
+| Route key mapping and opaque custom codec order remain authoritative                      | `packages/effect-frame/tests/router/url-state.test.tsx` — remapped `c`/`p` keys and two-pane `q`, `filters`, `q2`, `filters2` output                 | Proven |
+| A route key or another view claim is refused at mount                                     | `packages/effect-frame/tests/router/url-state.test.tsx` — route/view and view/view collision mounts fail                                             | Proven |
+| Opaque codecs require explicit finite keys and cannot emit an undeclared key              | `packages/effect-frame/tests/router/url-state.test.tsx` — missing declarations and rejected output before history writes                             | Proven |
+| Claims release with the route scope, while overlapping route instances may reuse keys     | `packages/effect-frame/tests/router/url-state.test.tsx` — disposed actions are no-ops and the entering route can claim the same key                  | Proven |
+| Missing or malformed owned values use the omitted-record fallback on initial load/pop     | `packages/effect-frame/tests/router/url-state.test.tsx` — malformed initial value and pop render the fallback, then update from that canonical value | Proven |
+
 ### Define the client-visible command lifecycle and optimistic revisions ([#19](https://github.com/cevr/effect-frame/issues/19))
 
 Rows this ticket restates are listed once under the deciding ticket.

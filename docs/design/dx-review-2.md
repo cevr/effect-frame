@@ -78,6 +78,25 @@ The view receives `props.href(params, search)`, `props.updateSearch(update)`, an
 
 Rate limiting has no router option. A view composes the source it navigates from with the time-based Source combinators in #57.
 
+### B4.1 View-owned URL state
+
+Route search belongs to route identity. A view can own another URL slice without importing its route:
+
+```ts
+const panes =
+  yield *
+  UrlState.make(Workspace, {
+    keys: ["q", "filters", "q2", "filters2"],
+  });
+
+panes.state; // Source<Workspace>
+panes.set(next); // replace
+panes.update((previous) => next); // replace
+panes.push.set(next); // push
+```
+
+`Route.search` supplies encoded key metadata for fixed Struct codecs. An opaque `SearchRecord` codec declares its finite encoded keys explicitly. The router refuses a route or view collision when the view mounts, and releases the claim with the view scope. The source derives from `router.current`, so the URL remains canonical. Every queued update reads the latest URL and merges only its own keys; a disposed view cannot update a later route instance. Missing or malformed owned values use the codec's omitted-record value as the fallback. A codec without that value is refused at mount.
+
 ### B5. Fields: a form derived from a schema
 
 SvelteKit `form.fields.title.as("text")` returns `name`, `value`, `aria-invalid`, and `issues()`. The frame has `bind` and `onInput` and nothing between them. Every input is wired by hand, and validation issues have no home.

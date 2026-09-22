@@ -318,6 +318,18 @@ describe("route", () => {
     }),
   );
 
+  it.live("uses codec key order when updating an existing query", () =>
+    Effect.sync(() => {
+      expect(
+        defaults.hrefAt(
+          new URL("http://app.test/defaults/1?panes=old&p=2&unknown=x"),
+          { id: "1" },
+          { page: 3, panes: ["new"] },
+        ),
+      ).toBe("/defaults/1?p=3&panes=new&unknown=x");
+    }),
+  );
+
   it.live("remaps keys, preserves repeated values, and prints in schema order", () =>
     Effect.sync(() => {
       expect(defaults.href({ id: "1" }, { page: 2, panes: ["one", "two"] })).toBe(
@@ -362,6 +374,13 @@ describe("route", () => {
       expect(tenant.hrefAt(current, { id: "2" }, { section: "main", page: 1 })).toBe(
         "/tenant/2?tenant=acme&section=main",
       );
+      expect(
+        tenant.hrefAt(
+          new URL("http://app.test/tenant/1?tenant=acme&section=old&page=3"),
+          { id: "2" },
+          { section: "main", page: 1 },
+        ),
+      ).toBe("/tenant/2?tenant=acme&section=main");
       expect(
         tenant.hrefAt(
           new URL("http://app.test/other?tenant=acme&page=oops"),

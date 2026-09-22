@@ -1,4 +1,7 @@
 export * as Route from "./route.js";
+export * as UrlState from "./url-state.js";
+export type { Options as UrlStateOptions, State as UrlStateState } from "./url-state.js";
+export { UrlStateConflict, UrlStateSchemaRejected } from "./url-state.js";
 export { Link, isActive, link, type LinkProps, type LinkSearch } from "./link.js";
 export type { Link as RouteLink } from "./link.js";
 export {
@@ -14,6 +17,7 @@ export {
   type NotFoundProps,
   type RouterService,
 } from "./router.js";
+export { searchKeysOf } from "./route.js";
 export type {
   AnyRoute,
   Entered,
@@ -26,6 +30,7 @@ export type {
   RouteProps,
   Route as RouteOf,
   SearchCodec,
+  SearchKeyInfo,
   SearchRecord,
   SearchUpdater,
   TemplateRejected,

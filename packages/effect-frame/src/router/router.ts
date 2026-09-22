@@ -14,6 +14,10 @@ import {
   SubscriptionRef,
 } from "effect";
 import type { AnyRoute, Entered, RouteInstance, RouteNavigation, UrlUpdater } from "./route.js";
+import {
+  Runtime as UrlStateRuntime,
+  makeRuntime as makeUrlStateRuntime,
+} from "./url-state-runtime.js";
 
 /**
  * The router (#18 §7). The URL is the state: the router holds nothing about
@@ -87,9 +91,12 @@ interface Mounted<R> {
   readonly scope: Scope.Closeable;
 }
 
+const newRouteInstance = (): RouteInstance => ({ _tag: "RouteInstance" });
+
 /** The not-found view as a route that matches everything, so one rule mounts both. */
 const notFoundRoute = <R>(view: View.View<NotFoundProps, never, R>): AnyRoute<R> => ({
   name: "not-found",
+  searchKeys: { known: true, keys: [] },
   enter: (url) =>
     Option.some(
       Effect.map(SubscriptionRef.make(url), (current): Entered<R> => ({
@@ -158,7 +165,7 @@ export const mount: <R, HostNode>(
 ) => Effect.Effect<
   RouterService,
   never,
-  Exclude<Exclude<R, Router>, Scope.Scope> | Location | Scope.Scope
+  Exclude<Exclude<Exclude<R, Router>, UrlStateRuntime>, Scope.Scope> | Location | Scope.Scope
 > = Effect.fn("Router.mount")(function* <R, HostNode>(options: MountOptions<R, HostNode>) {
   const location = yield* Location;
   const scope = yield* Effect.scope;
@@ -241,10 +248,27 @@ export const mount: <R, HostNode>(
       }
       const child = yield* Scope.fork(scope);
       const entered = yield* target.enter;
-      const page = () => Effect.provideService(entered.setup, Router, service);
+      const enteredInstance = Option.fromNullishOr(entered.instance);
+      const instance = Option.getOrElse(enteredInstance, newRouteInstance);
+      const mountedEntered = Option.match(enteredInstance, {
+        onNone: () => ({ ...entered, instance }),
+        onSome: () => entered,
+      });
+      const urlStateRuntime = makeUrlStateRuntime(
+        service,
+        navigation,
+        target.route.searchKeys,
+        instance,
+      );
+      const page = () =>
+        Effect.provideService(
+          Effect.provideService(entered.setup, Router, service),
+          UrlStateRuntime,
+          urlStateRuntime,
+        );
       yield* Scope.provide(mountView(page, {}, options.host, options.root), child);
       const previous = mounted;
-      mounted = Option.some({ route: target.route, entered, scope: child });
+      mounted = Option.some({ route: target.route, entered: mountedEntered, scope: child });
       yield* Option.match(previous, {
         onNone: () => Effect.void,
         onSome: (shown) => Scope.close(shown.scope, Exit.void),

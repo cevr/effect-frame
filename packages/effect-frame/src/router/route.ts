@@ -255,6 +255,13 @@ interface SearchField {
 
 const searchKeyOrders = new WeakMap<object, ReadonlyArray<string>>();
 const searchFieldDefinitions = new WeakMap<object, ReadonlyArray<SearchField>>();
+/** Encoded search keys owned by one route or URL-state codec. */
+export interface SearchKeyInfo {
+  readonly known: boolean;
+  readonly keys: ReadonlyArray<string>;
+}
+
+const searchKeyDefinitions = new WeakMap<object, SearchKeyInfo>();
 type SearchEncodedValue = string | ReadonlyArray<string> | number | boolean;
 type SearchEncodedObject = Partial<Record<string, SearchEncodedValue>>;
 
@@ -301,6 +308,10 @@ export const search = <S extends Schema.ConstraintCodec<object, SearchEncodedObj
     fields.map((field) => field.name),
   );
   searchFieldDefinitions.set(result, fields);
+  searchKeyDefinitions.set(result, {
+    known: true,
+    keys: fields.map((field) => field.name),
+  });
   return result;
 };
 
@@ -488,6 +499,8 @@ export interface RouteDefinition<Params extends ParamsCodec, Search extends Sear
   readonly path: string;
   readonly params: Params;
   readonly search: Search;
+  /** Encoded search keys for an opaque codec such as a custom SearchRecord. */
+  readonly searchKeys?: ReadonlyArray<string>;
   /** Search keys to carry when this route is entered without a caller value. */
   readonly retain?: ReadonlyArray<Extract<keyof Search["Type"], string>>;
   readonly view: View.View<RouteProps<Params["Type"], Search["Type"]>, never, R>;
@@ -510,6 +523,8 @@ export interface Entered<R> {
 /** A route with its shapes erased: what a router holds. */
 export interface AnyRoute<R> {
   readonly name: string;
+  /** Encoded search ownership. Unknown means an opaque codec needs a declaration. */
+  readonly searchKeys: SearchKeyInfo;
   readonly enter: (
     url: URL,
     navigation?: RouteNavigation,
@@ -554,6 +569,10 @@ export const client = <
   const decodeSearch = Schema.decodeUnknownOption(definition.search);
   const encodeParams = Schema.encodeSync(definition.params);
   const encodeSearch = Schema.encodeSync(definition.search);
+  const searchKeys = declaredSearchKeys(
+    definition.search,
+    Option.fromNullishOr(definition.searchKeys),
+  );
   const searchOrder = encodedKeys(definition.search);
 
   const parse = (url: URL): Option.Option<Decoded<Params["Type"], Search["Type"]>> =>
@@ -569,22 +588,56 @@ export const client = <
   const href = (params: Params["Type"], searchValue: Search["Type"]): string =>
     `${printPath(parts, encodeParams(params))}${printSearch(encodeSearch(searchValue), searchOrder)}`;
 
+  const hrefFromCurrent = (
+    current: URL,
+    params: Params["Type"],
+    searchValue: Search["Type"],
+  ): string => {
+    const next = new URL(href(params, searchValue), current);
+    next.hash = current.hash;
+    if (searchKeys.known) {
+      next.search = printSearch(
+        mergeSearchRecord(
+          readSearch(current.searchParams),
+          encodeSearch(searchValue),
+          searchKeys.keys,
+        ),
+      );
+    }
+    return next.href;
+  };
+
   const hrefAt = (current: URL, params: Params["Type"], searchValue: Search["Type"]): string => {
     const retainedKeys = Option.fromNullishOr(definition.retain);
-    if (Option.isNone(retainedKeys) || retainedKeys.value.length === 0) {
-      return href(params, searchValue);
+    const nextSearch = Option.match(retainedKeys, {
+      onNone: () => searchValue,
+      onSome: (keys) => {
+        if (keys.length === 0) {
+          return searchValue;
+        }
+        const callerRecord = encodeSearch(searchValue);
+        const currentRecord = readSearch(current.searchParams);
+        const retainedRecord = retainedSearchRecord(
+          currentRecord,
+          callerRecord,
+          Option.fromNullishOr(searchFieldDefinitions.get(definition.search)),
+          callerKeys(searchValue),
+          keys,
+        );
+        const previous = Option.getOrElse(decodeSearch(retainedRecord), () => searchValue);
+        return retainSearch(previous, searchValue, keys);
+      },
+    });
+    if (Option.isSome(parse(current)) && searchKeys.known) {
+      return `${printPath(parts, encodeParams(params))}${printSearch(
+        mergeSearchRecord(
+          readSearch(current.searchParams),
+          encodeSearch(nextSearch),
+          searchKeys.keys,
+        ),
+      )}`;
     }
-    const callerRecord = encodeSearch(searchValue);
-    const currentRecord = readSearch(current.searchParams);
-    const retainedRecord = retainedSearchRecord(
-      currentRecord,
-      callerRecord,
-      Option.fromNullishOr(searchFieldDefinitions.get(definition.search)),
-      callerKeys(searchValue),
-      retainedKeys.value,
-    );
-    const previous = Option.getOrElse(decodeSearch(retainedRecord), () => searchValue);
-    return href(params, retainSearch(previous, searchValue, retainedKeys.value));
+    return href(params, nextSearch);
   };
 
   const unavailable: RouteNavigation = {
@@ -612,7 +665,7 @@ export const client = <
                     onNone: () => latest.href,
                     onSome: (currentValue) => {
                       const nextSearch = update(currentValue.search);
-                      return `${href(currentValue.params, nextSearch)}${latest.hash}`;
+                      return hrefFromCurrent(latest, currentValue.params, nextSearch);
                     },
                   }),
                 instance,
@@ -624,7 +677,7 @@ export const client = <
                     onNone: () => latest.href,
                     onSome: (currentValue) => {
                       const nextSearch = update(currentValue.search);
-                      return `${href(currentValue.params, nextSearch)}${latest.hash}`;
+                      return hrefFromCurrent(latest, currentValue.params, nextSearch);
                     },
                   }),
                 instance,
@@ -644,10 +697,44 @@ export const client = <
     name,
     params: definition.params,
     search: definition.search,
+    searchKeys,
     href,
     hrefAt,
     enter,
   };
+};
+
+const declaredSearchKeys = (
+  schema: SearchCodec,
+  declared: Option.Option<ReadonlyArray<string>>,
+): SearchKeyInfo => {
+  const inferred = inferredSearchKeys(schema);
+  if (Option.isSome(declared)) {
+    if (Option.isSome(inferred) && !sameKeySet(inferred.value, declared.value)) {
+      return Option.getOrThrowWith(Option.none(), () =>
+        SearchSchemaRejected.make({
+          reason: "explicit searchKeys must match the codec's inferred encoded keys",
+        }),
+      );
+    }
+    return makeSearchKeyInfo(declared.value);
+  }
+  if (Option.isSome(inferred)) {
+    return makeSearchKeyInfo(inferred.value);
+  }
+  return { known: false, keys: [] };
+};
+
+const inferredSearchKeys = (schema: SearchCodec): Option.Option<ReadonlyArray<string>> => {
+  const registered = Option.fromNullishOr(searchKeyDefinitions.get(schema));
+  if (Option.isSome(registered)) {
+    return Option.some(registered.value.keys);
+  }
+  const ast = Schema.toEncoded(schema).ast;
+  if (ast._tag !== "Objects" || ast.indexSignatures.length > 0) {
+    return Option.none();
+  }
+  return Option.some(ast.propertySignatures.map((property) => String(property.name)));
 };
 
 const encodedKeys = (schema: SearchCodec): ReadonlyArray<string> => {
@@ -656,10 +743,61 @@ const encodedKeys = (schema: SearchCodec): ReadonlyArray<string> => {
     return registered.value;
   }
   const ast = Schema.toEncoded(schema).ast;
-  if (ast._tag !== "Objects") {
+  if (ast._tag !== "Objects" || ast.indexSignatures.length > 0) {
     return [];
   }
   return ast.propertySignatures.map((property) => String(property.name));
+};
+
+const sameKeySet = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean => {
+  if (left.length !== right.length) {
+    return false;
+  }
+  const rightSet = new Set(right);
+  return left.every((key) => rightSet.has(key));
+};
+
+/** Merge owned encoded keys in codec order while retaining unrelated URL keys. */
+export const mergeSearchRecord = (
+  current: SearchRecord,
+  encoded: SearchRecord,
+  owned: ReadonlyArray<string>,
+): SearchRecord => {
+  const ownedSet = new Set(owned);
+  const merged: Record<string, ReadonlyArray<string>> = Object.create(null);
+  let encodedWritten = false;
+  const writeEncoded = () => {
+    if (encodedWritten) {
+      return;
+    }
+    encodedWritten = true;
+    for (const [key, values] of Object.entries(encoded)) {
+      merged[key] = Option.getOrThrow(Option.fromNullishOr(values));
+    }
+  };
+  for (const [key, values] of Object.entries(current)) {
+    if (ownedSet.has(key)) {
+      writeEncoded();
+      continue;
+    }
+    merged[key] = values;
+  }
+  writeEncoded();
+  return merged;
+};
+
+/** Return the encoded key metadata registered for a search codec. */
+export const searchKeysOf = (schema: SearchCodec): SearchKeyInfo =>
+  declaredSearchKeys(schema, Option.none());
+
+const makeSearchKeyInfo = (keys: ReadonlyArray<string>): SearchKeyInfo => {
+  const unique = new Set(keys);
+  if (unique.size !== keys.length) {
+    return Option.getOrThrowWith(Option.none(), () =>
+      SearchSchemaRejected.make({ reason: "search key declarations must be unique" }),
+    );
+  }
+  return { known: true, keys: [...keys] };
 };
 
 const retainSearch = <Search>(

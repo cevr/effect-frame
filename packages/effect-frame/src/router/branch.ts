@@ -23,7 +23,7 @@ import {
   ref,
 } from "effect-frame/actor/client";
 import type { Node } from "effect-frame/view";
-import { View } from "effect-frame/view";
+import { LoadingScope, View, ready } from "effect-frame/view";
 import {
   Effect,
   Exit,
@@ -982,6 +982,25 @@ const constant = <A>(value: A): Source<A> => ({
 });
 
 /**
+ * A failed segment has settled: nothing it would read will ever register.
+ * So it registers one settled read with the nearest `Loading`, if any, for
+ * as long as its errored node lives; otherwise that Loading would keep its
+ * fallback over the failure forever (a Loading with no registration is
+ * pending by the readiness rule).
+ */
+const presentFailure = (node: Node): Effect.Effect<Node, never, Scope.Scope> =>
+  Effect.flatMap(Effect.serviceOption(LoadingScope), (loading) =>
+    Option.match(loading, {
+      onNone: () => Effect.succeed(node),
+      onSome: (scope) =>
+        Effect.as(
+          Effect.provideService(ready(constant(Ready(true, false)), false), LoadingScope, scope),
+          node,
+        ),
+    }),
+  );
+
+/**
  * An instance that shows only `errored`: its own declarations failed. It
  * holds no binding and no child, and it is always entered again.
  */
@@ -998,7 +1017,10 @@ const failedEntering = <R>(
       key: tree.nextKey(name),
       branch: identity,
       setup: Scope.provide(
-        attempt(Effect.sync(node), (error: never): Effect.Effect<Node> => Function.absurd(error)),
+        attempt(
+          Effect.suspend(() => presentFailure(node())),
+          (error: never): Effect.Effect<Node> => Function.absurd(error),
+        ),
         scope,
       ),
       close: Scope.close(scope, Exit.void),
@@ -1090,7 +1112,7 @@ const makeBranch = <
     tree: Tree,
     internals: Internals<Params, Search, ChildR>,
     error: E,
-  ): Effect.Effect<Node> =>
+  ): Effect.Effect<Node, never, Scope.Scope> =>
     Option.match(recovery, {
       onNone: () => Effect.die(error),
       onSome: (handler) =>
@@ -1110,7 +1132,9 @@ const makeBranch = <
               );
             }),
           ),
-          Effect.sync(() => handler.errored(constant<RouteFailure<E>>({ _tag: "Setup", error }))),
+          Effect.suspend(() =>
+            presentFailure(handler.errored(constant<RouteFailure<E>>({ _tag: "Setup", error }))),
+          ),
         ),
     });
 
@@ -1213,7 +1237,7 @@ const makeBranch = <
       setup: Scope.provide(
         attempt(
           Effect.suspend(() => view(props, slotSetup(internals))),
-          (error: E): Effect.Effect<Node> => setupFailed(tree, internals, error),
+          (error: E) => setupFailed(tree, internals, error),
         ),
         viewScope,
       ),

@@ -96,14 +96,9 @@ const openWith = <C extends AnyContract, State, R>(
         Effect.orDie(encodeMessage(message)),
       );
     const instance: HostedInstance = {
-      send: (commandId, payload) =>
-        Effect.flatMap(prepareMessage(payload), (prepared) =>
-          actor.sendEncoded(commandId, prepared),
-        ),
+      send: (commandId, payload) => actor.sendPrepared(commandId, prepareMessage(payload)),
       call: (commandId, payload, timeout) =>
-        Effect.flatMap(prepareMessage(payload), (prepared) =>
-          Effect.flatMap(actor.callEncoded(commandId, prepared, timeout), project),
-        ),
+        Effect.flatMap(actor.callPrepared(commandId, prepareMessage(payload), timeout), project),
       snapshot: Effect.flatMap(actor.committed.get, project),
       changes: (after) =>
         Stream.mapEffect(

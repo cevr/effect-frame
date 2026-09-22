@@ -34,6 +34,17 @@ export interface DurableEngineOptions<State, Message, R> {
 /** The private durable engine surface shared by the public and hosted adapters. */
 export interface DurableEngine<State, Message> {
   readonly committed: Source<Committed<State>>;
+  /** Prepare one message inside the closed-aware admission boundary. */
+  readonly sendPrepared: (
+    commandId: CommandId,
+    prepare: Effect.Effect<string>,
+  ) => Effect.Effect<DurableReceipt, ActorStopped | CommandConflict>;
+  /** Prepare and await one message inside the caller's timeout boundary. */
+  readonly callPrepared: (
+    commandId: CommandId,
+    prepare: Effect.Effect<string>,
+    timeout: Duration.Input,
+  ) => Effect.Effect<Committed<State>, ActorStopped | CommandConflict | Uncertain>;
   readonly send: (
     message: Message,
     options: { readonly commandId: CommandId },
@@ -198,16 +209,23 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <State, M
     } satisfies DurableReceipt;
   });
 
-  const send = Effect.fn("Actor.durable.send")(function* (
-    message: Message,
-    sendOptions: { readonly commandId: CommandId },
+  const sendPrepared = Effect.fn("Actor.durable.sendPrepared")(function* (
+    commandId: CommandId,
+    prepare: Effect.Effect<string>,
   ) {
     const isClosed = yield* Deferred.isDone(closed);
     if (isClosed) {
       return yield* ActorStopped.make();
     }
-    const payload = yield* Effect.orDie(encodeMessage(message));
-    return yield* sendEncoded(sendOptions.commandId, payload);
+    const payload = yield* prepare;
+    return yield* sendEncoded(commandId, payload);
+  });
+
+  const send = Effect.fn("Actor.durable.send")(function* (
+    message: Message,
+    sendOptions: { readonly commandId: CommandId },
+  ) {
+    return yield* sendPrepared(sendOptions.commandId, Effect.orDie(encodeMessage(message)));
   });
 
   const awaitReceipt = Effect.fn("Actor.durable.awaitReceipt")(function* (
@@ -253,28 +271,45 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <State, M
     return yield* toCommitted(outcome.value);
   });
 
+  const callPrepared = Effect.fn("Actor.durable.callPrepared")(function* (
+    commandId: CommandId,
+    prepare: Effect.Effect<string>,
+    timeout: Duration.Input,
+  ) {
+    const wait = Effect.scopedWith((scope: Scope.Scope) =>
+      Effect.gen(function* () {
+        // Subscribe before preparation. The closed check below prevents a
+        // stopped actor from starting a codec, while the second check in
+        // sendEncoded closes the race after an asynchronous codec completes.
+        const subscription = yield* PubSub.subscribe(wake).pipe(Scope.provide(scope));
+        const isClosed = yield* Deferred.isDone(closed);
+        if (isClosed) {
+          return yield* ActorStopped.make();
+        }
+        const payload = yield* prepare;
+        yield* sendEncoded(commandId, payload);
+        return yield* awaitReceipt(commandId, subscription);
+      }),
+    );
+    const outcome = yield* Effect.raceFirst(
+      Effect.timeoutOption(wait, timeout),
+      Deferred.await(closed),
+    );
+    if (Option.isNone(outcome)) {
+      return yield* Uncertain.make({ commandId });
+    }
+    return yield* toCommitted(outcome.value);
+  });
+
   const call = Effect.fn("Actor.durable.call")(function* (
     message: Message,
     callOptions: { readonly commandId: CommandId; readonly timeout: Duration.Input },
   ) {
-    const wait = Effect.scopedWith((scope: Scope.Scope) =>
-      Effect.gen(function* () {
-        // Keep message preparation inside the public wait. An asynchronous
-        // encoder must obey the caller timeout and actor close race.
-        const subscription = yield* PubSub.subscribe(wake).pipe(Scope.provide(scope));
-        const payload = yield* Effect.orDie(encodeMessage(message));
-        yield* sendEncoded(callOptions.commandId, payload);
-        return yield* awaitReceipt(callOptions.commandId, subscription);
-      }),
+    return yield* callPrepared(
+      callOptions.commandId,
+      Effect.orDie(encodeMessage(message)),
+      callOptions.timeout,
     );
-    const outcome = yield* Effect.raceFirst(
-      Effect.timeoutOption(wait, callOptions.timeout),
-      Deferred.await(closed),
-    );
-    if (Option.isNone(outcome)) {
-      return yield* Uncertain.make({ commandId: callOptions.commandId });
-    }
-    return yield* toCommitted(outcome.value);
   });
 
   const committedSource = fromSubscriptionRef(committed);
@@ -295,6 +330,8 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <State, M
   }
   return {
     committed: committedSource,
+    sendPrepared,
+    callPrepared,
     send,
     call,
     sendEncoded,

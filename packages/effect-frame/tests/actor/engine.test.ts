@@ -1,8 +1,20 @@
-import { Context, Effect, Layer, Schema, Stream } from "effect";
-import type { Scope } from "effect";
+import {
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Schema,
+  SchemaTransformation,
+  Scope,
+  Stream,
+} from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
 import {
   ActorHost,
+  MailboxStore,
   contract,
   CommandId,
   implementTransparent,
@@ -29,6 +41,9 @@ const Counter = contract("EngineCounter", {
   snapshot: Schema.Finite,
   message: Add,
 });
+
+type Equals<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 const localBehavior: Behavior<number, Add, LocalValue> = {
   initial: 0,
@@ -68,16 +83,38 @@ const hostedLayer = ActorHost.layerMemory([Hosted]).pipe(
 );
 const concurrentLayer = ActorHost.layerMemory([Concurrent]);
 const id = Schema.decodeSync(CommandId);
+const localSpawnEffect = spawn(localBehavior);
+const localSpawnRequirements: Equals<
+  Effect.Services<typeof localSpawnEffect>,
+  LocalValue | Scope.Scope
+> = true;
+
+const hostedNumberBehavior: Behavior<number, number> = {
+  initial: 0,
+  open: () =>
+    Effect.succeed({
+      apply: (state: number, amount: number) => Effect.succeed(state + amount),
+      changes: Stream.empty,
+    }),
+};
+
+const hostedNumberImplementation = (message: Schema.Codec<number, string>) =>
+  implementTransparent(
+    contract("HostedEncodingProof", {
+      version: 1,
+      key: Schema.String,
+      snapshot: Schema.Finite,
+      message,
+    }),
+    hostedNumberBehavior,
+  );
+
+const hostedPayload = '"1"';
 
 describe("private actor engines", () => {
   it.scoped("preserves local behavior services inside the local engine", () =>
     Effect.gen(function* () {
-      const localSpawn: Effect.Effect<
-        LocalActorRef<number, Add>,
-        never,
-        LocalValue | Scope.Scope
-      > = spawn(localBehavior);
-      const actor = yield* localSpawn.pipe(
+      const actor = yield* localSpawnEffect.pipe(
         Effect.provideService(LocalValue, LocalValue.of({ amount: 4 })),
       );
       const applied = yield* actor.call({ _tag: "EngineAdd", amount: 3 });
@@ -85,6 +122,7 @@ describe("private actor engines", () => {
       expect(actor.kind).toBe("local");
       const localRef: LocalActorRef<number, Add> = actor;
       expect(localRef.derive).toBeDefined();
+      expect(localSpawnRequirements).toBe(true);
     }),
   );
 
@@ -125,6 +163,129 @@ describe("private actor engines", () => {
       expect(states.size).toBe(3);
       expect(states).toContain(6);
       expect(yield* actors[0].state.get).toBe(6);
+    }),
+  );
+
+  it.scoped("bounds hosted message preparation by the call timeout", () =>
+    Effect.gen(function* () {
+      const encodingStarted = yield* Deferred.make<void>();
+      const encodingRelease = yield* Deferred.make<void>();
+      const encodingFinalized = yield* Deferred.make<void>();
+      let encodes = 0;
+      const message = Schema.String.pipe(
+        Schema.decodeTo(
+          Schema.Finite,
+          SchemaTransformation.transformEffect({
+            decode: (value: string) => Effect.succeed(Number(value)),
+            encode: (value: number) =>
+              Effect.ensuring(
+                Effect.gen(function* () {
+                  encodes += 1;
+                  yield* Deferred.succeed(encodingStarted, void 0);
+                  yield* Deferred.await(encodingRelease);
+                  return String(value);
+                }),
+                Deferred.succeed(encodingFinalized, void 0),
+              ),
+          }),
+        ),
+      );
+      const lifetime = yield* Scope.make();
+      yield* Effect.addFinalizer((exit) => Scope.close(lifetime, exit));
+      const instance = yield* hostedNumberImplementation(message).open(
+        MailboxStore.layerMemory,
+        lifetime,
+      );
+      const waiting = yield* Effect.forkScoped(
+        Effect.flip(instance.call(id("hosted-encoding-timeout"), hostedPayload, "10 millis")),
+      );
+      yield* Deferred.await(encodingStarted);
+      yield* TestClock.adjust("10 millis");
+      const failure = yield* Fiber.join(waiting);
+
+      expect(failure._tag).toBe("Uncertain");
+      expect(encodes).toBe(1);
+      expect(yield* Deferred.isDone(encodingFinalized)).toBe(true);
+    }),
+  );
+
+  it.scoped("stopped hosted send and call refuse before message encoding", () =>
+    Effect.gen(function* () {
+      let encodes = 0;
+      const message = Schema.String.pipe(
+        Schema.decodeTo(
+          Schema.Finite,
+          SchemaTransformation.transformEffect({
+            decode: (value: string) => Effect.succeed(Number(value)),
+            encode: (value: number) =>
+              Effect.sync(() => {
+                encodes += 1;
+                return String(value);
+              }),
+          }),
+        ),
+      );
+      const lifetime = yield* Scope.make();
+      yield* Effect.addFinalizer((exit) => Scope.close(lifetime, exit));
+      const instance = yield* hostedNumberImplementation(message).open(
+        MailboxStore.layerMemory,
+        lifetime,
+      );
+      yield* Scope.close(lifetime, Exit.void);
+
+      const sendFailure = yield* Effect.flip(
+        instance.send(id("hosted-stopped-send"), hostedPayload),
+      );
+      const callFailure = yield* Effect.flip(
+        instance.call(id("hosted-stopped-call"), hostedPayload, "100 millis"),
+      );
+
+      expect(sendFailure._tag).toBe("ActorStopped");
+      expect(callFailure._tag).toBe("ActorStopped");
+      expect(encodes).toBe(0);
+    }),
+  );
+
+  it.scoped("closing a hosted actor interrupts message preparation", () =>
+    Effect.gen(function* () {
+      const encodingStarted = yield* Deferred.make<void>();
+      const encodingRelease = yield* Deferred.make<void>();
+      const encodingFinalized = yield* Deferred.make<void>();
+      let encodes = 0;
+      const message = Schema.String.pipe(
+        Schema.decodeTo(
+          Schema.Finite,
+          SchemaTransformation.transformEffect({
+            decode: (value: string) => Effect.succeed(Number(value)),
+            encode: (value: number) =>
+              Effect.ensuring(
+                Effect.gen(function* () {
+                  encodes += 1;
+                  yield* Deferred.succeed(encodingStarted, void 0);
+                  yield* Deferred.await(encodingRelease);
+                  return String(value);
+                }),
+                Deferred.succeed(encodingFinalized, void 0),
+              ),
+          }),
+        ),
+      );
+      const lifetime = yield* Scope.make();
+      yield* Effect.addFinalizer((exit) => Scope.close(lifetime, exit));
+      const instance = yield* hostedNumberImplementation(message).open(
+        MailboxStore.layerMemory,
+        lifetime,
+      );
+      const waiting = yield* Effect.forkScoped(
+        Effect.flip(instance.call(id("hosted-close-during-encode"), hostedPayload, "1 minute")),
+      );
+      yield* Deferred.await(encodingStarted);
+      yield* Scope.close(lifetime, Exit.void);
+      const failure = yield* Fiber.join(waiting);
+
+      expect(failure._tag).toBe("ActorStopped");
+      expect(encodes).toBe(1);
+      expect(yield* Deferred.isDone(encodingFinalized)).toBe(true);
     }),
   );
 });

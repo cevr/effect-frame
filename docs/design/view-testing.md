@@ -42,6 +42,9 @@ revision values, bounded recent host operations, listener counts, and a root
 summary capped at 2048 characters. Runtime inspection is reported as
 unavailable until the shared inspection service is integrated.
 
+Close receipts report `rootDisposed: false` until the harness scope's
+finalizers finish. This keeps a receipt truthful while cleanup is blocked.
+
 The helper is a host-level test tool. Happy DOM coverage does not claim
 browser behavior. Browser-only behavior still needs a browser regression
 suite. HTML string rendering remains one frame. It does not adopt streaming

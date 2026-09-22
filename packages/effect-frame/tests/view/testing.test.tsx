@@ -406,10 +406,62 @@ describe("scoped view test harness", () => {
           expect(failure.value._tag).toBe("HarnessClosed");
           if (failure.value._tag === "HarnessClosed") {
             expect(failure.value.listenersAttached).toBe(1);
-            expect(failure.value.rootDisposed).toBe(true);
+            expect(failure.value.rootDisposed).toBe(false);
           }
         }
       }
+    }),
+  );
+
+  it.scoped("reports close before blocked cleanup has disposed the root", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const closing = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const page = yield* ViewTest.make({
+        host: Dom.host,
+        root,
+        setup: (host, mountRoot) =>
+          Effect.gen(function* () {
+            const mounted = yield* mount(
+              () => Effect.succeed(<p id="still-mounted">still mounted</p>),
+              {},
+              host,
+              mountRoot,
+            );
+            yield* Effect.addFinalizer(() =>
+              Effect.gen(function* () {
+                yield* Deferred.succeed(closing, void 0);
+                yield* Deferred.await(release);
+              }),
+            );
+            return mounted;
+          }),
+      });
+      const waiting = yield* page
+        .waitFor({ label: "cleanup receipt", until: () => false })
+        .pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
+      const close = yield* page.close.pipe(Effect.forkChild);
+      yield* Deferred.await(closing);
+
+      const exit = yield* Fiber.await(waiting);
+      expect(root.querySelector("#still-mounted")).not.toBeNull();
+      expect(Exit.isFailure(exit)).toBe(true);
+      if (Exit.isFailure(exit)) {
+        const failure = Cause.findErrorOption(exit.cause);
+        expect(Option.isSome(failure)).toBe(true);
+        if (Option.isSome(failure)) {
+          expect(failure.value._tag).toBe("HarnessClosed");
+          if (failure.value._tag === "HarnessClosed") {
+            expect(failure.value.rootDisposed).toBe(false);
+          }
+        }
+      }
+
+      yield* Deferred.succeed(release, void 0);
+      yield* Fiber.join(close);
+      expect(root.querySelector("#still-mounted")).toBeNull();
     }),
   );
 

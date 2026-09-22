@@ -93,6 +93,7 @@ interface HarnessState<HostNode> {
   readonly recentHostOperations: Array<string>;
   revision: number;
   closed: boolean;
+  disposalComplete: boolean;
   listenersAttached: number;
   listenersReleased: number;
 }
@@ -102,7 +103,7 @@ const closeError = <HostNode>(state: HarnessState<HostNode>, label: string): Har
     label,
     rootId: state.rootId,
     revision: state.revision,
-    rootDisposed: state.closed,
+    rootDisposed: state.disposalComplete,
     listenersAttached: state.listenersAttached,
     listenersReleased: state.listenersReleased,
   });
@@ -300,7 +301,7 @@ const conditionFailure = <HostNode>(
     predicateResult,
     predicateChecked,
     recentHostOperations: [...state.recentHostOperations],
-    rootDisposed: state.closed,
+    rootDisposed: state.disposalComplete,
     listenersAttached: state.listenersAttached,
     listenersReleased: state.listenersReleased,
     rootSummary: Option.match(state.summarizeRoot, {
@@ -387,6 +388,7 @@ export const make = Effect.fn("ViewTest.make")(function* <HostNode, A, E, R>(
     recentHostOperations: [],
     revision: 0,
     closed: false,
+    disposalComplete: false,
     listenersAttached: 0,
     listenersReleased: 0,
   };
@@ -405,6 +407,12 @@ export const make = Effect.fn("ViewTest.make")(function* <HostNode, A, E, R>(
     }
   };
   const closeStateEffect = Effect.sync(closeState);
+  yield* Scope.addFinalizer(
+    harnessScope,
+    Effect.sync(() => {
+      state.disposalComplete = true;
+    }),
+  );
   yield* Scope.addFinalizer(parentScope, closeStateEffect);
 
   const setup = yield* options.setup(observedHost, options.root).pipe(

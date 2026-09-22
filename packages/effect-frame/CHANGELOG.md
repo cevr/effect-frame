@@ -1,5 +1,13 @@
 # effect-frame
 
+## 0.9.0
+
+### Minor Changes
+
+- [`8bec38f`](https://github.com/cevr/effect-frame/commit/8bec38fe1e895401fd588860e1ac1a8c8c3cab45) Thanks [@cevr](https://github.com/cevr)! - Keep readiness content owners live while fallback presentation is active, including deferred keyed rows and nested boundaries. A queued attachment runs once after its node reaches the document, and it is dropped when its owner ends first.
+
+  Add an optional host capability for constructing hidden nodes without claiming connected hydration nodes.
+
 ## 0.8.1
 
 ### Patch Changes

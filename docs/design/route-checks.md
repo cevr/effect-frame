@@ -219,8 +219,8 @@ scratchpad; this table is the record.
 - No browser proof: pop and fragment behavior use a fixture `Location`
   (`tests/router/route-check-edges.test.tsx` feeds it pops).
   Real Back/Forward, precommit cancellation, and focus are slice 5.
-- Nested routes still have no url-state, `updateSearch`, pending state, or
-  lazy views (slice 4).
+- Nested routes still have no url-state or `updateSearch`. Pending state
+  and lazy views are slice 4 (`docs/design/route-pending.md`).
 
 ## Open questions
 

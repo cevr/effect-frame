@@ -1,4 +1,15 @@
-import { Deferred, Effect, Equal, Function, Queue, Ref, Stream, SubscriptionRef } from "effect";
+import {
+  Deferred,
+  Effect,
+  Equal,
+  Function,
+  Option,
+  Queue,
+  Ref,
+  Stream,
+  SubscriptionRef,
+} from "effect";
+import * as Inspection from "../inspection.js";
 import type { Behavior, SetValue } from "./behavior.js";
 import { Value } from "./behavior.js";
 import { fromSubscriptionRef, select } from "./source.js";
@@ -121,6 +132,21 @@ export const spawn = Effect.fn("Actor.spawn")(function* <State, Message, R>(
     call,
     derive,
   };
+
+  const registry = yield* Effect.serviceOption(Inspection.Registry);
+  if (Option.isSome(registry)) {
+    const owner = yield* Inspection.ownerFor(registry.value);
+    yield* registry.value.register(owner, (id) =>
+      Effect.map(SubscriptionRef.get(applied), (current) => ({
+        _tag: "Actor",
+        id,
+        ownerId: owner.id,
+        parentOwnerId: owner.parentId,
+        kind: "local",
+        revision: current.revision,
+      })),
+    );
+  }
   return ref;
 });
 

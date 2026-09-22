@@ -19,6 +19,7 @@ import type { Behavior } from "./behavior.js";
 import type { PendingCommand, StoredReceipt } from "./mailbox-store.js";
 import { MailboxStore } from "./mailbox-store.js";
 import { fromSubscriptionRef, select } from "./source.js";
+import * as Inspection from "../inspection.js";
 
 export interface DurableOptions<State, Message, R> {
   readonly behavior: Behavior<State, Message, R>;
@@ -216,5 +217,20 @@ export const durable = Effect.fn("Actor.durable")(function* <State, Message, R>(
     send,
     call,
   };
+
+  const registry = yield* Effect.serviceOption(Inspection.Registry);
+  if (Option.isSome(registry)) {
+    const owner = yield* Inspection.ownerFor(registry.value);
+    yield* registry.value.register(owner, (id) =>
+      Effect.map(SubscriptionRef.get(applied), (current) => ({
+        _tag: "Actor",
+        id,
+        ownerId: owner.id,
+        parentOwnerId: owner.parentId,
+        kind: "durable",
+        revision: current.revision,
+      })),
+    );
+  }
   return ref;
 });

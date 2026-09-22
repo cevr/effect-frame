@@ -1,5 +1,6 @@
 import type { Layer as LayerType } from "effect";
 import {
+  Clock,
   Context,
   Deferred,
   Effect,
@@ -13,6 +14,7 @@ import {
   Stream,
   SubscriptionRef,
 } from "effect";
+import * as Inspection from "../inspection.js";
 import type { AnyQuery, ArgsOf, QueryFailure, QueryKey, QueryState, ResultOf } from "./query.js";
 import { Failed, Loading, Ready, canonicalize, keyOf, markStale } from "./query.js";
 import type { Source } from "./source.js";
@@ -181,9 +183,13 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
   key: QueryKey,
   transport: ActorTransport["Service"],
   batchResolver: Option.Option<BatchedQueryResolver>,
+  clock: Clock.Clock,
+  registry: Option.Option<Inspection.RegistryService>,
+  owner: Option.Option<Inspection.OwnerToken>,
 ) {
   const scope = yield* Scope.make();
   const state = yield* SubscriptionRef.make<QueryState<string, QueryFailure>>(Loading());
+  const openedAt = clock.monotonicTimeNanosUnsafe();
 
   // A read in flight, so a second `refresh` joins it instead of repeating it.
   let inflight: Option.Option<Deferred.Deferred<void>> = Option.none();
@@ -266,6 +272,38 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
     accept,
     reject,
   };
+
+  if (Option.isSome(registry) && Option.isSome(owner)) {
+    yield* Scope.provide(
+      registry.value.register(owner.value, (id) =>
+        Effect.map(SubscriptionRef.get(state), (current) => {
+          let stale = Option.none<boolean>();
+          let value: Inspection.QueryValue = { _tag: "Absent" };
+          let failure = Option.none<unknown>();
+          if (current._tag === "Ready") {
+            stale = Option.some(current.stale);
+            value = { _tag: "Encoded", encoding: "json", value: current.value };
+          } else if (current._tag === "Failed") {
+            failure = Option.some(current.error);
+          }
+          return {
+            _tag: "Query",
+            id,
+            ownerId: owner.value.id,
+            parentOwnerId: owner.value.parentId,
+            cacheId: owner.value.id,
+            key: keyOf(key),
+            state: current._tag,
+            stale,
+            ageMs: Number(clock.monotonicTimeNanosUnsafe() - openedAt) / 1_000_000,
+            value,
+            failure,
+          };
+        }),
+      ),
+      scope,
+    );
+  }
   return slot;
 });
 
@@ -299,7 +337,13 @@ const entryOf = <Q extends AnyQuery>(
 };
 
 const make = (): Effect.Effect<QueryCacheService> =>
-  Effect.sync(() => {
+  Effect.gen(function* () {
+    const clock = yield* Clock.Clock;
+    const registry = yield* Effect.serviceOption(Inspection.Registry);
+    let owner = Option.none<Inspection.OwnerToken>();
+    if (Option.isSome(registry)) {
+      owner = Option.some(yield* Inspection.ownerFor(registry.value));
+    }
     const slots = new Map<string, CacheSlot>();
     const batchResolvers = new Map<
       AnyQuery,
@@ -343,6 +387,9 @@ const make = (): Effect.Effect<QueryCacheService> =>
           key,
           transport,
           batchResolverFor(contract, transport),
+          clock,
+          registry,
+          owner,
         );
         created.count = 1;
         slots.set(id, created);

@@ -1,0 +1,413 @@
+import { Context, Effect, Layer, Match, Option, Schema } from "effect";
+import type {
+  QueryValue as InspectionQueryValue,
+  Record as InspectionRecord,
+  Sample,
+} from "./inspection.js";
+import * as Inspection from "./inspection.js";
+
+// ---------------------------------------------------------------------------
+// Public snapshot schema
+// ---------------------------------------------------------------------------
+
+/** An opaque identity allocated by one Frame root. */
+export const Identity = Schema.String.pipe(Schema.brand("FrameIdentity"));
+export type Identity = Schema.Schema.Type<typeof Identity>;
+
+const Primitive = Schema.Union([Schema.String, Schema.Finite, Schema.Boolean, Schema.Null]);
+
+/**
+ * A bounded diagnostic value. Values are tagged so an empty object, an
+ * unsupported value, and a value cut short by the bounds remain distinct.
+ */
+export type DiagnosticData =
+  | Schema.Schema.Type<typeof Primitive>
+  | ReadonlyArray<DiagnosticValue>
+  | Readonly<Record<string, DiagnosticValue>>;
+
+export type DiagnosticValue =
+  | { readonly _tag: "Value"; readonly value: DiagnosticData }
+  | { readonly _tag: "Opaque"; readonly reason: string }
+  | { readonly _tag: "Truncated"; readonly reason: string };
+
+export const DiagnosticValue: Schema.Schema<DiagnosticValue> = Schema.suspend(() =>
+  Schema.Union([
+    Schema.TaggedStruct("Value", {
+      value: Schema.Union([
+        Primitive,
+        Schema.Array(DiagnosticValue),
+        Schema.Record(Schema.String, DiagnosticValue),
+      ]),
+    }),
+    Schema.TaggedStruct("Opaque", { reason: Schema.String }),
+    Schema.TaggedStruct("Truncated", { reason: Schema.String }),
+  ]),
+);
+
+const RecordFields = {
+  id: Identity,
+  ownerId: Identity,
+  parentOwnerId: Schema.NullOr(Identity),
+};
+
+const Mount = Schema.TaggedStruct("Mount", {
+  ...RecordFields,
+  phase: Schema.Literals(["entering", "mounted"]),
+});
+
+const Actor = Schema.TaggedStruct("Actor", {
+  ...RecordFields,
+  kind: Schema.Literals(["local", "durable"]),
+  revision: Schema.Finite,
+});
+
+const QueryValueSchema = Schema.Union([
+  Schema.TaggedStruct("Absent", {}),
+  Schema.TaggedStruct("Encoded", {
+    encoding: Schema.Literal("json"),
+    value: Schema.String,
+  }),
+  Schema.TaggedStruct("Unsupported", { reason: Schema.String }),
+]);
+
+const Query = Schema.TaggedStruct("Query", {
+  ...RecordFields,
+  cacheId: Identity,
+  key: Schema.String,
+  state: Schema.Literals(["Loading", "Ready", "Failed"]),
+  stale: Schema.NullOr(Schema.Boolean),
+  ageMs: Schema.Finite,
+  value: QueryValueSchema,
+  failure: Schema.NullOr(DiagnosticValue),
+});
+
+const Route = Schema.TaggedStruct("Route", {
+  ...RecordFields,
+  routerId: Identity,
+  routeInstanceId: Identity,
+  routeName: Schema.String,
+  phase: Schema.Literals(["entering", "mounted"]),
+  params: DiagnosticValue,
+  search: DiagnosticValue,
+  canonicalRouteName: Schema.String,
+  canonicalUrl: Schema.String,
+});
+
+const UrlState = Schema.TaggedStruct("UrlState", {
+  ...RecordFields,
+  routeInstanceId: Identity,
+  keys: Schema.Array(Schema.String),
+  value: DiagnosticValue,
+});
+
+const CommandsUnavailable = Schema.TaggedStruct("Unavailable", {
+  reason: Schema.Literal("ClientCommandLifecycleNotImplemented"),
+});
+
+export const Snapshot = Schema.Struct({
+  version: Schema.Literal(1),
+  root: Schema.Struct({
+    id: Identity,
+    name: Schema.NullOr(Schema.String),
+  }),
+  collection: Schema.Literal("sampled"),
+  startedAt: Schema.Finite,
+  finishedAt: Schema.Finite,
+  mounts: Schema.Array(Mount),
+  routes: Schema.Array(Route),
+  actors: Schema.Array(Actor),
+  queries: Schema.Array(Query),
+  urlStates: Schema.Array(UrlState),
+  commands: CommandsUnavailable,
+});
+export type Snapshot = Schema.Schema.Type<typeof Snapshot>;
+
+export interface FrameService {
+  readonly inspect: Effect.Effect<Snapshot>;
+}
+
+export class Service extends Context.Service<Service, FrameService>()(
+  "effect-frame/src/frame/Service",
+) {}
+
+export const inspect: Effect.Effect<Snapshot, never, Service> = Effect.flatMap(
+  Service,
+  (frame) => frame.inspect,
+);
+
+// ---------------------------------------------------------------------------
+// Diagnostic conversion
+// ---------------------------------------------------------------------------
+
+const MAX_DEPTH = 6;
+const MAX_ENTRIES = 32;
+const MAX_NODES = 128;
+const MAX_STRING_LENGTH = 512;
+
+interface DiagnosticBudget {
+  remaining: number;
+}
+
+const opaque = (reason: string): DiagnosticValue => ({ _tag: "Opaque", reason });
+
+type DiagnosticInput = Schema.Schema.Type<typeof Schema.Unknown>;
+
+const diagnosticPrimitive = (input: DiagnosticInput): Option.Option<DiagnosticValue> => {
+  if (Schema.is(Schema.Null)(input)) {
+    return Option.some({ _tag: "Value", value: Schema.decodeUnknownSync(Schema.Null)(input) });
+  }
+  if (Schema.is(Schema.String)(input)) {
+    if (input.length > MAX_STRING_LENGTH) {
+      return Option.some({ _tag: "Truncated", reason: "maximum-string-length" });
+    }
+    return Option.some({ _tag: "Value", value: input });
+  }
+  if (Schema.is(Schema.Boolean)(input)) {
+    return Option.some({ _tag: "Value", value: input });
+  }
+  if (Schema.is(Schema.Finite)(input)) {
+    return Option.some({ _tag: "Value", value: input });
+  }
+  return Option.none();
+};
+
+const diagnosticArray = (
+  input: DiagnosticInput,
+  depth: number,
+  ancestors: ReadonlySet<object>,
+  budget: DiagnosticBudget,
+  descriptors: Record<string, PropertyDescriptor>,
+): DiagnosticValue => {
+  if (!Schema.is(Schema.ObjectKeyword)(input)) {
+    return opaque("unsupported-value");
+  }
+  const lengthDescriptor = Option.fromNullishOr(descriptors["length"]);
+  if (Option.isNone(lengthDescriptor)) {
+    return { _tag: "Truncated", reason: "maximum-entries" };
+  }
+  const length = lengthDescriptor.value.value;
+  if (!Schema.is(Schema.Finite)(length) || !Number.isSafeInteger(length) || length > MAX_ENTRIES) {
+    return { _tag: "Truncated", reason: "maximum-entries" };
+  }
+  const nextAncestors = new Set(ancestors);
+  nextAncestors.add(input);
+  const values: Array<DiagnosticValue> = [];
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = Option.fromNullishOr(descriptors[String(index)]);
+    if (Option.isNone(descriptor)) {
+      values.push(opaque("array-hole"));
+    } else if ("get" in descriptor.value || "set" in descriptor.value) {
+      values.push(opaque("accessor"));
+    } else {
+      values.push(diagnostic(descriptor.value.value, depth + 1, nextAncestors, budget));
+    }
+  }
+  return { _tag: "Value", value: values };
+};
+
+const diagnosticRecord = (
+  input: DiagnosticInput,
+  depth: number,
+  ancestors: ReadonlySet<object>,
+  budget: DiagnosticBudget,
+  descriptors: Record<string, PropertyDescriptor>,
+): DiagnosticValue => {
+  if (!Schema.is(Schema.ObjectKeyword)(input)) {
+    return opaque("unsupported-value");
+  }
+  const keys = Object.keys(descriptors);
+  if (keys.length > MAX_ENTRIES) {
+    return { _tag: "Truncated", reason: "maximum-entries" };
+  }
+  const nextAncestors = new Set(ancestors);
+  nextAncestors.add(input);
+  const value: Record<string, DiagnosticValue> = {};
+  for (const key of keys) {
+    const descriptor = Option.fromNullishOr(descriptors[key]);
+    if (Option.isNone(descriptor)) {
+      continue;
+    }
+    if ("get" in descriptor.value || "set" in descriptor.value) {
+      return opaque("accessor");
+    }
+    Object.defineProperty(value, key, {
+      configurable: true,
+      enumerable: true,
+      value: diagnostic(descriptor.value.value, depth + 1, nextAncestors, budget),
+      writable: true,
+    });
+  }
+  return { _tag: "Value", value };
+};
+
+const diagnosticObject = (
+  input: DiagnosticInput,
+  depth: number,
+  ancestors: ReadonlySet<object>,
+  budget: DiagnosticBudget,
+): DiagnosticValue => {
+  if (!Schema.is(Schema.ObjectKeyword)(input)) {
+    return opaque("unsupported-value");
+  }
+  const readable = Option.liftThrowable(() => ({
+    descriptors: Object.getOwnPropertyDescriptors(input),
+    prototype: Object.getPrototypeOf(input),
+  }))();
+  if (Option.isNone(readable)) {
+    return opaque("unreadable-object");
+  }
+  const { descriptors, prototype } = readable.value;
+  if (
+    prototype !== Object.prototype &&
+    Option.isSome(Option.fromNullishOr(prototype)) &&
+    !Array.isArray(input)
+  ) {
+    return opaque("unsupported-object");
+  }
+  if (Array.isArray(input)) {
+    return diagnosticArray(input, depth, ancestors, budget, descriptors);
+  }
+  return diagnosticRecord(input, depth, ancestors, budget, descriptors);
+};
+
+const diagnostic = (
+  input: DiagnosticInput,
+  depth: number,
+  ancestors: ReadonlySet<object>,
+  budget: DiagnosticBudget,
+): DiagnosticValue => {
+  budget.remaining -= 1;
+  if (budget.remaining < 0) {
+    return { _tag: "Truncated", reason: "maximum-size" };
+  }
+  const primitive = diagnosticPrimitive(input);
+  if (Option.isSome(primitive)) {
+    return primitive.value;
+  }
+  if (!Schema.is(Schema.ObjectKeyword)(input)) {
+    return opaque("unsupported-value");
+  }
+  if (depth >= MAX_DEPTH) {
+    return { _tag: "Truncated", reason: "maximum-depth" };
+  }
+  if (ancestors.has(input)) {
+    return opaque("cycle");
+  }
+  return diagnosticObject(input, depth, ancestors, budget);
+};
+
+const toDiagnostic = (input: DiagnosticInput): DiagnosticValue =>
+  diagnostic(input, 0, new Set(), { remaining: MAX_NODES });
+
+const identity = (value: string): Identity => Schema.decodeUnknownSync(Identity)(value);
+
+const base = (record: InspectionRecord) => ({
+  id: identity(record.id),
+  ownerId: identity(record.ownerId),
+  parentOwnerId: Option.getOrNull(Option.map(record.parentOwnerId, identity)),
+});
+
+export type QueryValue = Schema.Schema.Type<typeof QueryValueSchema>;
+
+const toQueryValue = (value: InspectionQueryValue): QueryValue =>
+  Match.type<InspectionQueryValue>().pipe(
+    Match.withReturnType<QueryValue>(),
+    Match.tagsExhaustive({
+      Absent: () => ({ _tag: "Absent" }),
+      Encoded: (encoded) => ({ _tag: "Encoded", encoding: "json", value: encoded.value }),
+      Unsupported: (unsupported) => ({ _tag: "Unsupported", reason: unsupported.reason }),
+    }),
+  )(value);
+
+const toSnapshot = (sample: Sample): Snapshot => {
+  const mounts: Array<Snapshot["mounts"][number]> = [];
+  const routes: Array<Snapshot["routes"][number]> = [];
+  const actors: Array<Snapshot["actors"][number]> = [];
+  const queries: Array<Snapshot["queries"][number]> = [];
+  const urlStates: Array<Snapshot["urlStates"][number]> = [];
+
+  for (const record of sample.records) {
+    switch (record._tag) {
+      case "Mount":
+        mounts.push({ ...base(record), _tag: "Mount", phase: record.phase });
+        break;
+      case "Route":
+        routes.push({
+          ...base(record),
+          _tag: "Route",
+          routerId: identity(record.routerId),
+          routeInstanceId: identity(record.routeInstanceId),
+          routeName: record.routeName,
+          phase: record.phase,
+          params: toDiagnostic(record.params),
+          search: toDiagnostic(record.search),
+          canonicalRouteName: record.canonicalRouteName,
+          canonicalUrl: record.canonicalUrl,
+        });
+        break;
+      case "Actor":
+        actors.push({
+          ...base(record),
+          _tag: "Actor",
+          kind: record.kind,
+          revision: record.revision,
+        });
+        break;
+      case "Query":
+        queries.push({
+          ...base(record),
+          _tag: "Query",
+          cacheId: identity(record.cacheId),
+          key: record.key,
+          state: record.state,
+          stale: Option.getOrNull(record.stale),
+          ageMs: record.ageMs,
+          value: toQueryValue(record.value),
+          failure: Option.getOrNull(Option.map(record.failure, toDiagnostic)),
+        });
+        break;
+      case "UrlState":
+        urlStates.push({
+          ...base(record),
+          _tag: "UrlState",
+          routeInstanceId: identity(record.routeInstanceId),
+          keys: [...record.keys],
+          value: toDiagnostic(record.value),
+        });
+        break;
+    }
+  }
+
+  return {
+    version: 1,
+    root: { id: identity(sample.rootId), name: Option.getOrNull(sample.rootName) },
+    collection: "sampled",
+    startedAt: sample.startedAt,
+    finishedAt: sample.finishedAt,
+    mounts,
+    routes,
+    actors,
+    queries,
+    urlStates,
+    commands: {
+      _tag: "Unavailable",
+      reason: "ClientCommandLifecycleNotImplemented",
+    },
+  } satisfies Snapshot;
+};
+
+export interface LayerOptions {
+  readonly name?: string;
+}
+
+/** Build one inspection registry and Frame service for one application root. */
+export const layer = (options: LayerOptions = {}): Layer.Layer<Service | Inspection.Registry> =>
+  Layer.effectContext(
+    Effect.gen(function* () {
+      const registry = yield* Inspection.makeRegistry(Option.fromNullishOr(options.name));
+      const frame: FrameService = {
+        inspect: Effect.map(registry.sample, toSnapshot),
+      };
+      return Context.make(Inspection.Registry, registry).pipe(Context.add(Service, frame));
+    }),
+  );

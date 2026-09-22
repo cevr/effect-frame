@@ -1,5 +1,11 @@
 # effect-frame
 
+## 0.7.1
+
+### Patch Changes
+
+- [`6e2b399`](https://github.com/cevr/effect-frame/commit/6e2b399fd762928039aeac4ee81a147cdf33a5be) Thanks [@cevr](https://github.com/cevr)! - Release host event listeners with the branch, row, and mount scope that owns their element. Start view work only after that owner accepts it, so a closed owner cannot start stale handlers or attachment setup.
+
 ## 0.7.0
 
 ### Minor Changes

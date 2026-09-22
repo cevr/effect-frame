@@ -5,7 +5,7 @@ registerDom();
 import type { Source } from "effect-frame/actor";
 import { Link, Location, Route, Router, followLinks, link, mount } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
-import { Dom, View, render } from "effect-frame/view";
+import { Dom, View, ViewTest } from "effect-frame/view";
 import type { Node } from "effect-frame/view";
 import { Deferred, Effect, Fiber, Option, Queue, Ref, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -19,6 +19,7 @@ import { describe, expect, it } from "effect-bun-test";
 interface FakeLocation {
   readonly service: LocationService;
   readonly history: Array<string>;
+  readonly awaitMove: Effect.Effect<void>;
   readonly pop: (href: string) => Effect.Effect<void>;
 }
 
@@ -26,6 +27,7 @@ const makeLocation = (initial: string): Effect.Effect<FakeLocation> =>
   Effect.gen(function* () {
     const current = yield* Ref.make(new URL(initial));
     const pops = yield* Queue.unbounded<URL>();
+    const moves = yield* Queue.unbounded<void>();
     const history: Array<string> = [];
     return {
       service: {
@@ -33,20 +35,27 @@ const makeLocation = (initial: string): Effect.Effect<FakeLocation> =>
         push: (url) =>
           Effect.andThen(
             Ref.set(current, url),
-            Effect.sync(() => {
-              history.push(`push ${url.pathname}${url.search}`);
-            }),
+            Effect.andThen(
+              Effect.sync(() => {
+                history.push(`push ${url.pathname}${url.search}`);
+              }),
+              Effect.succeed(Queue.offerUnsafe(moves, void 0)),
+            ),
           ),
         replace: (url) =>
           Effect.andThen(
             Ref.set(current, url),
-            Effect.sync(() => {
-              history.push(`replace ${url.pathname}${url.search}`);
-            }),
+            Effect.andThen(
+              Effect.sync(() => {
+                history.push(`replace ${url.pathname}${url.search}`);
+              }),
+              Effect.succeed(Queue.offerUnsafe(moves, void 0)),
+            ),
           ),
         pops: Stream.fromQueue(pops),
       },
       history,
+      awaitMove: Effect.asVoid(Queue.take(moves)),
       pop: (href) =>
         Effect.gen(function* () {
           const url = new URL(href, initial);
@@ -60,6 +69,13 @@ const makeRoot = Effect.sync(() => document.createElement("main"));
 
 const textOf = (root: HTMLElement, selector: string): string =>
   root.querySelector(selector)?.textContent ?? "";
+
+const textAt = (root: globalThis.Node, selector: string): string => {
+  if (!(root instanceof HTMLElement)) {
+    return "";
+  }
+  return textOf(root, selector);
+};
 
 const Nothing = Schema.Struct({});
 const BookSearch = Route.search(Schema.Struct({ q: Schema.String.pipe(Route.withDefault("")) }));
@@ -163,14 +179,19 @@ const start = (initial: string, routes: ReadonlyArray<Route.AnyRoute<Router>> = 
   Effect.gen(function* () {
     const root = yield* makeRoot;
     const location = yield* makeLocation(initial);
-    const router = yield* mount({
-      routes,
-      notFound: NotFound,
+    const page = yield* ViewTest.make({
       host: Dom.host,
       root,
-    }).pipe(Effect.provideService(Location, location.service));
-    yield* followLinks(root, router);
-    return { root, location, router };
+      setup: (host, mountRoot) =>
+        mount({
+          routes,
+          notFound: NotFound,
+          host,
+          root: mountRoot,
+        }).pipe(Effect.provideService(Location, location.service)),
+    });
+    yield* followLinks(root, page.setup);
+    return { root, location, router: page.setup, page };
   });
 
 describe("router", () => {
@@ -186,7 +207,7 @@ describe("router", () => {
 
   it.scoped("a typed link prints the route's href, says when it is current, and moves", () =>
     Effect.gen(function* () {
-      const { root, router, location } = yield* start("http://app.test/");
+      const { root, router, location, page } = yield* start("http://app.test/");
       const anchors = Array.from(root.querySelectorAll("a"));
       const typed = anchors.find((a) => a.textContent === "typed");
       const next = anchors.find((a) => a.textContent === "next");
@@ -198,8 +219,10 @@ describe("router", () => {
       expect((yield* router.current.get).name).toBe("home");
 
       typed?.click();
-      yield* render;
-      expect(textOf(root, "#book")).toBe("5");
+      yield* page.waitFor({
+        label: "typed link route",
+        until: (actualRoot) => textAt(actualRoot, "#book") === "5",
+      });
       expect((yield* router.current.get).name).toBe("book");
       expect(location.history).toEqual(["push /books/5"]);
     }),
@@ -207,10 +230,13 @@ describe("router", () => {
 
   it.scoped("a replacing link replaces the entry", () =>
     Effect.gen(function* () {
-      const { root, router, location } = yield* start("http://app.test/books/1");
+      const { root, router, location, page } = yield* start("http://app.test/books/1");
       const here = Array.from(root.querySelectorAll("a")).find((a) => a.textContent === "home");
       here?.click();
-      yield* render;
+      yield* page.waitFor({
+        label: "replacing link route",
+        until: (actualRoot) => textAt(actualRoot, "#home") !== "",
+      });
       expect((yield* router.current.get).name).toBe("home");
       expect(location.history).toEqual(["replace /"]);
     }),
@@ -218,10 +244,11 @@ describe("router", () => {
 
   it.scoped("navigate pushes and swaps the view; the previous one is gone", () =>
     Effect.gen(function* () {
-      const { root, location, router } = yield* start("http://app.test/");
-      yield* router.navigate("/books/3");
-      yield* render;
-      expect(textOf(root, "#book")).toBe("3");
+      const { root, location, router, page } = yield* start("http://app.test/");
+      yield* page.act(router.navigate("/books/3"), {
+        label: "navigate to book",
+        until: (actualRoot) => textAt(actualRoot, "#book") === "3",
+      });
       expect(root.querySelector("#home")).toBeNull();
       expect(location.history).toEqual(["push /books/3"]);
     }),
@@ -229,22 +256,27 @@ describe("router", () => {
 
   it.scoped("a navigation within the same route stays: the view keeps its identity", () =>
     Effect.gen(function* () {
-      const { root, router } = yield* start("http://app.test/books/1");
+      const { root, router, page } = yield* start("http://app.test/books/1");
       const before = root.querySelector("#book");
-      yield* router.navigate("/books/2");
-      yield* render;
-      expect(textOf(root, "#book")).toBe("2");
+      yield* page.act(router.navigate("/books/2"), {
+        label: "same route params",
+        until: (actualRoot) => textAt(actualRoot, "#book") === "2",
+      });
       expect(root.querySelector("#book")).toBe(before);
     }),
   );
 
   it.scoped("a functional search update stays on the route and updates its props", () =>
     Effect.gen(function* () {
-      const { root, location, router } = yield* start("http://app.test/books/1");
+      const { root, location, router, page } = yield* start("http://app.test/books/1");
       const before = root.querySelector("#book");
-      yield* updateBookSearch((previous) => ({ q: `${previous.q}a` }));
-      yield* render;
-      expect(textOf(root, "#book-search")).toBe("a");
+      yield* page.act(
+        updateBookSearch((previous) => ({ q: `${previous.q}a` })),
+        {
+          label: "functional search update",
+          until: (actualRoot) => textAt(actualRoot, "#book-search") === "a",
+        },
+      );
       expect(root.querySelector("#book")).toBe(before);
       expect((yield* router.current.get).name).toBe("book");
       expect(location.history).toEqual(["push /books/1?q=a"]);
@@ -253,7 +285,7 @@ describe("router", () => {
 
   it.scoped("concurrent functional updates serialize against the latest URL", () =>
     Effect.gen(function* () {
-      const { root, location } = yield* start("http://app.test/books/1");
+      const { root, location, page } = yield* start("http://app.test/books/1");
       yield* Effect.all(
         [
           updateBookSearch((previous) => ({ q: `${previous.q}a` })),
@@ -261,7 +293,10 @@ describe("router", () => {
         ],
         { concurrency: "unbounded" },
       );
-      yield* render;
+      yield* page.waitFor({
+        label: "concurrent search updates",
+        until: (actualRoot) => textAt(actualRoot, "#book-search").length === 2,
+      });
       const search = textOf(root, "#book-search");
       expect(search.length).toBe(2);
       expect(search.includes("a")).toBe(true);
@@ -291,15 +326,17 @@ describe("router", () => {
 
   it.scoped("a disposed route action cannot mutate a later route instance", () =>
     Effect.gen(function* () {
-      const { location, router, root } = yield* start("http://app.test/books/1");
+      const { location, router, page } = yield* start("http://app.test/books/1");
       const stale = updateBookSearch;
       const staleReplace = replaceBookSearch;
       yield* router.navigate("/");
       yield* router.navigate("/books/2?q=new");
       yield* stale((previous) => ({ q: `${previous.q}-stale` }));
       yield* staleReplace((previous) => ({ q: `${previous.q}-replace-stale` }));
-      yield* render;
-      expect(textOf(root, "#book-search")).toBe("new");
+      yield* page.waitFor({
+        label: "new route search",
+        until: (actualRoot) => textAt(actualRoot, "#book-search") === "new",
+      });
       expect(location.history).toEqual(["push /", "push /books/2?q=new"]);
     }),
   );
@@ -314,7 +351,7 @@ describe("router", () => {
 
   it.scoped("a same-origin link click is intercepted; a modified click is not", () =>
     Effect.gen(function* () {
-      const { root, location } = yield* start("http://app.test/");
+      const { root, location, page } = yield* start("http://app.test/");
       const anchor = Option.getOrThrow(Option.fromNullishOr(root.querySelector("#to-book")));
       const updater = Option.getOrThrow(Option.fromNullishOr(root.querySelector(".next")));
       const modified = new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true });
@@ -326,23 +363,30 @@ describe("router", () => {
 
       const plain = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
       anchor.dispatchEvent(plain);
-      yield* render;
+      yield* Effect.yieldNow;
+      yield* location.awaitMove;
+      yield* page.waitFor({
+        label: "ordinary link route",
+        until: (actualRoot) => textAt(actualRoot, "#book") === "7",
+      });
       expect(plain.defaultPrevented).toBe(true);
       expect(textOf(root, "#book")).toBe("7");
       expect(location.history).toEqual(["push /books/7"]);
 
-      yield* render;
       expect(location.history).toEqual(["push /books/7"]);
     }),
   );
 
   it.scoped("a typed Link updater prints the same href it navigates", () =>
     Effect.gen(function* () {
-      const { root, location, router } = yield* start("http://app.test/");
+      const { root, location, router, page } = yield* start("http://app.test/");
       const next = Option.getOrThrow(Option.fromNullishOr(root.querySelector(".next")));
       expect(next.getAttribute("href")).toBe("/books/5?q=x");
       next.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
-      yield* render;
+      yield* page.waitFor({
+        label: "typed updater route",
+        until: (actualRoot) => textAt(actualRoot, "#book") === "5",
+      });
       expect((yield* router.current.get).url.search).toBe("?q=x");
       expect(location.history).toEqual(["push /books/5?q=x"]);
     }),
@@ -350,14 +394,17 @@ describe("router", () => {
 
   it.scoped("two immediate updater Link clicks compose against the latest URL", () =>
     Effect.gen(function* () {
-      const { root, location } = yield* start("http://app.test/books/1");
+      const { root, location, page } = yield* start("http://app.test/books/1");
       const next = Option.getOrThrow(Option.fromNullishOr(root.querySelector(".same-book")));
       expect(next.getAttribute("href")).toBe("/books/1?q=x");
       const first = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
       const second = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
       next.dispatchEvent(first);
       next.dispatchEvent(second);
-      yield* render;
+      yield* page.waitFor({
+        label: "composed updater route",
+        until: (actualRoot) => textAt(actualRoot, "#book-search") === "xx",
+      });
       expect(textOf(root, "#book-search")).toBe("xx");
       expect(location.history).toEqual(["push /books/1?q=x", "push /books/1?q=xx"]);
     }),
@@ -365,20 +412,25 @@ describe("router", () => {
 
   it.scoped("replace does not push, and the view can reach the Router", () =>
     Effect.gen(function* () {
-      const { root, location } = yield* start("http://app.test/");
+      const { root, location, page } = yield* start("http://app.test/");
       root.querySelector("#go")?.dispatchEvent(new Event("click"));
-      yield* render;
-      expect(textOf(root, "#book")).toBe("9");
+      yield* page.waitFor({
+        label: "router replace event",
+        until: (actualRoot) => textAt(actualRoot, "#book") === "9",
+      });
       expect(location.history).toEqual(["replace /books/9"]);
     }),
   );
 
   it.scoped("a pop shows the popped URL and reports it as a pop", () =>
     Effect.gen(function* () {
-      const { root, location, router } = yield* start("http://app.test/");
+      const { root, location, router, page } = yield* start("http://app.test/");
       yield* router.navigate("/books/4");
       yield* location.pop("/");
-      yield* render;
+      yield* page.waitFor({
+        label: "popped home route",
+        until: (actualRoot) => textAt(actualRoot, "#home") !== "",
+      });
       expect(root.querySelector("#book")).toBeNull();
       expect(textOf(root, "#home")).toContain("book");
       const last = yield* router.navigations.get;
@@ -402,7 +454,7 @@ describe("router", () => {
             return <p id="slow">slow</p>;
           }),
       });
-      const { root, location, router } = yield* start("http://app.test/", [home, book, slow]);
+      const { root, location, router, page } = yield* start("http://app.test/", [home, book, slow]);
 
       const slowMove = yield* Effect.forkScoped(router.navigate("/slow"));
       yield* Deferred.await(setupStarted);
@@ -411,7 +463,10 @@ describe("router", () => {
       yield* Deferred.succeed(releaseSetup, void 0);
       yield* Fiber.join(slowMove);
       yield* Fiber.join(bookMove);
-      yield* render;
+      yield* page.waitFor({
+        label: "latest queued route",
+        until: (actualRoot) => textAt(actualRoot, "#book") === "2",
+      });
 
       expect(textOf(root, "#book")).toBe("2");
       expect(textOf(root, "#home")).toBe("");
@@ -426,7 +481,6 @@ describe("router", () => {
       const { router } = yield* start("http://app.test/");
       yield* router.navigate("/books/4");
       yield* router.navigate("/");
-      yield* render;
       expect(homeMounts).toBe(seen + 2);
     }),
   );

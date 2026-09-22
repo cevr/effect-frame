@@ -16,7 +16,7 @@ import {
 } from "effect-frame/actor";
 import type { QueryEntry, QueryFailure, QueryState, Source } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
-import { Dom, Loading, Query, View, mount, readyWithStale, render } from "effect-frame/view";
+import { Dom, Loading, Query, View, ViewTest, mount, readyWithStale } from "effect-frame/view";
 import type { Layer } from "effect";
 import { Deferred, Effect, Exit, Fiber, Option, Schema, Scope, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -106,9 +106,14 @@ const settled = <A, E>(state: Source<QueryState<A, E>>) =>
     Stream.runDrain,
   );
 
-const flush = Effect.andThen(render, render);
-
 const makeRoot = Effect.sync(() => document.createElement("main"));
+
+const textAt = (root: Node, selector: string): string => {
+  if (!(root instanceof HTMLElement)) {
+    return "";
+  }
+  return root.querySelector(selector)?.textContent ?? "";
+};
 
 describe("local query test transport", () => {
   it.scoped.layer(testLayer)("serves real cache entries through readiness and controls", () =>
@@ -141,10 +146,16 @@ describe("local query test transport", () => {
           }),
         });
 
-      yield* mount(Page, {}, Dom.host, root);
+      const page = yield* ViewTest.make({
+        host: Dom.host,
+        root,
+        setup: (host, mountRoot) => mount(Page, {}, host, mountRoot),
+      });
       expect(root.querySelector("#loading")?.textContent).toBe("loading");
-      yield* flush;
-      expect(root.querySelector("#value")?.textContent).toBe("0:false:0");
+      yield* page.waitFor({
+        label: "initial query value",
+        until: (actualRoot) => textAt(actualRoot, "#value") === "0:false:0",
+      });
 
       const gate = yield* Deferred.make<void>();
       countControl.current = Option.some({ gate });
@@ -159,13 +170,17 @@ describe("local query test transport", () => {
       yield* Stream.runHead(
         Stream.filter(entry.state.changes, (state) => state._tag === "Ready" && state.stale),
       );
-      yield* flush;
-      expect(root.querySelector("#value")?.textContent).toBe("0:true:0");
+      yield* page.waitFor({
+        label: "stale query value",
+        until: (actualRoot) => textAt(actualRoot, "#value") === "0:true:0",
+      });
 
       yield* Deferred.succeed(gate, void 0);
       yield* Fiber.join(calling);
-      yield* flush;
-      expect(root.querySelector("#value")?.textContent).toBe("1:false:1");
+      yield* page.waitFor({
+        label: "settled query value",
+        until: (actualRoot) => textAt(actualRoot, "#value") === "1:false:1",
+      });
     }).pipe(
       Effect.ensuring(
         Effect.sync(() => {

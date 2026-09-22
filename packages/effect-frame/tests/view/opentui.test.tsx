@@ -1,11 +1,12 @@
 import { Behavior, Value, modify, select, spawn } from "effect-frame/actor";
 import type { LocalActorRef, SetValue } from "effect-frame/actor";
-import { View, mount, render } from "effect-frame/view";
+import { View, ViewTest, mount, render } from "effect-frame/view";
 import { make as makeHost } from "effect-frame/view/opentui";
-import { InputRenderable } from "@opentui/core";
+import { InputRenderable, TextNodeRenderable, TextRenderable } from "@opentui/core";
+import type { BaseRenderable } from "@opentui/core";
 import type { TestRendererSetup } from "@opentui/core/testing";
 import { createTestRenderer } from "@opentui/core/testing";
-import { Effect } from "effect";
+import { Effect, Predicate, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 /** One headless terminal per test, destroyed with the test's scope. */
@@ -23,6 +24,24 @@ const draw = Effect.fn("test.draw")(function* (setup: TestRendererSetup) {
   yield* Effect.promise(() => setup.renderOnce());
   return setup.captureCharFrame();
 });
+
+const terminalText = (node: BaseRenderable): string => {
+  if (node instanceof TextNodeRenderable) {
+    let text = "";
+    for (const child of node.children) {
+      if (Predicate.isString(child)) {
+        text += child;
+      } else {
+        text += terminalText(child);
+      }
+    }
+    return text;
+  }
+  if (node instanceof TextRenderable) {
+    return node.getTextChildren().map(terminalText).join("");
+  }
+  return node.getChildren().map(terminalText).join("");
+};
 
 interface CounterProps {
   readonly count: LocalActorRef<number, SetValue<number>>;
@@ -56,11 +75,21 @@ describe("terminal view", () => {
     Effect.gen(function* () {
       const setup = yield* makeTerminal();
       const count = yield* spawn(Behavior.value(0));
-      yield* mount(Counter, { count }, makeHost(setup.renderer), setup.renderer.root);
+      const page = yield* ViewTest.make({
+        host: makeHost(setup.renderer),
+        root: setup.renderer.root,
+        setup: (host, root) => mount(Counter, { count }, host, root),
+      });
 
       expect(yield* draw(setup)).toContain("count 0");
 
-      yield* modify(count, (n) => n + 7);
+      yield* page.act(
+        modify(count, (n) => n + 7),
+        {
+          label: "terminal count update",
+          until: () => terminalText(setup.renderer.root).includes("count 7"),
+        },
+      );
       expect(yield* draw(setup)).toContain("count 7");
     }),
   );
@@ -81,7 +110,7 @@ describe("terminal view", () => {
       });
       yield* Effect.promise(() => setup.renderOnce());
       yield* Effect.promise(() => setup.mockInput.typeText("ab"));
-      yield* render;
+      yield* Stream.runHead(Stream.filter(draft.state.changes, (value) => value === "ab"));
       expect(yield* draft.state.get).toBe("ab");
     }),
   );

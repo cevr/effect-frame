@@ -15,11 +15,11 @@ import {
   Query,
   QueryState,
   View,
+  ViewTest,
   mount,
   orErrored,
   ready,
   readyWithStale,
-  render,
 } from "effect-frame/view";
 import type { Bound, ReadyValue } from "effect-frame/view";
 import {
@@ -53,6 +53,20 @@ const textOf = (root: HTMLElement, selector: string): string =>
 const has = (root: HTMLElement, selector: string): boolean =>
   Option.isSome(Option.fromNullishOr(root.querySelector(selector)));
 
+const textAt = (root: Node, selector: string): string => {
+  if (!(root instanceof HTMLElement)) {
+    return "";
+  }
+  return textOf(root, selector);
+};
+
+const hasAt = (root: Node, selector: string): boolean => {
+  if (!(root instanceof HTMLElement)) {
+    return false;
+  }
+  return has(root, selector);
+};
+
 /**
  * Bind a source outside a view's setup, by building the marker directly.
  * `View.bind` does the same; this spells out that a `Bound` is only data.
@@ -61,15 +75,6 @@ const bound = <A, B>(source: Source<A>, project: (value: A) => B): Bound<B> => (
   _tag: "Bound",
   source: selectSource(source, project),
 });
-
-/**
- * Deliver every pending host write. `render` already yields to the forked
- * subscription fibers before it flushes the reactive graph; a readiness
- * change travels through more of them (the query source, the shared
- * broadcast, the settled source, the derived pending source), so the test
- * runs it twice rather than guessing a count.
- */
-const flush = Effect.andThen(render, render);
 
 const staleClass = (stale: boolean): string => {
   if (stale) {
@@ -80,7 +85,11 @@ const staleClass = (stale: boolean): string => {
 
 /** Mount a scope view, which takes no props of its own. */
 const mountScoped = <E, R>(view: View.View<Record<string, never>, E, R>, root: HTMLElement) =>
-  mount(view, {}, Dom.host, root);
+  ViewTest.make({
+    host: Dom.host,
+    root,
+    setup: (host, mountRoot) => mount(view, {}, host, mountRoot),
+  });
 
 /**
  * The scope tests below use the public QueryTest layer. The handler keeps its
@@ -197,13 +206,17 @@ describe("readiness through context", () => {
             }),
           });
 
-        yield* mountScoped(Page, root);
+        const page = yield* mountScoped(Page, root);
         expect(textOf(root, "#pending")).toBe("loading");
         expect(has(root, "#title")).toBe(false);
 
         yield* setResponse(fixtures, "title", readyResponse("Alpha"));
         yield* Deferred.succeed(gate, void 0);
-        yield* flush;
+        yield* page.waitFor({
+          label: "first readiness value appears",
+          until: (actualRoot) =>
+            !hasAt(actualRoot, "#pending") && textAt(actualRoot, "#title") === "Alpha",
+        });
         expect(has(root, "#pending")).toBe(false);
         expect(textOf(root, "#title")).toBe("Alpha");
       }),
@@ -232,8 +245,11 @@ describe("readiness through context", () => {
           }),
         });
 
-      yield* mountScoped(Page, root);
-      yield* flush;
+      const page = yield* mountScoped(Page, root);
+      yield* page.waitFor({
+        label: "initial query value appears",
+        until: (actualRoot) => textAt(actualRoot, "#title") === "Alpha",
+      });
       expect(textOf(root, "#title")).toBe("Alpha");
       expect(textOf(root, "#stale")).toBe("false");
 
@@ -242,7 +258,10 @@ describe("readiness through context", () => {
       yield* setResponse(fixtures, "title", pendingResponse(gate, "Beta"));
       const entry = yield* Deferred.await(entryReady);
       const refreshing = yield* Effect.forkChild(entry.refresh);
-      yield* flush;
+      yield* page.waitFor({
+        label: "refetch marks content stale",
+        until: (actualRoot) => textAt(actualRoot, "#stale") === "true",
+      });
       expect(has(root, "#pending")).toBe(false);
       expect(textOf(root, "#title")).toBe("Alpha");
       expect(textOf(root, "#stale")).toBe("true");
@@ -250,7 +269,11 @@ describe("readiness through context", () => {
       yield* setResponse(fixtures, "title", readyResponse("Beta"));
       yield* Deferred.succeed(gate, void 0);
       yield* Fiber.join(refreshing);
-      yield* flush;
+      yield* page.waitFor({
+        label: "refetch value appears",
+        until: (actualRoot) =>
+          textAt(actualRoot, "#title") === "Beta" && textAt(actualRoot, "#stale") === "false",
+      });
       expect(textOf(root, "#title")).toBe("Beta");
       expect(textOf(root, "#stale")).toBe("false");
     }),
@@ -284,17 +307,26 @@ describe("readiness through context", () => {
             }),
           });
 
-        yield* mountScoped(Page, root);
+        const page = yield* mountScoped(Page, root);
         expect(textOf(root, "#pending")).toBe("loading");
 
         yield* setResponse(fixtures, "left", readyResponse("one"));
         yield* Deferred.succeed(leftGate, void 0);
-        yield* flush;
+        yield* page.waitFor({
+          label: "first query remains pending",
+          until: (actualRoot) => textAt(actualRoot, "#pending") === "loading",
+        });
         expect(textOf(root, "#pending")).toBe("loading");
 
         yield* setResponse(fixtures, "right", readyResponse("two"));
         yield* Deferred.succeed(rightGate, void 0);
-        yield* flush;
+        yield* page.waitFor({
+          label: "both queries settle",
+          until: (actualRoot) =>
+            !hasAt(actualRoot, "#pending") &&
+            textAt(actualRoot, "#a") === "one" &&
+            textAt(actualRoot, "#b") === "two",
+        });
         expect(has(root, "#pending")).toBe(false);
         expect(textOf(root, "#a")).toBe("one");
         expect(textOf(root, "#b")).toBe("two");
@@ -332,7 +364,7 @@ describe("readiness through context", () => {
             }),
           });
 
-        yield* mountScoped(Page, root);
+        const page = yield* mountScoped(Page, root);
         expect(textOf(root, "#pending")).toBe("loading");
         expect(has(root, "#failed")).toBe(false);
 
@@ -342,7 +374,10 @@ describe("readiness through context", () => {
         yield* Stream.runHead(
           Stream.filter(entry.state.changes, (state) => state._tag === "Failed"),
         );
-        yield* flush;
+        yield* page.waitFor({
+          label: "query failure is shown",
+          until: (actualRoot) => textAt(actualRoot, "#failed") === "boom",
+        });
         // A failed query has settled, so Loading releases its fallback.
         expect(has(root, "#pending")).toBe(false);
         // Errored owns the region and carries the typed failure.
@@ -353,14 +388,16 @@ describe("readiness through context", () => {
         // the controlled Failed -> Loading transition below.
         yield* setResponse(fixtures, "failure", pendingResponse(retryGate, "unused"));
         const retrying = yield* Effect.forkChild(entry.refresh);
-        yield* flush;
         expect(textOf(root, "#failed")).toBe("boom");
         expect(has(root, "#pending")).toBe(false);
 
         yield* setResponse(fixtures, "failure", readyResponse("Alpha"));
         yield* Deferred.succeed(retryGate, void 0);
         yield* Fiber.join(retrying);
-        yield* flush;
+        yield* page.waitFor({
+          label: "retry value is shown",
+          until: (actualRoot) => textAt(actualRoot, "#title") === "Alpha",
+        });
         expect(has(root, "#failed")).toBe(false);
         expect(has(root, "#pending")).toBe(false);
         expect(textOf(root, "#title")).toBe("Alpha");
@@ -394,21 +431,27 @@ describe("readiness through context", () => {
           }),
         });
 
-      yield* mountScoped(Page, root);
+      const page = yield* mountScoped(Page, root);
       expect(textOf(root, "#controlled-pending")).toBe("loading");
 
-      yield* controlled.reject("boom");
-      yield* flush;
+      yield* page.act(controlled.reject("boom"), {
+        label: "controlled failure is shown",
+        until: (actualRoot) => textAt(actualRoot, "#controlled-failed") === "boom",
+      });
       expect(has(root, "#controlled-pending")).toBe(false);
       expect(textOf(root, "#controlled-failed")).toBe("boom");
 
-      yield* controlled.refetch;
-      yield* flush;
+      yield* page.act(controlled.refetch, {
+        label: "controlled retry shows loading",
+        until: (actualRoot) => hasAt(actualRoot, "#controlled-pending"),
+      });
       expect(has(root, "#controlled-failed")).toBe(false);
       expect(textOf(root, "#controlled-pending")).toBe("loading");
 
-      yield* controlled.resolve("Alpha");
-      yield* flush;
+      yield* page.act(controlled.resolve("Alpha"), {
+        label: "controlled retry resolves",
+        until: (actualRoot) => textAt(actualRoot, "#controlled-title") === "Alpha",
+      });
       expect(has(root, "#controlled-pending")).toBe(false);
       expect(textOf(root, "#controlled-title")).toBe("Alpha");
     }),
@@ -446,14 +489,20 @@ describe("readiness through context", () => {
           }),
         });
 
-      yield* mountScoped(Page, root);
+      const page = yield* mountScoped(Page, root);
       expect(textOf(root, "#outer-pending")).toBe("outer");
 
       // The outer query lands: the outer content appears, and the inner
       // scope is still showing its own fallback.
       yield* setResponse(fixtures, "outer", readyResponse("Header"));
       yield* Deferred.succeed(outerGate, void 0);
-      yield* flush;
+      yield* page.waitFor({
+        label: "outer query settles",
+        until: (actualRoot) =>
+          !hasAt(actualRoot, "#outer-pending") &&
+          textAt(actualRoot, "#header") === "Header" &&
+          textAt(actualRoot, "#inner-pending") === "inner",
+      });
       expect(has(root, "#outer-pending")).toBe(false);
       expect(textOf(root, "#header")).toBe("Header");
       expect(textOf(root, "#inner-pending")).toBe("inner");
@@ -461,7 +510,10 @@ describe("readiness through context", () => {
 
       yield* setResponse(fixtures, "inner", readyResponse("Body"));
       yield* Deferred.succeed(innerGate, void 0);
-      yield* flush;
+      yield* page.waitFor({
+        label: "inner query settles",
+        until: (actualRoot) => textAt(actualRoot, "#body") === "Body",
+      });
       expect(has(root, "#inner-pending")).toBe(false);
       expect(textOf(root, "#body")).toBe("Body");
     }),
@@ -488,22 +540,28 @@ describe("readiness through context", () => {
           />,
         );
 
-      yield* mountScoped(Page, root);
+      const page = yield* mountScoped(Page, root);
       expect(textOf(root, "#q-loading")).toBe("loading");
 
-      yield* controlled.resolve("Alpha");
-      yield* flush;
+      yield* page.act(controlled.resolve("Alpha"), {
+        label: "query value appears",
+        until: (actualRoot) => textAt(actualRoot, "#q-ready") === "Alpha",
+      });
       expect(has(root, "#q-loading")).toBe(false);
       expect(textOf(root, "#q-ready")).toBe("Alpha");
       expect(root.querySelector("#q-ready")?.getAttribute("class")).toBe("fresh");
 
-      yield* controlled.refetch;
-      yield* flush;
+      yield* page.act(controlled.refetch, {
+        label: "query value becomes stale",
+        until: (actualRoot) => textAt(actualRoot, "#q-ready") === "Alpha",
+      });
       expect(textOf(root, "#q-ready")).toBe("Alpha");
       expect(root.querySelector("#q-ready")?.getAttribute("class")).toBe("stale");
 
-      yield* controlled.reject("boom");
-      yield* flush;
+      yield* page.act(controlled.reject("boom"), {
+        label: "query failure appears",
+        until: (actualRoot) => textAt(actualRoot, "#q-failed") === "boom",
+      });
       expect(has(root, "#q-ready")).toBe(false);
       expect(textOf(root, "#q-failed")).toBe("boom");
     }),
@@ -528,16 +586,20 @@ describe("readiness through context", () => {
           ),
         });
 
-      yield* mountScoped(Page, root);
+      const page = yield* mountScoped(Page, root);
       expect(textOf(root, "#await-loading")).toBe("loading");
 
-      yield* controlled.resolve("Alpha");
-      yield* flush;
+      yield* page.act(controlled.resolve("Alpha"), {
+        label: "await value appears",
+        until: (actualRoot) => textAt(actualRoot, "#await-ready") === "Alpha",
+      });
       expect(has(root, "#await-loading")).toBe(false);
       expect(textOf(root, "#await-ready")).toBe("Alpha");
 
-      yield* controlled.reject("boom");
-      yield* flush;
+      yield* page.act(controlled.reject("boom"), {
+        label: "await failure appears",
+        until: (actualRoot) => textAt(actualRoot, "#await-failed") === "boom",
+      });
       expect(has(root, "#await-ready")).toBe(false);
       expect(textOf(root, "#await-failed")).toBe("boom");
     }),
@@ -571,14 +633,18 @@ describe("readiness through context", () => {
             }),
           });
 
-        yield* mountScoped(Page, root);
+        const page = yield* mountScoped(Page, root);
         // The first query already had a value, but the second has not, so the
         // scope is still pending. Registration order does not matter.
         expect(textOf(root, "#pending")).toBe("loading");
 
         yield* setResponse(fixtures, "second", readyResponse("two"));
         yield* Deferred.succeed(secondGate, void 0);
-        yield* flush;
+        yield* page.waitFor({
+          label: "late query settles",
+          until: (actualRoot) =>
+            !hasAt(actualRoot, "#pending") && textAt(actualRoot, "#b") === "two",
+        });
         expect(has(root, "#pending")).toBe(false);
         expect(textOf(root, "#a")).toBe("one");
         expect(textOf(root, "#b")).toBe("two");
@@ -613,20 +679,27 @@ describe("readiness through context", () => {
             }),
           });
 
-        yield* mountScoped(Page, root);
-        yield* flush;
+        const page = yield* mountScoped(Page, root);
         expect(textOf(root, "#pending-fallback")).toBe("loading");
 
         // Closing the owner's scope removes only its contribution. The
         // sibling remains registered, so the boundary can settle.
         yield* Scope.close(owner, Exit.void);
-        yield* flush;
+        yield* page.waitFor({
+          label: "closed owner releases pending fallback",
+          until: (actualRoot) =>
+            !hasAt(actualRoot, "#pending-fallback") &&
+            textAt(actualRoot, "#sibling-value") === "sibling",
+        });
         expect(has(root, "#pending-fallback")).toBe(false);
         expect(textOf(root, "#sibling-value")).toBe("sibling");
 
         yield* setResponse(fixtures, "pending", readyResponse("pending"));
         yield* Deferred.succeed(pendingGate, void 0);
-        yield* flush;
+        yield* page.waitFor({
+          label: "released owner value appears",
+          until: (actualRoot) => textAt(actualRoot, "#pending-value") === "pending",
+        });
         expect(textOf(root, "#pending-value")).toBe("pending");
       }),
   );
@@ -650,13 +723,19 @@ describe("readiness through context", () => {
             }),
           });
 
-        yield* mountScoped(Page, root);
-        yield* flush;
+        const page = yield* mountScoped(Page, root);
+        yield* page.waitFor({
+          label: "owned failure appears",
+          until: (actualRoot) => textAt(actualRoot, "#failed-owner-error") === "boom",
+        });
         expect(textOf(root, "#failed-owner-error")).toBe("boom");
         expect(has(root, "#failed-owner-content")).toBe(false);
 
         yield* Scope.close(owner, Exit.void);
-        yield* flush;
+        yield* page.waitFor({
+          label: "closed error owner releases fallback",
+          until: (actualRoot) => textAt(actualRoot, "#failed-owner-content") === "content",
+        });
         expect(has(root, "#failed-owner-error")).toBe(false);
         expect(textOf(root, "#failed-owner-content")).toBe("content");
       }),

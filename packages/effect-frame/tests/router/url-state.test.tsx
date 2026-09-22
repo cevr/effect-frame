@@ -6,7 +6,7 @@ import { Location, Route, Router, UrlState, link, mount } from "effect-frame/rou
 import type { LocationService } from "effect-frame/router";
 import { Behavior, Value, spawn } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
-import { Dom, View, render } from "effect-frame/view";
+import { Dom, View, ViewTest } from "effect-frame/view";
 import {
   Deferred,
   Effect,
@@ -60,6 +60,13 @@ const makeLocation = (initial: string): Effect.Effect<FakeLocation> =>
         }),
     };
   });
+
+const textAt = (root: Node, selector: string): string => {
+  if (!(root instanceof HTMLElement)) {
+    return "";
+  }
+  return root.querySelector(selector)?.textContent ?? "";
+};
 
 const Nothing = Schema.Struct({});
 const CountSearch = Route.search(
@@ -386,13 +393,18 @@ const startWith = <R,>(initial: string, routes: ReadonlyArray<Route.AnyRoute<R>>
   Effect.gen(function* () {
     const root = document.createElement("main");
     const location = yield* makeLocation(initial);
-    const router = yield* mount({
-      routes,
-      notFound: NotFound,
+    const page = yield* ViewTest.make({
       host: Dom.host,
       root,
-    }).pipe(Effect.provideService(Location, location.service));
-    return { root, location, router };
+      setup: (host, mountRoot) =>
+        mount({
+          routes,
+          notFound: NotFound,
+          host,
+          root: mountRoot,
+        }).pipe(Effect.provideService(Location, location.service)),
+    });
+    return { root, location, router: page.setup, page };
   });
 
 const start = (initial: string) => startWith(initial, [counter]);
@@ -400,12 +412,13 @@ const start = (initial: string) => startWith(initial, [counter]);
 describe("UrlState", () => {
   it.scoped("derives from the URL and replaces by default", () =>
     Effect.gen(function* () {
-      const { root, location } = yield* start("http://app.test/counter");
+      const { root, location, page } = yield* start("http://app.test/counter");
       expect(root.querySelector("#counter")?.textContent).toBe("0");
       const state = Option.getOrThrow(counterState);
-      yield* state.set({ count: 2 });
-      yield* render;
-      expect(root.querySelector("#counter")?.textContent).toBe("2");
+      yield* page.act(state.set({ count: 2 }), {
+        label: "counter state update",
+        until: (actualRoot) => textAt(actualRoot, "#counter") === "2",
+      });
       expect(location.history).toEqual(["replace /counter?c=2"]);
     }),
   );
@@ -455,16 +468,18 @@ describe("UrlState", () => {
 
   it.scoped("keeps the source valid after a malformed pop", () =>
     Effect.gen(function* () {
-      const { root, location } = yield* start("http://app.test/counter?c=1");
+      const { location, page } = yield* start("http://app.test/counter?c=1");
       yield* location.pop("/counter?c=oops");
-      yield* render;
-      expect(root.querySelector("#counter")?.textContent).toBe("0");
+      yield* page.waitFor({
+        label: "malformed counter pop",
+        until: (actualRoot) => textAt(actualRoot, "#counter") === "0",
+      });
     }),
   );
 
   it.scoped("serializes concurrent owners against one canonical URL", () =>
     Effect.gen(function* () {
-      const { root, location } = yield* startWith("http://app.test/dual?c=0&p=", [dual]);
+      const { root, location, page } = yield* startWith("http://app.test/dual?c=0&p=", [dual]);
       const count = Option.getOrThrow(counterState);
       const pane = Option.getOrThrow(paneState);
       const before = root.querySelector("#dual");
@@ -475,7 +490,11 @@ describe("UrlState", () => {
         ],
         { concurrency: "unbounded" },
       );
-      yield* render;
+      yield* page.waitFor({
+        label: "dual URL state update",
+        until: (actualRoot) =>
+          textAt(actualRoot, "#dual-count") === "1" && textAt(actualRoot, "#dual-pane") === "x",
+      });
       expect(root.querySelector("#dual")).toBe(before);
       expect(root.querySelector("#dual-count")?.textContent).toBe("1");
       expect(root.querySelector("#dual-pane")?.textContent).toBe("x");
@@ -485,7 +504,7 @@ describe("UrlState", () => {
 
   it.scoped("route search updates preserve view state and its later canonical update", () =>
     Effect.gen(function* () {
-      const { root, location, router } = yield* startWith(
+      const { root, location, router, page } = yield* startWith(
         "http://app.test/route-and-view?page=one&c=1&unknown=x",
         [routeAndView],
       );
@@ -496,11 +515,18 @@ describe("UrlState", () => {
         page: `${previous.page}-link`,
       })).pipe(Effect.provideService(Router, router));
       expect(yield* typed.href.get).toBe("/route-and-view?page=one-link&c=1&unknown=x");
-      yield* typed.go;
-      yield* render;
+      yield* page.act(typed.go, {
+        label: "typed route search update",
+        until: (actualRoot) => textAt(actualRoot, "#route-page") === "one-link",
+      });
       expect(location.history).toEqual(["push /route-and-view?page=one-link&c=1&unknown=x"]);
-      yield* props.updateSearch((previous) => ({ page: `${previous.page}-next` }));
-      yield* render;
+      yield* page.act(
+        props.updateSearch((previous) => ({ page: `${previous.page}-next` })),
+        {
+          label: "route search update",
+          until: (actualRoot) => textAt(actualRoot, "#route-page") === "one-link-next",
+        },
+      );
       expect(root.querySelector("#route-and-view")).toBe(before);
       expect(root.querySelector("#route-page")?.textContent).toBe("one-link-next");
       expect(root.querySelector("#route-count")?.textContent).toBe("1");
@@ -556,39 +582,48 @@ describe("UrlState", () => {
 
   it.scoped("releases claims when a route scope closes", () =>
     Effect.gen(function* () {
-      const { location, router, root } = yield* startWith("http://app.test/counter", [
+      const { location, router, page } = yield* startWith("http://app.test/counter", [
         counter,
         other,
       ]);
       const stale = Option.getOrThrow(counterState);
       yield* router.navigate("/other");
       yield* stale.set({ count: 9 });
-      yield* render;
-      expect(root.querySelector("#other")?.textContent).toBe("0");
+      yield* page.waitFor({
+        label: "other route after stale update",
+        until: (actualRoot) => textAt(actualRoot, "#other") === "0",
+      });
       expect(location.history).toEqual(["push /other"]);
     }),
   );
 
   it.scoped("allows the same key in overlapping different route instances", () =>
     Effect.gen(function* () {
-      const { router, root } = yield* startWith("http://app.test/counter", [counter, other]);
-      yield* router.navigate("/other");
-      yield* render;
-      expect(root.querySelector("#other")?.textContent).toBe("0");
+      const { router, page } = yield* startWith("http://app.test/counter", [counter, other]);
+      yield* page.act(router.navigate("/other"), {
+        label: "other route",
+        until: (actualRoot) => textAt(actualRoot, "#other") === "0",
+      });
     }),
   );
 
   it.scoped("releases a child claim before reusing it in the same route", () =>
     Effect.gen(function* () {
-      const { root } = yield* startWith("http://app.test/reusable-claims", [reusableClaims]);
+      const { root, page } = yield* startWith("http://app.test/reusable-claims", [reusableClaims]);
       const setItems = Option.getOrThrow(reusableItems);
       expect(root.querySelectorAll("#reusable-claims span")).toHaveLength(1);
-      yield* setItems([]);
-      yield* render;
-      expect(root.querySelectorAll("#reusable-claims span")).toHaveLength(0);
-      yield* setItems(["second"]);
-      yield* render;
-      expect(root.querySelectorAll("#reusable-claims span")).toHaveLength(1);
+      yield* page.act(setItems([]), {
+        label: "release reusable claim",
+        until: (actualRoot) =>
+          actualRoot instanceof HTMLElement &&
+          actualRoot.querySelectorAll("#reusable-claims span").length === 0,
+      });
+      yield* page.act(setItems(["second"]), {
+        label: "reuse child claim",
+        until: (actualRoot) =>
+          actualRoot instanceof HTMLElement &&
+          actualRoot.querySelectorAll("#reusable-claims span").length === 1,
+      });
     }),
   );
 

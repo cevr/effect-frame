@@ -5,7 +5,7 @@ registerDom();
 import { ActorHost, Behavior, CommandId, implementTransparent } from "effect-frame/actor";
 import { contract, ref, resumeCodec } from "effect-frame/actor/client";
 import type { Applied, KeyOf, SnapshotOf } from "effect-frame/actor/client";
-import { Dom, Html, View, mount, render } from "effect-frame/view";
+import { Dom, Html, View, ViewTest, mount } from "effect-frame/view";
 import { Deferred, Effect, Exit, Match, Option, Ref, Schema, Scope } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
@@ -110,6 +110,16 @@ const install = (html: string, script: string) =>
       }),
   );
 
+const textAt = (root: Node, selector: string): string => {
+  if (!(root instanceof HTMLElement)) {
+    return "";
+  }
+  return Option.match(Option.fromNullishOr(root.querySelector(selector)), {
+    onNone: () => "",
+    onSome: (node) => Option.getOrElse(Option.fromNullishOr(node.textContent), () => ""),
+  });
+};
+
 const hydrate = (main: HTMLElement, key: string, onClose: Effect.Effect<void> = Effect.void) =>
   Effect.gen(function* () {
     const embedded = Dom.readJsonScript("note");
@@ -118,9 +128,13 @@ const hydrate = (main: HTMLElement, key: string, onClose: Effect.Effect<void> = 
       onSome: (json) => Effect.map(Effect.orDie(Schema.decodeEffect(Resume)(json)), Option.some),
     });
     const hydration = Dom.hydrate(main);
-    yield* mount(NotePage, { key, resume, onClose }, hydration.host, main);
-    yield* render;
-    return yield* hydration.finish;
+    const page = yield* ViewTest.make({
+      host: hydration.host,
+      root: main,
+      setup: (host, root) => mount(NotePage, { key, resume, onClose }, host, root),
+    });
+    const report = yield* hydration.finish;
+    return { page, report };
   });
 
 const withHost = it.scoped.layer(ActorHost.layerMemory([NoteLive]));
@@ -192,13 +206,16 @@ describe("server render and hydration", () => {
       const main = yield* install(html, script);
       const heading = Option.fromNullishOr(main.querySelector("h1"));
 
-      const report = yield* hydrate(main, "n3");
+      const { page, report } = yield* hydrate(main, "n3");
       expect(report).toEqual({ mismatches: [], unclaimed: 0 });
       expect(Option.fromNullishOr(main.querySelector("h1"))).toEqual(heading);
 
       const { note } = yield* server("n3");
       yield* note.call({ _tag: "Add", amount: 5 }, { commandId: id("c1"), timeout: "1 second" });
-      yield* render;
+      yield* page.waitFor({
+        label: "hydrated count follows the actor",
+        until: (root) => textAt(root, "#count") === "5",
+      });
       expect(main.querySelector("#count")?.textContent).toBe("5");
     }),
   );
@@ -210,9 +227,13 @@ describe("server render and hydration", () => {
       yield* note.call({ _tag: "Add", amount: 2 }, { commandId: id("c1"), timeout: "1 second" });
 
       const main = yield* install(html, script);
-      const report = yield* hydrate(main, "n4");
+      const { page, report } = yield* hydrate(main, "n4");
       expect(report.mismatches).toEqual([]);
       expect(snapshot.revision).toBe(0);
+      yield* page.waitFor({
+        label: "hydrated revision catches up",
+        until: (root) => textAt(root, "#count") === "2",
+      });
       expect(main.querySelector("#count")?.textContent).toBe("2");
     }),
   );
@@ -221,7 +242,7 @@ describe("server render and hydration", () => {
     Effect.gen(function* () {
       const { html, script } = yield* renderPage("n5");
       const main = yield* install(html.replace("<h1>", "<h2>").replace("</h1>", "</h2>"), script);
-      const report = yield* hydrate(main, "n5");
+      const { report } = yield* hydrate(main, "n5");
       expect(report.mismatches.length).toBeGreaterThan(0);
       expect(main.querySelector("h1")?.textContent).toBe("untitled");
       expect(main.querySelector("h2")).toBeNull();

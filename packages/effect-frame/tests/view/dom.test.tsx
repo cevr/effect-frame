@@ -4,7 +4,7 @@ registerDom();
 
 import { Behavior, Cell, Value, modify, select, spawn } from "effect-frame/actor";
 import type { LocalActorRef, SetValue, Source } from "effect-frame/actor";
-import { Dom, For, Match, Portal, Show, View, mount, render } from "effect-frame/view";
+import { Dom, For, Match, Portal, Show, View, ViewTest, mount } from "effect-frame/view";
 import { Deferred, Effect, Exit, Option, Ref, Scope, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
@@ -17,6 +17,13 @@ const noProps: NoProps = { _tag: "NoProps" };
 
 /** A fresh detached root for each mount, so one test never sees another's nodes. */
 const makeRoot = Effect.sync(() => document.createElement("main"));
+
+const pageMount = <Props, E, R>(root: Node, view: View.View<Props, E, R>, props: Props) =>
+  ViewTest.make({
+    host: Dom.host,
+    root,
+    setup: (host, mountRoot) => mount(view, props, host, mountRoot),
+  });
 
 const Counter = (_props: NoProps) =>
   Effect.gen(function* () {
@@ -91,6 +98,20 @@ const NestedToggle = (props: NestedToggleProps) =>
 
 const textOf = (root: HTMLElement, selector: string): string =>
   root.querySelector(selector)?.textContent ?? "";
+
+const textAt = (root: Node, selector: string): string => {
+  if (!(root instanceof HTMLElement)) {
+    return "";
+  }
+  return textOf(root, selector);
+};
+
+const hasAt = (root: Node, selector: string): boolean => {
+  if (!(root instanceof HTMLElement)) {
+    return false;
+  }
+  return Option.isSome(Option.fromNullishOr(root.querySelector(selector)));
+};
 
 /** A child asks for the capabilities itself; nothing passes them down. */
 const Child = (_props: NoProps) =>
@@ -168,6 +189,8 @@ const JobView = (props: JobProps) =>
 interface AttachProps {
   readonly open: Source<boolean>;
   readonly log: Ref.Ref<ReadonlyArray<string>>;
+  readonly attached: Deferred.Deferred<void>;
+  readonly gone: Deferred.Deferred<void>;
 }
 
 /**
@@ -185,7 +208,13 @@ const Attaching = (props: AttachProps) =>
             Dom.attach((element) =>
               Effect.gen(function* () {
                 yield* Ref.update(props.log, (xs) => [...xs, `first:${element.isConnected}`]);
-                yield* Effect.addFinalizer(() => Ref.update(props.log, (xs) => [...xs, "gone"]));
+                yield* Deferred.succeed(props.attached, void 0);
+                yield* Effect.addFinalizer(() =>
+                  Effect.andThen(
+                    Ref.update(props.log, (xs) => [...xs, "gone"]),
+                    Deferred.succeed(props.gone, void 0),
+                  ),
+                );
               }),
             ),
             Dom.attach((element) =>
@@ -222,13 +251,18 @@ describe("browser view", () => {
   it.scoped("a bound source writes its first value and then every change", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
-      yield* mount(Counter, noProps, Dom.host, root);
+      const page = yield* pageMount(root, Counter, noProps);
       expect(textOf(root, "#count")).toBe("0");
 
       const button = root.querySelector("#up");
       expect(button).toBeTruthy();
-      button?.dispatchEvent(new Event("click"));
-      yield* render;
+      yield* page.act(
+        Effect.sync(() => button?.dispatchEvent(new Event("click"))),
+        {
+          label: "counter increments from a click",
+          until: (actualRoot) => textAt(actualRoot, "#count") === "1",
+        },
+      );
       expect(textOf(root, "#count")).toBe("1");
     }),
   );
@@ -242,17 +276,26 @@ describe("browser view", () => {
           { id: "b", title: "beta" },
         ]),
       );
-      yield* mount(TaskList, { tasks: tasks.state }, Dom.host, root);
+      const page = yield* pageMount(root, TaskList, { tasks: tasks.state });
       expect(titles(root)).toEqual(["alpha", "beta"]);
 
-      yield* setTasks(tasks, [
-        { id: "b", title: "beta" },
-        { id: "a", title: "alpha" },
-        { id: "c", title: "gamma" },
-      ]);
+      yield* page.act(
+        setTasks(tasks, [
+          { id: "b", title: "beta" },
+          { id: "a", title: "alpha" },
+          { id: "c", title: "gamma" },
+        ]),
+        {
+          label: "tasks reorder and add a row",
+          until: (actualRoot) => titlesAt(actualRoot).join(",") === "beta,alpha,gamma",
+        },
+      );
       expect(titles(root)).toEqual(["beta", "alpha", "gamma"]);
 
-      yield* setTasks(tasks, [{ id: "c", title: "gamma" }]);
+      yield* page.act(setTasks(tasks, [{ id: "c", title: "gamma" }]), {
+        label: "tasks remove old rows",
+        until: (actualRoot) => titlesAt(actualRoot).join(",") === "gamma",
+      });
       expect(titles(root)).toEqual(["gamma"]);
     }),
   );
@@ -263,10 +306,13 @@ describe("browser view", () => {
       const tasks = yield* spawn(
         Behavior.value<ReadonlyArray<Task>>([{ id: "a", title: "alpha" }]),
       );
-      yield* mount(TaskList, { tasks: tasks.state }, Dom.host, root);
+      const page = yield* pageMount(root, TaskList, { tasks: tasks.state });
       const before = root.querySelector("li");
 
-      yield* setTasks(tasks, [{ id: "a", title: "ALPHA" }]);
+      yield* page.act(setTasks(tasks, [{ id: "a", title: "ALPHA" }]), {
+        label: "one keyed row updates",
+        until: (actualRoot) => titlesAt(actualRoot).join(",") === "ALPHA",
+      });
       expect(titles(root)).toEqual(["ALPHA"]);
       expect(root.querySelector("li")).toBe(before);
     }),
@@ -276,15 +322,19 @@ describe("browser view", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const open = yield* spawn(Behavior.value(false));
-      yield* mount(Toggle, { open: open.state }, Dom.host, root);
+      const page = yield* pageMount(root, Toggle, { open: open.state });
       expect(root.querySelector("#body")).toBeNull();
 
-      yield* open.call(Value.Set(true));
-      yield* render;
+      yield* page.act(open.call(Value.Set(true)), {
+        label: "toggle opens",
+        until: (actualRoot) => textAt(actualRoot, "#body") === "visible",
+      });
       expect(textOf(root, "#body")).toBe("visible");
 
-      yield* open.call(Value.Set(false));
-      yield* render;
+      yield* page.act(open.call(Value.Set(false)), {
+        label: "toggle closes",
+        until: (actualRoot) => !hasAt(actualRoot, "#body"),
+      });
       expect(root.querySelector("#body")).toBeNull();
     }),
   );
@@ -292,7 +342,7 @@ describe("browser view", () => {
   it.scoped("a parent composes a child by yielding its setup", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
-      yield* mount(Parent, noProps, Dom.host, root);
+      yield* pageMount(root, Parent, noProps);
       expect(textOf(root, "#child")).toBe("child");
     }),
   );
@@ -301,22 +351,28 @@ describe("browser view", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const hits = yield* spawn(Behavior.value<ReadonlyArray<string>>([]));
-      yield* mount(Hits, { hits: hits.state }, Dom.host, root);
+      const page = yield* pageMount(root, Hits, { hits: hits.state });
       expect(textOf(root, "#none")).toBe("no hits");
       expect(root.querySelector("#first")).toBeNull();
 
-      yield* hits.call(Value.Set(["alpha", "beta"]));
-      yield* render;
+      yield* page.act(hits.call(Value.Set(["alpha", "beta"])), {
+        label: "hits show the first result",
+        until: (actualRoot) => textAt(actualRoot, "#first") === "alpha",
+      });
       expect(root.querySelector("#none")).toBeNull();
       expect(textOf(root, "#first")).toBe("alpha");
 
       // A change that keeps the test true updates the branch in place.
-      yield* hits.call(Value.Set(["gamma"]));
-      yield* render;
+      yield* page.act(hits.call(Value.Set(["gamma"])), {
+        label: "hits update the kept branch",
+        until: (actualRoot) => textAt(actualRoot, "#first") === "gamma",
+      });
       expect(textOf(root, "#first")).toBe("gamma");
 
-      yield* hits.call(Value.Set([]));
-      yield* render;
+      yield* page.act(hits.call(Value.Set([])), {
+        label: "empty hits show the fallback",
+        until: (actualRoot) => textAt(actualRoot, "#none") === "no hits",
+      });
       expect(root.querySelector("#first")).toBeNull();
       expect(textOf(root, "#none")).toBe("no hits");
     }),
@@ -326,24 +382,30 @@ describe("browser view", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const job = yield* spawn(Behavior.value<Job>({ _tag: "Idle" }));
-      yield* mount(JobView, { job: job.state }, Dom.host, root);
+      const page = yield* pageMount(root, JobView, { job: job.state });
       expect(textOf(root, "#idle")).toBe("idle");
       expect(root.querySelector("#running")).toBeNull();
 
-      yield* job.call(Value.Set<Job>({ _tag: "Running", percent: 10 }));
-      yield* render;
+      yield* page.act(job.call(Value.Set<Job>({ _tag: "Running", percent: 10 })), {
+        label: "job starts running",
+        until: (actualRoot) => textAt(actualRoot, "#running") === "10%",
+      });
       expect(root.querySelector("#idle")).toBeNull();
       expect(textOf(root, "#running")).toBe("10%");
       const drawn = root.querySelector("#running");
 
       // Same tag: the branch is kept and its binding moves.
-      yield* job.call(Value.Set<Job>({ _tag: "Running", percent: 60 }));
-      yield* render;
+      yield* page.act(job.call(Value.Set<Job>({ _tag: "Running", percent: 60 })), {
+        label: "running job updates",
+        until: (actualRoot) => textAt(actualRoot, "#running") === "60%",
+      });
       expect(textOf(root, "#running")).toBe("60%");
       expect(root.querySelector("#running")).toBe(drawn);
 
-      yield* job.call(Value.Set<Job>({ _tag: "Done", output: "ok" }));
-      yield* render;
+      yield* page.act(job.call(Value.Set<Job>({ _tag: "Done", output: "ok" })), {
+        label: "job completes",
+        until: (actualRoot) => textAt(actualRoot, "#done") === "ok",
+      });
       expect(root.querySelector("#running")).toBeNull();
       expect(textOf(root, "#done")).toBe("ok");
     }),
@@ -355,16 +417,22 @@ describe("browser view", () => {
       document.body.appendChild(root);
       const log = yield* Ref.make<ReadonlyArray<string>>([]);
       const open = yield* spawn(Behavior.value(false));
-      yield* mount(Attaching, { open: open.state, log }, Dom.host, root);
+      const attached = yield* Deferred.make<void>();
+      const gone = yield* Deferred.make<void>();
+      const page = yield* pageMount(root, Attaching, { open: open.state, log, attached, gone });
       expect(yield* Ref.get(log)).toEqual([]);
 
-      yield* open.call(Value.Set(true));
-      yield* render;
+      yield* page.act(Effect.andThen(open.call(Value.Set(true)), Deferred.await(attached)), {
+        label: "attached branch opens",
+        until: (actualRoot) => hasAt(actualRoot, "#field"),
+      });
       expect(yield* Ref.get(log)).toEqual(["first:true"]);
       expect(document.activeElement?.id).toBe("field");
 
-      yield* open.call(Value.Set(false));
-      yield* render;
+      yield* page.act(Effect.andThen(open.call(Value.Set(false)), Deferred.await(gone)), {
+        label: "attached branch closes",
+        until: (actualRoot) => !hasAt(actualRoot, "#field"),
+      });
       expect(yield* Ref.get(log)).toEqual(["first:true", "gone"]);
       root.remove();
     }),
@@ -375,16 +443,20 @@ describe("browser view", () => {
       const root = yield* makeRoot;
       const into = document.createElement("div");
       const open = yield* spawn(Behavior.value(false));
-      yield* mount(WithPortal, { open: open.state, into }, Dom.host, root);
+      const page = yield* pageMount(root, WithPortal, { open: open.state, into });
       expect(into.querySelector("#modal")).toBeNull();
 
-      yield* open.call(Value.Set(true));
-      yield* render;
+      yield* page.act(open.call(Value.Set(true)), {
+        label: "portal opens",
+        until: () => textOf(into, "#modal") === "hello",
+      });
       expect(root.querySelector("#modal")).toBeNull();
       expect(textOf(into, "#modal")).toBe("hello");
 
-      yield* open.call(Value.Set(false));
-      yield* render;
+      yield* page.act(open.call(Value.Set(false)), {
+        label: "portal closes",
+        until: () => Option.isNone(Option.fromNullishOr(into.querySelector("#modal"))),
+      });
       expect(into.querySelector("#modal")).toBeNull();
     }),
   );
@@ -393,15 +465,19 @@ describe("browser view", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const name = yield* spawn(Behavior.value<Option.Option<string>>(Option.none()));
-      yield* mount(Optional, { name: name.state }, Dom.host, root);
+      const page = yield* pageMount(root, Optional, { name: name.state });
       expect(root.querySelector("#name")).toBeNull();
 
-      yield* name.call(Value.Set(Option.some("Ada")));
-      yield* render;
+      yield* page.act(name.call(Value.Set(Option.some("Ada"))), {
+        label: "optional name appears",
+        until: (actualRoot) => textAt(actualRoot, "#name") === "Ada",
+      });
       expect(textOf(root, "#name")).toBe("Ada");
 
-      yield* name.call(Value.Set(Option.none()));
-      yield* render;
+      yield* page.act(name.call(Value.Set(Option.none())), {
+        label: "optional name disappears",
+        until: (actualRoot) => !hasAt(actualRoot, "#name"),
+      });
       expect(root.querySelector("#name")).toBeNull();
     }),
   );
@@ -411,25 +487,29 @@ describe("browser view", () => {
       const root = yield* makeRoot;
       const outer = yield* spawn(Behavior.value(true));
       const inner = yield* spawn(Behavior.value(false));
-      yield* mount(NestedToggle, { outer: outer.state, inner: inner.state }, Dom.host, root);
+      const page = yield* pageMount(root, NestedToggle, { outer: outer.state, inner: inner.state });
       expect(root.querySelector("#title")).toBeNull();
 
       // The inner branch reveals and the outer branch hides in one update.
-      yield* inner.call(Value.Set(true));
-      yield* outer.call(Value.Set(false));
-      yield* render;
+      yield* page.act(Effect.andThen(inner.call(Value.Set(true)), outer.call(Value.Set(false))), {
+        label: "nested branch hides",
+        until: (actualRoot) => !hasAt(actualRoot, "#title"),
+      });
       expect(root.querySelector("#title")).toBeNull();
 
       // Showing the outer branch again draws the inner content exactly once.
-      yield* outer.call(Value.Set(true));
-      yield* render;
+      yield* page.act(outer.call(Value.Set(true)), {
+        label: "nested branch reveals",
+        until: (actualRoot) => textAt(actualRoot, "#title") === "t",
+      });
       expect(textOf(root, "#title")).toBe("t");
       expect(root.querySelectorAll("#title").length).toBe(1);
 
       // The reverse order leaves nothing behind either.
-      yield* outer.call(Value.Set(false));
-      yield* inner.call(Value.Set(false));
-      yield* render;
+      yield* page.act(Effect.andThen(outer.call(Value.Set(false)), inner.call(Value.Set(false))), {
+        label: "nested branch clears",
+        until: (actualRoot) => !hasAt(actualRoot, "#title"),
+      });
       expect(root.querySelector("#title")).toBeNull();
       expect(root.querySelector("section")?.childNodes.length).toBe(0);
     }),
@@ -455,22 +535,28 @@ describe("browser view", () => {
             </Show>
           </section>,
         );
-      yield* mount(Watched, noProps, Dom.host, root);
+      const page = yield* pageMount(root, Watched, noProps);
       expect(textOf(root, "#watched")).toBe("0");
 
-      yield* open.call(Value.Set(false));
-      yield* render;
+      yield* page.act(open.call(Value.Set(false)), {
+        label: "hidden branch closes",
+        until: (actualRoot) => !hasAt(actualRoot, "#watched"),
+      });
       expect(root.querySelector("#watched")).toBeNull();
 
       // The branch's scope is closed, so its subscription projects nothing.
       const before = reads;
-      yield* count.call(Value.Set(7));
-      yield* render;
+      yield* page.act(count.call(Value.Set(7)), {
+        label: "hidden source stays unsubscribed",
+        until: (actualRoot) => !hasAt(actualRoot, "#watched"),
+      });
       expect(reads).toBe(before);
 
       // Showing it again subscribes afresh, against the current value.
-      yield* open.call(Value.Set(true));
-      yield* render;
+      yield* page.act(open.call(Value.Set(true)), {
+        label: "hidden branch resubscribes",
+        until: (actualRoot) => textAt(actualRoot, "#watched") === "7",
+      });
       expect(textOf(root, "#watched")).toBe("7");
     }),
   );
@@ -485,9 +571,12 @@ describe("browser view", () => {
             say
           </button>,
         );
-      yield* mount(Echo, noProps, Dom.host, root);
-      root.querySelector("#say")?.dispatchEvent(new Event("click"));
-      yield* render;
+      const page = yield* pageMount(root, Echo, noProps);
+      yield* page.act(
+        Effect.sync(() => root.querySelector("#say")?.dispatchEvent(new Event("click"))),
+        { label: "event reaches its actor", until: () => true },
+      );
+      yield* Effect.yieldNow;
       expect(yield* Ref.get(seen)).toEqual(["hi"]);
     }),
   );
@@ -502,11 +591,14 @@ describe("browser view", () => {
             <button>go</button>
           </form>,
         );
-      yield* mount(Form, noProps, Dom.host, root);
+      const page = yield* pageMount(root, Form, noProps);
 
       const event = new Event("submit", { cancelable: true });
-      root.querySelector("#form")?.dispatchEvent(event);
-      yield* render;
+      yield* page.act(
+        Effect.sync(() => root.querySelector("#form")?.dispatchEvent(event)),
+        { label: "form submit is handled", until: () => event.defaultPrevented },
+      );
+      yield* Effect.yieldNow;
       expect(event.defaultPrevented).toBe(true);
       expect(yield* Ref.get(sent)).toBe(true);
     }),
@@ -547,12 +639,18 @@ describe("browser view", () => {
 const titles = (root: HTMLElement): ReadonlyArray<string> =>
   Array.from(root.querySelectorAll("li")).map((node) => node.textContent ?? "");
 
+const titlesAt = (root: Node): ReadonlyArray<string> => {
+  if (!(root instanceof HTMLElement)) {
+    return [];
+  }
+  return titles(root);
+};
+
 const setTasks = Effect.fn("test.setTasks")(function* (
   tasks: LocalActorRef<ReadonlyArray<Task>, SetValue<ReadonlyArray<Task>>>,
   next: ReadonlyArray<Task>,
 ) {
   yield* tasks.call(Value.Set(next));
-  yield* render;
 });
 
 // ---------------------------------------------------------------------------
@@ -601,20 +699,28 @@ describe("row sources", () => {
           { id: "b", title: "beta" },
         ]),
       );
-      yield* mount(CountedList, { tasks: tasks.state, ended }, Dom.host, root);
+      const page = yield* pageMount(root, CountedList, { tasks: tasks.state, ended });
       expect(titles(root)).toEqual(["ALPHA", "BETA"]);
 
       // The change reaches the derived source through the row's cell.
-      yield* setTasks(tasks, [
-        { id: "a", title: "alef" },
-        { id: "b", title: "beta" },
-      ]);
+      yield* page.act(
+        setTasks(tasks, [
+          { id: "a", title: "alef" },
+          { id: "b", title: "beta" },
+        ]),
+        {
+          label: "derived row source updates",
+          until: (actualRoot) => titlesAt(actualRoot).join(",") === "ALEF,BETA",
+        },
+      );
       expect(titles(root)).toEqual(["ALEF", "BETA"]);
       expect(yield* Ref.get(ended)).toBe(0);
 
       // Removing a row ends exactly that row's subscription.
-      yield* setTasks(tasks, [{ id: "b", title: "beta" }]);
-      yield* render;
+      yield* page.act(setTasks(tasks, [{ id: "b", title: "beta" }]), {
+        label: "removed row source ends",
+        until: (actualRoot) => titlesAt(actualRoot).join(",") === "BETA",
+      });
       expect(titles(root)).toEqual(["BETA"]);
       expect(yield* Ref.get(ended)).toBe(1);
     }),
@@ -689,24 +795,40 @@ describe("rows with a setup", () => {
           { id: "b", title: "beta" },
         ]),
       );
-      yield* mount(CountedRows, { tasks: tasks.state, closed }, Dom.host, root);
+      const page = yield* pageMount(root, CountedRows, { tasks: tasks.state, closed });
       expect(titles(root)).toEqual(["alpha0", "beta0"]);
 
       const taps = root.querySelectorAll("button.tap");
-      taps[1]?.dispatchEvent(new Event("click"));
-      taps[1]?.dispatchEvent(new Event("click"));
-      yield* render;
+      yield* page.act(
+        Effect.sync(() => {
+          taps[1]?.dispatchEvent(new Event("click"));
+          taps[1]?.dispatchEvent(new Event("click"));
+        }),
+        {
+          label: "row keeps its own click state",
+          until: (actualRoot) => titlesAt(actualRoot).join(",") === "alpha0,beta2",
+        },
+      );
       expect(titles(root)).toEqual(["alpha0", "beta2"]);
 
       // Reordering keeps each row's state with its key.
-      yield* setTasks(tasks, [
-        { id: "b", title: "BETA" },
-        { id: "a", title: "alpha" },
-      ]);
+      yield* page.act(
+        setTasks(tasks, [
+          { id: "b", title: "BETA" },
+          { id: "a", title: "alpha" },
+        ]),
+        {
+          label: "row state follows its key",
+          until: (actualRoot) => titlesAt(actualRoot).join(",") === "BETA2,alpha0",
+        },
+      );
       expect(titles(root)).toEqual(["BETA2", "alpha0"]);
       expect(yield* Ref.get(closed)).toBe(0);
 
-      yield* setTasks(tasks, [{ id: "a", title: "alpha" }]);
+      yield* page.act(setTasks(tasks, [{ id: "a", title: "alpha" }]), {
+        label: "removed row closes its scope",
+        until: (actualRoot) => titlesAt(actualRoot).join(",") === "alpha0",
+      });
       expect(titles(root)).toEqual(["alpha0"]);
       expect(yield* Ref.get(closed)).toBe(1);
     }),
@@ -723,11 +845,13 @@ describe("rows with a setup", () => {
           { id: "c", title: "gamma" },
         ]),
       );
-      yield* mount(LateRows, { tasks: tasks.state, slow: "b", gate }, Dom.host, root);
+      const page = yield* pageMount(root, LateRows, { tasks: tasks.state, slow: "b", gate });
       expect(titles(root)).toEqual(["alpha", "gamma"]);
 
-      yield* Deferred.succeed(gate, void 0);
-      yield* render;
+      yield* page.act(Deferred.succeed(gate, void 0), {
+        label: "slow row lands in its slot",
+        until: (actualRoot) => titlesAt(actualRoot).join(",") === "alpha,beta,gamma",
+      });
       expect(titles(root)).toEqual(["alpha", "beta", "gamma"]);
     }),
   );
@@ -746,7 +870,6 @@ describe("rows with a setup", () => {
 
       yield* Scope.close(scope, Exit.void);
       yield* Deferred.succeed(gate, void 0);
-      yield* render;
       expect(titles(root)).toEqual([]);
     }),
   );

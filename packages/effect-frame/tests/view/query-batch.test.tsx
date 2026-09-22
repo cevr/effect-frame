@@ -16,7 +16,7 @@ import {
 } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
 import { HttpTransport } from "effect-frame/actor/client";
-import { Dom, View, mount, render } from "effect-frame/view";
+import { Dom, View, ViewTest, mount } from "effect-frame/view";
 import { Deferred, Effect, Exit, Layer, Option, Ref, Schema, Sink, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
@@ -204,16 +204,23 @@ describe("View.list and declared query batches", () => {
       const cleaned = yield* Deferred.make<void>();
       batchControl.current = Option.some({ started, gate, cleaned });
 
-      yield* mount(Rows, { items: items.state, disposal: Option.none() }, Dom.host, root);
+      const page = yield* ViewTest.make({
+        host: Dom.host,
+        root,
+        setup: (host, mountRoot) =>
+          mount(Rows, { items: items.state, disposal: Option.none() }, host, mountRoot),
+      });
       yield* Deferred.await(started);
       expect(batchRequests).toBe(1);
       expect(singleRequests).toBe(0);
       expect(batchCalls).toBe(0);
       expect(lastBatchIds).toEqual([]);
 
-      yield* Deferred.succeed(gate, void 0);
-      yield* Deferred.await(cleaned);
-      yield* render;
+      yield* page.act(Effect.andThen(Deferred.succeed(gate, void 0), Deferred.await(cleaned)), {
+        label: "both query rows are ready",
+        until: (actualRoot) =>
+          actualRoot instanceof HTMLElement && actualRoot.querySelectorAll("li").length === 2,
+      });
       expect(batchCalls).toBe(1);
       expect(lastBatchIds).toEqual([1, 2]);
       expect(root.querySelectorAll("li")).toHaveLength(2);
@@ -246,15 +253,23 @@ describe("View.list and declared query batches", () => {
 
         yield* Effect.ensuring(
           Effect.gen(function* () {
-            yield* mount(
-              Rows,
-              { items: items.state, disposal: Option.some({ disposed, allDisposed }) },
-              Dom.host,
+            const page = yield* ViewTest.make({
+              host: Dom.host,
               root,
-            );
+              setup: (host, mountRoot) =>
+                mount(
+                  Rows,
+                  { items: items.state, disposal: Option.some({ disposed, allDisposed }) },
+                  host,
+                  mountRoot,
+                ),
+            });
             yield* Deferred.await(started);
-            yield* items.call(Value.Set([]));
-            yield* render;
+            yield* page.act(items.call(Value.Set([])), {
+              label: "all query rows are removed",
+              until: (actualRoot) =>
+                actualRoot instanceof HTMLElement && actualRoot.querySelectorAll("li").length === 0,
+            });
             yield* Deferred.await(allDisposed);
             expect(yield* Ref.get(disposed)).toBe(2);
             expect(root.querySelectorAll("li")).toHaveLength(0);
@@ -262,7 +277,7 @@ describe("View.list and declared query batches", () => {
             const cache = yield* QueryCache;
             expect(yield* cache.active).toEqual([]);
 
-            yield* Effect.yieldNow;
+            yield* Deferred.await(cleaned);
             expect(yield* Deferred.isDone(cleaned)).toBe(true);
             expect(batchAborts - beforeAborts).toBe(1);
             yield* Deferred.succeed(gate, void 0);

@@ -26,7 +26,7 @@ const bothCodecsYieldOneType: Equals<
 // --- A generated field is absent from the message an author constructs ----
 
 type AddInput = Extract<Generated.Input<typeof TasksMessage>, { readonly _tag: "AddTask" }>;
-const addInputOmitsId: Equals<keyof AddInput, "_tag" | "title" | "done"> = true;
+const addInputOmitsId: Equals<keyof AddInput, "_tag" | "title" | "done" | "note"> = true;
 const addTypeKeepsIdRequired: Equals<
   Pick<Schema.Schema.Type<typeof AddTask>, "id">,
   { readonly id: string }

@@ -119,6 +119,84 @@ describe("form codec", () => {
     }),
   );
 
+  it.effect("a name deeper than the limit or a body with too many fields is refused", () =>
+    Effect.gen(function* () {
+      const depth = (segments: number) => Array.from({ length: segments }, () => "a").join(".");
+      const deepest = yield* Form.tree(fields([[depth(Form.maxDepth), "x"]]));
+      expect(Object.keys(deepest)).toEqual(["a"]);
+
+      // A stack walk over 20k segments would overflow; the limit refuses first.
+      for (const name of [depth(Form.maxDepth + 1), depth(20_000)]) {
+        const refused = yield* Effect.flip(Form.tree(fields([[name, "x"]])));
+        expect(refused._tag).toBe("FormMalformed");
+      }
+      const many = Array.from(
+        { length: Form.maxFields + 1 },
+        (_, index): readonly [string, string] => [`f${String(index)}`, "x"],
+      );
+      const crowded = yield* Effect.flip(Form.tree(fields(many)));
+      expect(crowded._tag).toBe("FormMalformed");
+    }),
+  );
+
+  it.effect("a list filled by both [n] and [] is refused, in either order", () =>
+    Effect.gen(function* () {
+      for (const entries of [
+        [
+          ["a[1]", "x"],
+          ["a[]", "y"],
+        ],
+        [
+          ["a[]", "y"],
+          ["a[0]", "x"],
+        ],
+        [
+          ["a[0].b", "x"],
+          ["a[]", "y"],
+        ],
+      ] satisfies ReadonlyArray<ReadonlyArray<readonly [string, string]>>) {
+        const refused = yield* Effect.flip(Form.tree(fields(entries)));
+        expect(refused._tag).toBe("FormMalformed");
+      }
+      expect(
+        yield* Form.tree(
+          fields([
+            ["a[1]", "y"],
+            ["a[0]", "x"],
+            ["b[]", "p"],
+            ["b[]", "q"],
+          ]),
+        ),
+      ).toEqual({ a: ["x", "y"], b: ["p", "q"] });
+    }),
+  );
+
+  it.effect("the return path allows only printable, root-relative, same-origin paths", () =>
+    Effect.sync(() => {
+      for (const safe of ["/", "/lists/inbox?tab=1#top", "/%2f%2fevil.test", "/a%0ab"]) {
+        expect([safe, Form.isReturnPath(safe)]).toEqual([safe, true]);
+      }
+      for (const hostile of [
+        "/\t/evil.test/",
+        "/\n/evil.test/",
+        "/\r/evil.test/",
+        "/\t\\evil.test",
+        "/\\evil.test",
+        "//evil.test",
+        "/a\nb",
+        "/a b",
+        "/\u0000",
+        "/\u007f",
+        "/caf\u00e9",
+        "https://evil.test/",
+        "evil.test",
+        "",
+      ]) {
+        expect([hostile, Form.isReturnPath(hostile)]).toEqual([hostile, false]);
+      }
+    }),
+  );
+
   it.effect("framework fields are last-write-wins and never reach the message", () =>
     Effect.gen(function* () {
       const posted = fields([

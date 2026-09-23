@@ -9,7 +9,7 @@ import {
 } from "effect";
 import type { AnyContract, KeyOf } from "./contract.js";
 import type { GeneratedTypeId } from "./generated.js";
-import type { CommandId } from "./vocabulary.js";
+import { CommandId } from "./vocabulary.js";
 
 export { freshCommandId } from "./command-id.js";
 
@@ -44,6 +44,11 @@ export const frameworkFields = {
   version: "$version",
   key: "$key",
   returnTo: "$return",
+  /**
+   * Which form on the page posted. Two forms on one actor key refuse
+   * separately: a refusal redraws only the form that it names.
+   */
+  form: "$form",
 } satisfies Record<string, string>;
 
 /** A body the structural step refuses. A rendered form cannot produce one. */
@@ -147,12 +152,36 @@ interface Branch {
   readonly _tag: "Branch";
   /** An indexed branch becomes a list; a named one becomes a record. */
   readonly list: boolean;
+  /**
+   * How a list is filled: by `[n]` or by `[]`. One list takes one of the
+   * two, because an appended value has no index to agree with a written one.
+   */
+  indexing: "unset" | "explicit" | "append";
   readonly children: Map<string, Draft>;
 }
 
 type Draft = Leaf | Branch;
 
-const branch = (list: boolean): Branch => ({ _tag: "Branch", list, children: new Map() });
+const branch = (list: boolean): Branch => ({
+  _tag: "Branch",
+  list,
+  indexing: "unset",
+  children: new Map(),
+});
+
+/** The deepest name the structural step reads. A message is not deeper. */
+export const maxDepth = 32;
+/** The most fields one body may carry. */
+export const maxFields = 1000;
+
+/** Record how a list is filled. None when it was filled the other way. */
+const indexWith = (list: Branch, indexing: "explicit" | "append"): Option.Option<Branch> => {
+  if (list.indexing !== "unset" && list.indexing !== indexing) {
+    return Option.none();
+  }
+  list.indexing = indexing;
+  return Option.some(list);
+};
 
 const isIndex = (segment: string): boolean => segment.startsWith("[");
 
@@ -189,11 +218,18 @@ const place = (root: Branch, name: string, value: string): Option.Option<string>
   if (segments.some((segment) => refusedSegments.has(segment))) {
     return Option.some(`field name "${name}" uses a refused segment`);
   }
+  if (segments.length > maxDepth) {
+    return Option.some(`field name "${name.slice(0, 64)}…" is deeper than ${String(maxDepth)}`);
+  }
   if (value === "" && !append) {
     return Option.none();
   }
+  const mixed = Option.some(`field name "${name}" mixes [n] and [] in one list`);
   let parent = root;
   for (const [index, segment] of segments.entries()) {
+    if (isIndex(segment) && Option.isNone(indexWith(parent, "explicit"))) {
+      return mixed;
+    }
     const next = Option.fromNullishOr(segments[index + 1]);
     const isLast = Option.isNone(next);
     if (isLast && !append) {
@@ -210,6 +246,9 @@ const place = (root: Branch, name: string, value: string): Option.Option<string>
       return Option.some(`field name "${name}" disagrees with another field's shape`);
     }
     parent = child.value;
+  }
+  if (Option.isNone(indexWith(parent, "append"))) {
+    return mixed;
   }
   parent.children.set(String(parent.children.size), { _tag: "Leaf", value });
   return Option.none();
@@ -240,7 +279,13 @@ export const tree = (
 ): Effect.Effect<{ readonly [key: string]: FormTree }, FormMalformed> =>
   Effect.suspend(() => {
     const root = branch(false);
-    for (const [name, value] of toEntries(fields)) {
+    const entries = toEntries(fields);
+    if (entries.length > maxFields) {
+      return Effect.fail(
+        FormMalformed.make({ reason: `the body has more than ${String(maxFields)} fields` }),
+      );
+    }
+    for (const [name, value] of entries) {
       const refused = place(root, name, value);
       if (Option.isSome(refused)) {
         return Effect.fail(FormMalformed.make({ reason: refused.value }));
@@ -410,6 +455,8 @@ export interface FormIssues {
   readonly contract: string;
   /** The key as the form posted it, form-encoded. */
   readonly key: string;
+  /** The `$form` the refused post carried: which form on the page it was. */
+  readonly form: string;
   readonly commandId: CommandId;
   readonly issues: ReadonlyArray<FormIssue>;
   /** Every non-redacted posted value, for repopulation. Strings only. */
@@ -423,6 +470,50 @@ export interface FormIssues {
 export class FormContext extends Context.Service<FormContext, FormIssues>()(
   "effect-frame/src/actor/form/FormContext",
 ) {}
+
+/**
+ * `FormIssues` as JSON, for the page. A hydrating client must draw what the
+ * server drew, so a refused page carries its issues to the client the way
+ * it carries a snapshot (#21 §5).
+ */
+export const IssuesJson = Schema.fromJsonString(
+  Schema.Struct({
+    contract: Schema.String,
+    key: Schema.String,
+    form: Schema.String,
+    commandId: CommandId,
+    issues: Schema.Array(Schema.Struct({ field: Schema.String, message: Schema.String })),
+    submitted: Schema.Array(Schema.Tuple([Schema.String, Schema.Array(Schema.String)])),
+  }),
+);
+
+/** The id under which a page embeds its `FormIssues`. */
+export const issuesScriptId = "effect-frame-form-issues";
+
+/** `FormIssues` as the JSON a page embeds. */
+export const encodeIssues = (issues: FormIssues): Effect.Effect<string> =>
+  Effect.orDie(
+    Schema.encodeEffect(IssuesJson)({ ...issues, submitted: Array.from(issues.submitted) }),
+  );
+
+/** The JSON a page embedded, back to `FormIssues`. */
+export const decodeIssues = (json: string): Effect.Effect<FormIssues, Schema.SchemaError> =>
+  Effect.map(Schema.decodeEffect(IssuesJson)(json), (decoded): FormIssues => ({
+    ...decoded,
+    submitted: new Map(decoded.submitted),
+  }));
+
+/**
+ * Provide the issues a page carried, when it carried any. A client mounts
+ * through this, so its first render draws the refused form the server drew.
+ */
+export const provideIssues =
+  (issues: Option.Option<FormIssues>) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+    Option.match(issues, {
+      onNone: () => effect,
+      onSome: (found) => Effect.provideService(effect, FormContext, found),
+    });
 
 const formatter = SchemaIssue.makeFormatterStandardSchemaV1();
 
@@ -490,11 +581,23 @@ export const decodeKey = (
 // Return paths
 // ---------------------------------------------------------------------------
 
+/** Printable ASCII only: no C0 control, no space, no DEL, nothing wider. */
+const printable = /^[\x21-\x7e]+$/;
+const sentinel = "http://return-path.invalid";
+
 /**
  * Only a root-relative path. `//host` is protocol-relative and leaves the
  * origin, and `/\host` is read the same way by browsers, so both are
- * refused. An absolute URL is refused even on this origin: the rule does
- * not grow into an open redirect when an origin check is loosened.
+ * refused. A URL parser drops tab, LF, and CR before it reads, so
+ * `/<tab>/host` is `//host` to a browser: every control character, space,
+ * and DEL is refused before the prefix is read. The path must then resolve
+ * against a sentinel base to that same origin. An absolute URL is refused
+ * even on this origin. A `$return` that passes is also a valid `Location`
+ * header, so the reply can never fail after the send.
  */
 export const isReturnPath = (raw: string): boolean =>
-  raw.startsWith("/") && !raw.startsWith("//") && !raw.startsWith("/\\");
+  printable.test(raw) &&
+  raw.startsWith("/") &&
+  !raw.startsWith("//") &&
+  !raw.startsWith("/\\") &&
+  Option.exists(Option.fromNullishOr(URL.parse(raw, sentinel)), (url) => url.origin === sentinel);

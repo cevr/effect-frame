@@ -6,9 +6,10 @@ import {
   Unreachable,
   contract,
   ref,
+  spawn,
 } from "effect-frame/actor/client";
 import type { CommandId, TransportService } from "effect-frame/actor/client";
-import { View } from "effect-frame/view";
+import { Html, View } from "effect-frame/view";
 import { Effect, Layer, Match, Option, Ref, Schema } from "effect";
 
 /**
@@ -21,6 +22,7 @@ export const AddTask = Schema.TaggedStruct("AddTask", {
   id: Generated.fromCommandId(Schema.String),
   title: Schema.String.check(Schema.isMaxLength(12)),
   done: Form.Checkbox,
+  note: Schema.optionalKey(Schema.String),
 });
 
 export const Tag = Schema.TaggedStruct("Tag", {
@@ -115,16 +117,20 @@ export interface NoProps {
 
 export const noProps: NoProps = { _tag: "NoProps" };
 
-/** One page, every host: an `AddTask` form, a `Tag` form, and the count. */
+/**
+ * One page, every host: an `AddTask` form, a `Tag` form, and the count.
+ * The title input is bound to a local draft, as the notes compose input is.
+ */
 export const TasksPage = (_props: NoProps) =>
   Effect.gen(function* () {
     const tasks = yield* ref(Tasks, board);
+    const draft = yield* spawn(Behavior.value(""));
     const add = yield* View.form({
       ref: tasks,
       contract: Tasks,
       key: board,
       message: AddTask,
-      typed: ["title", "done"],
+      typed: ["title", "done", "note"],
       endpoint: "/actors",
       returnTo: "/",
     });
@@ -140,8 +146,9 @@ export const TasksPage = (_props: NoProps) =>
     return (
       <main>
         <form id="add" onSubmit={add.submit}>
-          <input id="title" name="title" />
+          <input id="title" name="title" value={View.bind(draft.state)} />
           <input id="done" type="checkbox" name="done" />
+          <textarea id="note" name="note"></textarea>
           <input id="pin" name="_pin" />
           <button type="submit">add</button>
         </form>
@@ -157,6 +164,23 @@ export const TasksPage = (_props: NoProps) =>
       </main>
     );
   });
+
+/**
+ * The document: the page, and the refused post's issues when this render
+ * redraws one, so the hydrating client draws the same form.
+ */
+export const TasksDocument = Effect.scoped(
+  Effect.gen(function* () {
+    const body = yield* Html.renderToString(TasksPage, noProps);
+    const issues = yield* Effect.serviceOption(Form.FormContext);
+    const script = yield* Option.match(issues, {
+      onNone: () => Effect.succeed(""),
+      onSome: (found) =>
+        Effect.map(Form.encodeIssues(found), (json) => Html.jsonScript(Form.issuesScriptId, json)),
+    });
+    return `<main id="app">${body}</main>${script}`;
+  }),
+);
 
 /** The hidden inputs a rendered form carries, in document order. */
 export const hiddenOf = (html: string, formId: string): ReadonlyArray<[string, string]> => {

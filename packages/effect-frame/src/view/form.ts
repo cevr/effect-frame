@@ -35,6 +35,12 @@ export interface CommandForm<C extends AnyContract, M, Typed extends string> {
   readonly endpoint: string;
   /** Where the browser goes after the post. A root-relative path. */
   readonly returnTo: string;
+  /**
+   * This form's identity on the page, posted as `$form`. A refusal redraws
+   * only the form it names. The default is the member's tag, so name a
+   * form only when one page has two forms for one member on one key.
+   */
+  readonly name?: string;
   /** Runs after a scripted send, with its handle. A plain post never runs it. */
   readonly onSend?: (
     handle: IdentifiedCommandHandle<SnapshotOf<C>, "remote">,
@@ -95,7 +101,8 @@ const renderGenerated = (
 /**
  * Bind a form to one command. Run it in the view's setup: the render
  * chooses the command id here, and every generated field with it. A render
- * with a `FormContext` for this form takes the id the server chose instead:
+ * with a `FormContext` for this form (same contract, key, and `$form`)
+ * takes the id the server chose instead:
  * fresh after a refusal, the same after a lost reply.
  *
  * On the client the binding adopts what the markup carries. Its first send
@@ -109,9 +116,11 @@ export const form = <C extends AnyContract, M extends Member<C>, const Typed ext
   Effect.gen(function* () {
     const member = yield* onlyMember(options.message);
     const key = yield* Form.encodeKey(options.contract, options.key);
+    const identity = Option.getOrElse(Option.fromNullishOr(options.name), () => member.tag);
     const context = Option.filter(
       yield* Effect.serviceOption(Form.FormContext),
-      (issues) => issues.contract === options.contract.name && issues.key === key,
+      (issues) =>
+        issues.contract === options.contract.name && issues.key === key && issues.form === identity,
     );
     const commandId = yield* Option.match(context, {
       onNone: () => Form.freshCommandId,
@@ -136,6 +145,7 @@ export const form = <C extends AnyContract, M extends Member<C>, const Typed ext
         [Form.frameworkFields.version, String(options.contract.version)],
         [Form.frameworkFields.key, key],
         [Form.frameworkFields.returnTo, options.returnTo],
+        [Form.frameworkFields.form, identity],
         ["_tag", member.tag],
         ...generated,
       ],

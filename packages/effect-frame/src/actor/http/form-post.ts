@@ -57,6 +57,7 @@ interface Posted {
   readonly contract: AnyContract;
   readonly commandId: CommandId;
   readonly key: string;
+  readonly form: string;
   readonly returnTo: string;
 }
 
@@ -73,21 +74,39 @@ const required = (fields: FormFields, name: string): Effect.Effect<string, Reply
 const urlencoded = "application/x-www-form-urlencoded";
 
 /**
+ * A media type parameter the body reader honours. The body is read as
+ * UTF-8, so a `charset` that names anything else is refused rather than
+ * decoded wrongly. Other parameters are ignored. Input is lower case.
+ */
+const isUtf8Parameter = (parameter: string): boolean => {
+  const [name = "", value = ""] = parameter.split("=").map((part) => part.trim());
+  if (name !== "charset") {
+    return true;
+  }
+  const charset = value.replace(/^"(.*)"$/, "$1");
+  return charset === "utf-8" || charset === "utf8";
+};
+
+/**
  * Read the body. Only urlencoded: multipart is not specified (#21 §6), so
  * it is refused rather than parsed by a rule nobody wrote down.
  */
 const readBody = (request: Request): Effect.Effect<FormFields, Reply> => {
-  const type = Option.getOrElse(
+  const header = Option.getOrElse(
     Option.fromNullishOr(request.headers.get("content-type")),
     () => "",
   );
-  if (type.startsWith("multipart/form-data")) {
+  const [media = "", ...parameters] = header.split(";").map((part) => part.trim().toLowerCase());
+  if (media === "multipart/form-data") {
     return Effect.fail(
       refused(415, "multipart/form-data is not accepted: file uploads are not specified (#21 §6)"),
     );
   }
-  if (!type.startsWith(urlencoded)) {
+  if (media !== urlencoded) {
     return Effect.fail(refused(415, `expected ${urlencoded}`));
+  }
+  if (!parameters.every(isUtf8Parameter)) {
+    return Effect.fail(refused(415, `expected ${urlencoded} in UTF-8`));
   }
   return Effect.map(
     Effect.tryPromise({ try: () => request.text(), catch: (cause) => refused(400, String(cause)) }),
@@ -126,7 +145,8 @@ const readFramework = (
       );
     }
     const key = yield* required(fields, frameworkFields.key);
-    return { fields, contract, commandId, key, returnTo };
+    const form = yield* required(fields, frameworkFields.form);
+    return { fields, contract, commandId, key, form, returnTo };
   });
 
 /** The generated fields of every member: dropped from the values a fresh id redraws. */
@@ -150,6 +170,7 @@ const page = (
     const base = {
       contract: posted.contract.name,
       key: posted.key,
+      form: posted.form,
       issues,
     };
     if (retry === "same") {

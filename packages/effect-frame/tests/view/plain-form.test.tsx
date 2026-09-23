@@ -10,6 +10,7 @@ import { describe, expect, it } from "effect-bun-test";
 import type { Wire } from "../plain-form-fixture.js";
 import {
   Tasks,
+  TasksDocument,
   TasksPage,
   hiddenOf,
   hiddenValue,
@@ -55,6 +56,21 @@ const element = <T extends Element>(root: ParentNode, selector: string, type: ne
     ),
   );
 
+/** Put a whole document into the body: the app root and its scripts. */
+const installDocument = (html: string) =>
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      document.body.innerHTML = html;
+      return Option.getOrThrow(
+        Option.filter(
+          Option.fromNullishOr(document.getElementById("app")),
+          (found): found is HTMLElement => found instanceof HTMLElement,
+        ),
+      );
+    }),
+    () => Effect.sync(() => void (document.body.innerHTML = "")),
+  );
+
 /** Submit the form as a person would: the event, cancelable, from the form. */
 const submit = (form: HTMLFormElement) =>
   Effect.sync(() => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
@@ -81,6 +97,7 @@ describe("the command form binding", () => {
           "$version",
           "$key",
           "$return",
+          "$form",
           "_tag",
           "id",
         ]);
@@ -148,6 +165,7 @@ describe("the command form binding", () => {
         const issues: Form.FormIssues = {
           contract: "Tasks",
           key: "tenant=acme&board=main",
+          form: "AddTask",
           commandId,
           issues: [{ field: "title", message: "too long" }],
           submitted: Form.submitted(posted),
@@ -165,6 +183,57 @@ describe("the command form binding", () => {
         expect(html).toContain('<input id="done" type="checkbox" name="done">');
       }),
     ),
+  );
+
+  it.scopedLive(
+    "a refused page hydrates with no mismatch and keeps its issues and repopulated values",
+    () =>
+      withWire(() =>
+        Effect.gen(function* () {
+          const commandId = yield* Form.freshCommandId;
+          const refusal: Form.FormIssues = {
+            contract: "Tasks",
+            key: "tenant=acme&board=main",
+            form: "AddTask",
+            commandId,
+            issues: [{ field: "title", message: "too long" }],
+            submitted: Form.submitted(
+              Form.fromEntries([
+                ["_tag", "AddTask"],
+                ["title", "far too long a title"],
+                ["done", "on"],
+                ["note", "line one\nline two"],
+              ]),
+            ),
+          };
+          const html = yield* TasksDocument.pipe(Effect.provideService(Form.FormContext, refusal));
+          const root = yield* installDocument(html);
+
+          // The client reads the refusal the page carried and mounts under it.
+          const carried = yield* Option.match(Dom.readJsonScript(Form.issuesScriptId), {
+            onNone: () => Effect.succeed(Option.none<Form.FormIssues>()),
+            onSome: (json) => Effect.map(Form.decodeIssues(json), Option.some),
+          });
+          expect(Option.isSome(carried)).toBe(true);
+          const hydration = Dom.hydrate(root);
+          yield* Form.provideIssues(carried)(mount(TasksPage, noProps, hydration.host, root));
+          yield* render;
+          const report = yield* hydration.finish;
+
+          expect(report).toEqual({ mismatches: [], unclaimed: 0 });
+          expect(root.querySelectorAll("#issues li")).toHaveLength(1);
+          const title = element(root, "#title", HTMLInputElement);
+          expect(title.value).toBe("far too long a title");
+          expect(title.getAttribute("aria-invalid")).toBe("true");
+          expect(element(root, "#done", HTMLInputElement).checked).toBe(true);
+          expect(element(root, "#note", HTMLTextAreaElement).value).toBe("line one\nline two");
+          expect(element(root, 'form#add input[name="$command"]', HTMLInputElement).value).toBe(
+            String(commandId),
+          );
+          // The other form on the key was not refused, and it draws nothing of this one.
+          expect(root.querySelectorAll("form#tag [aria-invalid]")).toHaveLength(0);
+        }),
+      ),
   );
 
   it.scopedLive("the hydrated binding sends the adopted `id`, not a fresh one", () =>

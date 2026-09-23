@@ -2,19 +2,17 @@
 import { HttpServer } from "effect-frame/actor";
 import { Form, ref } from "effect-frame/actor/client";
 import type { ActorTransport } from "effect-frame/actor/client";
-import { Html } from "effect-frame/view";
 import { Effect, Layer, Option, Ref, Stream } from "effect";
 import type { Context } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import type { Wire } from "../plain-form-fixture.js";
 import {
   Tasks,
-  TasksPage,
+  TasksDocument,
   board,
   hiddenOf,
   hiddenValue,
   makeWire,
-  noProps,
   recordedTransport,
 } from "../plain-form-fixture.js";
 
@@ -32,7 +30,7 @@ interface Served {
   readonly context: Context.Context<ActorTransport>;
 }
 
-const page = Effect.scoped(Html.renderToString(TasksPage, noProps));
+const page = TasksDocument;
 
 const serve = Effect.gen(function* () {
   const wire = yield* makeWire;
@@ -101,9 +99,25 @@ const post = (served: Served, body: string) =>
     body,
   });
 
+/** Post a body under any content type. */
+const postAs = (served: Served, contentType: string, body: string) =>
+  request(`${served.url}${actorPrefix}/form`, {
+    method: "POST",
+    headers: { "content-type": contentType },
+    body,
+  });
+
 /** The rendered `add` form, filled: hidden inputs first, then the typed fields. */
 const fill = (html: string, typed: ReadonlyArray<[string, string]>): string =>
-  Form.toBody(Form.fromEntries([...hiddenOf(html, "add"), ...typed]));
+  fillForm(html, "add", typed);
+
+/** Any rendered form, filled. */
+const fillForm = (html: string, formId: string, typed: ReadonlyArray<[string, string]>): string =>
+  Form.toBody(Form.fromEntries([...hiddenOf(html, formId), ...typed]));
+
+/** The body with one field's value replaced. */
+const withField = (body: string, name: string, value: string): string =>
+  Form.toBody(Form.withValues(Form.fromBody(body), [[name, value]]));
 
 /**
  * The actor's committed state at `revision`, read through the same host.
@@ -294,6 +308,134 @@ describe("plain-form posts", () => {
 
       expect(reply.status).toBe(400);
       expect(yield* sends(served)).toEqual([]);
+    }),
+  );
+
+  it.scopedLive(
+    "a $return that a URL parser reads as another origin answers 400 and sends nothing",
+    () =>
+      Effect.gen(function* () {
+        const served = yield* serve;
+        const html = yield* getPage(served);
+        const body = fill(html, [["title", "milk"]]);
+        const hostile = [
+          "/\t/evil.test/",
+          "/\n/evil.test/",
+          "/\r/evil.test/",
+          "/\t\\evil.test",
+          "/\\evil.test",
+          "//evil.test",
+          "https://evil.test/",
+          "/a\nb",
+          "/a b",
+          "/\u007f",
+          "/caf\u00e9",
+          "",
+        ];
+
+        for (const returnTo of hostile) {
+          const reply = yield* post(served, withField(body, "$return", returnTo));
+          expect([returnTo, reply.status, reply.location]).toEqual([returnTo, 400, ""]);
+        }
+
+        // No refusal reached the transport: each one was answered before the send.
+        expect(yield* sends(served)).toEqual([]);
+        expect((yield* snapshot(served)).revision.value).toBe(0);
+      }),
+  );
+
+  it.scopedLive("an encoded slash or backslash in $return stays a path on this origin", () =>
+    Effect.gen(function* () {
+      const served = yield* serve;
+      const html = yield* getPage(served);
+      const body = fill(html, [["title", "milk"]]);
+
+      for (const returnTo of ["/%2f%2fevil.test/", "/%2F%2Fevil.test/", "/%5c%5cevil.test/"]) {
+        const reply = yield* post(served, withField(body, "$return", returnTo));
+        expect(reply.status).toBe(303);
+        expect(reply.location).toBe(returnTo);
+        expect(new URL(reply.location, served.url).origin).toBe(new URL(served.url).origin);
+      }
+    }),
+  );
+
+  it.scopedLive(
+    "the media type is read without case, and a charset other than UTF-8 answers 415",
+    () =>
+      Effect.gen(function* () {
+        const served = yield* serve;
+        const html = yield* getPage(served);
+        const body = fill(html, [["title", "milk"]]);
+
+        const latin = yield* postAs(
+          served,
+          "application/x-www-form-urlencoded; charset=ISO-8859-1",
+          body,
+        );
+        expect(latin.status).toBe(415);
+        expect(yield* sends(served)).toEqual([]);
+
+        const mixed = yield* postAs(
+          served,
+          'Application/X-WWW-Form-Urlencoded; Charset="UTF-8"',
+          body,
+        );
+        expect(mixed.status).toBe(303);
+      }),
+  );
+
+  it.scopedLive("a very deep field name or a mixed list answers 400 before any send", () =>
+    Effect.gen(function* () {
+      const served = yield* serve;
+      const html = yield* getPage(served);
+
+      const deep = Array.from({ length: 20_000 }, () => "a").join(".");
+      const tooDeep = yield* post(
+        served,
+        fill(html, [
+          ["title", "milk"],
+          [deep, "x"],
+        ]),
+      );
+      const mixed = yield* post(
+        served,
+        fill(html, [
+          ["title", "milk"],
+          ["tags[1]", "x"],
+          ["tags[]", "y"],
+        ]),
+      );
+
+      expect([tooDeep.status, mixed.status]).toEqual([400, 400]);
+      expect(yield* sends(served)).toEqual([]);
+    }),
+  );
+
+  it.scopedLive("two forms on one key refuse separately", () =>
+    Effect.gen(function* () {
+      const served = yield* serve;
+      const html = yield* getPage(served);
+
+      const refused = yield* post(served, fill(html, [["title", "far too long a title"]]));
+
+      expect(refused.status).toBe(200);
+      const add = hiddenValue(refused.body, "add", "$command");
+      const tag = hiddenValue(refused.body, "tag", "$command");
+      // The Tag form is not the one refused: it keeps its own identity and values.
+      expect(tag).not.toBe(add);
+      expect(hiddenValue(refused.body, "tag", "id")).not.toBe(add);
+      expect(hiddenValue(refused.body, "tag", "$form")).toBe("Tag");
+      const tagForm = refused.body.slice(refused.body.indexOf('<form id="tag"'));
+      expect(tagForm.slice(0, tagForm.indexOf("</form>"))).not.toContain("aria-invalid");
+      expect(refused.body).toContain(Form.issuesScriptId);
+
+      // The Tag form posts from the refused page and applies; it does not conflict.
+      const tagged = yield* post(served, fillForm(refused.body, "tag", [["label", "home"]]));
+      expect(tagged.status).toBe(303);
+      const applied = yield* snapshot(served, 1);
+      expect(applied.state.tags).toEqual([
+        { id: hiddenValue(refused.body, "tag", "id"), label: "home" },
+      ]);
     }),
   );
 });

@@ -211,11 +211,16 @@ const anonymous: Principal = Anonymous.make({});
  * An active, unexpired session is its subject. Anything else is anonymous.
  * The clock comparison is a guard that can only refuse earlier: the
  * authority is the session's own `Empty` revision.
+ *
+ * `clock` is the host's, passed in rather than read where this runs. The
+ * derivation runs on whichever fiber a connection opens it from, and a
+ * browser's fiber may keep another clock: read there, an unexpired session
+ * could look expired.
  */
-const principalOf = (encoded: string): Effect.Effect<Principal> =>
+const principalOf = (clock: Clock.Clock, encoded: string): Effect.Effect<Principal> =>
   Effect.gen(function* () {
     const snapshot = yield* Effect.orDie(decodeSession(encoded));
-    const now = yield* Clock.currentTimeMillis;
+    const now = yield* clock.currentTimeMillis;
     if (snapshot._tag === "Active" && snapshot.expiresAt > now) {
       return Authenticated.make({ subject: snapshot.subject, claims: snapshot.claims });
     }
@@ -229,7 +234,12 @@ export interface Follows {
 }
 
 /** The session's principal over time, counted while it is followed. */
-const follow = (transport: TransportService, sessionId: string, follows: Follows) =>
+const follow = (
+  transport: TransportService,
+  clock: Clock.Clock,
+  sessionId: string,
+  follows: Follows,
+) =>
   Stream.unwrap(
     Effect.gen(function* () {
       const address = yield* sessionAddress(sessionId);
@@ -241,17 +251,17 @@ const follow = (transport: TransportService, sessionId: string, follows: Follows
         () => Ref.update(follows.active, (n) => n - 1),
       );
       return transport.changes(address, -1).pipe(
-        Stream.mapEffect((projection) => principalOf(projection.snapshot)),
+        Stream.mapEffect((projection) => principalOf(clock, projection.snapshot)),
         Stream.catch(() => Stream.succeed(anonymous)),
       );
     }),
   );
 
 /** One request's principal: a snapshot read of the session. */
-const read = (transport: TransportService, sessionId: string) =>
+const read = (transport: TransportService, clock: Clock.Clock, sessionId: string) =>
   Effect.flatMap(sessionAddress(sessionId), (address) =>
     transport.snapshot(address).pipe(
-      Effect.flatMap((projection) => principalOf(projection.snapshot)),
+      Effect.flatMap((projection) => principalOf(clock, projection.snapshot)),
       Effect.orElseSucceed(() => anonymous),
     ),
   );
@@ -266,10 +276,12 @@ export const sessionPrincipal = (
 ): Effect.Effect<HttpServer.DerivePrincipal, never, ActorTransport | Scope.Scope> =>
   Effect.gen(function* () {
     const transport = yield* ActorTransport;
+    // The host's clock, taken where the host is built.
+    const clock = yield* Clock.Clock;
     // One subscription per session, however many connections follow it.
     const sessions = yield* HttpServer.shareSessions({
-      read: (sessionId: string) => read(transport, sessionId),
-      follow: (sessionId: string) => follow(transport, sessionId, follows),
+      read: (sessionId: string) => read(transport, clock, sessionId),
+      follow: (sessionId: string) => follow(transport, clock, sessionId, follows),
     });
     const derive: HttpServer.DerivePrincipal = (request) =>
       Effect.succeed(
@@ -292,7 +304,9 @@ export const snapshotPrincipal: HttpServer.DerivePrincipal<ActorTransport> = (re
     onSome: (sessionId) =>
       Effect.gen(function* () {
         const transport = yield* ActorTransport;
-        return Principal.constant(yield* read(transport, sessionId));
+        // Built per request, inside the adapter that serves it.
+        const clock = yield* Clock.Clock;
+        return Principal.constant(yield* read(transport, clock, sessionId));
       }),
   });
 

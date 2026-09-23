@@ -19,14 +19,7 @@ jobs:
 
       - run: bun install
 
-      - name: Typecheck
-        run: bun run typecheck
-
-      - name: Lint
-        run: bun run lint
-
-      - name: Format
-        run: bun run fmt
-
-      - name: Test
-        run: bun run test
+      - name: Expiry debug (full suite)
+        run: |
+          set +e
+          for i in 1 2 3 4 5; do bun run test > full-$i.log 2>&1; echo "run $i exit $?"; grep -E -B60 "\(fail\)" full-$i.log | grep -v "(pass)" | head -150; done

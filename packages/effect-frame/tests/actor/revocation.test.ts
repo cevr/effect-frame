@@ -161,7 +161,12 @@ const watchWith = (
           ),
         ),
       );
-      yield* Queue.take(revisions);
+      yield* Effect.raceFirst(
+        Queue.take(revisions),
+        Effect.flatMap(Fiber.join(ended), (error) =>
+          Effect.die(`the stream ended before its first projection: ${JSON.stringify(error)}`),
+        ),
+      );
       const watcher: Watcher = { ended, revisions };
       return watcher;
     }),

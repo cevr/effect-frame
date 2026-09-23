@@ -1,5 +1,5 @@
 import type { Layer, Scope } from "effect";
-import { Cause, Effect, Equal, Exit, Inspectable, Option, Schema } from "effect";
+import { Cause, Effect, Equal, Exit, Hash, Inspectable, Option, Schema } from "effect";
 import type { CommandConflict } from "../vocabulary.js";
 import { CommandId } from "../vocabulary.js";
 import type { Appended, Committed, StoredReceipt } from "../mailbox-store.js";
@@ -124,6 +124,51 @@ const conflictRejectsNewPayload = Effect.fn("Conformance.conflictRejectsNewPaylo
   return [
     equals("append fails", failure, Option.some({ tag: "CommandConflict", commandId: id("a") })),
     equals("pending unchanged", pending, [id("a")]),
+  ];
+});
+
+/**
+ * Two payloads whose `Hash.string` values are equal. The engine hashes a
+ * payload with `Hash.string`, so a store that trusts the hash alone would
+ * answer `Duplicate` for the second under the first one's ID.
+ */
+const collidingPayloads: readonly [string, string] = ['{"title":"00008t"}', '{"title":"0000fj"}'];
+
+const conflictDespiteEqualHash = Effect.fn("Conformance.conflictDespiteEqualHash")(function* (
+  store: StoreService,
+) {
+  const [first, second] = collidingPayloads;
+  const firstHash = Hash.string(first);
+  const secondHash = Hash.string(second);
+  const conflictOf = (outcome: Exit.Exit<Appended, CommandConflict>) =>
+    Option.map(Exit.findErrorOption(outcome), (conflict) => ({
+      tag: conflict._tag,
+      commandId: conflict.commandId,
+    }));
+  yield* store.append({ commandId: id("a"), payload: first, payloadHash: firstHash });
+  const whilePending = yield* Effect.exit(
+    store.append({ commandId: id("a"), payload: second, payloadHash: secondHash }),
+  );
+  yield* store.commit(id("a"), "s1");
+  const afterCommit = yield* Effect.exit(
+    store.append({ commandId: id("a"), payload: second, payloadHash: secondHash }),
+  );
+  const same = yield* store.append({ commandId: id("a"), payload: first, payloadHash: firstHash });
+  const pending = yield* store.pending;
+  return [
+    equals("the two payloads share a hash", firstHash, secondHash),
+    equals(
+      "append while pending fails",
+      conflictOf(whilePending),
+      Option.some({ tag: "CommandConflict", commandId: id("a") }),
+    ),
+    equals(
+      "append after commit fails",
+      conflictOf(afterCommit),
+      Option.some({ tag: "CommandConflict", commandId: id("a") }),
+    ),
+    equals("the first payload is still a duplicate", same._tag, "Duplicate"),
+    equals("pending", pending, []),
   ];
 });
 
@@ -306,6 +351,10 @@ const definitions: ReadonlyArray<Definition> = [
   {
     name: "a new payload under a used ID fails with CommandConflict",
     run: conflictRejectsNewPayload,
+  },
+  {
+    name: "a new payload with an equal hash under a used ID fails with CommandConflict",
+    run: conflictDespiteEqualHash,
   },
   {
     name: "commit advances one monotonic revision and updates latest",

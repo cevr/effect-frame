@@ -1,3 +1,4 @@
+import type { AnyImplementation } from "effect-frame/actor";
 import {
   ActorHost,
   Behavior,
@@ -15,7 +16,7 @@ import {
   ref,
   spawn,
 } from "effect-frame/actor/client";
-import type { CommandId, TransportService } from "effect-frame/actor/client";
+import type { CommandId, DurableReceipt, TransportService } from "effect-frame/actor/client";
 import { Html, View } from "effect-frame/view";
 import { Effect, Layer, Match, Option, Ref, Schema } from "effect";
 
@@ -74,6 +75,38 @@ export const TasksLive = implementTransparent(
   Behavior.reducer<TasksSnapshot, TasksMessage>({ initial: { tasks: [], tags: [] }, reduce }),
 );
 
+/**
+ * A second contract whose one member has a required redacted field. A
+ * refused post never writes `_pin` back, so a redrawn form needs it typed
+ * again (#21 §4).
+ */
+export const Unlock = Schema.TaggedStruct("Unlock", {
+  id: Generated.fromCommandId(Schema.String),
+  label: Schema.String,
+  _pin: Schema.String,
+});
+
+export const VaultSnapshot = Schema.Struct({ unlocks: Schema.Array(Schema.String) });
+export type VaultSnapshot = Schema.Schema.Type<typeof VaultSnapshot>;
+
+export const Vault = contract("Vault", {
+  version: 1,
+  policy: "public",
+  key: Schema.Struct({ vault: Schema.String }),
+  snapshot: VaultSnapshot,
+  message: Schema.Union([Unlock]),
+});
+
+export const vault = { vault: "main" };
+
+export const VaultLive = implementTransparent(
+  Vault,
+  Behavior.reducer<VaultSnapshot, Schema.Schema.Type<typeof Unlock>>({
+    initial: { unlocks: [] },
+    reduce: (state, unlock) => ({ unlocks: [...state.unlocks, unlock.label] }),
+  }),
+);
+
 /** What reached the transport: every send, in order, and a lost-reply switch. */
 export interface Wire {
   readonly sends: Ref.Ref<
@@ -81,6 +114,8 @@ export interface Wire {
   >;
   /** When set, the next send applies and then its reply is lost. */
   readonly loseNextReply: Ref.Ref<boolean>;
+  /** The host's receipt for every send, in order, including a reply that was lost. */
+  readonly replies: Ref.Ref<ReadonlyArray<DurableReceipt>>;
 }
 
 export const makeWire = Effect.gen(function* () {
@@ -89,6 +124,7 @@ export const makeWire = Effect.gen(function* () {
       ReadonlyArray<{ readonly commandId: CommandId; readonly payload: string }>
     >([]),
     loseNextReply: yield* Ref.make(false),
+    replies: yield* Ref.make<ReadonlyArray<DurableReceipt>>([]),
   };
   return wire;
 });
@@ -96,13 +132,19 @@ export const makeWire = Effect.gen(function* () {
 /** The one policy table: `Tasks` declares `public`, and it allows everything. */
 export const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
 
-/** The real in-process host, recording each send and able to lose one reply. */
-export const recordedTransport = (wire: Wire) =>
+/**
+ * The real in-process host, recording each send and able to lose one reply.
+ * `extra` hosts a test's own actors beside the fixture's.
+ */
+export const recordedTransport = (
+  wire: Wire,
+  extra: ReadonlyArray<AnyImplementation<never>> = [],
+) =>
   Layer.effect(
     ActorTransport,
     Effect.gen(function* () {
       const real = yield* ActorHost.make({
-        implementations: [TasksLive],
+        implementations: [TasksLive, VaultLive, ...extra],
         store: () => MailboxStore.layerMemory,
       });
       const transport: TransportService = {
@@ -111,6 +153,7 @@ export const recordedTransport = (wire: Wire) =>
           Effect.gen(function* () {
             yield* Ref.update(wire.sends, (seen) => [...seen, { commandId, payload }]);
             const receipt = yield* real.send(address, commandId, payload, active);
+            yield* Ref.update(wire.replies, (seen) => [...seen, receipt.receipt]);
             const lose = yield* Ref.getAndSet(wire.loseNextReply, false);
             if (lose) {
               return yield* Unreachable.make({ reason: "reply lost" });
@@ -196,6 +239,36 @@ export const TasksDocument = Effect.scoped(
     return `<main id="app">${body}</main>${script}`;
   }),
 );
+
+/** The unlock form alone: a label and a redacted, required pin. */
+export const VaultPage = (_props: NoProps) =>
+  Effect.gen(function* () {
+    const vaults = yield* ref(Vault, vault);
+    const unlock = yield* View.form({
+      ref: vaults,
+      contract: Vault,
+      key: vault,
+      message: Unlock,
+      typed: ["label", "_pin"],
+      endpoint: "/actors",
+      returnTo: "/",
+    });
+    return (
+      <main>
+        <form id="unlock" onSubmit={unlock.submit}>
+          <input id="label" name="label" />
+          <input id="pin" name="_pin" />
+        </form>
+        <ul id="issues">
+          {unlock.issues.map((issue) => (
+            <li data-field={issue.field}>{issue.message}</li>
+          ))}
+        </ul>
+      </main>
+    );
+  });
+
+export const VaultDocument = Effect.scoped(Html.renderToString(VaultPage, noProps));
 
 /** The hidden inputs a rendered form carries, in document order. */
 export const hiddenOf = (html: string, formId: string): ReadonlyArray<[string, string]> => {

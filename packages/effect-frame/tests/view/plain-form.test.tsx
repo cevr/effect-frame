@@ -12,6 +12,10 @@ import {
   Tasks,
   TasksDocument,
   TasksPage,
+  Vault,
+  VaultDocument,
+  VaultPage,
+  vault,
   hiddenOf,
   hiddenValue,
   makeWire,
@@ -172,6 +176,7 @@ describe("the command form binding", () => {
           key: "tenant=acme&board=main",
           form: "AddTask",
           commandId,
+          outcome: "Refused",
           issues: [{ field: "title", message: "too long" }],
           submitted: Form.submitted(posted),
         };
@@ -201,6 +206,7 @@ describe("the command form binding", () => {
             key: "tenant=acme&board=main",
             form: "AddTask",
             commandId,
+            outcome: "Refused",
             issues: [{ field: "title", message: "too long" }],
             submitted: Form.submitted(
               Form.fromEntries([
@@ -252,6 +258,7 @@ describe("the command form binding", () => {
             key: "tenant=acme&board=main",
             form: "AddTask",
             commandId,
+            outcome: "Refused",
             issues: [{ field: "title", message: "too long" }],
             submitted: Form.submitted(
               Form.fromEntries([
@@ -352,5 +359,62 @@ describe("the command form binding", () => {
         expect(hidden.value).toBe(rendered);
       }),
     ),
+  );
+  it.scopedLive(
+    "a hydrated 504 page with its pin missing sends nothing, and the retyped submit carries the adopted id",
+    () =>
+      withWire((wire) =>
+        Effect.gen(function* () {
+          const commandId = yield* Form.freshCommandId;
+          const lost: Form.FormIssues = {
+            contract: "Vault",
+            key: yield* Form.encodeKey(Vault, vault),
+            form: "Unlock",
+            commandId,
+            outcome: "Uncertain",
+            issues: [{ field: "", message: "Unreachable" }],
+            submitted: Form.submitted(
+              Form.fromEntries([
+                ["_tag", "Unlock"],
+                ["label", "door"],
+                ["_pin", "4321"],
+              ]),
+            ),
+          };
+          const html = yield* VaultDocument.pipe(Effect.provideService(Form.FormContext, lost));
+          expect(html).not.toContain("4321");
+          const main = yield* install(html);
+          const hydration = Dom.hydrate(main);
+          yield* Form.provideIssues(Option.some(lost))(
+            mount(VaultPage, noProps, hydration.host, main),
+          );
+          yield* render;
+          expect(yield* hydration.finish).toEqual({
+            mismatches: [],
+            unclaimed: 0,
+            resolvedAhead: 0,
+          });
+          const form = element(main, "#unlock", HTMLFormElement);
+          expect(element(form, 'input[name="$uncertain"]', HTMLInputElement).value).toBe("true");
+
+          // The pin was not written back, so the form does not decode and sends nothing.
+          yield* submit(form);
+          yield* Effect.sleep("50 millis");
+          expect(yield* Ref.get(wire.sends)).toEqual([]);
+
+          // Typed again, the submit still carries the id the lost post may have admitted.
+          element(form, "#pin", HTMLInputElement).value = "4321";
+          yield* submit(form);
+          const [sent] = yield* sendsAfter(wire, 1);
+          const first = Option.getOrThrow(Option.fromNullishOr(sent));
+          expect(String(first.commandId)).toBe(String(commandId));
+          expect(yield* Schema.decodeEffect(Vault.message)(first.payload)).toEqual({
+            _tag: "Unlock",
+            id: String(commandId),
+            label: "door",
+            _pin: "4321",
+          });
+        }),
+      ),
   );
 });

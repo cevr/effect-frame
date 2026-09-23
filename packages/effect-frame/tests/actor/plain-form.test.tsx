@@ -1,15 +1,18 @@
 /* oxlint-disable effect/noGlobals -- Bun.serve and fetch are this test's platform boundary: a real socket and a browser with no script. */
 import { HttpServer } from "effect-frame/actor";
-import { Form, ref } from "effect-frame/actor/client";
-import type { ActorTransport } from "effect-frame/actor/client";
-import { Effect, Layer, Option, Ref, Stream } from "effect";
+import { Form, contract, ref } from "effect-frame/actor/client";
+import type { ActorTransport, AnyContract } from "effect-frame/actor/client";
+import { Effect, Hash, Layer, Option, Ref, Schema, Stream } from "effect";
 import type { Context } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import type { Wire } from "../plain-form-fixture.js";
 import {
   Tasks,
   TasksDocument,
+  Vault,
+  VaultDocument,
   board,
+  vault as vaultKey,
   hiddenOf,
   hiddenValue,
   makeWire,
@@ -32,52 +35,59 @@ interface Served {
 
 const page = TasksDocument;
 
-const serve = Effect.gen(function* () {
-  const wire = yield* makeWire;
-  const context = yield* Layer.build(recordedTransport(wire));
-  const actors = yield* Effect.provideContext(
-    HttpServer.make({ principal: HttpServer.anonymous }),
-    context,
-  );
-  const forms = yield* Effect.provideContext(
-    HttpServer.form({
-      contracts: [Tasks],
-      principal: HttpServer.anonymous,
-      login: Option.none(),
-      render: () => page,
-    }),
-    context,
-  );
-  const run = Effect.runPromiseWith(context);
-  const server = yield* Effect.acquireRelease(
-    Effect.sync(() =>
-      Bun.serve({
-        port: 0,
-        fetch: (request) => {
-          const url = new URL(request.url);
-          if (url.pathname === `${actorPrefix}/form`) {
-            return run(forms(request));
-          }
-          if (url.pathname.startsWith(actorPrefix)) {
-            const stripped = new URL(request.url);
-            stripped.pathname = url.pathname.slice(actorPrefix.length);
-            return run(actors(new Request(stripped, request)));
-          }
-          return run(
-            Effect.map(
-              Effect.orDie(page),
-              (html) => new Response(html, { headers: { "content-type": "text/html" } }),
-            ),
-          );
-        },
+/** A server for `contracts`, whose form route and page draw `document`. */
+const serveWith = <E,>(
+  contracts: ReadonlyArray<AnyContract>,
+  document: Effect.Effect<string, E, ActorTransport>,
+) =>
+  Effect.gen(function* () {
+    const wire = yield* makeWire;
+    const context = yield* Layer.build(recordedTransport(wire));
+    const actors = yield* Effect.provideContext(
+      HttpServer.make({ principal: HttpServer.anonymous }),
+      context,
+    );
+    const forms = yield* Effect.provideContext(
+      HttpServer.form({
+        contracts,
+        principal: HttpServer.anonymous,
+        login: Option.none(),
+        render: () => document,
       }),
-    ),
-    (running) => Effect.promise(() => running.stop(true)),
-  );
-  const port = Option.getOrElse(Option.fromNullishOr(server.port), () => 0);
-  const served: Served = { url: `http://127.0.0.1:${String(port)}`, wire, context };
-  return served;
-});
+      context,
+    );
+    const run = Effect.runPromiseWith(context);
+    const server = yield* Effect.acquireRelease(
+      Effect.sync(() =>
+        Bun.serve({
+          port: 0,
+          fetch: (request) => {
+            const url = new URL(request.url);
+            if (url.pathname === `${actorPrefix}/form`) {
+              return run(forms(request));
+            }
+            if (url.pathname.startsWith(actorPrefix)) {
+              const stripped = new URL(request.url);
+              stripped.pathname = url.pathname.slice(actorPrefix.length);
+              return run(actors(new Request(stripped, request)));
+            }
+            return run(
+              Effect.map(
+                Effect.orDie(document),
+                (html) => new Response(html, { headers: { "content-type": "text/html" } }),
+              ),
+            );
+          },
+        }),
+      ),
+      (running) => Effect.promise(() => running.stop(true)),
+    );
+    const port = Option.getOrElse(Option.fromNullishOr(server.port), () => 0);
+    const served: Served = { url: `http://127.0.0.1:${String(port)}`, wire, context };
+    return served;
+  });
+
+const serve = serveWith([Tasks], page);
 
 interface Reply {
   readonly status: number;
@@ -146,6 +156,51 @@ const snapshot = (served: Served, revision = 0) =>
   );
 
 const sends = (served: Served) => Ref.get(served.wire.sends);
+
+/** The `Vault` actor's committed state at `revision`, read through the same host. */
+const vaultAt = (served: Served, revision: number) =>
+  Effect.scoped(
+    Effect.flatMap(ref(Vault, vaultKey), (vaults) =>
+      Stream.runHead(
+        Stream.filter(vaults.applied.changes, (applied) => applied.revision.value >= revision),
+      ),
+    ),
+  ).pipe(
+    Effect.flatMap(Effect.fromOption),
+    Effect.timeout("2 seconds"),
+    Effect.orDie,
+    Effect.provideContext(served.context),
+  );
+
+/**
+ * A form message whose codec is not repeatable: a decoding default draws
+ * a new value on every decode. #32 forbids this for a form; the route
+ * refuses it rather than send bytes a resubmission cannot repeat.
+ */
+const draws = { next: 0 };
+
+const Stamp = Schema.TaggedStruct("Stamp", {
+  title: Schema.String,
+  nonce: Schema.String.pipe(
+    Schema.withDecodingDefaultKey(
+      Effect.sync(() => {
+        draws.next += 1;
+        return String(draws.next);
+      }),
+    ),
+  ),
+});
+
+const Stamps = contract("Stamps", {
+  version: 1,
+  policy: "public",
+  key: Schema.Struct({ id: Schema.String }),
+  snapshot: Schema.Struct({ count: Schema.Finite }),
+  message: Schema.Union([Stamp]),
+});
+
+const sendAt = (served: Served, index: number) =>
+  Effect.map(sends(served), (seen) => Option.getOrThrow(Option.fromNullishOr(seen[index])));
 
 describe("plain-form posts", () => {
   it.scopedLive("a urlencoded post to /actors/form applies the message and answers 303", () =>
@@ -239,7 +294,7 @@ describe("plain-form posts", () => {
     }),
   );
 
-  it.scopedLive("the 504 re-render posts a byte-identical body and hits the stored receipt", () =>
+  it.scopedLive("the 504 re-render posts the same message and hits the stored receipt", () =>
     Effect.gen(function* () {
       const served = yield* serve;
       const html = yield* getPage(served);
@@ -254,11 +309,15 @@ describe("plain-form posts", () => {
       expect(hiddenValue(lost.body, "add", "$command")).toBe(posted);
       expect(hiddenValue(lost.body, "add", "id")).toBe(posted);
       const resubmit = fill(lost.body, [["title", "milk"]]);
-      expect(resubmit).toBe(body);
+      // The redraw adds only the `$uncertain` marker; every other field is byte-identical.
+      expect(hiddenValue(lost.body, "add", "$uncertain")).toBe("true");
+      expect(Form.toBody(Form.without(Form.fromBody(resubmit), ["$uncertain"]))).toBe(body);
 
       const retried = yield* post(served, resubmit);
 
       expect(retried.status).toBe(303);
+      // The route sent the same payload bytes both times: the receipt's hash and text match.
+      expect((yield* sendAt(served, 1)).payload).toBe((yield* sendAt(served, 0)).payload);
       const applied = yield* snapshot(served, 1);
       expect(applied.revision.value).toBe(1);
       expect(applied.state.tasks).toEqual([{ id: posted, title: "milk", done: false }]);
@@ -445,5 +504,112 @@ describe("plain-form posts", () => {
         { id: hiddenValue(refused.body, "tag", "id"), label: "home" },
       ]);
     }),
+  );
+  it.scopedLive("an equal-hash payload under a posted id answers 409 and applies nothing new", () =>
+    Effect.gen(function* () {
+      const served = yield* serve;
+      const html = yield* getPage(served);
+
+      const first = yield* post(served, fill(html, [["title", "00008t"]]));
+      expect(first.status).toBe(303);
+      yield* snapshot(served, 1);
+      const second = yield* post(served, fill(html, [["title", "0000fj"]]));
+
+      // The two payloads differ and share a hash, so only the text tells them apart.
+      const [a, b] = [yield* sendAt(served, 0), yield* sendAt(served, 1)];
+      expect(a.commandId).toBe(b.commandId);
+      expect(a.payload).not.toBe(b.payload);
+      expect(Hash.string(a.payload)).toBe(Hash.string(b.payload));
+      expect(second.status).toBe(409);
+      const applied = yield* snapshot(served, 1);
+      expect(applied.revision.value).toBe(1);
+      expect(applied.state.tasks.map((task) => task.title)).toEqual(["00008t"]);
+    }),
+  );
+
+  it.scopedLive("a form message that decodes to two payloads answers 500 and sends nothing", () =>
+    Effect.gen(function* () {
+      const served = yield* serveWith([Stamps], Effect.succeed("<p>page</p>"));
+      const body = Form.toBody(
+        Form.fromEntries([
+          ["$command", String(yield* Form.freshCommandId)],
+          ["$contract", "Stamps"],
+          ["$version", "1"],
+          ["$key", yield* Form.encodeKey(Stamps, { id: "a" })],
+          ["$return", "/"],
+          ["$form", "Stamp"],
+          ["_tag", "Stamp"],
+          ["title", "x"],
+        ]),
+      );
+
+      const reply = yield* post(served, body);
+
+      expect(reply.status).toBe(500);
+      expect(reply.body).toContain("does not decode repeatably");
+      expect(yield* sends(served)).toEqual([]);
+    }),
+  );
+
+  it.scopedLive(
+    "a 504 page resubmitted without its redacted pin keeps the id and admits nothing new",
+    () =>
+      Effect.gen(function* () {
+        const served = yield* serveWith([Vault], VaultDocument);
+        const html = yield* getPage(served);
+        const posted = hiddenValue(html, "unlock", "$command");
+        yield* Ref.set(served.wire.loseNextReply, true);
+
+        const lost = yield* post(
+          served,
+          fillForm(html, "unlock", [
+            ["label", "door"],
+            ["_pin", "4321"],
+          ]),
+        );
+
+        expect(lost.status).toBe(504);
+        expect(hiddenValue(lost.body, "unlock", "$command")).toBe(posted);
+        expect(hiddenValue(lost.body, "unlock", "$uncertain")).toBe("true");
+        // A redacted value is never written back, so the pin must be typed again.
+        expect(lost.body).not.toContain("4321");
+        yield* vaultAt(served, 1);
+
+        // Posted as redrawn: the pin is missing. The issue names it, and the id stays.
+        const missing = yield* post(served, fillForm(lost.body, "unlock", [["label", "door"]]));
+        expect(missing.status).toBe(200);
+        expect(missing.body).toContain('<li data-field="_pin">');
+        expect(hiddenValue(missing.body, "unlock", "$command")).toBe(posted);
+        expect(hiddenValue(missing.body, "unlock", "$uncertain")).toBe("true");
+        expect(yield* sends(served)).toHaveLength(1);
+
+        // The same pin typed again: the stored receipt, one application.
+        const retyped = yield* post(
+          served,
+          fillForm(missing.body, "unlock", [
+            ["label", "door"],
+            ["_pin", "4321"],
+          ]),
+        );
+        expect(retyped.status).toBe(303);
+
+        // Another pin under that id is a conflict, never a second application.
+        const other = yield* post(
+          served,
+          fillForm(missing.body, "unlock", [
+            ["label", "door"],
+            ["_pin", "9999"],
+          ]),
+        );
+        expect(other.status).toBe(409);
+        expect(hiddenValue(other.body, "unlock", "$command")).not.toBe(posted);
+        expect(hiddenValue(other.body, "unlock", "$uncertain")).toBe("");
+
+        const replies = yield* Ref.get(served.wire.replies);
+        expect(replies.map((reply) => reply.admitted)).toEqual([1, 1]);
+        const applied = yield* vaultAt(served, 1);
+        expect(applied.revision.value).toBe(1);
+        expect(applied.state.unlocks).toEqual(["door"]);
+      }),
   );
 });

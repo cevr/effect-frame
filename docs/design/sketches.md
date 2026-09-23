@@ -214,7 +214,7 @@ The store uses only the portable host operations: `get`, `put`, `delete`, `delet
 A committed command performs these steps:
 
 1. Decode the request and verify its principal.
-2. Append to the mailbox. Same ID with a different payload hash fails with `CommandConflict`. Same ID with the same payload returns the stored receipt.
+2. Append to the mailbox. Same ID with a different payload fails with `CommandConflict`, even when the two payload hashes are equal: the hash is only a fast refusal, and the store compares the payload text. Same ID with the same payload returns the stored receipt.
 3. Claim the next command in admission order.
 4. Check the behavior transition.
 5. Commit the next state, the command result, and the revision in one local transaction.

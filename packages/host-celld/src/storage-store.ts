@@ -62,6 +62,7 @@ const toCommitted = (row: SqlRow): Committed => ({
 /** A command row, whether or not it carries a receipt yet. */
 interface CommandRow {
   readonly admitted: number;
+  readonly payload: string;
   readonly payloadHash: number;
   readonly receipt: Option.Option<StoredReceipt>;
 }
@@ -72,6 +73,7 @@ interface CommandRow {
  */
 const toCommandRow = (row: SqlRow): CommandRow => ({
   admitted: number(row, "admitted"),
+  payload: text(row, "payload"),
   payloadHash: number(row, "payload_hash"),
   receipt: Option.map(Interop.numberColumn(row, "revision"), () => toReceipt(row)),
 });
@@ -81,7 +83,7 @@ const readCommand = (sql: SqlStorage, commandId: CommandId): Option.Option<Comma
     Interop.firstRow(
       Interop.exec(
         sql,
-        `SELECT admitted, command_id, payload_hash, revision, state
+        `SELECT admitted, command_id, payload, payload_hash, revision, state
            FROM commands WHERE command_id = ?`,
         commandId,
       ),
@@ -129,7 +131,12 @@ export const make = Effect.fn("HostCelld.storageStore")(function* (storage: Dura
   const append = Effect.fn("HostCelld.storageStore.append")(function* (input: AppendInput) {
     const existing = yield* Effect.sync(() => readCommand(storage.sql, input.commandId));
     if (Option.isSome(existing)) {
-      if (existing.value.payloadHash !== input.payloadHash) {
+      // The hash is only a fast refusal. Two payloads can share a hash, so
+      // equal hashes are confirmed on the stored text before a Duplicate.
+      if (
+        existing.value.payloadHash !== input.payloadHash ||
+        existing.value.payload !== input.payload
+      ) {
         return yield* CommandConflict.make({ commandId: input.commandId });
       }
       return {

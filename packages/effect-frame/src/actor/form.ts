@@ -49,6 +49,13 @@ export const frameworkFields = {
    * separately: a refusal redraws only the form that it names.
    */
   form: "$form",
+  /**
+   * Present only on a form redrawn after a lost reply (#21 §2): its
+   * `$command` may already be in a mailbox. A refusal of this post keeps
+   * that id, so the next post can reach the stored receipt and cannot apply
+   * the message a second time under a new id.
+   */
+  uncertain: "$uncertain",
 } satisfies Record<string, string>;
 
 /** A body the structural step refuses. A rendered form cannot produce one. */
@@ -447,9 +454,16 @@ export interface FormIssue {
 }
 
 /**
+ * Whether a redrawn form's `$command` may be in a mailbox. `Refused`: the
+ * command certainly did not reach one, and the id is fresh. `Uncertain`:
+ * it may have, and the id is the posted one.
+ */
+export type FormOutcome = "Refused" | "Uncertain";
+
+/**
  * What a refused post hands the page it re-renders. `commandId` is the id
  * the re-rendered form carries: fresh when the command certainly did not
- * reach the mailbox, the same when it may have.
+ * reach the mailbox, the same when it may have. `outcome` says which.
  */
 export interface FormIssues {
   readonly contract: string;
@@ -458,6 +472,8 @@ export interface FormIssues {
   /** The `$form` the refused post carried: which form on the page it was. */
   readonly form: string;
   readonly commandId: CommandId;
+  /** `Uncertain` draws `$uncertain` into the form, so its next refusal keeps the id. */
+  readonly outcome: FormOutcome;
   readonly issues: ReadonlyArray<FormIssue>;
   /** Every non-redacted posted value, for repopulation. Strings only. */
   readonly submitted: FormFields;
@@ -482,6 +498,7 @@ export const IssuesJson = Schema.fromJsonString(
     key: Schema.String,
     form: Schema.String,
     commandId: CommandId,
+    outcome: Schema.Literals(["Refused", "Uncertain"]),
     issues: Schema.Array(Schema.Struct({ field: Schema.String, message: Schema.String })),
     submitted: Schema.Array(Schema.Tuple([Schema.String, Schema.Array(Schema.String)])),
   }),

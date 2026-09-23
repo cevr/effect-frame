@@ -8,7 +8,7 @@ import type {
   SnapshotOf,
 } from "effect-frame/actor";
 import { CommandId as CommandIdSchema, Form, Generated, Wire } from "effect-frame/actor/client";
-import { Effect, Option, Predicate, Ref, Schema } from "effect";
+import { Effect, Option, Predicate, Ref, Schema, Semaphore } from "effect";
 import type { HostEvent } from "./host.js";
 import type { ElementNode, ElementProps, Node } from "./jsx-runtime.js";
 import type { PlainPost, Prepared } from "./view.js";
@@ -135,6 +135,17 @@ export const form = <C extends AnyContract, M extends Member<C>, const Typed ext
       onNone: (): ReadonlyArray<Form.FormIssue> => [],
       onSome: (found) => found.issues,
     });
+    // A form redrawn after a lost reply says so, so a refusal of its next
+    // post keeps the id that may already be in a mailbox.
+    const uncertain = Option.match(
+      Option.filter(context, (found) => found.outcome === "Uncertain"),
+      {
+        onNone: (): ReadonlyArray<readonly [string, string]> => [],
+        onSome: (): ReadonlyArray<readonly [string, string]> => [
+          [Form.frameworkFields.uncertain, "true"],
+        ],
+      },
+    );
 
     const post: PlainPost = {
       action: `${options.endpoint}${Wire.paths.form}`,
@@ -146,6 +157,7 @@ export const form = <C extends AnyContract, M extends Member<C>, const Typed ext
         [Form.frameworkFields.key, key],
         [Form.frameworkFields.returnTo, options.returnTo],
         [Form.frameworkFields.form, identity],
+        ...uncertain,
         ["_tag", member.tag],
         ...generated,
       ],
@@ -178,6 +190,12 @@ const scriptedSend = <C extends AnyContract, M, Typed extends string>(
 ) =>
   Effect.gen(function* () {
     const spent = yield* Ref.make<ReadonlySet<string>>(new Set());
+    // The DOM host forks each submit. One permit per form makes choosing an
+    // id, decoding, and spending it one step, so two submits in flight can
+    // never both take the rendered id: the second waits, sees it spent, and
+    // mints its own. A submit that does not decode releases the permit and
+    // leaves the id unspent for the next one.
+    const deciding = yield* Semaphore.make(1);
     const decodeTree = Schema.decodeUnknownEffect(options.contract.raw.message);
     const asMessage = Schema.decodeUnknownEffect(Schema.toType(options.contract.message));
     const onSend = Option.fromNullishOr(options.onSend);
@@ -197,14 +215,30 @@ const scriptedSend = <C extends AnyContract, M, Typed extends string>(
         return { commandId, fields: Form.withValues(fields, minted) };
       });
 
+    /**
+     * Choose the id, decode, and spend the id, under the form's one permit.
+     * An id is spent by a message that will be sent, not by a form that did
+     * not decode: the adopted id of a form redrawn after a lost reply may be
+     * in a mailbox, so the corrected submit must still carry it.
+     */
+    const prepare = (fields: Form.FormFields) =>
+      deciding.withPermit(
+        Effect.gen(function* () {
+          const identified = yield* identify(fields);
+          const nested = yield* Form.tree(Form.strip(identified.fields));
+          const decoded = yield* decodeTree(nested);
+          const message = yield* asMessage(decoded);
+          yield* Ref.update(spent, (used) => new Set([...used, identified.commandId]));
+          return { commandId: identified.commandId, message };
+        }),
+      );
+
     return (fields: Form.FormFields): Effect.Effect<void> =>
       Effect.gen(function* () {
-        const identified = yield* identify(fields);
-        yield* Ref.update(spent, (used) => new Set([...used, identified.commandId]));
-        const nested = yield* Form.tree(Form.strip(identified.fields));
-        const decoded = yield* decodeTree(nested);
-        const message = yield* asMessage(decoded);
-        const handle = yield* options.ref.send(message, { commandId: identified.commandId });
+        const prepared = yield* prepare(fields);
+        const handle = yield* options.ref.send(prepared.message, {
+          commandId: prepared.commandId,
+        });
         yield* Option.match(onSend, {
           onNone: () => Effect.void,
           onSome: (run) => Effect.asVoid(run(handle)),

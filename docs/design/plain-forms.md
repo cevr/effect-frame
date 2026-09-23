@@ -82,14 +82,15 @@ does all coercion, so a field name never carries a type.
 Names that start with `$` belong to the framework. The last value wins.
 `Form.strip` removes all of them before the message decodes.
 
-| Field       | Value                                                     |
-| ----------- | --------------------------------------------------------- |
-| `$command`  | The command id the render minted.                         |
-| `$contract` | The contract name.                                        |
-| `$version`  | The contract version.                                     |
-| `$key`      | The actor key, form-urlencoded (`Form.encodeKey`).        |
-| `$return`   | A root-relative path for the 303.                         |
-| `$form`     | The form's identity on the page. Default: the member tag. |
+| Field        | Value                                                                  |
+| ------------ | ---------------------------------------------------------------------- |
+| `$command`   | The command id the render minted.                                      |
+| `$contract`  | The contract name.                                                     |
+| `$version`   | The contract version.                                                  |
+| `$key`       | The actor key, form-urlencoded (`Form.encodeKey`).                     |
+| `$return`    | A root-relative path for the 303.                                      |
+| `$form`      | The form's identity on the page. Default: the member tag.              |
+| `$uncertain` | Only on a form redrawn after a lost reply. Its id may be in a mailbox. |
 
 A name with a segment that starts with `_` is redacted. It decodes, but a
 refused post never writes it back into the page.
@@ -113,22 +114,23 @@ passes is also a valid `Location` header, so the 303 cannot fail after the
 send. An encoded slash (`/%2f%2fhost`) is a path on this origin, and it is
 accepted.
 
-| Case                                                        | Answer                                    |
-| ----------------------------------------------------------- | ----------------------------------------- |
-| A multipart body, or a type that is not urlencoded          | 415, plain text                           |
-| `$return` is absent or leaves the origin                    | 400, plain text                           |
-| `$command`, `$version`, `$key`, or `$form` is bad or absent | 400, plain text                           |
-| `$contract` names no served contract                        | 404, plain text                           |
-| `$version` is not the contract's version                    | 409, plain text                           |
-| A structural failure (`FormMalformed`)                      | 400, plain text                           |
-| The message does not decode                                 | 200, the page with issues and a fresh id  |
-| `Admitted` or `Duplicate`                                   | 303 to `$return`                          |
-| `Unreachable` (the outcome is `Uncertain`)                  | 504, the page with the same id and values |
-| `CommandConflict`, `ContractMismatch`                       | 409, the page with a fresh id             |
-| `UnknownContract`                                           | 404, the page with a fresh id             |
-| `Unauthorized`, principal `Anonymous`, `login` is set       | 303 to `login?next=<$return>`             |
-| `Unauthorized`, any other case                              | 403, the page with a fresh id             |
-| `ActorStopped`                                              | 503, the page with a fresh id             |
+| Case                                                        | Answer                                                                                      |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| A multipart body, or a type that is not urlencoded          | 415, plain text                                                                             |
+| `$return` is absent or leaves the origin                    | 400, plain text                                                                             |
+| `$command`, `$version`, `$key`, or `$form` is bad or absent | 400, plain text                                                                             |
+| `$contract` names no served contract                        | 404, plain text                                                                             |
+| `$version` is not the contract's version                    | 409, plain text                                                                             |
+| A structural failure (`FormMalformed`)                      | 400, plain text                                                                             |
+| The message does not decode                                 | 200, the page with issues and a fresh id, or the same id when the post carries `$uncertain` |
+| The fields decode to two different payloads                 | 500, plain text, logged, nothing sent                                                       |
+| `Admitted` or `Duplicate`                                   | 303 to `$return`                                                                            |
+| `Unreachable` (the outcome is `Uncertain`)                  | 504, the page with the same id and values                                                   |
+| `CommandConflict`, `ContractMismatch`                       | 409, the page with a fresh id                                                               |
+| `UnknownContract`                                           | 404, the page with a fresh id                                                               |
+| `Unauthorized`, principal `Anonymous`, `login` is set       | 303 to `login?next=<$return>`                                                               |
+| `Unauthorized`, any other case                              | 403, the page with a fresh id                                                               |
+| `ActorStopped`                                              | 503, the page with a fresh id                                                               |
 
 `render(path)` draws the page for the posted `$return`. The route provides
 `FormContext` to it. A render failure is a 500, and it is logged.
@@ -219,7 +221,29 @@ const Compose = (props: { readonly notes: NotesRef }) =>
 - If the script dies after a scripted send, a native post of the same
   rendered id can answer 409 (`CommandConflict`) when the fields differ.
   With the same fields it is a `Duplicate`.
-- `Unreachable` is treated as `Uncertain`: 504, same id, same values.
+- `Unreachable` is treated as `Uncertain`: 504, same id, same values, and
+  `$uncertain` in the form. `FormIssues.outcome` is `Uncertain` for this
+  page and `Refused` for every other redraw. The hydrating host draws the
+  same marker from the same `FormIssues`, so hydration finds no mismatch.
+- A post that carries `$uncertain` and does not decode keeps its id and
+  the marker. Its id may be in a mailbox. A fresh id would let the
+  corrected post apply the message a second time under a new id, which
+  breaks the actor-model north star. Every other post that does not
+  decode gets a fresh id, as #21 §4 decided. The marker only chooses which
+  id the redraw carries. A forged marker keeps the poster's own id, which
+  the poster already controls, so it grants nothing.
+- The scripted binding spends an id when it sends, not when the form fails
+  to decode. So on a hydrated 504 page, a submit that does not decode sends
+  nothing, and the corrected submit still carries the adopted id.
+- The binding chooses the id, decodes, and spends the id under one
+  `Semaphore(1)` per form. The DOM host forks each submit, and a decode can
+  wait, so without it two valid submits could both take the rendered id,
+  and the second would post other bytes under it and meet
+  `CommandConflict`. With it, the second waits, finds the id spent, and
+  mints its own. The send runs after the permit is released. We chose the
+  semaphore over a `Ref` state machine (`Unspent` → `Deciding` → `Spent`):
+  it is one line, and the state machine would need a waiting rule for the
+  `Deciding` state, which the semaphore already is.
 - A scripted resend mints a fresh id. The first scripted send adopts the
   rendered id. Each later send from the same form, including a retry after
   a refusal on the client, mints a new id and new generated values. Only a
@@ -236,6 +260,68 @@ const Compose = (props: { readonly notes: NotesRef }) =>
   page, the binding's `commandId` on the client is the id it drew, not the
   markup's. On a refused page mounted through `Form.provideIssues`, it is
   the markup's.
+
+## One settlement mechanism
+
+A plain post and a scripted send settle a lost reply the same way (#29
+§5, #21 §5). These facts make it hold:
+
+1. The form route calls `transport.send` with the posted `$command` and the
+   JSON payload of the decoded message. `/send` calls the same host
+   `send`. The host admits a command id once. A later send of that id with
+   the same payload text is `Duplicate`, and it carries the stored
+   receipt. A different payload text is `CommandConflict`, even when the
+   two payload hashes are equal. The stores use the hash only as a fast
+   refusal and then compare the stored text. `Hash.string` gives
+   `{"title":"00008t"}` and `{"title":"0000fj"}` one hash, so a store that
+   trusted the hash would answer `Duplicate` to a different message.
+2. The route and the hydrated binding decode the same fields with the same
+   schemas, and they encode with `contract.message`. So one rendered form
+   gives one payload on both paths, **if the message codec is
+   repeatable**.
+3. An `Uncertain` outcome keeps the id on both paths. The route draws the
+   504 page with the same `$command` and with `$uncertain`. The binding's
+   first send adopts that id. The command owner retries a lost pass with
+   the same id and the same bytes.
+
+The changes stream settles nothing (#29 §1).
+
+### Preconditions
+
+- **A form message codec must be repeatable.** The same fields must decode
+  and encode to the same payload every time. A value that needs entropy or
+  a clock is minted at render as a generated field (#32), never at decode.
+  A decoding default that draws a new value on each decode breaks this.
+  The route enforces it: it decodes and encodes the posted fields a second
+  time, and when the two payloads differ it answers 500, logs the contract
+  name, and sends nothing. We chose this over a development-only check or a
+  conformance helper for apps, for three reasons. The package has no
+  development mode flag to hang a check on. A helper runs only when an app
+  remembers to call it. The cost is one more decode and encode of a small
+  body per plain post, which is trivial next to the durable append that
+  follows. The check is best effort: a codec that draws the same value
+  twice by chance passes it. It catches a counter, a clock read with
+  changing output, and random draws.
+- **A redacted field is typed again after a 504.** A field whose segment
+  starts with `_` is never written back into a page. If the message
+  requires it, the redrawn 504 form posted as it is does not decode. The
+  route answers 200 with an issue at that field. It keeps the same id and
+  `$uncertain`, and it sends nothing. When the user types the same value
+  again, the post reaches the stored receipt (303). When the user types a
+  different value, the store answers `CommandConflict` (409, a fresh id).
+  In no case is a second command admitted under that id with other bytes,
+  and the message is not applied twice.
+
+Decision: the proof is in the package, over one real socket. The browser
+with no script is `fetch`. The browser with its bundle is a happy-dom
+page that hydrates and sends through `HttpTransport`
+(`packages/effect-frame/tests/view/plain-retry.test.tsx`). The proof
+covers both orders: a plain post first, and a scripted send first. The
+preconditions are proven in `packages/effect-frame/tests/actor/plain-form.test.tsx`,
+`packages/effect-frame/tests/view/plain-form.test.tsx`, and the store
+conformance suite. A browser that runs its own script is not needed for
+this row. The race-with-hydration row in `apps/notes/tests/e2e.test.tsx`
+stays the app proof.
 
 ## Not built
 

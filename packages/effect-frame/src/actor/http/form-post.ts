@@ -4,7 +4,7 @@ import type { Principal } from "../principal.js";
 import { CurrentPrincipal } from "../principal.js";
 import { freshCommandId } from "../command-id.js";
 import type { Address, AnyContract } from "../contract.js";
-import type { FormFields, FormIssue, FormIssues, FormMalformed } from "../form.js";
+import type { FormFields, FormIssue, FormIssues, FormMalformed, FormTree } from "../form.js";
 import {
   FormContext,
   decodeKey,
@@ -84,6 +84,8 @@ interface Posted {
   readonly key: string;
   readonly form: string;
   readonly returnTo: string;
+  /** The form was redrawn after a lost reply: its id may be in a mailbox. */
+  readonly uncertain: boolean;
 }
 
 const refused = (status: number, reason: string): Reply => ({ _tag: "Refused", status, reason });
@@ -171,7 +173,8 @@ const readFramework = (
     }
     const key = yield* required(fields, frameworkFields.key);
     const form = yield* required(fields, frameworkFields.form);
-    return { fields, contract, commandId, key, form, returnTo };
+    const uncertain = Option.isSome(last(fields, frameworkFields.uncertain));
+    return { fields, contract, commandId, key, form, returnTo, uncertain };
   });
 
 /** The generated fields of every member: dropped from the values a fresh id redraws. */
@@ -203,7 +206,7 @@ const page = (
         _tag: "Page",
         path: posted.returnTo,
         status,
-        issues: { ...base, commandId: posted.commandId, submitted: values },
+        issues: { ...base, commandId: posted.commandId, outcome: "Uncertain", submitted: values },
       } satisfies Reply;
     }
     const commandId = yield* freshCommandId;
@@ -211,8 +214,60 @@ const page = (
       _tag: "Page",
       path: posted.returnTo,
       status,
-      issues: { ...base, commandId, submitted: without(values, generatedNames(posted.contract)) },
+      issues: {
+        ...base,
+        commandId,
+        outcome: "Refused",
+        submitted: without(values, generatedNames(posted.contract)),
+      },
     } satisfies Reply;
+  });
+
+/**
+ * The id a message that does not decode redraws with. A post from a form
+ * redrawn after a lost reply keeps its id: that id may be in a mailbox, and
+ * a fresh one would let the corrected post apply the message a second time.
+ * A redacted field is never written back, so a required one is the common
+ * way to reach this. Any other refused decode mints a fresh id (#21 §4).
+ */
+const decodeRetry = (posted: Posted): "fresh" | "same" => {
+  if (posted.uncertain) {
+    return "same";
+  }
+  return "fresh";
+};
+
+/**
+ * The route and the hydrated binding send the same command id, so they
+ * must send the same bytes, or the store answers `CommandConflict`. That
+ * holds only when the message codec is repeatable: the same fields decode
+ * and encode to the same payload every time. A value that needs entropy or
+ * a clock is minted at render as a generated field (#32), never at decode.
+ * The route decodes a second time and compares, and refuses the post
+ * before any send when the two payloads differ. The cost is one decode and
+ * one encode of a small body per plain post.
+ */
+const encodeOnce = (
+  posted: Posted,
+  nested: { readonly [key: string]: FormTree },
+  payload: string,
+): Effect.Effect<void, Reply> =>
+  Effect.gen(function* () {
+    const again = yield* Effect.orDie(
+      Effect.flatMap(
+        Schema.decodeUnknownEffect(posted.contract.raw.message)(nested),
+        Schema.encodeUnknownEffect(posted.contract.message),
+      ),
+    );
+    if (again === payload) {
+      return;
+    }
+    yield* Effect.logError(
+      `HttpServer.form: ${posted.contract.name} does not decode repeatably; the same fields gave two payloads. Mint the value at render with Generated, not at decode.`,
+    );
+    return yield* Effect.fail(
+      refused(500, `${posted.contract.name}: the form message does not decode repeatably`),
+    );
   });
 
 const failureIssue = (error: TransportSendError): FormIssue => ({
@@ -282,11 +337,12 @@ const post = (
       Schema.decodeUnknownEffect(posted.contract.raw.message)(nested),
     );
     if (decoded._tag === "Failure") {
-      return yield* page(posted, 200, issuesOf(decoded.failure), "fresh");
+      return yield* page(posted, 200, issuesOf(decoded.failure), decodeRetry(posted));
     }
     const payload = yield* Effect.orDie(
       Schema.encodeUnknownEffect(posted.contract.message)(decoded.success),
     );
+    yield* encodeOnce(posted, nested, payload);
     const address: Address = {
       contract: posted.contract.name,
       version: posted.contract.version,

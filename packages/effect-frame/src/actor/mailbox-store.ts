@@ -52,7 +52,11 @@ export type Appended = Admitted | Duplicate;
 export class MailboxStore extends Context.Service<
   MailboxStore,
   {
-    /** Admit a command. Same ID and payload returns `Duplicate`. Same ID and a different payload fails. */
+    /**
+     * Admit a command. Same ID and payload returns `Duplicate`. Same ID and a
+     * different payload fails, even when the two payload hashes are equal:
+     * the hash may refuse early, but only equal payload text is a duplicate.
+     */
     readonly append: (input: AppendInput) => Effect.Effect<Appended, CommandConflict>;
     /** The oldest command without a receipt. */
     readonly next: Effect.Effect<Option.Option<PendingCommand>>;
@@ -89,7 +93,12 @@ const appendToLog = (log: Log, input: AppendInput): readonly [AppendOutcome, Log
   );
   return Option.match(existing, {
     onSome: (entry): readonly [AppendOutcome, Log] => {
-      if (entry.command.payloadHash !== input.payloadHash) {
+      // The hash is only a fast refusal. Two payloads can share a hash, so
+      // equal hashes are confirmed on the stored text before a Duplicate.
+      if (
+        entry.command.payloadHash !== input.payloadHash ||
+        entry.command.payload !== input.payload
+      ) {
         return [CommandConflict.make({ commandId: input.commandId }), log];
       }
       return [{ _tag: "Duplicate", admitted: entry.command.admitted, receipt: entry.receipt }, log];

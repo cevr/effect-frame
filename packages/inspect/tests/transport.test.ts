@@ -328,22 +328,25 @@ describe.skipIf(!H.hasBrowser)("live Frame inspection over a browser-originated 
       });
       await blocked.done;
 
-      let incarnation = first.root.incarnation;
-      for (let index = 0; index < 10; index += 1) {
+      // The gateway lists an incarnation as soon as its side of the upgrade
+      // completes, which can be before the page sees its socket open. A read
+      // answered over the new incarnation proves both ends are open.
+      const reconnected = async (after: number): Promise<number> => {
         await H.waitUntil(
-          async () => (await roots(r)).roots.some((root) => root.incarnation > incarnation),
+          async () => (await roots(r)).roots.some((root) => root.incarnation > after),
           "reconnect",
         );
         const read = inspection((await inspect(r, rootId)).body);
-        expect(read.root.incarnation).toBeGreaterThan(incarnation);
+        expect(read.root.incarnation).toBeGreaterThan(after);
         expect(recordIds(read.snapshot)).toEqual(baselineRecords);
-        incarnation = read.root.incarnation;
+        return read.root.incarnation;
+      };
+      let incarnation = first.root.incarnation;
+      for (let index = 0; index < 10; index += 1) {
+        incarnation = await reconnected(incarnation);
         await Effect.runPromise(r.gateway.gateway.disconnectRoot(rootId));
       }
-      await H.waitUntil(
-        async () => (await roots(r)).roots.some((root) => root.incarnation > incarnation),
-        "last reconnect",
-      );
+      await reconnected(incarnation);
 
       const stats = await H.stats(r.gateway);
       expect(stats.roots).toBe(1);

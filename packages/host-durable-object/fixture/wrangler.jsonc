@@ -1,5 +1,5 @@
 {
-  "name": "effect-frame-host-celld-proof",
+  "name": "effect-frame-host-durable-object-proof",
   "main": "worker.js",
   "compatibility_date": "2026-01-01",
   "no_bundle": true,

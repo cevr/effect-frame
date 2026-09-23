@@ -91,8 +91,8 @@
         "@opentui/core",
       ],
     },
-    "packages/host-celld": {
-      "name": "@effect-frame/host-celld",
+    "packages/host-durable-object": {
+      "name": "@effect-frame/host-durable-object",
       "version": "0.0.0",
       "dependencies": {
         "effect-frame": "workspace:*",
@@ -193,7 +193,7 @@
 
     "@effect-frame/example-notes": ["@effect-frame/example-notes@workspace:apps/notes"],
 
-    "@effect-frame/host-celld": ["@effect-frame/host-celld@workspace:packages/host-celld"],
+    "@effect-frame/host-durable-object": ["@effect-frame/host-durable-object@workspace:packages/host-durable-object"],
 
     "@effect-frame/inspect": ["@effect-frame/inspect@workspace:packages/inspect"],
 

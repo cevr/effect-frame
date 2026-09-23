@@ -109,7 +109,7 @@
   },
   "overrides": [
     {
-      "files": ["packages/host-celld/tests/sqlite-storage.ts"],
+      "files": ["packages/host-durable-object/tests/sqlite-storage.ts"],
       "rules": {
         "effect/noAsyncFunction": "off",
         "effect/noNewPromise": "off",
@@ -119,7 +119,7 @@
       }
     },
     {
-      "files": ["packages/host-celld/fixture-contract/index.ts"],
+      "files": ["packages/host-durable-object/fixture-contract/index.ts"],
       "rules": {
         "effect/noAsyncFunction": "off",
         "effect/noNullish": "off",
@@ -127,7 +127,7 @@
       }
     },
     {
-      "files": ["packages/host-celld/fixture/index.ts"],
+      "files": ["packages/host-durable-object/fixture/index.ts"],
       "rules": {
         "effect/noAsyncFunction": "off",
         "effect/noNullish": "off",
@@ -135,14 +135,14 @@
       }
     },
     {
-      "files": ["packages/host-celld/src/durable-object.ts"],
+      "files": ["packages/host-durable-object/src/durable-object.ts"],
       "rules": {
         "effect/noAsyncFunction": "off",
         "effect/noUnknownParameters": "off"
       }
     },
     {
-      "files": ["packages/host-celld/src/frame-host.ts"],
+      "files": ["packages/host-durable-object/src/frame-host.ts"],
       "rules": {
         "effect/noAsyncFunction": "off",
         "effect/noGlobals": "off",
@@ -150,7 +150,7 @@
       }
     },
     {
-      "files": ["packages/host-celld/src/interop.ts"],
+      "files": ["packages/host-durable-object/src/interop.ts"],
       "rules": {
         "effect/noAsyncFunction": "off",
         "effect/noNewPromise": "off",
@@ -158,27 +158,27 @@
       }
     },
     {
-      "files": ["packages/host-celld/src/storage.ts"],
+      "files": ["packages/host-durable-object/src/storage.ts"],
       "rules": {
         "effect/noUnsafeDictionaryType": "off"
       }
     },
     {
-      "files": ["packages/host-celld/tests/storage-store.test.ts"],
+      "files": ["packages/host-durable-object/tests/storage-store.test.ts"],
       "rules": {
         "effect/noAsyncFunction": "off",
         "effect/noNewPromise": "off"
       }
     },
     {
-      "files": ["packages/host-celld/tests/frame-host.test.ts"],
+      "files": ["packages/host-durable-object/tests/frame-host.test.ts"],
       "rules": {
         "effect/noGlobals": "off",
         "effect/noUnknownParameters": "off"
       }
     },
     {
-      "files": ["packages/host-celld/scripts/contract-proof.ts"],
+      "files": ["packages/host-durable-object/scripts/contract-proof.ts"],
       "rules": {
         "effect/noAsyncFunction": "off",
         "effect/noGlobals": "off",
@@ -188,7 +188,7 @@
       }
     },
     {
-      "files": ["packages/host-celld/scripts/crash-harness.ts"],
+      "files": ["packages/host-durable-object/scripts/crash-harness.ts"],
       "rules": {
         "effect/noAs": "off",
         "effect/noAsyncFunction": "off",
@@ -207,7 +207,7 @@
       }
     },
     {
-      "files": ["packages/host-celld/scripts/celld-process.ts"],
+      "files": ["packages/host-durable-object/scripts/celld-process.ts"],
       "rules": {
         "effect/noAsyncFunction": "off",
         "effect/noGlobals": "off",
@@ -278,9 +278,9 @@
     "**/node_modules/**",
     "**/*.d.ts",
     "**/bin/**",
-    "packages/host-celld/fixture/worker.js",
+    "packages/host-durable-object/fixture/worker.js",
     "**/.proof/**",
-    "packages/host-celld/fixture-contract/worker.js",
+    "packages/host-durable-object/fixture-contract/worker.js",
     "tooling/dom-bench/.generated/**",
     "tooling/dom-bench/.generated-debug/**",
     "tooling/dom-bench/.generated-debug-o/**",

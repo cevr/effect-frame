@@ -135,7 +135,7 @@ Executed as source and environment checks: source reads, Git commit and tag chec
 
 ### Executed against the running runtime
 
-The `@effect-frame/host-celld` package now runs these checks. The receipt for every row below is `packages/host-celld/scripts/crash-harness.ts`. Run it with `bun run proof:celld` in `packages/host-celld`. It is not in the default gate: it needs the binary and takes about 30 seconds.
+The `@effect-frame/host-durable-object` package now runs these checks. The receipt for every row below is `packages/host-durable-object/scripts/crash-harness.ts`. Run it with `bun run proof:celld` in `packages/host-durable-object`. It is not in the default gate: it needs the binary and takes about 30 seconds.
 
 | Check                           | Result                                                                                                                  |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
@@ -158,17 +158,17 @@ The `@effect-frame/host-celld` package now runs these checks. The receipt for ev
 | c   | Concurrent duplicate commands, different payload | The same ID with a different payload returns `CommandConflict` and leaves the committed state alone.                     |
 | d   | Order of several admitted commands               | Three quick sends each apply once. The committed revision reaches 3 and the mailbox drains.                              |
 
-All ten assertions across these four rows passed. The store also passes the shared `MailboxStore` conformance suite over an in-memory SQLite fake, in `packages/host-celld/tests/storage-store.test.ts`.
+All ten assertions across these four rows passed. The store also passes the shared `MailboxStore` conformance suite over an in-memory SQLite fake, in `packages/host-durable-object/tests/storage-store.test.ts`.
 
 ### Generic host proof
 
 Rows a to d use a hand-written counter Durable Object. They prove the store, not the framework wire. The generic host proof replaces that fixture with the shipped one.
 
-`packages/host-celld/src/frame-host.ts` exports `defineFrameHost`. It builds a Durable Object class from a list of `AnyImplementation` values. One object holds one actor instance, because the worker routes one address to one object. The class serves the generic actor wire and nothing else: `POST /send`, `POST /call`, `POST /snapshot`, and `GET /changes`. The client is the shipped `HttpTransport` and `ref`. No proof code knows the host is a Durable Object.
+`packages/host-durable-object/src/frame-host.ts` exports `defineFrameHost`. It builds a Durable Object class from a list of `AnyImplementation` values. One object holds one actor instance, because the worker routes one address to one object. The class serves the generic actor wire and nothing else: `POST /send`, `POST /call`, `POST /snapshot`, and `GET /changes`. The client is the shipped `HttpTransport` and `ref`. No proof code knows the host is a Durable Object.
 
-The fixture is `packages/host-celld/fixture-contract/`. Its worker routes `/actors/:contract/:version/:key/<verb>` to the object named `contract@version/key` and rewrites the inner URL to the bare verb. It hosts two contracts. `Counter` is a reducer. `Upload` is a `Behavior.machine` whose `Uploading` state carries a `.task` that sleeps for a duration the state holds, so a kill during the sleep is a kill during machine work.
+The fixture is `packages/host-durable-object/fixture-contract/`. Its worker routes `/actors/:contract/:version/:key/<verb>` to the object named `contract@version/key` and rewrites the inner URL to the bare verb. It hosts two contracts. `Counter` is a reducer. `Upload` is a `Behavior.machine` whose `Uploading` state carries a `.task` that sleeps for a duration the state holds, so a kill during the sleep is a kill during machine work.
 
-The receipt for every row below is `packages/host-celld/scripts/contract-proof.ts`. Run it with `bun run proof:contract` in `packages/host-celld`. It is not in the default gate, like `proof:celld`. Both proofs share process control in `packages/host-celld/scripts/celld-process.ts`.
+The receipt for every row below is `packages/host-durable-object/scripts/contract-proof.ts`. Run it with `bun run proof:contract` in `packages/host-durable-object`. It is not in the default gate, like `proof:celld`. Both proofs share process control in `packages/host-durable-object/scripts/celld-process.ts`.
 
 | Row | Kill point or test                         | Result                                                                                                                                                 |
 | --- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |

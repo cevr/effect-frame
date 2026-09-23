@@ -79,7 +79,7 @@ const GuardedLive = implementTransparent(
 
 /** The members this object admits. Only the object's own layer provides it. */
 class Members extends Context.Service<Members, ReadonlySet<string>>()(
-  "@effect-frame/host-celld/tests/frame-host.test/Members",
+  "@effect-frame/host-durable-object/tests/frame-host.test/Members",
 ) {}
 
 /**

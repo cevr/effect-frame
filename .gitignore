@@ -9,5 +9,5 @@ dist/
 .DS_Store
 .tools/
 .proof/
-packages/host-celld/fixture/worker.js
-packages/host-celld/fixture-contract/worker.js
+packages/host-durable-object/fixture/worker.js
+packages/host-durable-object/fixture-contract/worker.js

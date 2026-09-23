@@ -12,16 +12,16 @@ All commits referenced in this repository's design notes live on the local
 
 ## Package split
 
-| Package                    | Entry           | Ships to | Holds                                                                                                                                      |
-| -------------------------- | --------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `effect-frame/actor`       | `.`             | server   | everything below plus `durable`, `MailboxStore`, `implement`, `ActorHost`, `HttpServer`                                                    |
-| `effect-frame/actor`       | `./client`      | browser  | vocabulary, `contract`, `resumeCodec`, local `spawn` and `Behavior`, remote `ref`, `ActorTransport`, `HttpTransport`                       |
-| `effect-frame/actor`       | `./testing`     | tests    | the `MailboxStore` conformance suite as one Effect                                                                                         |
-| `effect-frame/view`        | `.`             | both     | `View` (a function), `View.bind`, `View.event`, `mount`, `render`, `For`, `Show`, `Dom` (incl. `hydrate`), `Html` (incl. `renderToString`) |
-| `effect-frame/view`        | `./jsx-runtime` | both     | the JSX factory the compiler targets                                                                                                       |
-| `effect-frame/view`        | `./opentui`     | terminal | the OpenTUI host                                                                                                                           |
-| `@effect-frame/host-celld` | `.`             | celld    | `StorageStore` over Durable Object SQL, the Durable Object classes, the interop seam                                                       |
-| `apps/notes`               | app             | example  | one contract, a Bun server with server render and the HTTP transport, a hydrated browser client, a terminal client                         |
+| Package                             | Entry           | Ships to | Holds                                                                                                                                      |
+| ----------------------------------- | --------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `effect-frame/actor`                | `.`             | server   | everything below plus `durable`, `MailboxStore`, `implement`, `ActorHost`, `HttpServer`                                                    |
+| `effect-frame/actor`                | `./client`      | browser  | vocabulary, `contract`, `resumeCodec`, local `spawn` and `Behavior`, remote `ref`, `ActorTransport`, `HttpTransport`                       |
+| `effect-frame/actor`                | `./testing`     | tests    | the `MailboxStore` conformance suite as one Effect                                                                                         |
+| `effect-frame/view`                 | `.`             | both     | `View` (a function), `View.bind`, `View.event`, `mount`, `render`, `For`, `Show`, `Dom` (incl. `hydrate`), `Html` (incl. `renderToString`) |
+| `effect-frame/view`                 | `./jsx-runtime` | both     | the JSX factory the compiler targets                                                                                                       |
+| `effect-frame/view`                 | `./opentui`     | terminal | the OpenTUI host                                                                                                                           |
+| `@effect-frame/host-durable-object` | `.`             | celld    | `StorageStore` over Durable Object SQL, the Durable Object classes, the interop seam                                                       |
+| `apps/notes`                        | app             | example  | one contract, a Bun server with server render and the HTTP transport, a hydrated browser client, a terminal client                         |
 
 The rule behind the split: a module a browser may load never imports a store, a
 host, or an implementation. `packages/actor/tests/boundary.test.ts` bundles the
@@ -37,13 +37,13 @@ store) or fold two existing call sites (for a helper) before it exists.
 One toolchain: Bun 1.4, TypeScript 7 with the Effect language service patch,
 oxlint with `oxlint-plugin-effect`, oxfmt, turbo, lefthook.
 
-| Loop             | Command                                                               | What runs                                                                                                                                                       |
-| ---------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| gate             | `bun run gate`                                                        | typecheck, lint, format check, and build in parallel; then every package's tests. Pre-commit runs it.                                                           |
-| one package      | `bun test tests/` in the package                                      | that package's tests; browser tests use happy-dom, terminal tests use `@opentui/core/testing`                                                                   |
-| server + browser | `bun run dev` in `apps/notes`                                         | `Bun.serve` renders the page, serves the HTTP transport, and bundles the client with `Bun.build` at start                                                       |
-| terminal         | `bun run terminal` in `apps/notes`                                    | the OpenTUI client against a running server URL                                                                                                                 |
-| celld            | `bun run fixture` then `bun run proof:celld` in `packages/host-celld` | `bun build --target browser --format esm` produces the worker; `celld dev --no-watch` serves it with `no_bundle: true`; the harness kills and restarts the node |
+| Loop             | Command                                                                        | What runs                                                                                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| gate             | `bun run gate`                                                                 | typecheck, lint, format check, and build in parallel; then every package's tests. Pre-commit runs it.                                                           |
+| one package      | `bun test tests/` in the package                                               | that package's tests; browser tests use happy-dom, terminal tests use `@opentui/core/testing`                                                                   |
+| server + browser | `bun run dev` in `apps/notes`                                                  | `Bun.serve` renders the page, serves the HTTP transport, and bundles the client with `Bun.build` at start                                                       |
+| terminal         | `bun run terminal` in `apps/notes`                                             | the OpenTUI client against a running server URL                                                                                                                 |
+| celld            | `bun run fixture` then `bun run proof:celld` in `packages/host-durable-object` | `bun build --target browser --format esm` produces the worker; `celld dev --no-watch` serves it with `no_bundle: true`; the harness kills and restarts the node |
 
 Browser bundles come from `bun build --target browser` with `effect` and
 `effect-machine` external for library packages and inlined for apps. celld

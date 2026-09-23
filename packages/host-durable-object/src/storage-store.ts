@@ -121,14 +121,16 @@ const writeCommitted = (sql: SqlStorage, revision: number, state: string): void 
  * request. `commit` writes the receipt and the new committed revision in one
  * transaction, so no observer sees a receipt without its state.
  */
-export const make = Effect.fn("HostCelld.storageStore")(function* (storage: DurableStorage) {
+export const make = Effect.fn("HostDurableObject.storageStore")(function* (
+  storage: DurableStorage,
+) {
   yield* Effect.forEach(schema, (statement) =>
     Effect.sync(() => {
       Interop.exec(storage.sql, statement);
     }),
   );
 
-  const append = Effect.fn("HostCelld.storageStore.append")(function* (input: AppendInput) {
+  const append = Effect.fn("HostDurableObject.storageStore.append")(function* (input: AppendInput) {
     const existing = yield* Effect.sync(() => readCommand(storage.sql, input.commandId));
     if (Option.isSome(existing)) {
       // The hash is only a fast refusal. Two payloads can share a hash, so
@@ -169,7 +171,7 @@ export const make = Effect.fn("HostCelld.storageStore")(function* (storage: Dura
     ),
   );
 
-  const commit = Effect.fn("HostCelld.storageStore.commit")(function* (
+  const commit = Effect.fn("HostDurableObject.storageStore.commit")(function* (
     commandId: CommandId,
     state: string,
   ) {
@@ -202,7 +204,7 @@ export const make = Effect.fn("HostCelld.storageStore")(function* (storage: Dura
 
   const latest = Effect.sync(() => readCommitted(storage.sql));
 
-  const advance = Effect.fn("HostCelld.storageStore.advance")(function* (state: string) {
+  const advance = Effect.fn("HostDurableObject.storageStore.advance")(function* (state: string) {
     const revision = yield* Interop.transact(storage, (txn) => writeAdvance(txn.sql, state));
     return { revision, state } satisfies Committed;
   });

@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "bun build --conditions=source src/client.tsx --target browser --format esm --outdir dist",
+    "build": "bun run build:client && bun run prerender",
+    "build:client": "bun build --conditions=source src/client.tsx --target browser --format esm --outdir dist",
     "test": "bun test --conditions=source tests/",
     "dev": "bun run --conditions=source src/server.ts",
     "prerender": "bun run --conditions=source src/prerender.server.ts",
-    "start": "bun run prerender && bun run --conditions=source src/server.ts"
+    "start": "bun run build && bun run --conditions=source src/server.ts"
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",

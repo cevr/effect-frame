@@ -13,7 +13,7 @@
     "lint:fix": "oxlint --fix",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "build": "turbo run build",
+    "build": "turbo run build --filter=!@effect-frame/example-blog && turbo run build:client",
     "test": "turbo run test",
     "boundary": "bun run --cwd tooling/checks boundary",
     "bench": "bun run --cwd tooling/dom-bench bench",

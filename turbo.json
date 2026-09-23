@@ -27,6 +27,17 @@
       ],
       "outputs": ["dist/**"]
     },
+    "build:client": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "src/**/*.ts",
+        "src/**/*.tsx",
+        "tsconfig.json",
+        "../../tsconfig.json",
+        "package.json"
+      ],
+      "outputs": ["dist/**"]
+    },
     "test": {
       "inputs": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "tests/**/*.tsx", "package.json"],
       "outputs": [],

@@ -25,9 +25,11 @@ page reads, so the build reads it once. The two unmounted trees live in
 The build (`src/prerender.server.ts`) runs `Prerender.build` over the real
 host as `Anonymous`, writes `dist/prerender/generations/<id>/<href>/index.html`,
 `client.js` and `manifest.json` into staging, and publishes by renaming the
-generation and then `current.json`. `bun run prerender` runs it; the app's
-`build` script bundles the client only, because the gate runs `build`
-(#23 §2.6). The server (`src/server.ts`) loads the published generation at
+generation and then `current.json`. The app's `build` script is the deploy
+build: `build:client`, then `prerender` (#38). The repository gate runs
+`turbo run build` for every other package and `build:client` for the Blog,
+so it never reads content (#23 §2.1). `tests/deploy-build.test.ts` runs
+`bun run build` as a process and reads the page tree it published. The server (`src/server.ts`) loads the published generation at
 start and puts `Prerender.serve` in front of the router.
 
 ## Rows, tests and mutations
@@ -91,9 +93,14 @@ The two framework changes this ticket made carry their own red-on-old tests:
    and the page draws them as nodes.
 4. **The hearts snapshot keeps the ids.** `{ hearts, ids }`: "one heart per
    click" is then observable in the store, not only as a count.
-5. **The build is not in the gate.** `build` bundles the client;
-   `prerender` builds the pages; `start` runs `prerender` then the server
-   (#23 §2.6: the gate never reads content).
+5. **The deploy build prerenders; the gate does not.** `build` is
+   `build:client` and then `prerender`; `start` runs `build` and then the
+   server. The root `build` runs `turbo run build` without the Blog, then
+   `turbo run build:client`, so the gate compiles the Blog's client and
+   never reads its posts (#23 §2.1). The Blog's `turbo.json` turns caching
+   off for its `build`, whose output depends on content turbo does not see.
+   Counsel round 1 (B2) found the first version, where `build` bundled the
+   client only, so a deploy that ran the build step published no pages.
 6. **The output is the package's layout, not a flat tree.** #23 wrote
    `dist/prerender/<href>/index.html` with `manifest.json` written to a temp
    dir and renamed. The released build (`prerender.md` decisions 10–13)

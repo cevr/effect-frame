@@ -1,5 +1,26 @@
 # effect-frame
 
+## 0.20.1
+
+### Patch Changes
+
+- [`511d546`](https://github.com/cevr/effect-frame/commit/511d546af5b6104d9a9d7ffcb9e028f919a3b7e6) - A server drawing shows every value its seed carries ([#22](https://github.com/cevr/effect-frame/issues/22)). An `AwaitAll` document, a streamed shell, and an `SSR` document could draw a value older than the seed, for example "searching…" from a `followQuery` view with no `Loading` boundary while the seed carried the results. The client then drew the results, and hydration did not agree.
+
+  - A source's `get` is its value now. `followQuery`, a route's query binding, `ready`, `readyWithStale`, `orErrored` and a readiness scope read their upstream in `get` and do not return a copy that a fiber moves.
+  - The HTML host reads its records, brings every binding to its source's current value, and reads the records again until the two reads agree. A new optional `Host` capability, `sourceBound`, tells a host of each source the runtime binds.
+
+- [`511d546`](https://github.com/cevr/effect-frame/commit/511d546af5b6104d9a9d7ffcb9e028f919a3b7e6) - Back and Forward restore the entry's saved scroll position under `NavigationBehavior.Preserve` with `browserNavigation`, as they do with `browserLocation` ([#31](https://github.com/cevr/effect-frame/issues/31)). `Preserve` keeps a push or replace where the page is; a traversal returns to where the entry was. Focus under `Preserve` still does not move.
+
+- [`ad93c5b`](https://github.com/cevr/effect-frame/commit/ad93c5bd880cbe5c005120977884a986e4a47e38) Thanks [@cevr](https://github.com/cevr)! - A server render whose drawing and seed still disagree at the time limit no longer writes a document. Before, `AwaitAll`, the streamed shell and `SSR` wrote the last read, and a query that settled between the drawing's catch-up and that read put a newer value in the seed than in the HTML, so the page did not hydrate. Now `Html.renderAwaitAll` and `Html.renderToStream` fail with the new `Html.RecordsUnsettled`, and `renderDocument` fails with `DocumentTimedOut { phase: "agree" }` (the prerender build: `PrerenderTimedOut { phase: "agree" }`), so the caller answers another way, for example with a client-only page. A caller that matches `phase` exhaustively has a new case to handle.
+
+- [`5efe89b`](https://github.com/cevr/effect-frame/commit/5efe89bb2d120fd520c3afe85625ded9976d20c0) Thanks [@cevr](https://github.com/cevr)! - A read that a document's seed calls for (a value the server showed stale or baked at build time, a failure that is not final, `StreamEnded`) now starts when the client runs `Resumed.hydrated`, not when the seed lands. Until then the entry shows what the server drew, so a reply that comes before the client's first drawing no longer draws a newer value against the server's markup. Run `resumed.hydrated` after `hydration.finish`, as the README shows: a client that never runs it never reads those keys again.
+
+- [`652b8b4`](https://github.com/cevr/effect-frame/commit/652b8b4d6488af953bfa9d58ab8bc4a877ef6fd8) - Review round 1 of the seed fix ([#22](https://github.com/cevr/effect-frame/issues/22)):
+
+  - `followQuery`, a route's query binding, `ready` and `readyWithStale` keep their state in one place and move it by one step over the upstream now. A read never runs ahead of `changes`, a late delivery never undoes a newer value, the value shown last stays stale while the next key loads, and an equal value is not emitted twice.
+  - A patch and a seed carry `stale: true` when the server showed the value stale, and the client seeds it stale, so a view that draws the flag hydrates with no mismatch.
+  - A server render that brings its drawing to the seed stops at the document's limit, in `AwaitAll`, the streamed shell and `SSR`.
+
 ## 0.20.0
 
 ### Minor Changes

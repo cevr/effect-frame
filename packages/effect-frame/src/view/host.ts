@@ -1,3 +1,4 @@
+import type { Form } from "effect-frame/actor/client";
 import type { Option } from "effect";
 
 /**
@@ -55,6 +56,11 @@ export interface HostEvent {
   /** The event's own value, when it has one: an input's text. */
   readonly value: string;
   readonly preventDefault: () => void;
+  /**
+   * The fields a form submission carries, in document order, when the event
+   * is one. A host with no forms always gives `None`.
+   */
+  readonly form: Option.Option<Form.FormFields>;
 }
 
 export type EventHandler = (event: HostEvent) => void;

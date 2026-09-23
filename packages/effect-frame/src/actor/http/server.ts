@@ -22,6 +22,8 @@ import {
   statusOf,
 } from "./wire.js";
 
+export { form, type FormPostOptions } from "./form-post.js";
+
 /**
  * A web-standard handler over the transport in context. `Request` in,
  * `Response` out: the shape Bun, Cloudflare Workers, and celld all serve.

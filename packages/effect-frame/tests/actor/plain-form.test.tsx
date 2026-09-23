@@ -1,0 +1,299 @@
+/* oxlint-disable effect/noGlobals -- Bun.serve and fetch are this test's platform boundary: a real socket and a browser with no script. */
+import { HttpServer } from "effect-frame/actor";
+import { Form, ref } from "effect-frame/actor/client";
+import type { ActorTransport } from "effect-frame/actor/client";
+import { Html } from "effect-frame/view";
+import { Effect, Layer, Option, Ref, Stream } from "effect";
+import type { Context } from "effect";
+import { describe, expect, it } from "effect-bun-test";
+import type { Wire } from "../plain-form-fixture.js";
+import {
+  Tasks,
+  TasksPage,
+  board,
+  hiddenOf,
+  hiddenValue,
+  makeWire,
+  noProps,
+  recordedTransport,
+} from "../plain-form-fixture.js";
+
+/**
+ * Plain-form posts over a real socket (#21, #32). The browser is `fetch`
+ * with redirects left unfollowed, so each test reads the 303 itself. The
+ * page, the form route, and the JSON route share one in-process host.
+ */
+
+const actorPrefix = "/actors";
+
+interface Served {
+  readonly url: string;
+  readonly wire: Wire;
+  readonly context: Context.Context<ActorTransport>;
+}
+
+const page = Effect.scoped(Html.renderToString(TasksPage, noProps));
+
+const serve = Effect.gen(function* () {
+  const wire = yield* makeWire;
+  const context = yield* Layer.build(recordedTransport(wire));
+  const actors = yield* Effect.provideContext(HttpServer.make, context);
+  const forms = yield* Effect.provideContext(
+    HttpServer.form({ contracts: [Tasks], render: () => page }),
+    context,
+  );
+  const run = Effect.runPromiseWith(context);
+  const server = yield* Effect.acquireRelease(
+    Effect.sync(() =>
+      Bun.serve({
+        port: 0,
+        fetch: (request) => {
+          const url = new URL(request.url);
+          if (url.pathname === `${actorPrefix}/form`) {
+            return run(forms(request));
+          }
+          if (url.pathname.startsWith(actorPrefix)) {
+            const stripped = new URL(request.url);
+            stripped.pathname = url.pathname.slice(actorPrefix.length);
+            return run(actors(new Request(stripped, request)));
+          }
+          return run(
+            Effect.map(
+              Effect.orDie(page),
+              (html) => new Response(html, { headers: { "content-type": "text/html" } }),
+            ),
+          );
+        },
+      }),
+    ),
+    (running) => Effect.promise(() => running.stop(true)),
+  );
+  const port = Option.getOrElse(Option.fromNullishOr(server.port), () => 0);
+  const served: Served = { url: `http://127.0.0.1:${String(port)}`, wire, context };
+  return served;
+});
+
+interface Reply {
+  readonly status: number;
+  readonly location: string;
+  readonly body: string;
+}
+
+const request = (url: string, init: RequestInit) =>
+  Effect.gen(function* () {
+    const response = yield* Effect.promise(() => fetch(url, { ...init, redirect: "manual" }));
+    const body = yield* Effect.promise(() => response.text());
+    const reply: Reply = {
+      status: response.status,
+      location: Option.getOrElse(Option.fromNullishOr(response.headers.get("location")), () => ""),
+      body,
+    };
+    return reply;
+  });
+
+const getPage = (served: Served) => Effect.map(request(served.url, {}), (reply) => reply.body);
+
+/** Post a form body the way a browser does with no script. */
+const post = (served: Served, body: string) =>
+  request(`${served.url}${actorPrefix}/form`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body,
+  });
+
+/** The rendered `add` form, filled: hidden inputs first, then the typed fields. */
+const fill = (html: string, typed: ReadonlyArray<[string, string]>): string =>
+  Form.toBody(Form.fromEntries([...hiddenOf(html, "add"), ...typed]));
+
+/**
+ * The actor's committed state at `revision`, read through the same host.
+ * A 303 follows admission, not application, so the read waits for it.
+ */
+const snapshot = (served: Served, revision = 0) =>
+  Effect.scoped(
+    Effect.flatMap(ref(Tasks, board), (tasks) =>
+      Stream.runHead(
+        Stream.filter(tasks.applied.changes, (applied) => applied.revision.value >= revision),
+      ),
+    ),
+  ).pipe(
+    Effect.flatMap(Effect.fromOption),
+    Effect.timeout("2 seconds"),
+    Effect.orDie,
+    Effect.provideContext(served.context),
+  );
+
+const sends = (served: Served) => Ref.get(served.wire.sends);
+
+describe("plain-form posts", () => {
+  it.scopedLive("a urlencoded post to /actors/form applies the message and answers 303", () =>
+    Effect.gen(function* () {
+      const served = yield* serve;
+      const html = yield* getPage(served);
+      const commandId = hiddenValue(html, "add", "$command");
+
+      const reply = yield* post(
+        served,
+        fill(html, [
+          ["title", "milk"],
+          ["done", "on"],
+        ]),
+      );
+
+      expect(reply.status).toBe(303);
+      expect(reply.location).toBe("/");
+      const applied = yield* snapshot(served, 1);
+      expect(applied.state.tasks).toEqual([{ id: commandId, title: "milk", done: true }]);
+      expect((yield* sends(served)).map((send) => String(send.commandId))).toEqual([commandId]);
+    }),
+  );
+
+  it.scopedLive("the identical body posted twice returns the stored receipt and one revision", () =>
+    Effect.gen(function* () {
+      const served = yield* serve;
+      const html = yield* getPage(served);
+      const body = fill(html, [["title", "milk"]]);
+
+      const first = yield* post(served, body);
+      const second = yield* post(served, body);
+
+      expect([first.status, second.status]).toEqual([303, 303]);
+      const applied = yield* snapshot(served, 1);
+      expect(applied.revision.value).toBe(1);
+      expect(applied.state.tasks).toHaveLength(1);
+      // An unchecked box sent nothing, and nothing decoded it as anything but false.
+      expect(applied.state.tasks[0]?.done).toBe(false);
+      // Both posts reached the transport under one id; the mailbox applied one.
+      const ids = (yield* sends(served)).map((send) => send.commandId);
+      expect(ids).toHaveLength(2);
+      expect(new Set(ids).size).toBe(1);
+    }),
+  );
+
+  it.scopedLive("a bad value answers 200 with the page, the issues, and the submitted fields", () =>
+    Effect.gen(function* () {
+      const served = yield* serve;
+      const html = yield* getPage(served);
+      const posted = hiddenValue(html, "add", "$command");
+
+      const reply = yield* post(
+        served,
+        fill(html, [
+          ["title", "far too long a title"],
+          ["done", "on"],
+          ["_pin", "4321"],
+        ]),
+      );
+
+      expect(reply.status).toBe(200);
+      expect(reply.body).toContain('<li data-field="title">');
+      expect(reply.body).toContain(
+        '<input id="title" name="title" value="far too long a title" aria-invalid="true">',
+      );
+      expect(reply.body).toContain('<input id="done" type="checkbox" name="done" checked>');
+      // A field whose segment starts with `_` never round-trips into markup.
+      expect(reply.body).not.toContain("4321");
+      expect(reply.body).toContain('<input id="pin" name="_pin">');
+      // The refused id never reached a mailbox; the page carries a fresh one.
+      const next = hiddenValue(reply.body, "add", "$command");
+      expect(next).not.toBe(posted);
+      expect(hiddenValue(reply.body, "add", "id")).toBe(next);
+      expect(yield* sends(served)).toEqual([]);
+    }),
+  );
+
+  it.scopedLive("the corrected resubmission applies and does not raise CommandConflict", () =>
+    Effect.gen(function* () {
+      const served = yield* serve;
+      const html = yield* getPage(served);
+      const refused = yield* post(served, fill(html, [["title", "far too long a title"]]));
+      const next = hiddenValue(refused.body, "add", "$command");
+
+      const corrected = yield* post(served, fill(refused.body, [["title", "short"]]));
+
+      expect(corrected.status).toBe(303);
+      const applied = yield* snapshot(served, 1);
+      expect(applied.state.tasks).toEqual([{ id: next, title: "short", done: false }]);
+    }),
+  );
+
+  it.scopedLive("the 504 re-render posts a byte-identical body and hits the stored receipt", () =>
+    Effect.gen(function* () {
+      const served = yield* serve;
+      const html = yield* getPage(served);
+      const posted = hiddenValue(html, "add", "$command");
+      const body = fill(html, [["title", "milk"]]);
+      yield* Ref.set(served.wire.loseNextReply, true);
+
+      const lost = yield* post(served, body);
+
+      expect(lost.status).toBe(504);
+      // The command may have reached the mailbox, so the id and the generated value stay.
+      expect(hiddenValue(lost.body, "add", "$command")).toBe(posted);
+      expect(hiddenValue(lost.body, "add", "id")).toBe(posted);
+      const resubmit = fill(lost.body, [["title", "milk"]]);
+      expect(resubmit).toBe(body);
+
+      const retried = yield* post(served, resubmit);
+
+      expect(retried.status).toBe(303);
+      const applied = yield* snapshot(served, 1);
+      expect(applied.revision.value).toBe(1);
+      expect(applied.state.tasks).toEqual([{ id: posted, title: "milk", done: false }]);
+    }),
+  );
+
+  it.scopedLive("a protocol-relative $return answers 400 and the actor is untouched", () =>
+    Effect.gen(function* () {
+      const served = yield* serve;
+      const html = yield* getPage(served);
+      const hostile = Form.toBody(
+        Form.withValues(Form.fromBody(fill(html, [["title", "milk"]])), [
+          ["$return", "//evil.test/"],
+        ]),
+      );
+      const absolute = Form.toBody(
+        Form.withValues(Form.fromBody(fill(html, [["title", "milk"]])), [
+          ["$return", "https://evil.test/"],
+        ]),
+      );
+
+      const refused = yield* post(served, hostile);
+      const alsoRefused = yield* post(served, absolute);
+
+      expect([refused.status, alsoRefused.status]).toEqual([400, 400]);
+      expect(refused.location).toBe("");
+      expect(yield* sends(served)).toEqual([]);
+      expect((yield* snapshot(served)).revision.value).toBe(0);
+    }),
+  );
+
+  it.scopedLive("a multipart body answers 415", () =>
+    Effect.gen(function* () {
+      const served = yield* serve;
+      const html = yield* getPage(served);
+      const body = new FormData();
+      for (const [name, value] of Form.toEntries(Form.fromBody(fill(html, [["title", "milk"]])))) {
+        body.append(name, value);
+      }
+
+      const reply = yield* request(`${served.url}${actorPrefix}/form`, { method: "POST", body });
+
+      expect(reply.status).toBe(415);
+      expect(reply.body).toContain("multipart/form-data is not accepted");
+      expect(yield* sends(served)).toEqual([]);
+    }),
+  );
+
+  it.scopedLive("a hostile field name is refused before the message schema is consulted", () =>
+    Effect.gen(function* () {
+      const served = yield* serve;
+      const html = yield* getPage(served);
+
+      const reply = yield* post(served, fill(html, [["__proto__.title", "milk"]]));
+
+      expect(reply.status).toBe(400);
+      expect(yield* sends(served)).toEqual([]);
+    }),
+  );
+});

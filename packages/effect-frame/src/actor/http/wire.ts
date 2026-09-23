@@ -36,6 +36,10 @@ import {
  *
  * `active` and `refreshed` are additive: a client that sends no `active`
  * gets an empty `refreshed` and the old behavior exactly.
+ *
+ * Plain-form posts (#21) add one route whose client is the browser:
+ *
+ *   POST {base}/form  application/x-www-form-urlencoded -> 303 | 200 page | 4xx
  */
 export const WireAddress = Schema.Struct({
   contract: Schema.String,
@@ -222,6 +226,7 @@ export const paths = {
   changes: "/changes",
   query: "/query",
   queryBatch: "/query/batch",
+  form: "/form",
 } satisfies Record<string, string>;
 
 export const eventPrefix = "data: ";

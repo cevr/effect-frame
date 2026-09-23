@@ -112,7 +112,7 @@ export const make = (context: RenderContext): Host<TuiNode> => ({
   addEventListener: (node, name, handler: EventHandler): Cleanup => {
     const emitter = asEmitter(node);
     const listener = (payload: string): void =>
-      handler({ value: String(payload), preventDefault: () => {} });
+      handler({ value: String(payload), preventDefault: () => {}, form: Option.none() });
     emitter.on(name, listener);
     return () => void emitter.off(name, listener);
   },

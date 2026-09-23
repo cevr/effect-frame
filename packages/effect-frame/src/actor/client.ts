@@ -94,3 +94,7 @@ export {
   type ValueOf,
 } from "./source.js";
 export * as Cell from "./cell.js";
+// Plain-form posts (#21) and generated fields (#32).
+export * as Form from "./form.js";
+export * as Generated from "./generated.js";
+export { FormContext, type FormFields, type FormIssue, type FormIssues } from "./form.js";

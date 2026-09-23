@@ -1,0 +1,187 @@
+import { ActorHost, Behavior, MailboxStore, implementTransparent } from "effect-frame/actor";
+import {
+  ActorTransport,
+  Form,
+  Generated,
+  Unreachable,
+  contract,
+  ref,
+} from "effect-frame/actor/client";
+import type { CommandId, TransportService } from "effect-frame/actor/client";
+import { View } from "effect-frame/view";
+import { Effect, Layer, Match, Option, Ref, Schema } from "effect";
+
+/**
+ * One contract and one page for the plain-form proofs (#21, #32). `AddTask`
+ * derives its id from the command id; `Tag` draws a fresh one beside it;
+ * `done` is a checkbox, so its absence is `false`.
+ */
+
+export const AddTask = Schema.TaggedStruct("AddTask", {
+  id: Generated.fromCommandId(Schema.String),
+  title: Schema.String.check(Schema.isMaxLength(12)),
+  done: Form.Checkbox,
+});
+
+export const Tag = Schema.TaggedStruct("Tag", {
+  id: Generated.freshId(Schema.String, 8),
+  label: Schema.String,
+});
+
+export const TasksMessage = Schema.Union([AddTask, Tag]);
+export type TasksMessage = Schema.Schema.Type<typeof TasksMessage>;
+
+const Task = Schema.Struct({ id: Schema.String, title: Schema.String, done: Schema.Boolean });
+
+export const TasksSnapshot = Schema.Struct({
+  tasks: Schema.Array(Task),
+  tags: Schema.Array(Schema.Struct({ id: Schema.String, label: Schema.String })),
+});
+export type TasksSnapshot = Schema.Schema.Type<typeof TasksSnapshot>;
+
+export const Tasks = contract("Tasks", {
+  version: 1,
+  key: Schema.Struct({ tenant: Schema.String, board: Schema.String }),
+  snapshot: TasksSnapshot,
+  message: TasksMessage,
+});
+
+export const board = { tenant: "acme", board: "main" };
+
+const reduce = (state: TasksSnapshot, message: TasksMessage): TasksSnapshot =>
+  Match.type<TasksMessage>().pipe(
+    Match.tagsExhaustive({
+      AddTask: (add) => ({
+        ...state,
+        tasks: [...state.tasks, { id: add.id, title: add.title, done: add.done }],
+      }),
+      Tag: (tag) => ({ ...state, tags: [...state.tags, { id: tag.id, label: tag.label }] }),
+    }),
+  )(message);
+
+export const TasksLive = implementTransparent(
+  Tasks,
+  Behavior.reducer<TasksSnapshot, TasksMessage>({ initial: { tasks: [], tags: [] }, reduce }),
+);
+
+/** What reached the transport: every send, in order, and a lost-reply switch. */
+export interface Wire {
+  readonly sends: Ref.Ref<
+    ReadonlyArray<{ readonly commandId: CommandId; readonly payload: string }>
+  >;
+  /** When set, the next send applies and then its reply is lost. */
+  readonly loseNextReply: Ref.Ref<boolean>;
+}
+
+export const makeWire = Effect.gen(function* () {
+  const wire: Wire = {
+    sends: yield* Ref.make<
+      ReadonlyArray<{ readonly commandId: CommandId; readonly payload: string }>
+    >([]),
+    loseNextReply: yield* Ref.make(false),
+  };
+  return wire;
+});
+
+/** The real in-process host, recording each send and able to lose one reply. */
+export const recordedTransport = (wire: Wire) =>
+  Layer.effect(
+    ActorTransport,
+    Effect.gen(function* () {
+      const real = yield* ActorHost.make({
+        implementations: [TasksLive],
+        store: () => MailboxStore.layerMemory,
+      });
+      const transport: TransportService = {
+        ...real,
+        send: (address, commandId, payload, active) =>
+          Effect.gen(function* () {
+            yield* Ref.update(wire.sends, (seen) => [...seen, { commandId, payload }]);
+            const receipt = yield* real.send(address, commandId, payload, active);
+            const lose = yield* Ref.getAndSet(wire.loseNextReply, false);
+            if (lose) {
+              return yield* Unreachable.make({ reason: "reply lost" });
+            }
+            return receipt;
+          }),
+      };
+      return transport;
+    }),
+  );
+
+export interface NoProps {
+  readonly _tag: "NoProps";
+}
+
+export const noProps: NoProps = { _tag: "NoProps" };
+
+/** One page, every host: an `AddTask` form, a `Tag` form, and the count. */
+export const TasksPage = (_props: NoProps) =>
+  Effect.gen(function* () {
+    const tasks = yield* ref(Tasks, board);
+    const add = yield* View.form({
+      ref: tasks,
+      contract: Tasks,
+      key: board,
+      message: AddTask,
+      typed: ["title", "done"],
+      endpoint: "/actors",
+      returnTo: "/",
+    });
+    const tag = yield* View.form({
+      ref: tasks,
+      contract: Tasks,
+      key: board,
+      message: Tag,
+      typed: ["label"],
+      endpoint: "/actors",
+      returnTo: "/",
+    });
+    return (
+      <main>
+        <form id="add" onSubmit={add.submit}>
+          <input id="title" name="title" />
+          <input id="done" type="checkbox" name="done" />
+          <input id="pin" name="_pin" />
+          <button type="submit">add</button>
+        </form>
+        <ul id="issues">
+          {add.issues.map((issue) => (
+            <li data-field={issue.field}>{issue.message}</li>
+          ))}
+        </ul>
+        <form id="tag" onSubmit={tag.submit}>
+          <input id="label" name="label" />
+        </form>
+        <p id="count">{View.bind(tasks.state, (state) => state.tasks.length)}</p>
+      </main>
+    );
+  });
+
+/** The hidden inputs a rendered form carries, in document order. */
+export const hiddenOf = (html: string, formId: string): ReadonlyArray<[string, string]> => {
+  const start = html.indexOf(`<form id="${formId}"`);
+  const end = html.indexOf("</form>", start);
+  const form = html.slice(start, end);
+  return Array.from(
+    form.matchAll(/<input type="hidden" name="([^"]*)" value="([^"]*)">/g),
+    (match): [string, string] => [unescape(String(match[1])), unescape(String(match[2]))],
+  );
+};
+
+const unescape = (text: string): string =>
+  text
+    .replaceAll("&quot;", '"')
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
+
+/** The value a hidden field carries in a rendered form. */
+export const hiddenValue = (html: string, formId: string, name: string): string =>
+  Option.getOrElse(
+    Option.map(
+      Option.fromNullishOr(hiddenOf(html, formId).find(([field]) => field === name)),
+      ([, value]) => value,
+    ),
+    () => "",
+  );

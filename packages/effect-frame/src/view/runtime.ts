@@ -33,7 +33,8 @@ import type {
   RetainedNode,
   ShowNode,
 } from "./jsx-runtime.js";
-import type { Attached, Bound, Handler, Prepared, View } from "./view.js";
+import { repopulate } from "./form.js";
+import type { Attached, Bound, Handler, PlainPost, Prepared, View } from "./view.js";
 import * as Inspection from "../inspection.js";
 
 /**
@@ -1164,6 +1165,8 @@ interface ElementPlan<HostNode> {
   readonly dynamic: ReadonlyArray<readonly [string, Accessor<unknown>]>;
   readonly events: ReadonlyArray<readonly [string, Prepared]>;
   readonly attachments: ReadonlyArray<Attached<HostNode>>;
+  /** A command form's hidden inputs, drawn before its own children (#21). */
+  readonly hidden: ReadonlyArray<readonly [name: string, value: string]>;
   readonly children: Build<HostNode>;
 }
 
@@ -1212,7 +1215,7 @@ const classify = (value: RawProp): PropValue => {
 const sortProps = <HostNode>(
   renderer: Renderer<HostNode>,
   element: ElementNode,
-): Omit<ElementPlan<HostNode>, "tag" | "children"> => {
+): Omit<ElementPlan<HostNode>, "tag" | "children" | "hidden"> => {
   const staticProps: Record<string, PropertyValue> = {};
   const dynamic: Array<readonly [string, Accessor<unknown>]> = [];
   const events: Array<readonly [string, Prepared]> = [];
@@ -1240,15 +1243,45 @@ const sortProps = <HostNode>(
   return { staticProps, dynamic, events, attachments };
 };
 
+/**
+ * The plain post a command form carries on one of its event props. It is
+ * applied the same way in every host, so the server's markup and the
+ * hydrating client's nodes agree node for node.
+ */
+const plainPostOf = (element: ElementNode): Option.Option<PlainPost> => {
+  for (const [name, raw] of Object.entries(element.props)) {
+    if (isEventProp(name) && isPrepared(raw) && Option.isSome(raw.post)) {
+      return raw.post;
+    }
+  }
+  return Option.none();
+};
+
+const isPrepared = (value: RawProp): value is Prepared => Predicate.isTagged("Prepared")(value);
+
 const planElement = <HostNode>(
   renderer: Renderer<HostNode>,
   element: ElementNode,
-): Build<HostNode> =>
-  buildElement(renderer, {
-    tag: element.tag,
-    ...sortProps(renderer, element),
-    children: plan(renderer, element.children),
+): Build<HostNode> => {
+  const sorted = sortProps(renderer, element);
+  return Option.match(plainPostOf(element), {
+    onNone: () =>
+      buildElement(renderer, {
+        tag: element.tag,
+        ...sorted,
+        hidden: [],
+        children: plan(renderer, element.children),
+      }),
+    onSome: (post) =>
+      buildElement(renderer, {
+        tag: element.tag,
+        ...sorted,
+        staticProps: { ...sorted.staticProps, method: post.method, action: post.action },
+        hidden: post.hidden,
+        children: plan(renderer, repopulate(element.children, post)),
+      }),
   });
+};
 
 const buildElement =
   <HostNode>(renderer: Renderer<HostNode>, element: ElementPlan<HostNode>): Build<HostNode> =>
@@ -1269,6 +1302,13 @@ const buildElement =
           }
           run(event);
         }),
+      );
+    }
+    for (const [name, value] of element.hidden) {
+      host.insert(
+        node,
+        host.createElement("input", { type: "hidden", name, value }),
+        Option.none(),
       );
     }
     element.children(node, { nodes: [] }, () => {});

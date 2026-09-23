@@ -1,3 +1,4 @@
+import { Form } from "effect-frame/actor/client";
 import type { Scope } from "effect";
 import { Effect, Option } from "effect";
 import type { Cleanup, EventHandler, Host, PropertyValue, StaticProps } from "../host.js";
@@ -49,6 +50,25 @@ const valueOf = (event: Event): string => {
     return valued.value;
   }
   return "";
+};
+
+/**
+ * The fields a submission carries, read the way the browser would post
+ * them: the form's controls in document order, then the submitter's own
+ * name and value when a named button submitted it.
+ */
+const formOf = (event: Event): Option.Option<Form.FormFields> => {
+  const target = event.target;
+  if (event.type !== "submit" || !(target instanceof HTMLFormElement)) {
+    return Option.none();
+  }
+  const submitter = Option.filter(
+    Option.fromNullishOr(Reflect.get(event, "submitter")),
+    (value): value is HTMLButtonElement => value instanceof HTMLButtonElement && value.name !== "",
+  );
+  const entries: Array<readonly [string, unknown]> = Array.from(new FormData(target));
+  Option.map(submitter, (button) => entries.push([button.name, button.value]));
+  return Option.some(Form.fromEntries(entries));
 };
 
 /**
@@ -146,7 +166,11 @@ export const host: Host<DomNode> = {
   },
   addEventListener: (node, name, handler: EventHandler): Cleanup => {
     const listener = (event: Event): void =>
-      handler({ value: valueOf(event), preventDefault: () => event.preventDefault() });
+      handler({
+        value: valueOf(event),
+        preventDefault: () => event.preventDefault(),
+        form: formOf(event),
+      });
     node.addEventListener(name, listener);
     return () => node.removeEventListener(name, listener);
   },

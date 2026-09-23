@@ -1,4 +1,4 @@
-import type { Source } from "effect-frame/actor";
+import type { Form, Source } from "effect-frame/actor";
 import { select as selectSource } from "effect-frame/actor/client";
 import type { Effect, Scope } from "effect";
 import { Option } from "effect";
@@ -25,6 +25,27 @@ export interface Prepared {
   /** `true` when the host must suppress its default action first. */
   readonly preventDefault: boolean;
   readonly handler: Handler;
+  /**
+   * The plain-post description of a command form (#21). Present on a form
+   * binding, absent on `event` and on a handler `submit`. The runtime writes
+   * it as `method`, `action`, and hidden inputs in every host, so a server
+   * render posts with no script and a hydrating client adopts the same nodes.
+   */
+  readonly post: Option.Option<PlainPost>;
+}
+
+/** What a form posts when no script runs. */
+export interface PlainPost {
+  /** The form route: `{base}/form`. */
+  readonly action: string;
+  /** A command is never a GET. */
+  readonly method: "post";
+  /** The `$` fields, `_tag`, and every generated field, in that order. */
+  readonly hidden: ReadonlyArray<readonly [name: string, value: string]>;
+  /** The values a refused post redraws into the form's own inputs. */
+  readonly submitted: Form.FormFields;
+  /** The fields a refused post named, marked `aria-invalid`. */
+  readonly invalid: ReadonlyArray<string>;
 }
 
 /**
@@ -96,14 +117,21 @@ export const event = (handler: Handler): Prepared => ({
   _tag: "Prepared",
   preventDefault: false,
   handler,
+  post: Option.none(),
 });
 
-/** `event`, but the host suppresses its default action first. */
+/**
+ * `event`, but the host suppresses its default action first. The form posts
+ * nothing without a script; a form that sends a command uses `form`.
+ */
 export const submit = (handler: Handler): Prepared => ({
   _tag: "Prepared",
   preventDefault: true,
   handler,
+  post: Option.none(),
 });
+
+export { form, type CommandForm, type FormBinding } from "./form.js";
 
 export { list, type ListOptions } from "./control.js";
 export { attempt } from "./attempt.js";

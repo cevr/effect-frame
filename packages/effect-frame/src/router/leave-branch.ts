@@ -37,15 +37,21 @@ export const leaf = <
   R,
   CheckR = never,
   E = never,
+  Root extends boolean = boolean,
 >(
-  seg: Segment<Name, Params, Search, Own, Data, CheckR>,
+  seg: Segment<Name, Params, Search, Own, Data, CheckR, Root>,
   view: (props: SegmentProps<Params, Search, Data>) => Effect.Effect<Node, E, R>,
   ...recovery: RecoveryFor<E>
 ): Branch<
-  Segment<Name, Params, Search, Own, Data, CheckR>,
+  Segment<Name, Params, Search, Own, Data, CheckR, Root>,
   ViewServices<R>,
-  OwnServices<Segment<Name, Params, Search, Own, Data, CheckR>>
-> => buildLeaf<ViewServices<R>, Name, Params, Search, Own, Data, R, CheckR, E>(seg, view, recovery);
+  OwnServices<Segment<Name, Params, Search, Own, Data, CheckR, Root>>
+> =>
+  buildLeaf<ViewServices<R>, Name, Params, Search, Own, Data, R, CheckR, E, Root>(
+    seg,
+    view,
+    recovery,
+  );
 
 export const layout = <
   Name extends string,
@@ -57,19 +63,20 @@ export const layout = <
   R,
   CheckR = never,
   E = never,
+  Root extends boolean = boolean,
 >(
-  seg: Segment<Name, Params, Search, Own, Data, CheckR>,
+  seg: Segment<Name, Params, Search, Own, Data, CheckR, Root>,
   children: Children,
   view: (
     props: LayoutProps<Params, Search, Data, ViewROf<Children[number]>>,
   ) => Effect.Effect<Node, E, R>,
   ...recovery: RecoveryFor<E>
 ): Branch<
-  Segment<Name, Params, Search, Own, Data, CheckR>,
+  Segment<Name, Params, Search, Own, Data, CheckR, Root>,
   ViewServices<R>,
-  OwnServices<Segment<Name, Params, Search, Own, Data, CheckR>> | DataROf<Children[number]>
+  OwnServices<Segment<Name, Params, Search, Own, Data, CheckR, Root>> | DataROf<Children[number]>
 > =>
-  buildLayout<ViewServices<R>, Name, Params, Search, Own, Data, Children, R, CheckR, E>(
+  buildLayout<ViewServices<R>, Name, Params, Search, Own, Data, Children, R, CheckR, E, Root>(
     seg,
     children,
     view,

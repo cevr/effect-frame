@@ -3,7 +3,7 @@ import { select } from "effect-frame/actor/client";
 import type { Child, Node } from "effect-frame/view";
 import { Dom, View } from "effect-frame/view";
 import { Effect, Option, Predicate } from "effect";
-import type { AnyRoute, Linkable, SearchUpdater } from "./codec.js";
+import type { AnyRoute, Current, Linkable, SearchUpdater } from "./codec.js";
 import type { RouterService } from "./router.js";
 import { Router } from "./router.js";
 
@@ -16,7 +16,9 @@ import { Router } from "./router.js";
  */
 export interface Link {
   readonly href: Source<string>;
-  /** `true` while the document is on this link's destination, at any values. */
+  /** Where the document is relative to the destination. See `Route.Current`. */
+  readonly current: Source<Current>;
+  /** `true` while `current` is `"page"` or `"ancestor"`. */
   readonly active: Source<boolean>;
   readonly go: Effect.Effect<void>;
   readonly replace: Effect.Effect<void>;
@@ -26,8 +28,10 @@ export interface Link {
 export type LinkSearch<Search> = Search | SearchUpdater<Search>;
 
 /**
- * A flat route is active while the router resolved the document to it. A
- * segment is active while the URL starts with its path and decodes.
+ * A flat route is the page while the router resolved the document to it.
+ * A segment is the page while a tree that holds it matched and the URL ends
+ * at it, and an ancestor while the URL continues below it. Not-found and
+ * another route are neither.
  */
 export const link = <Params, Search>(
   to: Linkable<Params, Search>,
@@ -38,9 +42,11 @@ export const link = <Params, Search>(
     const router = yield* Router;
     const hrefAt = (url: URL): string => to.hrefAt(url, params, searchAt(to, url, search));
     const href = select(router.current, (match) => hrefAt(match.url));
+    const current = select(router.current, (match) => to.currentAt(match));
     return {
       href,
-      active: select(router.current, (match) => to.activeAt(match)),
+      current,
+      active: select(current, (where) => where !== "none"),
       go: router.navigate(hrefAt),
       replace: router.replace(hrefAt),
     };
@@ -76,14 +82,18 @@ export interface LinkProps {
 
 /**
  * An anchor drawn from a `Link`: a real `href`, so the platform's own
- * affordances hold (open in a new tab, copy link, middle click), and
- * `aria-current="page"` while the route is the current one. A plain click
+ * affordances hold (open in a new tab, copy link, middle click),
+ * `aria-current="page"` on the destination, and `aria-current="true"` on an
+ * ancestor segment of it. A plain click
  * runs the typed move against the latest URL without a document load.
  */
-/** `aria-current="page"` while active; `false` removes the attribute. */
-const currentAttribute = (active: boolean): string | false => {
-  if (active) {
+/** `false` removes the attribute. */
+const currentAttribute = (where: Current): string | false => {
+  if (where === "page") {
     return "page";
+  }
+  if (where === "ancestor") {
+    return "true";
   }
   return false;
 };
@@ -123,7 +133,7 @@ export const Link = (props: LinkProps): Node => (
     )}
     href={View.bind(props.link.href)}
     class={Option.getOrElse(Option.fromNullishOr(props.class), () => false)}
-    aria-current={View.bind(props.link.active, currentAttribute)}
+    aria-current={View.bind(props.link.current, currentAttribute)}
     data-frame-replace={props.replace === true}
   >
     {props.children}

@@ -8,11 +8,22 @@ import { implementQuery, query as queryContract } from "effect-frame/actor";
 import type { ActorTransport, QueryCache, Source } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import * as Frame from "effect-frame/frame";
-import { Link, Location, Route, link, mount as mountRouter } from "effect-frame/router";
-import type { AnyRoute, LocationService, Router } from "effect-frame/router";
+import { Link, Location, Route, Router, link, mount as mountRouter } from "effect-frame/router";
+import type { AnyRoute, LocationService } from "effect-frame/router";
 import { Dom, Loading, View, ViewTest, ready, render } from "effect-frame/view";
 import type { LoadingScope, Node } from "effect-frame/view";
-import { Context, Deferred, Effect, Layer, Option, Queue, Ref, Schema, Stream } from "effect";
+import {
+  Context,
+  Deferred,
+  Effect,
+  Layer,
+  Option,
+  Queue,
+  Ref,
+  Result,
+  Schema,
+  Stream,
+} from "effect";
 import type { Scope } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
@@ -238,6 +249,30 @@ const makeApp = (probes: Probes, importer: Importer) =>
         }),
     ),
   );
+
+// A root layout at "/": its path is a prefix of every URL.
+const home = Route.segment("home", { path: "/", params: Schema.Struct({}) });
+const about = Route.child(home, "about", { path: "about", params: Schema.Struct({}) });
+const Site = Route.client(
+  "site",
+  Route.layout(home, [Route.leaf(about, () => Effect.succeed(<p id="about">about</p>))], (props) =>
+    Effect.gen(function* () {
+      const toHome = yield* link(home, {}, {});
+      const toAbout = yield* link(about, {}, {});
+      return (
+        <nav id="site">
+          <Link link={toHome} class="home">
+            home
+          </Link>
+          <Link link={toAbout} class="about">
+            about
+          </Link>
+          {yield* props.outlet}
+        </nav>
+      );
+    }),
+  ),
+);
 
 const NotFound = (props: { readonly url: Source<URL> }) =>
   Effect.succeed(<p id="missing">{View.bind(props.url, (url) => url.pathname)}</p>);
@@ -470,6 +505,43 @@ const segmentLink = link(post, { tenant: "t1", postId: "1" }, (search) => search
 // @ts-expect-error A link's params have the destination's decoded type.
 const wrongLink = () => link(post, { tenant: "t1", postId: 1 }, { mode: "read" });
 
+const TenantParams = Schema.Struct({ tenant: Schema.String });
+interface TenantData extends Route.Declarations {
+  readonly info: Route.QueryDeclaration<typeof TenantInfo>;
+}
+
+// 7. Construction: flat errors stay on the property, a child is not a root,
+// declarations need `data`, and neither a segment nor a branch is a literal.
+const wrongFlatView = () =>
+  Route.client("wrong", {
+    path: "/wrong/:id",
+    params: Schema.Struct({ id: Schema.String }),
+    // @ts-expect-error The flat form reports the view's own props, on the view.
+    view: (props: Route.RouteProps<{ readonly id: number }, {}>) =>
+      Effect.succeed(<p>{View.bind(props.params, (params) => String(params.id))}</p>),
+  });
+const orphanRoot = () =>
+  // @ts-expect-error A tree mounts from a root segment; `post` is a child of `tenant`.
+  Route.client("orphan", Route.leaf(post, ReadingChild));
+const missingData = () =>
+  // @ts-expect-error An explicit declaration type needs `data` to build it.
+  Route.segment<"typed", typeof TenantParams, Route.SearchCodec, TenantData>("typed", {
+    path: "/typed/:tenant",
+    params: TenantParams,
+  });
+const handBranch = () => {
+  // @ts-expect-error A branch is built by `leaf` or `layout`, never written by hand.
+  const fake: Route.AnyBranch<never> = {
+    _tag: "Branch",
+    segment: tenant,
+    "~view": (value: never) => value,
+    "~data": (value: never) => value,
+  };
+  return fake;
+};
+// @ts-expect-error A segment's check is the router's: it is not on the public type.
+const hiddenCheck = () => tenant.check;
+
 const typeFixtures = [
   appServicesExact,
   lazyError,
@@ -494,6 +566,10 @@ const compiled = [
   flatLink,
   segmentLink,
   wrongLink,
+  wrongFlatView,
+  missingData,
+  handBranch,
+  hiddenCheck,
 ];
 
 // ---------------------------------------------------------------------------
@@ -504,7 +580,12 @@ describe("public nested routes", () => {
   it.effect("0. keeps exact E and R, typed targets, lazy props, services, and fallbacks", () =>
     Effect.sync(() => {
       expect(typeFixtures).toEqual([true, true, true, true, true, true, true]);
-      expect(compiled).toHaveLength(14);
+      expect(compiled).toHaveLength(18);
+      // The type refuses a child root; construction refuses it by name.
+      expect(Option.getOrThrow(Result.getFailure(Result.try(orphanRoot)))).toMatchObject({
+        _tag: "BranchRejected",
+        reason: "a tree is mounted from a root segment, not a child",
+      });
       expect(segmentTarget.href).toBe("/app/t1/posts/7?mode=edit");
       expect(flatTarget.href).toBe("/login");
     }),
@@ -610,6 +691,43 @@ describe("public nested routes", () => {
         const snapshot = yield* Frame.inspect;
         expect(snapshot.queries).toEqual([]);
         expect(snapshot.routes).toEqual([]);
+      }),
+  );
+
+  it.scoped.layer(frameLayer("public-current"))(
+    "2. a segment link is the page, an ancestor, or neither; never on not-found or another route",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* makeRoot;
+        const { page, router } = yield* mountApp(Site, root, "/");
+        const provided = <A,>(effect: Effect.Effect<A, never, Router>) =>
+          Effect.provideService(effect, Router, router);
+        const homeLink = yield* provided(link(home, {}, {}));
+        const aboutLink = yield* provided(link(about, {}, {}));
+        const where = Effect.all([homeLink.current.get, aboutLink.current.get]);
+        yield* page.waitFor({
+          label: "the home layout",
+          until: (actual) => hasAt(actual, "#site"),
+        });
+        expect(yield* where).toEqual(["page", "none"]);
+        expect(attributeAt(root, "a.home", "aria-current")).toBe("page");
+        expect(hasAt(root, "a.about[aria-current]")).toBe(false);
+
+        yield* router.navigate("/about");
+        yield* page.waitFor({ label: "about", until: (actual) => hasAt(actual, "#about") });
+        expect(yield* where).toEqual(["ancestor", "page"]);
+        expect(yield* homeLink.active.get).toBe(true);
+        expect(attributeAt(root, "a.home", "aria-current")).toBe("true");
+        expect(attributeAt(root, "a.about", "aria-current")).toBe("page");
+
+        // "/" is a prefix of every URL; it is still not current elsewhere.
+        yield* router.navigate("/login");
+        yield* page.waitFor({ label: "login", until: (actual) => hasAt(actual, "#login") });
+        expect(yield* where).toEqual(["none", "none"]);
+        yield* router.navigate("/nowhere/at/all");
+        yield* page.waitFor({ label: "not found", until: (actual) => hasAt(actual, "#missing") });
+        expect(yield* where).toEqual(["none", "none"]);
+        expect(yield* homeLink.active.get).toBe(false);
       }),
   );
 });

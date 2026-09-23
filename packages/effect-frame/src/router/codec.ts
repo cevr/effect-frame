@@ -518,9 +518,18 @@ export interface Linkable<Params, Search> {
   readonly hrefAt: (current: URL, params: Params, search: Search) => string;
   /** The current URL's decoded search, or the codec's empty value. */
   readonly searchAt: (current: URL) => Search;
-  /** `true` while the document is on this destination, at any values. */
-  readonly activeAt: (current: Match) => boolean;
+  /**
+   * Where the current match is relative to this destination: on it
+   * (`"page"`), below it (`"ancestor"`, a segment only), or elsewhere.
+   */
+  readonly currentAt: (current: Match) => Current;
 }
+
+/**
+ * A link's relation to the current match. `Link` draws `"page"` as
+ * `aria-current="page"` and `"ancestor"` as `aria-current="true"`.
+ */
+export type Current = "page" | "ancestor" | "none";
 
 export interface Route<
   Name extends string,

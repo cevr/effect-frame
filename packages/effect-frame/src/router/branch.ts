@@ -62,6 +62,7 @@ import type {
   SearchKeyInfo,
   SearchRecord,
   SearchUpdater,
+  Current,
 } from "./codec.js";
 import { matchPrefix, segmentsOf } from "./path.js";
 import { address, parseTemplate, printSearch, readSearch, search as searchCodec } from "./codec.js";
@@ -126,14 +127,9 @@ import { register as registerLeave } from "./leave-registry.js";
  *   every entered import before it creates an instance, so the first frame
  *   holds imported views and never a pending fallback.
  *
- * Route slice 5 adds, still privately (see `docs/design/route-leave.md`;
- * the leave-capable constructors are in `leave-branch.ts`):
- *
- * - Each instance provides `MountedRoute` to its own view setup, so the
- *   view can register scoped leave checks with `Leave.onLeave`. The tree
- *   answers the router's leave questions from its mounted instances,
- *   deepest first: an exited instance, and a stayed one whose params or
- *   search change. An unchanged stayed instance is not asked.
+ * Route slice 5 is internal (see `docs/design/route-leave.md`): the tree
+ * answers the router's leave questions from its mounted instances, deepest
+ * first. No public constructor reaches it.
  */
 
 // ---------------------------------------------------------------------------
@@ -208,12 +204,20 @@ export interface Values<Params, Search> {
   readonly search: Search;
 }
 
+/** Brands a segment value: only `Route.segment` and `Route.child` make one. */
+const SegmentBrand: unique symbol = Symbol.for("effect-frame/router/Segment");
+
 /** The part of a segment every holder can read without its types. */
 export interface AnySegment {
   readonly _tag: "Segment";
+  readonly [SegmentBrand]: "Segment";
   readonly name: string;
   readonly parent: Option.Option<AnySegment>;
-  readonly parts: ReadonlyArray<Part>;
+}
+
+/** A segment with no parent: the only segment a tree can be mounted from. */
+export interface RootSegment extends AnySegment {
+  readonly "~root": (_: never) => true;
 }
 
 /**
@@ -228,24 +232,47 @@ export interface Segment<
   Own extends Declarations,
   Data extends Declarations,
   CheckR = never,
+  Root extends boolean = boolean,
 > extends AnySegment {
   readonly name: Name;
   /** Encoded search ownership. Unknown means an opaque codec needs a declaration. */
   readonly searchKeys: SearchKeyInfo;
-  /** Decode the accumulated path record and the URL search. None is a non-match. */
-  decode(record: PathRecord, search: SearchRecord): Option.Option<Values<Params, Search>>;
-  /** The encoded form, used to decide whether a stayed segment changed. */
-  signature(record: PathRecord, values: Values<Params, Search>): string;
-  /** This segment's own declarations. Inherited ones are the parent's. */
-  declare(values: Values<Params, Search>): Own;
   /** Print this segment's URL: every ancestor's path and this segment's search. */
   href(params: Params, search: Search): string;
   /** `href` after carrying retained keys from the current URL. A `link` destination. */
   hrefAt(current: URL, params: Params, search: Search): string;
   /** The current URL's decoded search for this segment, or its empty value. */
   searchAt(current: URL): Search;
-  /** `true` while the current URL starts with this segment's path and decodes. */
-  activeAt(current: RouterMatch): boolean;
+  /**
+   * How the current match relates to this segment: `"page"` when a tree
+   * that holds this segment matched and the URL ends at this segment,
+   * `"ancestor"` when the URL continues below it, and `"none"` otherwise,
+   * including not-found and another route.
+   */
+  currentAt(current: RouterMatch): Current;
+  /** Phantom: this segment's own declarations. */
+  readonly "~own": (_: never) => Own;
+  /** Phantom: the declarations the view sees. */
+  readonly "~data": (_: never) => Data;
+  /** Phantom: what this segment's check needs. */
+  readonly "~check": (_: never) => CheckR;
+  /** Phantom: `true` for a segment without a parent. */
+  readonly "~root": (_: never) => Root;
+}
+
+/**
+ * What the transition reads from a segment. It is not part of the public
+ * `Segment` type: a check keeps its services only through the segment's
+ * phantom, so no caller can run one outside the router.
+ */
+interface SegmentRuntime<Params, Search, Own> {
+  readonly parts: ReadonlyArray<Part>;
+  /** Decode the accumulated path record and the URL search. None is a non-match. */
+  decode(record: PathRecord, search: SearchRecord): Option.Option<Values<Params, Search>>;
+  /** The raw path record and the encoded search: a stayed segment publishes when it changes. */
+  signature(record: PathRecord, values: Values<Params, Search>): string;
+  /** This segment's own declarations. Inherited ones are the parent's. */
+  declare(values: Values<Params, Search>): Own;
   /**
    * The target of a search update of the current URL. The deepest matched
    * segment prints its own path; a layout keeps the current path, so its
@@ -254,11 +281,39 @@ export interface Segment<
   searchUpdate(current: URL, values: Values<Params, Search>, deepest: boolean): string;
   /** This segment's own check, when it has one. Its services are `CheckR`. */
   check(values: Values<Params, Search>, url: URL, kind: NavigationKind): Option.Option<Check>;
-  /** Phantom: the declarations the view sees. */
-  readonly "~data": (_: never) => Data;
-  /** Phantom: what this segment's check needs. */
-  readonly "~check": (_: never) => CheckR;
 }
+
+const segmentRuntimes = new WeakMap<AnySegment, SegmentRuntime<unknown, unknown, Declarations>>();
+
+/** The runtime `makeSegment` stored for a segment. */
+const segmentRuntimeOf = <Params, Search, Own extends Declarations>(
+  seg: Segment<string, Params, Search, Own, Declarations, unknown>,
+): SegmentRuntime<Params, Search, Own> =>
+  Option.getOrThrowWith(
+    Option.map(
+      Option.fromNullishOr(segmentRuntimes.get(seg)),
+      // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- makeSegment stored this runtime under this segment with these types.
+      (runtime) => runtime as SegmentRuntime<Params, Search, Own>,
+    ),
+    () =>
+      BranchRejected.make({
+        segment: seg.name,
+        reason: "not a segment built by Route.segment or Route.child",
+      }),
+  );
+
+/** A segment's own path parts. */
+const partsOf = (seg: AnySegment): ReadonlyArray<Part> =>
+  Option.match(Option.fromNullishOr(segmentRuntimes.get(seg)), {
+    onNone: () => [],
+    onSome: (runtime) => runtime.parts,
+  });
+
+/**
+ * Trees that hold each segment, by name. A segment is current only while
+ * one of them is the router's match.
+ */
+const treesOf = new WeakMap<AnySegment, Set<string>>();
 
 /**
  * One check, ready to run. Its services move from the Effect to the
@@ -293,6 +348,12 @@ export interface SegmentOptions<P extends ParamsCodec, S extends SearchCodec, Ow
   readonly before?: Before<P["Type"], S["Type"], CheckR>;
 }
 
+/**
+ * `data` is optional only while `Own` is empty, so a segment given its
+ * declaration type explicitly must also say how to build it.
+ */
+type DataRequired<Own> = [NoDeclarations] extends [Own] ? unknown : { readonly data: unknown };
+
 const NoSearch = searchCodec(Schema.Struct({}));
 type NoSearch = typeof NoSearch;
 
@@ -316,7 +377,7 @@ const recordSignature = (record: PathRecord): string =>
 /** Every part from the root to this segment, in order. */
 const pathOf = (segment: AnySegment): ReadonlyArray<Part> => [
   ...Option.match(segment.parent, { onNone: () => [], onSome: pathOf }),
-  ...segment.parts,
+  ...partsOf(segment),
 ];
 
 const makeSegment = <
@@ -326,12 +387,13 @@ const makeSegment = <
   Own extends Declarations,
   Data extends Declarations,
   CheckR,
+  Root extends boolean,
 >(
   name: Name,
   parent: Option.Option<AnySegment>,
   options: SegmentOptions<P, S, Own, CheckR>,
   data: (values: Values<P["Type"], S["Type"]>) => Own,
-): Segment<Name, P["Type"], S["Type"], Own, Data, CheckR> => {
+): Segment<Name, P["Type"], S["Type"], Own, Data, CheckR, Root> => {
   const parts = Result.getOrThrowWith(parseTemplate(options.path), (rejected) => rejected);
   const search: SearchCodec = Option.getOrElse(
     Option.fromNullishOr(options.search),
@@ -349,16 +411,35 @@ const makeSegment = <
     searchKeys: Option.fromNullishOr(options.searchKeys),
     retain: Option.fromNullishOr(options.retain),
   });
-  return {
+  const made: Segment<Name, P["Type"], S["Type"], Own, Data, CheckR, Root> = {
     _tag: "Segment",
+    [SegmentBrand]: "Segment",
     name,
     parent,
-    parts,
     searchKeys: printer.searchKeys,
     href: printer.href,
     hrefAt: printer.hrefAt,
     searchAt: printer.searchAt,
-    activeAt: (current: RouterMatch) => Option.isSome(printer.parsePrefix(current.url)),
+    currentAt: (current: RouterMatch): Current => {
+      const trees = Option.fromNullishOr(treesOf.get(made));
+      if (!Option.exists(trees, (names) => names.has(current.name))) {
+        return "none";
+      }
+      if (Option.isSome(printer.parse(current.url))) {
+        return "page";
+      }
+      if (Option.isSome(printer.parsePrefix(current.url))) {
+        return "ancestor";
+      }
+      return "none";
+    },
+    "~own": phantom<Own>(),
+    "~data": phantom<Data>(),
+    "~check": phantom<CheckR>(),
+    "~root": phantom<Root>(),
+  };
+  const runtime: SegmentRuntime<P["Type"], S["Type"], Own> = {
+    parts,
     searchUpdate: (current, values, deepest) => {
       if (deepest) {
         return printer.hrefFrom(current, values.params, values.search);
@@ -375,9 +456,9 @@ const makeSegment = <
     signature: (record, values) =>
       `${recordSignature(record)}${printSearch(encodeSearch(values.search))}`,
     declare: data,
-    "~data": phantom<Data>(),
-    "~check": phantom<CheckR>(),
   };
+  segmentRuntimes.set(made, runtime);
+  return made;
 };
 
 /** A root segment. */
@@ -389,9 +470,9 @@ export const segment = <
   CheckR = never,
 >(
   name: Name,
-  options: SegmentOptions<P, S, Own, CheckR>,
-): Segment<Name, P["Type"], S["Type"], Own, Own, CheckR> =>
-  makeSegment<Name, P, S, Own, Own, CheckR>(
+  options: SegmentOptions<P, S, Own, CheckR> & DataRequired<Own>,
+): Segment<Name, P["Type"], S["Type"], Own, Own, CheckR, true> =>
+  makeSegment<Name, P, S, Own, Own, CheckR, true>(
     name,
     Option.none(),
     options,
@@ -409,9 +490,9 @@ export const child = <
 >(
   parent: Segment<string, unknown, unknown, Declarations, ParentData, unknown>,
   name: Name,
-  options: SegmentOptions<P, S, Own, CheckR>,
-): Segment<Name, P["Type"], S["Type"], Own, ParentData & Own, CheckR> => {
-  const made = makeSegment<Name, P, S, Own, ParentData & Own, CheckR>(
+  options: SegmentOptions<P, S, Own, CheckR> & DataRequired<Own>,
+): Segment<Name, P["Type"], S["Type"], Own, ParentData & Own, CheckR, false> => {
+  const made = makeSegment<Name, P, S, Own, ParentData & Own, CheckR, false>(
     name,
     Option.some(parent),
     options,
@@ -419,7 +500,7 @@ export const child = <
   );
   // The path record is accumulated from the root, so a repeated name would
   // silently replace the ancestor's value. Reject it where it is declared.
-  for (const param of paramNames(made.parts)) {
+  for (const param of paramNames(partsOf(made))) {
     const owner = ancestorWithParam(Option.some(parent), param);
     if (Option.isSome(owner)) {
       return Option.getOrThrowWith(Option.none(), () =>
@@ -447,7 +528,7 @@ const ancestorWithParam = (
   param: string,
 ): Option.Option<AnySegment> =>
   Option.flatMap(from, (current) => {
-    if (paramNames(current.parts).includes(param)) {
+    if (paramNames(partsOf(current)).includes(param)) {
       return Option.some(current);
     }
     return ancestorWithParam(current.parent, param);
@@ -666,8 +747,12 @@ interface MatchInput {
  * including every child's view requirements that the outlet carries.
  * `DataR` is what its transition needs: declarations and checks.
  */
+/** Brands a branch value: only `Route.leaf` and `Route.layout` make one. */
+const BranchBrand: unique symbol = Symbol.for("effect-frame/router/Branch");
+
 export interface Branch<Seg extends AnySegment, ViewR, DataR> {
   readonly _tag: "Branch";
+  readonly [BranchBrand]: "Branch";
   readonly segment: Seg;
   /** Phantom: what the branch's views need. */
   readonly "~view": (_: never) => ViewR;
@@ -686,6 +771,8 @@ interface BranchRuntime<R> {
   match(input: MatchInput): Option.Option<Match<R>>;
   /** Search ownership of this segment and every descendant. */
   readonly searchKeys: ReadonlyArray<SearchKeyInfo>;
+  /** This segment and every descendant. */
+  readonly segments: ReadonlyArray<AnySegment>;
 }
 
 const runtimes = new WeakMap<object, BranchRuntime<unknown>>();
@@ -725,8 +812,8 @@ export type OwnServices<Seg> =
 
 /**
  * Build a leaf whose phantom view services are `ViewR`. The public `leaf`
- * claims the view's services without `Scope`; the private leave variant
- * also removes `MountedRoute`. Every instance provides both.
+ * claims the view's services without `Scope`, which every instance
+ * provides. An internal variant removes one more service it provides.
  */
 export const buildLeaf = <
   ViewR,
@@ -738,16 +825,17 @@ export const buildLeaf = <
   R,
   CheckR,
   E,
+  Root extends boolean = boolean,
 >(
-  seg: Segment<Name, Params, Search, Own, Data, CheckR>,
+  seg: Segment<Name, Params, Search, Own, Data, CheckR, Root>,
   view: (props: SegmentProps<Params, Search, Data>) => Effect.Effect<Node, E, R>,
   recovery: ReadonlyArray<Recovery<E> | Presentation>,
 ): Branch<
-  Segment<Name, Params, Search, Own, Data, CheckR>,
+  Segment<Name, Params, Search, Own, Data, CheckR, Root>,
   ViewR,
-  OwnServices<Segment<Name, Params, Search, Own, Data, CheckR>>
+  OwnServices<Segment<Name, Params, Search, Own, Data, CheckR, Root>>
 > =>
-  makeBranch<Name, Params, Search, Own, Data, CheckR, E, R, never, ViewR>(
+  makeBranch<Name, Params, Search, Own, Data, CheckR, E, R, never, ViewR, Root>(
     seg,
     [],
     (props) => view(props),
@@ -766,16 +854,17 @@ export const leaf = <
   // Defaults, because TypeScript drops `never` as an inference candidate.
   CheckR = never,
   E = never,
+  Root extends boolean = boolean,
 >(
-  seg: Segment<Name, Params, Search, Own, Data, CheckR>,
+  seg: Segment<Name, Params, Search, Own, Data, CheckR, Root>,
   view: (props: SegmentProps<Params, Search, Data>) => Effect.Effect<Node, E, R>,
   ...recovery: RecoveryFor<E>
 ): Branch<
-  Segment<Name, Params, Search, Own, Data, CheckR>,
+  Segment<Name, Params, Search, Own, Data, CheckR, Root>,
   Exclude<R, Scope.Scope>,
-  OwnServices<Segment<Name, Params, Search, Own, Data, CheckR>>
+  OwnServices<Segment<Name, Params, Search, Own, Data, CheckR, Root>>
 > =>
-  buildLeaf<Exclude<R, Scope.Scope>, Name, Params, Search, Own, Data, R, CheckR, E>(
+  buildLeaf<Exclude<R, Scope.Scope>, Name, Params, Search, Own, Data, R, CheckR, E, Root>(
     seg,
     view,
     recovery,
@@ -793,17 +882,18 @@ export const buildLayout = <
   R,
   CheckR,
   E,
+  Root extends boolean = boolean,
 >(
-  seg: Segment<Name, Params, Search, Own, Data, CheckR>,
+  seg: Segment<Name, Params, Search, Own, Data, CheckR, Root>,
   children: Children,
   view: (
     props: LayoutProps<Params, Search, Data, ViewROf<Children[number]>>,
   ) => Effect.Effect<Node, E, R>,
   recovery: ReadonlyArray<Recovery<E> | Presentation>,
 ): Branch<
-  Segment<Name, Params, Search, Own, Data, CheckR>,
+  Segment<Name, Params, Search, Own, Data, CheckR, Root>,
   ViewR,
-  OwnServices<Segment<Name, Params, Search, Own, Data, CheckR>> | DataROf<Children[number]>
+  OwnServices<Segment<Name, Params, Search, Own, Data, CheckR, Root>> | DataROf<Children[number]>
 > => {
   for (const branch of children) {
     if (!Option.contains(branch.segment.parent, seg)) {
@@ -815,7 +905,7 @@ export const buildLayout = <
       );
     }
   }
-  if (seg.parts.some((part) => part._tag === "Tail")) {
+  if (partsOf(seg).some((part) => part._tag === "Tail")) {
     return Option.getOrThrowWith(Option.none(), () =>
       BranchRejected.make({ segment: seg.name, reason: "a layout cannot end in a tail" }),
     );
@@ -832,7 +922,8 @@ export const buildLayout = <
     E,
     R,
     ViewROf<Children[number]>,
-    ViewR
+    ViewR,
+    Root
   >(
     seg,
     typed,
@@ -858,24 +949,32 @@ export const layout = <
   // Defaults, because TypeScript drops `never` as an inference candidate.
   CheckR = never,
   E = never,
+  Root extends boolean = boolean,
 >(
-  seg: Segment<Name, Params, Search, Own, Data, CheckR>,
+  seg: Segment<Name, Params, Search, Own, Data, CheckR, Root>,
   children: Children,
   view: (
     props: LayoutProps<Params, Search, Data, ViewROf<Children[number]>>,
   ) => Effect.Effect<Node, E, R>,
   ...recovery: RecoveryFor<E>
 ): Branch<
-  Segment<Name, Params, Search, Own, Data, CheckR>,
+  Segment<Name, Params, Search, Own, Data, CheckR, Root>,
   Exclude<R, Scope.Scope>,
-  OwnServices<Segment<Name, Params, Search, Own, Data, CheckR>> | DataROf<Children[number]>
+  OwnServices<Segment<Name, Params, Search, Own, Data, CheckR, Root>> | DataROf<Children[number]>
 > =>
-  buildLayout<Exclude<R, Scope.Scope>, Name, Params, Search, Own, Data, Children, R, CheckR, E>(
-    seg,
-    children,
-    view,
-    recovery,
-  );
+  buildLayout<
+    Exclude<R, Scope.Scope>,
+    Name,
+    Params,
+    Search,
+    Own,
+    Data,
+    Children,
+    R,
+    CheckR,
+    E,
+    Root
+  >(seg, children, view, recovery);
 
 /** The options argument, read once: each part is present or absent. */
 interface Boundary<E> {
@@ -1495,8 +1594,9 @@ const makeBranch = <
   R,
   ChildR,
   ViewR,
+  Root extends boolean = boolean,
 >(
-  seg: Segment<Name, Params, Search, Own, Data, CheckR>,
+  seg: Segment<Name, Params, Search, Own, Data, CheckR, Root>,
   children: ReadonlyArray<AnyBranch<ChildR>>,
   view: (
     props: SegmentProps<Params, Search, Data>,
@@ -1504,11 +1604,12 @@ const makeBranch = <
   ) => Effect.Effect<Node, E, R>,
   boundary: Boundary<E>,
   lazy: Option.Option<LazyDefinition>,
-): Branch<Segment<Name, Params, Search, Own, Data, CheckR>, ViewR, never> => {
+): Branch<Segment<Name, Params, Search, Own, Data, CheckR, Root>, ViewR, never> => {
   // Typed memory of the instances this branch created. A match of this
   // branch reads it back, so no instance value is ever cast.
   const created = new WeakMap<Instance<unknown>, Internals<Params, Search, ChildR>>();
   const identity: BranchIdentity = { segment: seg.name };
+  const segRuntime = segmentRuntimeOf(seg);
 
   const childRuntimes = children.map(runtimeOf);
   const matchChild = (input: MatchInput): Option.Option<Match<ChildR>> => {
@@ -1646,12 +1747,14 @@ const makeBranch = <
           (latest) =>
             Option.match(
               Option.flatMap(outlineAt(tree.outline(latest), identity), (outline) =>
-                Option.map(seg.decode(outline.record, readSearch(latest.searchParams)), (current) =>
-                  seg.searchUpdate(
-                    latest,
-                    { params: current.params, search: update(current.search) },
-                    Option.isNone(outline.child),
-                  ),
+                Option.map(
+                  segRuntime.decode(outline.record, readSearch(latest.searchParams)),
+                  (current) =>
+                    segRuntime.searchUpdate(
+                      latest,
+                      { params: current.params, search: update(current.search) },
+                      Option.isNone(outline.child),
+                    ),
                 ),
               ),
               { onNone: () => latest.href, onSome: Function.identity },
@@ -1790,7 +1893,7 @@ const makeBranch = <
     signature: string,
     childMatch: Option.Option<Match<ChildR>>,
   ) {
-    const ownDeclarations = yield* keyed(seg.declare(values));
+    const ownDeclarations = yield* keyed(segRuntime.declare(values));
     const names = new Set(ownDeclarations.map((one) => one.name));
     if (
       names.size !== internals.bindings.size ||
@@ -1891,7 +1994,7 @@ const makeBranch = <
     const ticket = yield* Effect.transposeOption(
       Option.map(lazy, (definition) => definition.start),
     );
-    const ownDeclarations = yield* keyed(seg.declare(values));
+    const ownDeclarations = yield* keyed(segRuntime.declare(values));
     type Prepared =
       | { readonly _tag: "Own"; readonly name: string; readonly acquired: Acquired }
       | { readonly _tag: "Child"; readonly entering: Entering<ChildR> };
@@ -1979,10 +2082,10 @@ const makeBranch = <
     });
 
   const match = (input: MatchInput): Option.Option<Match<ViewServices<R>>> =>
-    Option.flatMap(matchPrefix(seg.parts, input.segments, input.index), (prefix) => {
+    Option.flatMap(matchPrefix(segRuntime.parts, input.segments, input.index), (prefix) => {
       const record: PathRecord = { ...input.record, ...prefix.record };
-      return Option.flatMap(seg.decode(record, input.search), (values) => {
-        const signature = seg.signature(record, values);
+      return Option.flatMap(segRuntime.decode(record, input.search), (values) => {
+        const signature = segRuntime.signature(record, values);
         const childMatch = matchChild({
           segments: input.segments,
           index: prefix.next,
@@ -2004,7 +2107,7 @@ const makeBranch = <
           // Parent first: a child is asked only after this segment continued.
           check: (url, kind) =>
             Effect.flatMap(
-              Option.getOrElse(seg.check(values, url, kind), () =>
+              Option.getOrElse(segRuntime.check(values, url, kind), () =>
                 Effect.succeed<Verdict>(Continue),
               ),
               (verdict): Check => {
@@ -2027,8 +2130,9 @@ const makeBranch = <
       });
     });
 
-  const made: Branch<Segment<Name, Params, Search, Own, Data, CheckR>, ViewR, never> = {
+  const made: Branch<Segment<Name, Params, Search, Own, Data, CheckR, Root>, ViewR, never> = {
     _tag: "Branch",
+    [BranchBrand]: "Branch",
     segment: seg,
     "~view": phantom<ViewR>(),
     "~data": phantom<never>(),
@@ -2036,6 +2140,7 @@ const makeBranch = <
   const runtime: BranchRuntime<ViewServices<R>> = {
     match,
     searchKeys: [seg.searchKeys, ...childRuntimes.flatMap((below) => below.searchKeys)],
+    segments: [seg, ...childRuntimes.flatMap((below) => below.segments)],
   };
   runtimes.set(made, runtime);
   return made;
@@ -2094,7 +2199,25 @@ const mountTree = <Name extends string, ViewR, DataR, Extra extends object>(
   branch: AnyBranch<ViewR>,
   extra: Extra,
 ): Extra & Tree<Name, ViewR | DataR> => {
+  // A child segment matches only below its ancestors' path, so a tree
+  // mounted from one would never match. The type refuses it; so does this.
+  if (Option.isSome(branch.segment.parent)) {
+    return Option.getOrThrowWith(Option.none(), () =>
+      BranchRejected.make({
+        segment: branch.segment.name,
+        reason: "a tree is mounted from a root segment, not a child",
+      }),
+    );
+  }
   const root = runtimeOf(branch);
+  for (const held of root.segments) {
+    const names = Option.getOrElse(
+      Option.fromNullishOr(treesOf.get(held)),
+      () => new Set<string>(),
+    );
+    names.add(name);
+    treesOf.set(held, names);
+  }
   const outline = (url: URL) => Option.map(matchUrl(root, url), (matched) => matched.outline);
   const mountable: Extra & Tree<Name, ViewR | DataR> = {
     ...extra,
@@ -2238,16 +2361,16 @@ const isBranch = <Params extends ParamsCodec, Search extends SearchCodec, R>(
  * route's codecs and printers on the result. A flat route that needs
  * `before`, `data`, `errored`, or `pending` is written in the segment form.
  */
+export function client<const Name extends string, Seg extends RootSegment, ViewR, DataR>(
+  name: Name,
+  root: Branch<Seg, ViewR, DataR>,
+): Tree<Name, ViewR | DataR>;
 export function client<
   const Name extends string,
   Params extends ParamsCodec,
   Search extends SearchCodec,
   R,
 >(name: Name, definition: RouteDefinition<Params, Search, R>): Route<Name, Params, Search, R>;
-export function client<const Name extends string, Seg extends AnySegment, ViewR, DataR>(
-  name: Name,
-  root: Branch<Seg, ViewR, DataR>,
-): Tree<Name, ViewR | DataR>;
 export function client<
   const Name extends string,
   Params extends ParamsCodec,
@@ -2285,6 +2408,11 @@ export function client<
     hrefAt: one.hrefAt,
     searchAt: one.searchAt,
     // The router resolved the document to this route: the flat rule.
-    activeAt: (current) => current.name === name,
+    currentAt: (current): Current => {
+      if (current.name === name) {
+        return "page";
+      }
+      return "none";
+    },
   });
 }

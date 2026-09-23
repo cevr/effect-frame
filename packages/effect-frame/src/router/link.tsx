@@ -2,22 +2,21 @@ import type { Source } from "effect-frame/actor";
 import { select } from "effect-frame/actor/client";
 import type { Child, Node } from "effect-frame/view";
 import { Dom, View } from "effect-frame/view";
-import { Effect, Option, Predicate, Schema } from "effect";
-import type { AnyRoute, ParamsCodec, Route, SearchCodec, SearchUpdater } from "./route.js";
-import { readSearch } from "./route.js";
+import { Effect, Option, Predicate } from "effect";
+import type { AnyRoute, Linkable, SearchUpdater } from "./codec.js";
 import type { RouterService } from "./router.js";
 import { Router } from "./router.js";
 
 /**
- * A typed link to a route: a live printed href, whether the route is the
- * current one, and the two moves. Yielded in a view's setup, where the
- * `Router` is in context; a `Link` node draws it, or a view uses the parts.
- * A link to a route cannot print a URL the route does not parse, because
- * `href` encodes through the route's own Schemas.
+ * A typed link to a route or a nested segment: a live printed href, whether
+ * the document is on it, and the two moves. Yielded in a view's setup, where
+ * the `Router` is in context; a `Link` node draws it, or a view uses the
+ * parts. A link cannot print a URL its destination does not parse, because
+ * `href` encodes through the destination's own Schemas.
  */
 export interface Link {
   readonly href: Source<string>;
-  /** `true` while the document is on this link's route, at any values. */
+  /** `true` while the document is on this link's destination, at any values. */
   readonly active: Source<boolean>;
   readonly go: Effect.Effect<void>;
   readonly replace: Effect.Effect<void>;
@@ -26,42 +25,41 @@ export interface Link {
 /** A fixed decoded search or a typed update evaluated against the URL. */
 export type LinkSearch<Search> = Search | SearchUpdater<Search>;
 
-export const link = <
-  Name extends string,
-  Params extends ParamsCodec,
-  Search extends SearchCodec,
-  R,
->(
-  route: Route<Name, Params, Search, R>,
-  params: Params["Type"],
-  search: LinkSearch<Search["Type"]>,
+/**
+ * A flat route is active while the router resolved the document to it. A
+ * segment is active while the URL starts with its path and decodes.
+ */
+export const link = <Params, Search>(
+  to: Linkable<Params, Search>,
+  params: NoInfer<Params>,
+  search: LinkSearch<NoInfer<Search>>,
 ): Effect.Effect<Link, never, Router> =>
   Effect.gen(function* () {
     const router = yield* Router;
-    const hrefAt = (url: URL): string => route.hrefAt(url, params, searchAt(route, url, search));
+    const hrefAt = (url: URL): string => to.hrefAt(url, params, searchAt(to, url, search));
     const href = select(router.current, (match) => hrefAt(match.url));
     return {
       href,
-      active: isActive(router, route),
+      active: select(router.current, (match) => to.activeAt(match)),
       go: router.navigate(hrefAt),
       replace: router.replace(hrefAt),
     };
   });
 
-const searchAt = <Name extends string, Params extends ParamsCodec, Search extends SearchCodec, R>(
-  route: Route<Name, Params, Search, R>,
+const searchAt = <Params, Search>(
+  to: Linkable<Params, Search>,
   url: URL,
-  search: LinkSearch<Search["Type"]>,
-): Search["Type"] => {
-  if (!Predicate.isFunction(search)) {
+  search: LinkSearch<Search>,
+): Search => {
+  if (!isUpdater(search)) {
     return search;
   }
-  const decoded = Schema.decodeUnknownOption(route.search)(readSearch(url.searchParams));
-  const previous = Option.getOrElse(decoded, () =>
-    Option.getOrThrow(Schema.decodeUnknownOption(route.search)({})),
-  );
-  return search(previous);
+  return search(to.searchAt(url));
 };
+
+function isUpdater<Search>(search: LinkSearch<Search>): search is SearchUpdater<Search> {
+  return Predicate.isFunction(search);
+}
 
 /** `true` while the document is on `route`, whatever its values. */
 export function isActive<R>(router: RouterService, route: AnyRoute<R>): Source<boolean> {

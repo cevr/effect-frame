@@ -10,10 +10,7 @@ import type { AnyRoute, LocationService } from "effect-frame/router";
 import { Dom, Html, Loading, View, ViewTest, ready, render } from "effect-frame/view";
 import type { LoadingScope, Node } from "effect-frame/view";
 import * as Frame from "../../src/frame.js";
-import * as Branch from "../../src/router/branch.js";
-import * as Check from "../../src/router/check.js";
 import * as Receipt from "../../src/router/receipt.js";
-import * as Lazy from "../../src/view/lazy.js";
 import {
   Clock,
   Context,
@@ -180,9 +177,9 @@ const loader =
   <P, E, R>(
     importer: Importer,
     events: Ref.Ref<ReadonlyArray<string>>,
-    module: Lazy.Module<P, E, R>,
+    module: View.LazyModule<P, E, R>,
   ) =>
-  (): Promise<Lazy.Module<P, E, R>> =>
+  (): Promise<View.LazyModule<P, E, R>> =>
     Effect.runPromise(
       Effect.gen(function* () {
         const call = yield* Ref.updateAndGet(importer.calls, (count) => count + 1);
@@ -212,38 +209,38 @@ const LoginRoute = Route.client("login", {
 const TenantParams = Schema.Struct({ tenant: Schema.String });
 const PostParams = Schema.Struct({ tenant: Schema.String, postId: Schema.String });
 
-const checkTenant = (next: Check.BeforeInput<{ readonly tenant: string }, {}>) =>
+const checkTenant = (next: Route.BeforeInput<{ readonly tenant: string }, {}>) =>
   Effect.gen(function* () {
     const access = yield* Access;
     yield* logEvent(access.events, `check:tenant:${next.url.pathname}`);
     if ((yield* Ref.get(access.denied)).has(next.params.tenant)) {
-      return Check.redirect(Check.target(LoginRoute, {}, { next: next.url.pathname }));
+      return Route.redirect(Route.target(LoginRoute, {}, { next: next.url.pathname }));
     }
-    return Check.Continue;
+    return Route.Continue;
   });
 
 const checkPost = (
-  next: Check.BeforeInput<{ readonly tenant: string; readonly postId: string }, {}>,
+  next: Route.BeforeInput<{ readonly tenant: string; readonly postId: string }, {}>,
 ) =>
   Effect.gen(function* () {
     const access = yield* Access;
     yield* logEvent(access.events, `check:post:${next.url.pathname}`);
-    return Check.Continue;
+    return Route.Continue;
   });
 
-const tenantSegment = Branch.segment("tenant", {
+const tenantSegment = Route.segment("tenant", {
   path: "/app/:tenant",
   params: TenantParams,
-  data: ({ params }) => ({ tenant: Branch.query(TenantInfo, { tenant: params.tenant }) }),
+  data: ({ params }) => ({ tenant: Route.query(TenantInfo, { tenant: params.tenant }) }),
   before: checkTenant,
 });
 
-const postSegment = Branch.child(tenantSegment, "post", {
+const postSegment = Route.child(tenantSegment, "post", {
   path: "posts/:postId",
   params: PostParams,
   // Declared and never read by the view: an unread query.
   data: ({ params }) => ({
-    post: Branch.query(PostBody, { tenant: params.tenant, postId: params.postId }),
+    post: Route.query(PostBody, { tenant: params.tenant, postId: params.postId }),
   }),
   before: checkPost,
 });
@@ -288,7 +285,7 @@ const makeProbes = Effect.gen(function* () {
 });
 
 const describeFailure = <E extends { readonly _tag: string }>(
-  failure: Check.RouteFailure<E>,
+  failure: Route.RouteFailure<E>,
 ): string => {
   if (failure._tag === "Setup") {
     return `Setup:${failure.error._tag}`;
@@ -297,7 +294,7 @@ const describeFailure = <E extends { readonly _tag: string }>(
 };
 
 /** The imported post view. Each instance runs this setup with its own Scope. */
-const makePostView = (probes: Probes) => (props: Branch.PropsOf<typeof postSegment>) =>
+const makePostView = (probes: Probes) => (props: Route.PropsOf<typeof postSegment>) =>
   Effect.gen(function* () {
     const access = yield* Access;
     const first = yield* props.params.get;
@@ -338,11 +335,11 @@ const PendingAfter = "100 millis";
 const PendingAtLeast = "300 millis";
 
 const makeApp = (probes: Probes, importer: Importer, events: Ref.Ref<ReadonlyArray<string>>) => {
-  const LazyPost = Lazy.lazy(loader(importer, events, { default: makePostView(probes) }));
-  const tree = Branch.layout(
+  const LazyPost = View.lazy(loader(importer, events, { default: makePostView(probes) }));
+  const tree = Route.layout(
     tenantSegment,
     [
-      Branch.leaf(postSegment, LazyPost, {
+      Route.leaf(postSegment, LazyPost, {
         errored: (failure) => {
           probes.erroredBuilt.push("errored");
           return <p id="post-errored">{View.bind(failure, describeFailure)}</p>;
@@ -379,15 +376,15 @@ const makeApp = (probes: Probes, importer: Importer, events: Ref.Ref<ReadonlyArr
         );
       }),
   );
-  return Branch.route("app", tree);
+  return Route.client("app", tree);
 };
 
 /** The post view as a plain leaf with no `pending`, under the layout's Loading. */
 const makePlainApp = (probes: Probes, events: Ref.Ref<ReadonlyArray<string>>) => {
-  const tree = Branch.layout(
+  const tree = Route.layout(
     tenantSegment,
     [
-      Branch.leaf(postSegment, makePostView(probes), {
+      Route.leaf(postSegment, makePostView(probes), {
         errored: (failure) => {
           probes.erroredBuilt.push("errored");
           return <p id="post-errored">{View.bind(failure, describeFailure)}</p>;
@@ -404,7 +401,7 @@ const makePlainApp = (probes: Probes, events: Ref.Ref<ReadonlyArray<string>>) =>
         return <section id="layout">{body}</section>;
       }),
   );
-  return Branch.route("app", tree);
+  return Route.client("app", tree);
 };
 
 /** Each time a nested fallback reached the document, by owner. */
@@ -426,18 +423,18 @@ const recorded = (log: Array<string>, id: string, text: string) => (
   </p>
 );
 
-const pendingOf = (log: Array<string>, id: string): Branch.Pending => ({
+const pendingOf = (log: Array<string>, id: string): Route.Pending => ({
   fallback: recorded(log, id, id),
   after: PendingAfter,
   atLeast: PendingAtLeast,
 });
 
 /** A child that needs nothing: only its import prepares. */
-const ChildView = (props: Branch.PropsOf<typeof postSegment>) =>
+const ChildView = (props: Route.PropsOf<typeof postSegment>) =>
   Effect.succeed(<p id="child">{View.bind(props.params, (params) => params.postId)}</p>);
 
 const nestedChild = (shown: Shown, importer: Importer, events: Ref.Ref<ReadonlyArray<string>>) =>
-  Branch.leaf(postSegment, Lazy.lazy(loader(importer, events, { default: ChildView })), {
+  Route.leaf(postSegment, View.lazy(loader(importer, events, { default: ChildView })), {
     errored: () => <p id="child-errored">child errored</p>,
     pending: pendingOf(shown.child, "child-pending"),
   });
@@ -449,14 +446,14 @@ const makeLazyParentApp = (
   childImporter: Importer,
   events: Ref.Ref<ReadonlyArray<string>>,
 ) => {
-  const ParentView = (props: Branch.LayoutPropsOf<typeof tenantSegment, never>) =>
+  const ParentView = (props: Route.LayoutPropsOf<typeof tenantSegment, never>) =>
     Effect.map(props.outlet, (outlet) => <section id="parent">{outlet}</section>);
-  return Branch.route(
+  return Route.client(
     "nested",
-    Branch.layout(
+    Route.layout(
       tenantSegment,
       [nestedChild(shown, childImporter, events)],
-      Lazy.lazy(loader(parentImporter, events, { default: ParentView })),
+      View.lazy(loader(parentImporter, events, { default: ParentView })),
       {
         errored: () => <p id="parent-errored">parent errored</p>,
         pending: pendingOf(shown.parent, "parent-pending"),
@@ -472,9 +469,9 @@ const makeSlowParentApp = (
   childImporter: Importer,
   events: Ref.Ref<ReadonlyArray<string>>,
 ) =>
-  Branch.route(
+  Route.client(
     "nested",
-    Branch.layout(
+    Route.layout(
       tenantSegment,
       [nestedChild(shown, childImporter, events)],
       (props) =>
@@ -493,18 +490,18 @@ const makeFirstFrameApp = (
   importer: Importer,
   events: Ref.Ref<ReadonlyArray<string>>,
 ) => {
-  const FirstPost = (props: Branch.PropsOf<typeof postSegment>) =>
+  const FirstPost = (props: Route.PropsOf<typeof postSegment>) =>
     Effect.gen(function* () {
       const first = yield* props.params.get;
       yield* Ref.update(probes.postSetups, (all) => [...all, first.postId]);
       return <p id="post-first">{`post ${first.postId}`}</p>;
     });
-  return Branch.route(
+  return Route.client(
     "app",
-    Branch.layout(
+    Route.layout(
       tenantSegment,
       [
-        Branch.leaf(postSegment, Lazy.lazy(loader(importer, events, { default: FirstPost })), {
+        Route.leaf(postSegment, View.lazy(loader(importer, events, { default: FirstPost })), {
           errored: () => <p id="post-errored">errored</p>,
           pending: pendingOf(probes.pendingShown, "post-pending"),
         }),
@@ -651,7 +648,7 @@ type Equals<A, B> =
 
 type RouteServices<T> = T extends AnyRoute<infer R> ? R : never;
 
-const FixturePostView = (props: Branch.PropsOf<typeof postSegment>) =>
+const FixturePostView = (props: Route.PropsOf<typeof postSegment>) =>
   Effect.gen(function* () {
     const params = yield* props.params.get;
     if (params.postId === "bad") {
@@ -664,10 +661,10 @@ const FixturePostView = (props: Branch.PropsOf<typeof postSegment>) =>
 /** An import that has already resolved. */
 const resolved =
   <P, E, R>(view: (props: P) => Effect.Effect<Node, E, R>) =>
-  (): Promise<Lazy.Module<P, E, R>> =>
+  (): Promise<View.LazyModule<P, E, R>> =>
     Effect.runPromise(Effect.succeed({ default: view }));
 
-const lazyFixture = Lazy.lazy(resolved(FixturePostView));
+const lazyFixture = View.lazy(resolved(FixturePostView));
 type Fixture = typeof FixturePostView;
 type LazyFixture = typeof lazyFixture;
 
@@ -675,7 +672,7 @@ type LazyFixture = typeof lazyFixture;
 const lazyProps: Equals<Parameters<LazyFixture>[0], Parameters<Fixture>[0]> = true;
 const lazyError: Equals<
   Effect.Error<ReturnType<LazyFixture>>,
-  PostFailed | Lazy.LazyImportFailed
+  PostFailed | View.LazyImportFailed
 > = true;
 const lazyServices: Equals<
   Effect.Services<ReturnType<LazyFixture>>,
@@ -685,14 +682,14 @@ const lazyServicesExact: Equals<
   Effect.Services<ReturnType<LazyFixture>>,
   LoadingScope | ScopeType.Scope
 > = true;
-const lazyLeaf = Branch.leaf(postSegment, lazyFixture, {
+const lazyLeaf = Route.leaf(postSegment, lazyFixture, {
   errored: (failure) => <p>{View.bind(failure, describeFailure)}</p>,
   pending: { fallback: <p>opening</p>, after: "150 millis", atLeast: "200 millis" },
 });
 /** A view that cannot fail may present pending without an errored handler. */
-const neverFails = (props: Branch.PropsOf<typeof postSegment>) =>
+const neverFails = (props: Route.PropsOf<typeof postSegment>) =>
   Effect.map(props.params.get, (params): Node => <p>{params.postId}</p>);
-const pendingOnly = Branch.leaf(postSegment, neverFails, {
+const pendingOnly = Route.leaf(postSegment, neverFails, {
   pending: { fallback: <p>opening</p>, after: 0, atLeast: 0 },
 });
 /** The app's services: declarations and the check. A lazy view adds none. */
@@ -703,21 +700,21 @@ const appServices: Equals<
 
 // @effect-diagnostics missingEffectError:off
 // @ts-expect-error A lazy view adds LazyImportFailed to E, so it needs an errored handler.
-const unhandledImport = Branch.leaf(postSegment, Lazy.lazy(resolved(neverFails)));
+const unhandledImport = Route.leaf(postSegment, View.lazy(resolved(neverFails)));
 
 // @ts-expect-error The handler must take LazyImportFailed as well as the view's own E.
-const narrowHandler = Branch.leaf(postSegment, lazyFixture, {
-  errored: (failure: Source<Check.RouteFailure<PostFailed>>) => View.bind(failure, describeFailure),
+const narrowHandler = Route.leaf(postSegment, lazyFixture, {
+  errored: (failure: Source<Route.RouteFailure<PostFailed>>) => View.bind(failure, describeFailure),
 });
 
 const OtherView = (props: { readonly other: string }) => Effect.succeed(<p>{props.other}</p>);
 const wrongModule = () =>
   // @ts-expect-error A lazy module's view must take the segment's props.
-  Branch.leaf(postSegment, Lazy.lazy(resolved(OtherView)));
+  Route.leaf(postSegment, View.lazy(resolved(OtherView)));
 
 const wrongDuration = () =>
   // @ts-expect-error `after` is a Duration input.
-  Branch.leaf(postSegment, neverFails, {
+  Route.leaf(postSegment, neverFails, {
     pending: { fallback: <p>opening</p>, after: true, atLeast: 0 },
   });
 // @effect-diagnostics missingEffectError:error

@@ -28,7 +28,6 @@ import type { AnyRoute, LocationService } from "effect-frame/router";
 import { Dom, Html, Loading, Query, View, ViewTest, ready, render } from "effect-frame/view";
 import type { LoadingScope } from "effect-frame/view";
 import * as Frame from "../../src/frame.js";
-import * as Branch from "../../src/router/branch.js";
 import {
   Context,
   Deferred,
@@ -278,41 +277,41 @@ const subscriptionsOf = Effect.fn("NestedTest.subscriptionsOf")(function* (
 const TenantParams = Schema.Struct({ tenant: Schema.String });
 const PostParams = Schema.Struct({ tenant: Schema.String, postId: Schema.String });
 
-const tenantSegment = Branch.segment("tenant", {
+const tenantSegment = Route.segment("tenant", {
   path: "/app/:tenant",
   params: TenantParams,
-  data: ({ params }) => ({ tenant: Branch.query(TenantInfo, { tenant: params.tenant }) }),
+  data: ({ params }) => ({ tenant: Route.query(TenantInfo, { tenant: params.tenant }) }),
 });
 
-const postSegment = Branch.child(tenantSegment, "post", {
+const postSegment = Route.child(tenantSegment, "post", {
   path: "posts/:postId",
   params: PostParams,
   search: Route.search(Schema.Struct({ tab: Schema.String.pipe(Route.withDefault("read")) })),
   // The actor comes first: a sequential acquisition would hold both queries behind it.
   data: ({ params }) => ({
-    draft: Branch.actor(Draft, { tenant: params.tenant, postId: params.postId }),
-    post: Branch.query(PostBody, { tenant: params.tenant, postId: params.postId }),
-    comments: Branch.query(Comments, { tenant: params.tenant, postId: params.postId }),
+    draft: Route.actor(Draft, { tenant: params.tenant, postId: params.postId }),
+    post: Route.query(PostBody, { tenant: params.tenant, postId: params.postId }),
+    comments: Route.query(Comments, { tenant: params.tenant, postId: params.postId }),
   }),
 });
 
-const editSegment = Branch.child(tenantSegment, "edit", {
+const editSegment = Route.child(tenantSegment, "edit", {
   path: "posts/:postId/edit",
   params: PostParams,
   data: ({ params }) => ({
-    post: Branch.query(PostBody, { tenant: params.tenant, postId: params.postId }),
+    post: Route.query(PostBody, { tenant: params.tenant, postId: params.postId }),
   }),
 });
 
 /** Two actors: a stay can hold the second read while the first is subscribed. */
-const pairSegment = Branch.child(tenantSegment, "pair", {
+const pairSegment = Route.child(tenantSegment, "pair", {
   path: "pairs/:postId",
   params: PostParams,
   data: ({ params }) => ({
-    first: Branch.actor(Draft, { tenant: params.tenant, postId: params.postId }),
-    second: Branch.actor(Draft, { tenant: params.tenant, postId: `${params.postId}-second` }),
+    first: Route.actor(Draft, { tenant: params.tenant, postId: params.postId }),
+    second: Route.actor(Draft, { tenant: params.tenant, postId: `${params.postId}-second` }),
     // A layout's Loading shows its fallback until the child registers a read.
-    post: Branch.query(PostBody, { tenant: params.tenant, postId: params.postId }),
+    post: Route.query(PostBody, { tenant: params.tenant, postId: params.postId }),
   }),
 });
 
@@ -361,7 +360,7 @@ const sendText = (target: RemoteActorRef<typeof Draft>, text: string) =>
   Effect.orDie(target.send(SetText.make({ text }), { commandId: nextCommandId() }));
 
 const makeTree = (probes: Probes) => {
-  const PostView = (props: Branch.PropsOf<typeof postSegment>) =>
+  const PostView = (props: Route.PropsOf<typeof postSegment>) =>
     Effect.gen(function* () {
       const first = yield* props.params.get;
       yield* Ref.update(probes.postSetups, (all) => [...all, first.postId]);
@@ -414,7 +413,7 @@ const makeTree = (probes: Probes) => {
       );
     });
 
-  const EditView = (props: Branch.PropsOf<typeof editSegment>) =>
+  const EditView = (props: Route.PropsOf<typeof editSegment>) =>
     Effect.gen(function* () {
       const first = yield* props.params.get;
       yield* Ref.update(probes.editSetups, (all) => [...all, first.postId]);
@@ -426,7 +425,7 @@ const makeTree = (probes: Probes) => {
       );
     });
 
-  const PairView = (props: Branch.PropsOf<typeof pairSegment>) =>
+  const PairView = (props: Route.PropsOf<typeof pairSegment>) =>
     Effect.map(ready(props.data.post.state, ""), (title) => (
       <article id="pair">
         <h2 id="pair-title">{View.bind(title)}</h2>
@@ -434,12 +433,12 @@ const makeTree = (probes: Probes) => {
       </article>
     ));
 
-  const tree = Branch.layout(
+  const tree = Route.layout(
     tenantSegment,
     [
-      Branch.leaf(postSegment, PostView),
-      Branch.leaf(editSegment, EditView),
-      Branch.leaf(pairSegment, PairView),
+      Route.leaf(postSegment, PostView),
+      Route.leaf(editSegment, EditView),
+      Route.leaf(pairSegment, PairView),
     ],
     (props) =>
       Effect.gen(function* () {
@@ -471,7 +470,7 @@ const makeTree = (probes: Probes) => {
         );
       }),
   );
-  return Branch.route("app", tree);
+  return Route.client("app", tree);
 };
 
 const NotFound = (props: { readonly url: Source<URL> }) =>
@@ -613,7 +612,7 @@ type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 type RouteServices<T> = T extends AnyRoute<infer R> ? R : never;
-type PostData = Branch.PropsOf<typeof postSegment>["data"];
+type PostData = Route.PropsOf<typeof postSegment>["data"];
 
 type TypedApp = ReturnType<typeof makeTree>;
 
@@ -623,17 +622,17 @@ const inheritedTenant: Equals<PostData["tenant"], FollowedQuery<string, QueryFai
 const ownPost: Equals<PostData["post"], FollowedQuery<string, QueryFailure>> = true;
 const actorSource: Equals<PostData["draft"], Source<RemoteActorRef<typeof Draft>>> = true;
 const postParams: Equals<
-  Effect.Success<Branch.PropsOf<typeof postSegment>["params"]["get"]>,
+  Effect.Success<Route.PropsOf<typeof postSegment>["params"]["get"]>,
   { readonly tenant: string; readonly postId: string }
 > = true;
 
 /** A layout that places the outlet outside Loading leaks the child's LoadingScope. */
-const leaky = Branch.route(
+const leaky = Route.client(
   "leaky",
-  Branch.layout(
+  Route.layout(
     tenantSegment,
     [
-      Branch.leaf(editSegment, (props) =>
+      Route.leaf(editSegment, (props) =>
         Effect.map(ready(props.data.post.state, ""), (title) => <h2>{View.bind(title)}</h2>),
       ),
     ],
@@ -651,11 +650,11 @@ const leakyServices: Equals<
 // @ts-expect-error The leaked LoadingScope is part of the route's requirements.
 const leakyWithoutScope: Equals<RouteServices<typeof leaky>, QueryCache | ActorTransport> = true;
 
-const collision = Branch.child(tenantSegment, "collision", {
+const collision = Route.child(tenantSegment, "collision", {
   path: "c",
   params: TenantParams,
   // @ts-expect-error A child may not redeclare a name its parent declared.
-  data: ({ params }) => ({ tenant: Branch.query(TenantInfo, { tenant: params.tenant }) }),
+  data: ({ params }) => ({ tenant: Route.query(TenantInfo, { tenant: params.tenant }) }),
 });
 
 // @ts-expect-error A binding that no declaration names does not exist.
@@ -695,12 +694,12 @@ describe("private nested transition", () => {
     Effect.gen(function* () {
       const rejection = (declare: () => void) =>
         Effect.flip(
-          Effect.try({ try: declare, catch: Schema.decodeUnknownSync(Branch.BranchRejected) }),
+          Effect.try({ try: declare, catch: Schema.decodeUnknownSync(Route.BranchRejected) }),
         );
       // A direct child may not reuse its parent's param name.
       expect(
         yield* rejection(() =>
-          Branch.child(tenantSegment, "shadow", { path: "items/:tenant", params: TenantParams }),
+          Route.child(tenantSegment, "shadow", { path: "items/:tenant", params: TenantParams }),
         ),
       ).toMatchObject({
         _tag: "BranchRejected",
@@ -710,7 +709,7 @@ describe("private nested transition", () => {
       // A grandchild is checked against every ancestor, tails included.
       expect(
         yield* rejection(() =>
-          Branch.child(postSegment, "deep", { path: "files/:tenant*", params: PostParams }),
+          Route.child(postSegment, "deep", { path: "files/:tenant*", params: PostParams }),
         ),
       ).toMatchObject({
         _tag: "BranchRejected",
@@ -718,7 +717,7 @@ describe("private nested transition", () => {
         reason: "path param tenant is already declared by tenant",
       });
       // A new name is accepted.
-      const accepted = Branch.child(postSegment, "file", {
+      const accepted = Route.child(postSegment, "file", {
         path: "files/:fileId",
         params: Schema.Struct({ ...PostParams.fields, fileId: Schema.String }),
       });

@@ -1,4 +1,4 @@
-import type { Entered } from "./route.js";
+import type { Entered } from "./codec.js";
 import { Option } from "effect";
 import type { Effect } from "effect";
 

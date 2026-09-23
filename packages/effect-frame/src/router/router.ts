@@ -16,7 +16,7 @@ import {
   Stream,
   SubscriptionRef,
 } from "effect";
-import type { AnyRoute, Entered, RouteInstance, RouteNavigation, UrlUpdater } from "./route.js";
+import type { AnyRoute, Entered, RouteInstance, RouteNavigation, UrlUpdater } from "./codec.js";
 import {
   Runtime as UrlStateRuntime,
   makeRuntime as makeUrlStateRuntime,

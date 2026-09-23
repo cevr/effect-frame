@@ -2,8 +2,11 @@ import { Context, Deferred, Effect, Exit, Option, Schema } from "effect";
 import type { View } from "./view.js";
 
 /**
- * PRIVATE (route slice 4). A view whose code is imported on first use. Not
- * exported from `effect-frame/view`. See `docs/design/route-pending.md`.
+ * A view whose code is imported on first use: `View.lazy` in
+ * `effect-frame/view`. See `docs/design/route-pending.md` and
+ * `docs/design/route-public.md`. `lazy`, `LazyImportFailed`, and `Module`
+ * are public; the transition's handles (`Ticket`, `Definition`,
+ * `definitionOf`, `withTicket`) are not.
  *
  * `lazy(load)` returns a View with the same Props and R as the imported
  * view, and one more typed error: `LazyImportFailed`. It imports only view

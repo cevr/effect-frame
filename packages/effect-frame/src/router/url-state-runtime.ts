@@ -6,8 +6,8 @@ import type {
   SearchCodec,
   SearchKeyInfo,
   SearchRecord,
-} from "./route.js";
-import { mergeSearchRecord, readSearch, printSearch, searchKeysOf } from "./route.js";
+} from "./codec.js";
+import { mergeSearchRecord, readSearch, printSearch, searchKeysOf } from "./codec.js";
 import type { RouterService } from "./router.js";
 import type { Scope } from "effect";
 import { Context, Effect, Option, Schema } from "effect";

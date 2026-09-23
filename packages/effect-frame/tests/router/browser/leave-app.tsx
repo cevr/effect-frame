@@ -10,7 +10,7 @@ import type { Source } from "effect-frame/actor";
 import { Location, Route, mount } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import { Deferred, Effect, Logger, Option, Schema } from "effect";
-import * as Branch from "../../../src/router/branch.js";
+import * as LeaveBranch from "../../../src/router/leave-branch.js";
 import { browserCommit } from "../../../src/router/browser-commit.js";
 import type { Precommit } from "../../../src/router/browser-commit.js";
 import * as Leave from "../../../src/router/leave.js";
@@ -42,16 +42,15 @@ declare global {
   }
 }
 
-const printValues = (
-  values: Branch.Values<{ readonly postId: string }, { readonly tab: string }>,
-) => `${values.params.postId}?${values.search.tab}`;
+const printValues = (values: Route.Values<{ readonly postId: string }, { readonly tab: string }>) =>
+  `${values.params.postId}?${values.search.tab}`;
 
-const tenantSegment = Branch.segment("tenant", {
+const tenantSegment = Route.segment("tenant", {
   path: "/app/:tenant",
   params: Schema.Struct({ tenant: Schema.String }),
 });
 
-const postSegment = Branch.child(tenantSegment, "post", {
+const postSegment = Route.child(tenantSegment, "post", {
   path: "posts/:postId",
   params: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
   search: Route.search(Schema.Struct({ tab: Schema.String.pipe(Route.withDefault("read")) })),
@@ -79,7 +78,7 @@ const start = (): void => {
   };
   window.__leave = control;
 
-  const PostView = (props: Branch.PropsOf<typeof postSegment>) =>
+  const PostView = (props: Route.PropsOf<typeof postSegment>) =>
     Effect.gen(function* () {
       yield* Leave.onLeave(postSegment, (input) =>
         Effect.gen(function* () {
@@ -110,9 +109,9 @@ const start = (): void => {
       );
     });
 
-  const app = Branch.route(
+  const app = Route.client(
     "app",
-    Branch.layout(tenantSegment, [Branch.leaf(postSegment, PostView)], (props) =>
+    LeaveBranch.layout(tenantSegment, [LeaveBranch.leaf(postSegment, PostView)], (props) =>
       Effect.map(props.outlet, (outlet) => (
         <section id="layout">
           <p id="tenant-param">{View.bind(props.params, (params) => params.tenant)}</p>

@@ -1,6 +1,6 @@
 import type { Effect } from "effect";
 import { Option } from "effect";
-import type { Entered } from "./route.js";
+import type { Entered } from "./codec.js";
 import type { RouterService } from "./router.js";
 
 /**

@@ -4,7 +4,7 @@ import { Runtime } from "./url-state-runtime.js";
 export { UrlStateConflict, UrlStateSchemaRejected } from "./url-state-runtime.js";
 export type { Options, State } from "./url-state-runtime.js";
 import type { Options, State } from "./url-state-runtime.js";
-import type { SearchCodec } from "./route.js";
+import type { SearchCodec } from "./codec.js";
 
 /**
  * Define URL-owned state in a view setup. The returned source derives from

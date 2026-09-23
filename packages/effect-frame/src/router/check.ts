@@ -1,14 +1,15 @@
 import type { TransportReadError, Unauthorized } from "effect-frame/actor";
 import { Option, Schema } from "effect";
 import type { Effect, Scope } from "effect";
-import type { AnyRoute } from "./route.js";
+import type { AnyRoute } from "./codec.js";
 import type { Router } from "./router.js";
 import type { Runtime as UrlStateRuntime } from "./url-state-runtime.js";
 
 /**
- * PRIVATE (route slice 3). Route checks, typed targets, and the typed route
- * failure. Not exported from `effect-frame/router`. See
- * `docs/design/route-checks.md`.
+ * Route checks, typed targets, and the typed route failure (route slice 3,
+ * `docs/design/route-checks.md`). The `Route` namespace exports the check
+ * vocabulary; the registry (`register`, `read`, `Checker`) and
+ * `redirectLimit` stay internal. See `docs/design/route-public.md`.
  *
  * A check describes one candidate transition. It runs before history,
  * declarations, and setup, so its answer is a value, not a side effect:

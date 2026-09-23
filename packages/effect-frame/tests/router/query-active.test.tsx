@@ -11,10 +11,9 @@ import {
 import type { QueryKey, TransportService } from "effect-frame/actor";
 import { canonicalize } from "effect-frame/actor/client";
 import { QueryTest } from "effect-frame/actor/testing";
-import { Location, mount as mountRouter } from "effect-frame/router";
+import { Location, Route, mount as mountRouter } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
 import { Html, View } from "effect-frame/view";
-import * as Branch from "../../src/router/branch.js";
 import { Context, Deferred, Effect, Fiber, Layer, Option, Ref, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
@@ -135,40 +134,40 @@ const testLayer = Layer.mergeAll(client, held.pipe(Layer.provide(client))).pipe(
 const TenantParams = Schema.Struct({ tenant: Schema.String });
 const PostParams = Schema.Struct({ tenant: Schema.String, postId: Schema.String });
 
-const tenantSegment = Branch.segment("tenant", {
+const tenantSegment = Route.segment("tenant", {
   path: "/app/:tenant",
   params: TenantParams,
-  data: ({ params }) => ({ tenant: Branch.query(Tenant, { tenant: params.tenant }) }),
+  data: ({ params }) => ({ tenant: Route.query(Tenant, { tenant: params.tenant }) }),
 });
 
-const postSegment = Branch.child(tenantSegment, "post", {
+const postSegment = Route.child(tenantSegment, "post", {
   path: "posts/:postId",
   params: PostParams,
   data: ({ params }) => ({
-    post: Branch.query(Post, { tenant: params.tenant, postId: params.postId }),
-    comments: Branch.query(Comments, { tenant: params.tenant, postId: params.postId }),
+    post: Route.query(Post, { tenant: params.tenant, postId: params.postId }),
+    comments: Route.query(Comments, { tenant: params.tenant, postId: params.postId }),
   }),
 });
 
 /** Declares an actor, so its snapshot read can hold a transition open. */
-const pairSegment = Branch.child(tenantSegment, "pair", {
+const pairSegment = Route.child(tenantSegment, "pair", {
   path: "pairs/:postId",
   params: PostParams,
   data: ({ params }) => ({
-    draft: Branch.actor(Draft, { tenant: params.tenant, postId: params.postId }),
-    post: Branch.query(Post, { tenant: params.tenant, postId: params.postId }),
+    draft: Route.actor(Draft, { tenant: params.tenant, postId: params.postId }),
+    post: Route.query(Post, { tenant: params.tenant, postId: params.postId }),
   }),
 });
 
-const app = Branch.route(
+const app = Route.client(
   "app",
-  Branch.layout(
+  Route.layout(
     tenantSegment,
     [
-      Branch.leaf(postSegment, (props) =>
+      Route.leaf(postSegment, (props) =>
         Effect.succeed(<p>{View.bind(props.params, (params) => params.postId)}</p>),
       ),
-      Branch.leaf(pairSegment, (props) =>
+      Route.leaf(pairSegment, (props) =>
         Effect.succeed(<p>{View.bind(props.params, (params) => params.postId)}</p>),
       ),
     ],

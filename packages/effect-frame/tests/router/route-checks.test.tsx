@@ -20,7 +20,6 @@ import { Location, Route, mount as mountRouter } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
 import { Dom, Loading, Query, View, ViewTest, ready } from "effect-frame/view";
 import * as Frame from "../../src/frame.js";
-import * as Branch from "../../src/router/branch.js";
 import * as Check from "../../src/router/check.js";
 import * as Receipt from "../../src/router/receipt.js";
 import {
@@ -177,7 +176,7 @@ interface Asked {
   readonly params: unknown;
   readonly search: unknown;
   readonly url: string;
-  readonly kind: Check.NavigationKind;
+  readonly kind: Route.NavigationKind;
 }
 
 interface AccessService {
@@ -327,7 +326,7 @@ const PostParams = Schema.Struct({ tenant: Schema.String, postId: Schema.String 
  * The tenant check: an unannotated function whose services are `Access`.
  * A denied tenant goes to sign-in with a typed target.
  */
-const checkTenant = (next: Check.BeforeInput<{ readonly tenant: string }, {}>) =>
+const checkTenant = (next: Route.BeforeInput<{ readonly tenant: string }, {}>) =>
   Effect.gen(function* () {
     const access = yield* Access;
     yield* record({ segment: "tenant", ...next, url: next.url.href });
@@ -337,26 +336,26 @@ const checkTenant = (next: Check.BeforeInput<{ readonly tenant: string }, {}>) =
       yield* Deferred.await(held.value.gate);
     }
     if ((yield* Ref.get(access.denied)).has(next.params.tenant)) {
-      return Check.redirect(Check.target(LoginRoute, {}, { next: next.url.pathname }));
+      return Route.redirect(Route.target(LoginRoute, {}, { next: next.url.pathname }));
     }
-    return Check.Continue;
+    return Route.Continue;
   });
 
-const tenantSegment = Branch.segment("tenant", {
+const tenantSegment = Route.segment("tenant", {
   path: "/app/:tenant",
   params: TenantParams,
-  data: ({ params }) => ({ tenant: Branch.query(TenantInfo, { tenant: params.tenant }) }),
+  data: ({ params }) => ({ tenant: Route.query(TenantInfo, { tenant: params.tenant }) }),
   before: checkTenant,
 });
 
-const postSegment = Branch.child(tenantSegment, "post", {
+const postSegment = Route.child(tenantSegment, "post", {
   path: "posts/:postId",
   params: PostParams,
   search: Route.search(Schema.Struct({ tab: Schema.String.pipe(Route.withDefault("read")) })),
   data: ({ params }) => ({
-    draft: Branch.actor(Draft, { tenant: params.tenant, postId: params.postId }),
-    post: Branch.query(PostBody, { tenant: params.tenant, postId: params.postId }),
-    comments: Branch.query(Comments, { tenant: params.tenant, postId: params.postId }),
+    draft: Route.actor(Draft, { tenant: params.tenant, postId: params.postId }),
+    post: Route.query(PostBody, { tenant: params.tenant, postId: params.postId }),
+    comments: Route.query(Comments, { tenant: params.tenant, postId: params.postId }),
   }),
   before: (next) => checkPost(next),
 });
@@ -366,16 +365,16 @@ const postSegment = Branch.child(tenantSegment, "post", {
  * the post segment as its own target, so its type is written out.
  */
 function checkPost(
-  next: Check.BeforeInput<
+  next: Route.BeforeInput<
     { readonly tenant: string; readonly postId: string },
     { readonly tab: string }
   >,
-): Effect.Effect<Check.Verdict, never, Access> {
+): Effect.Effect<Route.Verdict, never, Access> {
   return Effect.gen(function* () {
     yield* record({ segment: "post", ...next, url: next.url.href });
     const { tenant, postId } = next.params;
     const to = (id: string) =>
-      Check.redirect(Check.target(postSegment, { tenant, postId: id }, { tab: "read" }));
+      Route.redirect(Route.target(postSegment, { tenant, postId: id }, { tab: "read" }));
     if (postId === "loop-a") {
       return to("loop-b");
     }
@@ -385,7 +384,7 @@ function checkPost(
     if (postId.startsWith("step-")) {
       return to(`step-${String(Number(postId.slice(5)) + 1)}`);
     }
-    return Check.Continue;
+    return Route.Continue;
   });
 }
 
@@ -427,7 +426,7 @@ const sendText = (target: RemoteActorRef<typeof Draft>, text: string) =>
   Effect.orDie(target.send(SetText.make({ text }), { commandId: nextCommandId() }));
 
 const describeFailure = <E extends { readonly _tag: string }>(
-  failure: Check.RouteFailure<E>,
+  failure: Route.RouteFailure<E>,
 ): string => {
   if (failure._tag === "Setup") {
     return `Setup:${failure.error._tag}`;
@@ -436,7 +435,7 @@ const describeFailure = <E extends { readonly _tag: string }>(
 };
 
 const makeApp = (probes: Probes) => {
-  const PostView = (props: Branch.PropsOf<typeof postSegment>) =>
+  const PostView = (props: Route.PropsOf<typeof postSegment>) =>
     Effect.gen(function* () {
       const first = yield* props.params.get;
       yield* Ref.update(probes.postSetups, (all) => [...all, first.postId]);
@@ -478,10 +477,10 @@ const makeApp = (probes: Probes) => {
       );
     });
 
-  const tree = Branch.layout(
+  const tree = Route.layout(
     tenantSegment,
     [
-      Branch.leaf(postSegment, PostView, {
+      Route.leaf(postSegment, PostView, {
         errored: (failure) => {
           probes.order.push("errored-built");
           return <p id="post-errored">{View.bind(failure, describeFailure)}</p>;
@@ -518,7 +517,7 @@ const makeApp = (probes: Probes) => {
       errored: (failure) => <p id="layout-errored">{View.bind(failure, describeFailure)}</p>,
     },
   );
-  return Branch.route("app", tree);
+  return Route.client("app", tree);
 };
 
 const NotFound = (props: { readonly url: Source<URL> }) =>
@@ -643,8 +642,8 @@ const pathOf = (result: Receipt.NavigationResult): string =>
   `${result._tag} ${result.url.pathname}${result.url.search}${result.url.hash}`;
 
 /** The redirect-cycle defect a failed navigation carried. Anything else throws. */
-const cycleOf = <A,>(exit: Exit.Exit<A>): Check.RedirectCycle =>
-  Schema.decodeUnknownSync(Check.RedirectCycle)(
+const cycleOf = <A,>(exit: Exit.Exit<A>): Route.RedirectCycle =>
+  Schema.decodeUnknownSync(Route.RedirectCycle)(
     Exit.match(exit, {
       onSuccess: () => "committed",
       onFailure: (cause) => Result.getOrElse(Cause.findDefect(cause), () => "no defect"),
@@ -671,40 +670,40 @@ const checkServices: Equals<Effect.Services<typeof askedOnce>, Access> = true;
 const checkError: Equals<Effect.Error<typeof askedOnce>, never> = true;
 const checkSuccess: Equals<
   Effect.Success<typeof askedOnce>,
-  Check.Redirect | Check.Continue
+  Route.Redirect | Route.Continue
 > = true;
 /** The check's services reach the route; setup E does not. */
 const appServices: Equals<
   RouteServices<ReturnType<typeof makeApp>>,
   QueryCache | ActorTransport | Access
 > = true;
-const failingView = (props: Branch.PropsOf<typeof postSegment>) =>
+const failingView = (props: Route.PropsOf<typeof postSegment>) =>
   Effect.flatMap(props.params.get, (params) => PostFailed.make({ postId: params.postId }));
 const failingViewError: Equals<Effect.Error<ReturnType<typeof failingView>>, PostFailed> = true;
-const typedLeaf = Branch.leaf(postSegment, failingView, {
+const typedLeaf = Route.leaf(postSegment, failingView, {
   errored: (failure) => <p>{View.bind(failure, describeFailure)}</p>,
 });
 const typedLeafServices: Equals<
-  Branch.PropsOf<typeof postSegment>["data"]["draft"],
+  Route.PropsOf<typeof postSegment>["data"]["draft"],
   Source<RemoteActorRef<typeof Draft>>
 > = true;
 /** A segment prints its whole path with its own codecs. */
-const printed = Check.target(postSegment, { tenant: "t1", postId: "7" }, { tab: "edit" });
+const printed = Route.target(postSegment, { tenant: "t1", postId: "7" }, { tab: "edit" });
 
 // @effect-diagnostics missingEffectError:off
 // Thunks: a wrong target would fail to print if it ran.
 // @ts-expect-error A target's params are the destination's params.
-const missingParam = () => Check.target(postSegment, { tenant: "t1" }, { tab: "read" });
+const missingParam = () => Route.target(postSegment, { tenant: "t1" }, { tab: "read" });
 
 // @ts-expect-error A flat route's target is checked against its own search type.
-const wrongSearch = () => Check.target(LoginRoute, {}, { next: 1 });
+const wrongSearch = () => Route.target(LoginRoute, {}, { next: 1 });
 
 // @ts-expect-error A view that can fail with E needs an errored handler.
-const unhandled = Branch.leaf(postSegment, failingView);
+const unhandled = Route.leaf(postSegment, failingView);
 
 // @ts-expect-error The handler must take this view's E, not another.
-const wrongHandler = Branch.leaf(postSegment, failingView, {
-  errored: (failure: Source<Check.RouteFailure<LayoutFailed>>) =>
+const wrongHandler = Route.leaf(postSegment, failingView, {
+  errored: (failure: Source<Route.RouteFailure<LayoutFailed>>) =>
     View.bind(failure, describeFailure),
 });
 

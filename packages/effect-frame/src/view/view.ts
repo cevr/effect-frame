@@ -107,6 +107,8 @@ export const submit = (handler: Handler): Prepared => ({
 
 export { list, type ListOptions } from "./control.js";
 export { attempt } from "./attempt.js";
+export { LazyImportFailed, lazy } from "./lazy.js";
+export type { Module as LazyModule } from "./lazy.js";
 
 /**
  * A view is a function from props to an Effect that produces a node tree:

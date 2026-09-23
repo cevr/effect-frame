@@ -34,6 +34,7 @@ import {
   Fiber,
   Function,
   Option,
+  Predicate,
   Result,
   Schema,
   Scope,
@@ -52,17 +53,19 @@ import type {
   ParamsCodec,
   Part,
   PathRecord,
+  Route,
+  RouteDefinition,
+  RouteInstance,
+  RouteNavigation,
+  RouteProps,
   SearchCodec,
+  SearchKeyInfo,
   SearchRecord,
-} from "./route.js";
+  SearchUpdater,
+} from "./codec.js";
 import { matchPrefix, segmentsOf } from "./path.js";
-import {
-  parseTemplate,
-  printPath,
-  printSearch,
-  readSearch,
-  search as searchCodec,
-} from "./route.js";
+import { address, parseTemplate, printSearch, readSearch, search as searchCodec } from "./codec.js";
+import type { Match as RouterMatch } from "./router.js";
 import { register as registerInspection } from "./route-inspection.js";
 import { Router } from "./router.js";
 import type { LeaveEntry, LeaveInput, MountedRouteService } from "./leave.js";
@@ -71,11 +74,11 @@ import type { Candidate, LeaveKind, Question } from "./leave-registry.js";
 import { register as registerLeave } from "./leave-registry.js";
 
 /**
- * PRIVATE proof (route slice 2, the #36 dependency). This module is not
- * exported from `effect-frame/router`. It proves the nested transition
- * against the real router, view runtime, actor transport, and query cache
- * before any public nested-route constructor is chosen.
- * See `docs/design/nested-transition.md`.
+ * The nested route model: segments, branches, and the client mode. The
+ * public `Route` namespace (`route.ts`) lists what of this module is public;
+ * see `docs/design/route-public.md`. The transition itself is route slice 2,
+ * the #36 dependency (`docs/design/nested-transition.md`). A flat
+ * `Route.client(name, definition)` is a tree of one leaf, so it runs here too.
  *
  * A tree of segments mounts as one `AnyRoute`. The existing router keeps
  * history, the same-URL no-op, stale-instance rejection, and not-found; it
@@ -98,7 +101,7 @@ import { register as registerLeave } from "./leave-registry.js";
  *   `Source` of the current real `RemoteActorRef`. A moved binding holds a
  *   new ref; an old ref keeps its old address.
  *
- * Route slice 3 adds, still privately (see `docs/design/route-checks.md`):
+ * Route slice 3 adds (see `docs/design/route-checks.md`):
  *
  * - A segment's `before` check. The router runs every matched segment's
  *   check, parent first, before history moves and before this module plans
@@ -109,7 +112,7 @@ import { register as registerLeave } from "./leave-registry.js";
  *   data goes to the same handler as `Declaration`. A failed instance is
  *   never stayed: the next navigation that matches it enters it again.
  *
- * Route slice 4 adds, still privately (see `docs/design/route-pending.md`):
+ * Route slice 4 adds (see `docs/design/route-pending.md`):
  *
  * - A leaf or layout may present `pending` while its entered instance
  *   prepares: a lazy import or its own suspended setup. Timing starts when
@@ -123,7 +126,8 @@ import { register as registerLeave } from "./leave-registry.js";
  *   every entered import before it creates an instance, so the first frame
  *   holds imported views and never a pending fallback.
  *
- * Route slice 5 adds, still privately (see `docs/design/route-leave.md`):
+ * Route slice 5 adds, still privately (see `docs/design/route-leave.md`;
+ * the leave-capable constructors are in `leave-branch.ts`):
  *
  * - Each instance provides `MountedRoute` to its own view setup, so the
  *   view can register scoped leave checks with `Leave.onLeave`. The tree
@@ -226,6 +230,8 @@ export interface Segment<
   CheckR = never,
 > extends AnySegment {
   readonly name: Name;
+  /** Encoded search ownership. Unknown means an opaque codec needs a declaration. */
+  readonly searchKeys: SearchKeyInfo;
   /** Decode the accumulated path record and the URL search. None is a non-match. */
   decode(record: PathRecord, search: SearchRecord): Option.Option<Values<Params, Search>>;
   /** The encoded form, used to decide whether a stayed segment changed. */
@@ -234,6 +240,18 @@ export interface Segment<
   declare(values: Values<Params, Search>): Own;
   /** Print this segment's URL: every ancestor's path and this segment's search. */
   href(params: Params, search: Search): string;
+  /** `href` after carrying retained keys from the current URL. A `link` destination. */
+  hrefAt(current: URL, params: Params, search: Search): string;
+  /** The current URL's decoded search for this segment, or its empty value. */
+  searchAt(current: URL): Search;
+  /** `true` while the current URL starts with this segment's path and decodes. */
+  activeAt(current: RouterMatch): boolean;
+  /**
+   * The target of a search update of the current URL. The deepest matched
+   * segment prints its own path; a layout keeps the current path, so its
+   * update does not leave the child. Other search keys and the hash stay.
+   */
+  searchUpdate(current: URL, values: Values<Params, Search>, deepest: boolean): string;
   /** This segment's own check, when it has one. Its services are `CheckR`. */
   check(values: Values<Params, Search>, url: URL, kind: NavigationKind): Option.Option<Check>;
   /** Phantom: the declarations the view sees. */
@@ -262,6 +280,10 @@ export interface SegmentOptions<P extends ParamsCodec, S extends SearchCodec, Ow
   /** Decodes the path record accumulated from the root to this segment. */
   readonly params: P;
   readonly search?: S;
+  /** Encoded search keys for an opaque codec such as a custom SearchRecord. */
+  readonly searchKeys?: ReadonlyArray<string>;
+  /** Search keys to carry when this segment is linked to without a caller value. */
+  readonly retain?: ReadonlyArray<Extract<keyof S["Type"], string>>;
   readonly data?: (values: Values<P["Type"], S["Type"]>) => Own;
   /**
    * Asked on every proposed navigation that matches this segment, entering
@@ -317,17 +339,32 @@ const makeSegment = <
   );
   const decodeParams = Schema.decodeUnknownOption(options.params);
   const decodeSearch = Schema.decodeUnknownOption(search);
-  const encodeParams = Schema.encodeUnknownSync(options.params);
   const encodeSearch = Schema.encodeUnknownSync(search);
   const before = Option.fromNullishOr(options.before);
   const full = [...Option.match(parent, { onNone: () => [], onSome: pathOf }), ...parts];
+  // One address prints and parses the whole path, as a flat route does.
+  const printer = address<P, SearchCodec>(full, {
+    params: options.params,
+    search,
+    searchKeys: Option.fromNullishOr(options.searchKeys),
+    retain: Option.fromNullishOr(options.retain),
+  });
   return {
     _tag: "Segment",
     name,
     parent,
     parts,
-    href: (params, searchValue) =>
-      `${printPath(full, encodeParams(params))}${printSearch(encodeSearch(searchValue))}`,
+    searchKeys: printer.searchKeys,
+    href: printer.href,
+    hrefAt: printer.hrefAt,
+    searchAt: printer.searchAt,
+    activeAt: (current: RouterMatch) => Option.isSome(printer.parsePrefix(current.url)),
+    searchUpdate: (current, values, deepest) => {
+      if (deepest) {
+        return printer.hrefFrom(current, values.params, values.search);
+      }
+      return printer.searchFrom(current, values.search);
+    },
     check: (values, url, kind) => Option.map(before, (ask) => erase(ask({ ...values, url, kind }))),
     decode: (record, searchRecord) =>
       Option.flatMap(decodeParams(record), (params) =>
@@ -430,10 +467,16 @@ const ownEmpty = <Own>(): Own => {
 // Views and branches
 // ---------------------------------------------------------------------------
 
-/** What a segment's view receives. Sources, so a stayed segment re-runs nothing. */
-export interface SegmentProps<Params, Search, Data extends Declarations> {
-  readonly params: Source<Params>;
-  readonly search: Source<Search>;
+/**
+ * What a segment's view receives: a flat route's props and the segment's
+ * data. Sources, so a stayed segment re-runs nothing. `href` prints this
+ * segment; `updateSearch` and `replaceSearch` update its search against the
+ * latest URL and are refused once this instance's route is gone.
+ */
+export interface SegmentProps<Params, Search, Data extends Declarations> extends RouteProps<
+  Params,
+  Search
+> {
   readonly data: RouteData<Data>;
 }
 
@@ -540,16 +583,25 @@ interface Instance<R> {
   ) => Effect.Effect<ReadonlyArray<Question>>;
 }
 
-/** A candidate's matched branch, as values: what leave questions compare. */
+/**
+ * A candidate's matched branch, as values: what leave questions compare,
+ * and what a search update reads back.
+ */
 interface Outline {
   readonly branch: BranchIdentity;
+  readonly record: PathRecord;
   readonly values: Values<unknown, unknown>;
   readonly signature: string;
   readonly child: Option.Option<Outline>;
 }
 
 /** A tree mounted once: the Scope its declarations live under and its services. */
-interface Tree {
+interface TreeState {
+  /** The router's moves for this mounted route, and its identity for them. */
+  readonly navigation: RouteNavigation;
+  readonly instance: RouteInstance;
+  /** Match a URL against the whole tree. */
+  readonly outline: (url: URL) => Option.Option<Outline>;
   readonly declarations: Scope.Scope;
   readonly cache: Option.Option<QueryCacheService>;
   readonly transport: Option.Option<TransportService>;
@@ -598,8 +650,8 @@ interface Match<R> {
   readonly outline: Outline;
   /** Every matched segment's check for this candidate, parent first. */
   readonly check: (url: URL, kind: NavigationKind) => Check;
-  enter(tree: Tree): Effect.Effect<Entering<R>, TransportReadError>;
-  stay(instance: Instance<unknown>, tree: Tree): Effect.Effect<Plan<R>, TransportReadError>;
+  enter(tree: TreeState): Effect.Effect<Entering<R>, TransportReadError>;
+  stay(instance: Instance<unknown>, tree: TreeState): Effect.Effect<Plan<R>, TransportReadError>;
 }
 
 interface MatchInput {
@@ -617,22 +669,87 @@ interface MatchInput {
 export interface Branch<Seg extends AnySegment, ViewR, DataR> {
   readonly _tag: "Branch";
   readonly segment: Seg;
-  match(input: MatchInput): Option.Option<Match<ViewR>>;
+  /** Phantom: what the branch's views need. */
+  readonly "~view": (_: never) => ViewR;
+  /** Phantom: what the branch's transition needs: declarations and checks. */
   readonly "~data": (_: never) => DataR;
 }
 
 /** Any branch with view requirements `R`. */
 export type AnyBranch<R> = Branch<AnySegment, R, unknown>;
 
-type ViewROf<B> = B extends Branch<AnySegment, infer R, unknown> ? R : never;
-type DataROf<B> = B extends Branch<AnySegment, unknown, infer R> ? R : never;
-/** What a view needs beyond what its instance provides: its Scope and `MountedRoute`. */
-type ViewServices<R> = Exclude<Exclude<R, MountedRoute>, Scope.Scope>;
+/**
+ * What the transition reads from a branch. It is not part of the public
+ * `Branch` type, so no instance, plan, or leave question is named there.
+ */
+interface BranchRuntime<R> {
+  match(input: MatchInput): Option.Option<Match<R>>;
+  /** Search ownership of this segment and every descendant. */
+  readonly searchKeys: ReadonlyArray<SearchKeyInfo>;
+}
 
-type OwnServices<Seg> =
+const runtimes = new WeakMap<object, BranchRuntime<unknown>>();
+
+/**
+ * The runtime `makeBranch` stored for a branch. A constructor chose the
+ * phantom `R` as a superset of what the runtime's instances need, so the
+ * read keeps its services.
+ */
+const runtimeOf = <R>(branch: AnyBranch<R>): BranchRuntime<R> =>
+  Option.getOrThrowWith(
+    Option.map(
+      Option.fromNullishOr(runtimes.get(branch)),
+      // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- makeBranch stored this runtime under this branch; its constructor chose R.
+      (runtime) => runtime as BranchRuntime<R>,
+    ),
+    () =>
+      BranchRejected.make({
+        segment: branch.segment.name,
+        reason: "not a branch built by Route.leaf or Route.layout",
+      }),
+  );
+
+export type ViewROf<B> = B extends Branch<AnySegment, infer R, unknown> ? R : never;
+export type DataROf<B> = B extends Branch<AnySegment, unknown, infer R> ? R : never;
+/** What a view needs beyond what its instance provides: its Scope and `MountedRoute`. */
+export type ViewServices<R> = Exclude<Exclude<R, MountedRoute>, Scope.Scope>;
+
+export type OwnServices<Seg> =
   Seg extends Segment<string, unknown, unknown, infer Own, Declarations, infer CheckR>
     ? ServicesOf<Own[keyof Own]> | CheckR
     : never;
+
+/**
+ * Build a leaf whose phantom view services are `ViewR`. The public `leaf`
+ * claims the view's services without `Scope`; the private leave variant
+ * also removes `MountedRoute`. Every instance provides both.
+ */
+export const buildLeaf = <
+  ViewR,
+  Name extends string,
+  Params,
+  Search,
+  Own extends Declarations,
+  Data extends Declarations,
+  R,
+  CheckR,
+  E,
+>(
+  seg: Segment<Name, Params, Search, Own, Data, CheckR>,
+  view: (props: SegmentProps<Params, Search, Data>) => Effect.Effect<Node, E, R>,
+  recovery: ReadonlyArray<Recovery<E> | Presentation>,
+): Branch<
+  Segment<Name, Params, Search, Own, Data, CheckR>,
+  ViewR,
+  OwnServices<Segment<Name, Params, Search, Own, Data, CheckR>>
+> =>
+  makeBranch<Name, Params, Search, Own, Data, CheckR, E, R, never, ViewR>(
+    seg,
+    [],
+    (props) => view(props),
+    boundaryOf<E>(recovery),
+    lazyDefinitionOf(view),
+  );
 
 /** A leaf segment: it has no outlet. */
 export const leaf = <
@@ -651,16 +768,75 @@ export const leaf = <
   ...recovery: RecoveryFor<E>
 ): Branch<
   Segment<Name, Params, Search, Own, Data, CheckR>,
-  ViewServices<R>,
+  Exclude<R, Scope.Scope>,
   OwnServices<Segment<Name, Params, Search, Own, Data, CheckR>>
 > =>
-  makeBranch<Name, Params, Search, Own, Data, CheckR, E, R, never>(
+  buildLeaf<Exclude<R, Scope.Scope>, Name, Params, Search, Own, Data, R, CheckR, E>(
     seg,
-    [],
-    (props) => view(props),
+    view,
+    recovery,
+  );
+
+/** Build a layout whose phantom view services are `ViewR`. See `buildLeaf`. */
+export const buildLayout = <
+  ViewR,
+  Name extends string,
+  Params,
+  Search,
+  Own extends Declarations,
+  Data extends Declarations,
+  Children extends ReadonlyArray<AnyBranch<unknown>>,
+  R,
+  CheckR,
+  E,
+>(
+  seg: Segment<Name, Params, Search, Own, Data, CheckR>,
+  children: Children,
+  view: (
+    props: LayoutProps<Params, Search, Data, ViewROf<Children[number]>>,
+  ) => Effect.Effect<Node, E, R>,
+  recovery: ReadonlyArray<Recovery<E> | Presentation>,
+): Branch<
+  Segment<Name, Params, Search, Own, Data, CheckR>,
+  ViewR,
+  OwnServices<Segment<Name, Params, Search, Own, Data, CheckR>> | DataROf<Children[number]>
+> => {
+  for (const branch of children) {
+    if (!Option.contains(branch.segment.parent, seg)) {
+      return Option.getOrThrowWith(Option.none(), () =>
+        BranchRejected.make({
+          segment: branch.segment.name,
+          reason: `a child of ${seg.name} must name it as its parent`,
+        }),
+      );
+    }
+  }
+  if (seg.parts.some((part) => part._tag === "Tail")) {
+    return Option.getOrThrowWith(Option.none(), () =>
+      BranchRejected.make({ segment: seg.name, reason: "a layout cannot end in a tail" }),
+    );
+  }
+  // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- the children tuple is exactly ViewROf<Children[number]>'s branches.
+  const typed = children as ReadonlyArray<AnyBranch<ViewROf<Children[number]>>>;
+  return makeBranch<
+    Name,
+    Params,
+    Search,
+    Own,
+    Data,
+    CheckR,
+    E,
+    R,
+    ViewROf<Children[number]>,
+    ViewR
+  >(
+    seg,
+    typed,
+    (props, outlet) => view({ ...props, outlet }),
     boundaryOf<E>(recovery),
     lazyDefinitionOf(view),
   );
+};
 
 /**
  * A layout: its view receives the outlet. Children are built first so their
@@ -687,34 +863,15 @@ export const layout = <
   ...recovery: RecoveryFor<E>
 ): Branch<
   Segment<Name, Params, Search, Own, Data, CheckR>,
-  ViewServices<R>,
+  Exclude<R, Scope.Scope>,
   OwnServices<Segment<Name, Params, Search, Own, Data, CheckR>> | DataROf<Children[number]>
-> => {
-  for (const branch of children) {
-    if (!Option.contains(branch.segment.parent, seg)) {
-      return Option.getOrThrowWith(Option.none(), () =>
-        BranchRejected.make({
-          segment: branch.segment.name,
-          reason: `a child of ${seg.name} must name it as its parent`,
-        }),
-      );
-    }
-  }
-  if (seg.parts.some((part) => part._tag === "Tail")) {
-    return Option.getOrThrowWith(Option.none(), () =>
-      BranchRejected.make({ segment: seg.name, reason: "a layout cannot end in a tail" }),
-    );
-  }
-  // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- the children tuple is exactly ViewROf<Children[number]>'s branches.
-  const typed = children as ReadonlyArray<AnyBranch<ViewROf<Children[number]>>>;
-  return makeBranch<Name, Params, Search, Own, Data, CheckR, E, R, ViewROf<Children[number]>>(
+> =>
+  buildLayout<Exclude<R, Scope.Scope>, Name, Params, Search, Own, Data, Children, R, CheckR, E>(
     seg,
-    typed,
-    (props, outlet) => view({ ...props, outlet }),
-    boundaryOf<E>(recovery),
-    lazyDefinitionOf(view),
+    children,
+    view,
+    recovery,
   );
-};
 
 /** The options argument, read once: each part is present or absent. */
 interface Boundary<E> {
@@ -812,7 +969,7 @@ const missing = (service: string) =>
   Effect.die(`declared route data needs ${service} where the tree is mounted`);
 
 const open = (
-  tree: Tree,
+  tree: TreeState,
   declaration: Declaration,
 ): Effect.Effect<Resource, TransportReadError, Scope.Scope> =>
   Option.match(tree.transport, {
@@ -844,7 +1001,7 @@ const open = (
  * failure closes that Scope before it is reported.
  */
 const acquire = (
-  tree: Tree,
+  tree: TreeState,
   key: string,
   declaration: Declaration,
 ): Effect.Effect<Acquired, TransportReadError> =>
@@ -1044,7 +1201,7 @@ const slotSetup = <R>(slot: Slot<R>): Effect.Effect<Node, never, Exclude<R, Scop
  * reaches it is a new attempt, so it is entered again.
  */
 const prepareSlot = <R>(
-  tree: Tree,
+  tree: TreeState,
   input: Option.Option<Match<R>>,
   current: Option.Option<Instance<R>>,
 ): Effect.Effect<ChildPlan<R>, TransportReadError> =>
@@ -1249,7 +1406,7 @@ const presentWith = <R>(
  * holds no binding and no child, and it is always entered again.
  */
 const failedEntering = <R>(
-  tree: Tree,
+  tree: TreeState,
   name: string,
   identity: BranchIdentity,
   values: Values<unknown, unknown>,
@@ -1314,6 +1471,15 @@ const routeData = <Data extends Declarations>(data: DataRecord): RouteData<Data>
   return fields as RouteData<Data>;
 };
 
+/** The outline node of `branch` in a matched outline, when it matched. */
+const outlineAt = (from: Option.Option<Outline>, branch: BranchIdentity): Option.Option<Outline> =>
+  Option.flatMap(from, (node) => {
+    if (node.branch === branch) {
+      return Option.some(node);
+    }
+    return outlineAt(node.child, branch);
+  });
+
 const makeBranch = <
   Name extends string,
   Params,
@@ -1324,6 +1490,7 @@ const makeBranch = <
   E,
   R,
   ChildR,
+  ViewR,
 >(
   seg: Segment<Name, Params, Search, Own, Data, CheckR>,
   children: ReadonlyArray<AnyBranch<ChildR>>,
@@ -1333,15 +1500,16 @@ const makeBranch = <
   ) => Effect.Effect<Node, E, R>,
   boundary: Boundary<E>,
   lazy: Option.Option<LazyDefinition>,
-): Branch<Segment<Name, Params, Search, Own, Data, CheckR>, ViewServices<R>, never> => {
+): Branch<Segment<Name, Params, Search, Own, Data, CheckR>, ViewR, never> => {
   // Typed memory of the instances this branch created. A match of this
   // branch reads it back, so no instance value is ever cast.
   const created = new WeakMap<Instance<unknown>, Internals<Params, Search, ChildR>>();
   const identity: BranchIdentity = { segment: seg.name };
 
+  const childRuntimes = children.map(runtimeOf);
   const matchChild = (input: MatchInput): Option.Option<Match<ChildR>> => {
-    for (const branch of children) {
-      const matched = branch.match(input);
+    for (const runtime of childRuntimes) {
+      const matched = runtime.match(input);
       if (Option.isSome(matched)) {
         return matched;
       }
@@ -1356,7 +1524,7 @@ const makeBranch = <
    * again. Only then is `errored` built. Without a handler `E` is `never`.
    */
   const setupFailed = (
-    tree: Tree,
+    tree: TreeState,
     internals: Internals<Params, Search, ChildR>,
     error: E,
   ): Effect.Effect<Node, never, Scope.Scope> =>
@@ -1391,7 +1559,7 @@ const makeBranch = <
    * segment's to handle.
    */
   const declarationFailed = <A>(
-    tree: Tree,
+    tree: TreeState,
     values: Values<Params, Search>,
     failure: PartFailure,
   ): Effect.Effect<Entering<A>, TransportReadError> => {
@@ -1412,7 +1580,7 @@ const makeBranch = <
   };
 
   const create = Effect.fn("Branch.create")(function* (
-    tree: Tree,
+    tree: TreeState,
     values: Values<Params, Search>,
     signature: string,
     acquired: ReadonlyArray<{ readonly name: string; readonly acquired: Acquired }>,
@@ -1462,7 +1630,34 @@ const makeBranch = <
       child: childInstance,
       failed: false,
     };
+    /**
+     * A search update of this segment against the latest URL. The router
+     * refuses it once this route instance is gone. A URL where this branch
+     * no longer matches is left as it is.
+     */
+    const moveSearch =
+      (move: RouteNavigation["navigate"]) =>
+      (update: SearchUpdater<Search>): Effect.Effect<void> =>
+        move(
+          (latest) =>
+            Option.match(
+              Option.flatMap(outlineAt(tree.outline(latest), identity), (outline) =>
+                Option.map(seg.decode(outline.record, readSearch(latest.searchParams)), (current) =>
+                  seg.searchUpdate(
+                    latest,
+                    { params: current.params, search: update(current.search) },
+                    Option.isNone(outline.child),
+                  ),
+                ),
+              ),
+              { onNone: () => latest.href, onSome: Function.identity },
+            ),
+          tree.instance,
+        );
     const props: SegmentProps<Params, Search, Data> = {
+      href: (params, search) => seg.href(params, search),
+      updateSearch: moveSearch(tree.navigation.navigate),
+      replaceSearch: moveSearch(tree.navigation.replace),
       params: {
         get: Effect.map(stateSource.get, (current) => current.values.params),
         changes: Stream.map(stateSource.changes, (current) => current.values.params),
@@ -1585,7 +1780,7 @@ const makeBranch = <
   });
 
   const stayWith = Effect.fn("Branch.stay")(function* (
-    tree: Tree,
+    tree: TreeState,
     internals: Internals<Params, Search, ChildR>,
     values: Values<Params, Search>,
     signature: string,
@@ -1681,7 +1876,7 @@ const makeBranch = <
   });
 
   const enterWith = Effect.fn("Branch.enter")(function* (
-    tree: Tree,
+    tree: TreeState,
     values: Values<Params, Search>,
     signature: string,
     childMatch: Option.Option<Match<ChildR>>,
@@ -1797,6 +1992,7 @@ const makeBranch = <
           branch: identity,
           outline: {
             branch: identity,
+            record,
             values,
             signature,
             child: Option.map(childMatch, (next) => next.outline),
@@ -1827,12 +2023,18 @@ const makeBranch = <
       });
     });
 
-  return {
+  const made: Branch<Segment<Name, Params, Search, Own, Data, CheckR>, ViewR, never> = {
     _tag: "Branch",
     segment: seg,
-    match,
+    "~view": phantom<ViewR>(),
     "~data": phantom<never>(),
   };
+  const runtime: BranchRuntime<ViewServices<R>> = {
+    match,
+    searchKeys: [seg.searchKeys, ...childRuntimes.flatMap((below) => below.searchKeys)],
+  };
+  runtimes.set(made, runtime);
+  return made;
 };
 
 // ---------------------------------------------------------------------------
@@ -1840,11 +2042,11 @@ const makeBranch = <
 // ---------------------------------------------------------------------------
 
 interface MountedTree<R> {
-  readonly tree: Tree;
+  readonly tree: TreeState;
   readonly root: Instance<R>;
 }
 
-const matchUrl = <R>(root: AnyBranch<R>, url: URL): Option.Option<Match<R>> =>
+const matchUrl = <R>(root: BranchRuntime<R>, url: URL): Option.Option<Match<R>> =>
   root.match({
     segments: segmentsOf(url.pathname),
     index: 0,
@@ -1880,28 +2082,37 @@ const laterNavigation: Effect.Effect<boolean> = Effect.flatMap(
  * Mount a tree as one route. `update` runs the nested transition for every
  * URL the tree matches. The router runs the tree's checks before it moves
  * history and before `enter` or `update`. An acquisition failure that no
- * segment handles is a defect: nothing is published.
+ * segment handles is a defect: nothing is published. `extra` is copied onto
+ * the route before its checks are registered under it.
  */
-export const route = <const Name extends string, Seg extends AnySegment, ViewR, DataR>(
+const mountTree = <Name extends string, ViewR, DataR, Extra extends object>(
   name: Name,
-  root: Branch<Seg, ViewR, DataR>,
-): AnyRoute<ViewR | DataR> & { readonly name: Name } => {
-  const mountable: AnyRoute<ViewR | DataR> & { readonly name: Name } = {
+  branch: AnyBranch<ViewR>,
+  extra: Extra,
+): Extra & Tree<Name, ViewR | DataR> => {
+  const root = runtimeOf(branch);
+  const outline = (url: URL) => Option.map(matchUrl(root, url), (matched) => matched.outline);
+  const mountable: Extra & Tree<Name, ViewR | DataR> = {
+    ...extra,
     name,
-    searchKeys: { known: false, keys: [] },
-    enter: (url) =>
+    searchKeys: treeSearchKeys(root.searchKeys),
+    enter: (url, navigation = unavailable) =>
       Option.map(matchUrl(root, url), (first) =>
         Effect.sync((): Entered<ViewR | DataR> => {
           let mounted = Option.none<MountedTree<ViewR>>();
           let counter = 0;
+          const routeInstance: RouteInstance = { _tag: "RouteInstance" };
           const entered: Entered<ViewR | DataR> = {
-            instance: { _tag: "RouteInstance" },
+            instance: routeInstance,
             setup: Effect.gen(function* () {
               const owner = yield* Effect.scope;
               // Forked first, so it closes last: every view closes before
               // any declaration interest is released.
               const declarations = yield* Scope.fork(owner);
-              const tree: Tree = {
+              const tree: TreeState = {
+                navigation,
+                instance: routeInstance,
+                outline,
                 declarations,
                 cache: yield* Effect.serviceOption(QueryCache),
                 transport: yield* Effect.serviceOption(ActorTransport),
@@ -1986,3 +2197,90 @@ export const route = <const Name extends string, Seg extends AnySegment, ViewR, 
   registerChecks(mountable, checks);
   return mountable;
 };
+
+/** A mounted tree: an ordinary route for `mount({ routes })`. */
+export interface Tree<Name extends string, R> extends AnyRoute<R> {
+  readonly name: Name;
+}
+
+const unavailable: RouteNavigation = {
+  navigate: () => Effect.die("route navigation is unavailable before router mount"),
+  replace: () => Effect.die("route navigation is unavailable before router mount"),
+};
+
+/**
+ * A tree's search ownership: the union of every segment's keys when all
+ * are known. `UrlState` then cannot claim a key that any segment decodes.
+ */
+const treeSearchKeys = (all: ReadonlyArray<SearchKeyInfo>): SearchKeyInfo => {
+  if (all.some((info) => !info.known)) {
+    return { known: false, keys: [] };
+  }
+  return { known: true, keys: [...new Set(all.flatMap((info) => info.keys))] };
+};
+
+/** The two inputs of `client`: a branch has a `_tag`, a definition has none. */
+const isBranch = <Params extends ParamsCodec, Search extends SearchCodec, R>(
+  input: RouteDefinition<Params, Search, R> | AnyBranch<unknown>,
+): input is AnyBranch<unknown> => Predicate.hasProperty(input, "_tag") && input._tag === "Branch";
+
+/**
+ * The client rendering mode (#18 §6, #62): the route renders on the client
+ * only. The mode is chosen where a tree becomes mountable, and it applies to
+ * the whole tree, so one branch never mixes modes.
+ *
+ * The definition form is the one-leaf shorthand. It is exactly
+ * `client(name, leaf(segment(name, definition), definition.view))`, with the
+ * route's codecs and printers on the result. A flat route that needs
+ * `before`, `data`, `errored`, or `pending` is written in the segment form.
+ */
+export function client<
+  const Name extends string,
+  Params extends ParamsCodec,
+  Search extends SearchCodec,
+  R,
+>(name: Name, definition: RouteDefinition<Params, Search, R>): Route<Name, Params, Search, R>;
+export function client<const Name extends string, Seg extends AnySegment, ViewR, DataR>(
+  name: Name,
+  root: Branch<Seg, ViewR, DataR>,
+): Tree<Name, ViewR | DataR>;
+export function client<
+  const Name extends string,
+  Params extends ParamsCodec,
+  Search extends SearchCodec,
+  R,
+>(
+  name: Name,
+  input: RouteDefinition<Params, Search, R> | AnyBranch<unknown>,
+): Route<Name, Params, Search, R> | Tree<Name, unknown> {
+  if (isBranch(input)) {
+    return mountTree(name, input, {});
+  }
+  const one = segment(name, {
+    path: input.path,
+    params: input.params,
+    search: input.search,
+    ...Option.match(Option.fromNullishOr(input.searchKeys), {
+      onNone: () => ({}),
+      onSome: (searchKeys) => ({ searchKeys }),
+    }),
+    ...Option.match(Option.fromNullishOr(input.retain), {
+      onNone: () => ({}),
+      onSome: (retain) => ({ retain }),
+    }),
+  });
+  return mountTree<
+    Name,
+    Exclude<R, Scope.Scope>,
+    never,
+    Omit<Route<Name, Params, Search, R>, keyof Tree<Name, R>>
+  >(name, leaf(one, input.view), {
+    params: input.params,
+    search: input.search,
+    href: one.href,
+    hrefAt: one.hrefAt,
+    searchAt: one.searchAt,
+    // The router resolved the document to this route: the flat rule.
+    activeAt: (current) => current.name === name,
+  });
+}

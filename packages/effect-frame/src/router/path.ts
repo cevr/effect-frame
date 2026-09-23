@@ -1,5 +1,5 @@
 import { Option } from "effect";
-import type { Part, PathRecord } from "./route.js";
+import type { Part, PathRecord } from "./codec.js";
 
 /**
  * Path matching shared by the router and nested branches. Internal: the

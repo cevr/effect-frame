@@ -1,5 +1,5 @@
 import { Effect, Option } from "effect";
-import type { RouteInstance, UrlUpdater } from "./route.js";
+import type { RouteInstance, UrlUpdater } from "./codec.js";
 import type { RouterService } from "./router.js";
 
 /**

@@ -4,8 +4,6 @@ registerDom();
 
 import { Location, Route, Router, mount as mountRouter } from "effect-frame/router";
 import { Dom, ViewTest } from "effect-frame/view";
-import * as Branch from "../../src/router/branch.js";
-import * as Check from "../../src/router/check.js";
 import * as Receipt from "../../src/router/receipt.js";
 import { Cause, Effect, Exit, Option, Queue, Ref, Result, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -44,10 +42,10 @@ interface Gate {
  * A denied id goes to sign-in.
  */
 /** The gated URL that points at itself. */
-const selfPath: Check.Printable<{}, {}> = { href: () => "/g/self" };
+const selfPath: Route.Printable<{}, {}> = { href: () => "/g/self" };
 
 const makeApp = (gate: Gate) => {
-  const segment = Branch.segment("gate", {
+  const segment = Route.segment("gate", {
     path: "/g/:id",
     params: Schema.Struct({ id: Schema.String }),
     before: ({ params, kind }) =>
@@ -57,17 +55,17 @@ const makeApp = (gate: Gate) => {
           yield* (yield* Router).navigate("/home");
         }
         if (params.id === "self") {
-          return Check.redirect(Check.target(selfPath, {}, {}));
+          return Route.redirect(Route.target(selfPath, {}, {}));
         }
         if (gate.denied.has(params.id)) {
-          return Check.redirect(Check.target(Login, {}, {}));
+          return Route.redirect(Route.target(Login, {}, {}));
         }
-        return Check.Continue;
+        return Route.Continue;
       }),
   });
-  return Branch.route(
+  return Route.client(
     "app",
-    Branch.leaf(segment, () => Effect.succeed(<p id="gate">gate</p>)),
+    Route.leaf(segment, () => Effect.succeed(<p id="gate">gate</p>)),
   );
 };
 

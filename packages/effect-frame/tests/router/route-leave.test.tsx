@@ -17,7 +17,7 @@ import { Location, Route, mount as mountRouter } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
 import { Dom, Loading, View, ViewTest, ready } from "effect-frame/view";
 import * as Frame from "../../src/frame.js";
-import * as Branch from "../../src/router/branch.js";
+import * as LeaveBranch from "../../src/router/leave-branch.js";
 import * as Leave from "../../src/router/leave.js";
 import * as Receipt from "../../src/router/receipt.js";
 import * as Traversal from "../../src/router/traversal.js";
@@ -189,7 +189,7 @@ const printRecord = (record: Readonly<Record<string, string>>): string =>
     .map(([key, one]) => `${key}=${one}`)
     .join(",");
 
-const printValues = (values: Branch.Values<unknown, unknown>): string =>
+const printValues = (values: Route.Values<unknown, unknown>): string =>
   [values.params, values.search]
     .map((one) =>
       Option.match(decodeStrings(one), { onNone: () => "<not strings>", onSome: printRecord }),
@@ -251,23 +251,23 @@ const check =
 const TenantParams = Schema.Struct({ tenant: Schema.String });
 const PostParams = Schema.Struct({ tenant: Schema.String, postId: Schema.String });
 
-const tenantSegment = Branch.segment("tenant", {
+const tenantSegment = Route.segment("tenant", {
   path: "/app/:tenant",
   params: TenantParams,
-  data: ({ params }) => ({ tenant: Branch.query(TenantInfo, { tenant: params.tenant }) }),
+  data: ({ params }) => ({ tenant: Route.query(TenantInfo, { tenant: params.tenant }) }),
 });
 
-const postSegment = Branch.child(tenantSegment, "post", {
+const postSegment = Route.child(tenantSegment, "post", {
   path: "posts/:postId",
   params: PostParams,
   search: Route.search(Schema.Struct({ tab: Schema.String.pipe(Route.withDefault("read")) })),
   data: ({ params }) => ({
-    draft: Branch.actor(Draft, { tenant: params.tenant, postId: params.postId }),
-    post: Branch.query(PostBody, { tenant: params.tenant, postId: params.postId }),
+    draft: Route.actor(Draft, { tenant: params.tenant, postId: params.postId }),
+    post: Route.query(PostBody, { tenant: params.tenant, postId: params.postId }),
   }),
 });
 
-const settingsSegment = Branch.child(tenantSegment, "settings", {
+const settingsSegment = Route.child(tenantSegment, "settings", {
   path: "settings",
   params: TenantParams,
 });
@@ -306,7 +306,7 @@ class PostFailed extends Schema.TaggedError<PostFailed>()("PostFailed", {
   postId: Schema.String,
 }) {}
 
-const PostView = (props: Branch.PropsOf<typeof postSegment>) =>
+const PostView = (props: Route.PropsOf<typeof postSegment>) =>
   Effect.gen(function* () {
     const policy = yield* Policy;
     const label = `post#${String(policy.posts.length + 1)}`;
@@ -339,15 +339,15 @@ const PostView = (props: Branch.PropsOf<typeof postSegment>) =>
 const SettingsView = () => Effect.succeed(<p id="settings">settings</p>);
 
 const makeApp = () =>
-  Branch.route(
+  Route.client(
     "app",
-    Branch.layout(
+    LeaveBranch.layout(
       tenantSegment,
       [
-        Branch.leaf(postSegment, PostView, {
+        LeaveBranch.leaf(postSegment, PostView, {
           errored: () => <p id="post-errored">errored</p>,
         }),
-        Branch.leaf(settingsSegment, SettingsView),
+        LeaveBranch.leaf(settingsSegment, SettingsView),
       ],
       (props) =>
         Effect.gen(function* () {
@@ -546,10 +546,7 @@ const registered = Leave.onLeave(postSegment, (input) =>
     const next: Equals<
       typeof input.next,
       Option.Option<
-        Branch.Values<
-          { readonly tenant: string; readonly postId: string },
-          { readonly tab: string }
-        >
+        Route.Values<{ readonly tenant: string; readonly postId: string }, { readonly tab: string }>
       >
     > = true;
     if (previous && next) {
@@ -1137,9 +1134,9 @@ describe("private scoped leave checks", () => {
     () =>
       Effect.gen(function* () {
         const root = yield* makeRoot;
-        const wrong = Branch.route(
+        const wrong = Route.client(
           "wrong",
-          Branch.leaf(tenantSegment, () =>
+          LeaveBranch.leaf(tenantSegment, () =>
             Effect.as(
               Leave.onLeave(postSegment, () => Effect.succeed(Leave.Leave)),
               <p>wrong</p>,

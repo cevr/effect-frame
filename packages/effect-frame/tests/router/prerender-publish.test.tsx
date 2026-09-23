@@ -70,6 +70,8 @@ const injected = (method: string, path: string) =>
 interface Faults {
   readonly rename?: (from: string, to: string) => boolean;
   readonly remove?: (path: string) => boolean;
+  readonly readDirectory?: (path: string) => boolean;
+  readonly makeTempDirectory?: (directory: string) => boolean;
 }
 
 /** The platform file system, failing the calls `faults` names. */
@@ -86,6 +88,19 @@ const faulty = (fs: FileSystem.FileSystem, faults: Faults): FileSystem.FileSyste
       return Effect.fail(injected("remove", path));
     }
     return fs.remove(path, options);
+  },
+  readDirectory: (path, options) => {
+    if (faults.readDirectory?.(path) === true) {
+      return Effect.fail(injected("readDirectory", path));
+    }
+    return fs.readDirectory(path, options);
+  },
+  makeTempDirectory: (options) => {
+    const directory = options?.directory ?? "";
+    if (faults.makeTempDirectory?.(directory) === true) {
+      return Effect.fail(injected("makeTempDirectory", directory));
+    }
+    return fs.makeTempDirectory(options);
   },
 });
 
@@ -320,6 +335,41 @@ describe("serving a loaded generation (#86)", () => {
         yield* buildInto(yield* sideOf(makeControl(changedLabels)), blogRoutes, out);
         expect(yield* namesIn(`${out}/generations`)).toEqual([nameOf(yield* generationOf(out))]);
         expect(yield* namesIn(`${out}/leases`)).toEqual([]);
+      }),
+    15_000,
+  );
+
+  platform(
+    "a build that cannot read the leases keeps every generation: clean-up waits for the next build",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = yield* tempDirectory;
+        const out = `${directory}/out`;
+        const server = yield* sideOf(makeControl(blogLabels));
+        yield* buildInto(server, blogRoutes, out);
+        const loadedFrom = yield* generationOf(out);
+        const routed: Array<string> = [];
+        const handler = yield* Prerender.serve(
+          yield* Prerender.load(out),
+          routerFallback(server, blogRoutes, routed),
+        );
+        // The leases cannot be read: "no leases" is not what that means.
+        const unreadable = yield* Effect.exit(
+          buildInto(yield* sideOf(makeControl(changedLabels)), blogRoutes, out).pipe(
+            Effect.provideService(
+              FileSystem.FileSystem,
+              faulty(fs, { readDirectory: (path) => path.endsWith("/leases") }),
+            ),
+          ),
+        );
+        // The build published: clean-up is best effort, and it was skipped.
+        expect(Exit.isSuccess(unreadable)).toBe(true);
+        expect(yield* generationOf(out)).not.toBe(loadedFrom);
+        expect(yield* namesIn(`${out}/generations`)).toContain(nameOf(loadedFrom));
+        const answer = yield* handler(request("/blog/first"));
+        expect(yield* textOfResponse(answer)).toContain("body of first");
+        expect(routed).toEqual([]);
       }),
     15_000,
   );

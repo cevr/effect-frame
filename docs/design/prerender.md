@@ -203,7 +203,8 @@ does, with no body.
     published generation again: clean-up runs only after the pointer
     moved, so a generation still published once its lease exists is one
     clean-up sees held; otherwise the lease goes and `load` holds the new
-    one. A lease a crashed process left keeps its generation until it is
+    one. Only a missing `leases/` directory means no leases: a build that
+    cannot read it skips clean-up (counsel round 2). A lease a crashed process left keeps its generation until it is
     removed by hand, as `build.lock` is. When no lease can be written, as
     on a read-only output, `load` serves the generation unheld: no build
     can write there either. Clean-up is best effort: when it fails, the

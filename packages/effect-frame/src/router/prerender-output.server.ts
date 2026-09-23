@@ -176,16 +176,22 @@ export const publish = (
     }),
   );
 
+const isNotFound = (error: PlatformError): boolean => error.reason._tag === "NotFound";
+
 /**
  * The generations the leases name. A lease is a directory named
  * `<generation>.<random>`: one `mkdtemp` creates it whole, so a lease is
  * either there and names its generation, or not there. The random part
  * holds no dot, so the generation is the name up to the last one.
+ *
+ * Only a leases directory that does not exist means "no leases". Any other
+ * failure to read it fails: nobody knows which generations are held, so
+ * clean-up must not run.
  */
 const leased = (fs: FileSystem.FileSystem, output: Output) =>
-  Effect.map(
-    Effect.orElseSucceed(fs.readDirectory(output.leases), (): ReadonlyArray<string> => []),
-    (names) => names.map((name) => name.slice(0, name.lastIndexOf("."))),
+  fs.readDirectory(output.leases).pipe(
+    Effect.catchIf(isNotFound, () => Effect.succeed<ReadonlyArray<string>>([])),
+    Effect.map((names) => names.map((name) => name.slice(0, name.lastIndexOf(".")))),
   );
 
 /** Take one lease on `generation`, released when the scope closes. */

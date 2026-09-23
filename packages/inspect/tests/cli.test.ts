@@ -4,10 +4,12 @@
  * `src/bin.ts`, real argv, real environment, real signals, real files. It
  * proves the exit codes, that `--json` prints exactly one versioned document
  * for success and failure, that capabilities stay off stdout and argv, and
- * that capability files have mode 0600 and die with the gateway.
+ * that capability files have mode 0600 and die with the gateway, that one
+ * gateway owns a state directory, and that SIGTERM and SIGHUP clean up as
+ * SIGINT does.
  */
 import { describe, expect, it } from "bun:test";
-import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Option, Schema } from "effect";
@@ -79,9 +81,18 @@ interface RunningGateway {
   readonly stdout: () => Promise<string>;
 }
 
+const freshStateDir = async () =>
+  join(await mkdtemp(join(tmpdir(), "effect-frame-inspect-")), "state");
+
 /** Start `effect-frame gateway` and wait for its ready text on stderr. */
-const startGateway = async (port = "0"): Promise<RunningGateway> => {
-  const stateDir = join(await mkdtemp(join(tmpdir(), "effect-frame-inspect-")), "state");
+const startGateway = async (
+  stateDirectory: Option.Option<string> = Option.none(),
+): Promise<RunningGateway> => {
+  const port = "0";
+  const stateDir = await Option.match(stateDirectory, {
+    onNone: freshStateDir,
+    onSome: async (dir) => dir,
+  });
   const child = spawnBin([
     "gateway",
     "--origin",
@@ -264,8 +275,111 @@ describe("effect-frame executable", () => {
     expect(await gateway.child.exited).toBe(130);
     expect(await gateway.stdout()).toBe("");
     expect(gateway.stderr()).toContain("effect-frame gateway stopped");
-    for (const file of [attachFile, readFile_]) {
+    for (const file of [attachFile, readFile_, join(gateway.stateDir, "gateway.lock")]) {
       expect(await Bun.file(file).exists()).toBe(false);
     }
+  }, 30_000);
+
+  it("lets one gateway own a state directory and takes over a stale lock", async () => {
+    const first = await startGateway();
+    const readPath = join(first.stateDir, "read-token");
+    const lockPath = join(first.stateDir, "gateway.lock");
+    const checks = async () => {
+      const before = await readFile(readPath, "utf8");
+      expect((await readFile(lockPath, "utf8")).trim()).toBe(String(first.child.pid));
+      const second = run([
+        "gateway",
+        "--origin",
+        ORIGIN,
+        "--port",
+        "0",
+        "--state-dir",
+        first.stateDir,
+      ]);
+      expect(second.exitCode).toBe(1);
+      expect(second.stderr).toContain(
+        `another effect-frame gateway (pid ${first.child.pid}) owns ${first.stateDir}`,
+      );
+      // The first gateway's capabilities are untouched and still work.
+      expect(await readFile(readPath, "utf8")).toBe(before);
+      const roots = run(["roots", "--url", first.url, "--token-file", readPath]);
+      expect(roots.exitCode).toBe(0);
+    };
+    await checks().finally(() => first.child.kill("SIGINT"));
+    expect(await first.child.exited).toBe(130);
+
+    // A lock left by a dead process is stale: the next gateway takes it.
+    const dead = Bun.spawn(["true"]);
+    await dead.exited;
+    await writeFile(lockPath, `${dead.pid}\n`);
+    const next = await startGateway(Option.some(first.stateDir));
+    expect((await readFile(lockPath, "utf8")).trim()).toBe(String(next.child.pid));
+    next.child.kill("SIGINT");
+    expect(await next.child.exited).toBe(130);
+  }, 30_000);
+
+  it("cleans up and exits 143 on SIGTERM and 129 on SIGHUP", async () => {
+    for (const [signal, code] of [
+      ["SIGTERM", 143],
+      ["SIGHUP", 129],
+    ] satisfies ReadonlyArray<[NodeJS.Signals, number]>) {
+      const gateway = await startGateway();
+      gateway.child.kill(signal);
+      expect({ signal, code: await gateway.child.exited }).toEqual({ signal, code });
+      expect(gateway.stderr()).toContain("effect-frame gateway stopped");
+      for (const file of ["attach-token", "read-token", "gateway.lock"]) {
+        expect({
+          signal,
+          file,
+          exists: await Bun.file(join(gateway.stateDir, file)).exists(),
+        }).toEqual({ signal, file, exists: false });
+      }
+    }
+  }, 30_000);
+
+  it("sets the state directory to 0700, never follows a planted symlink, and refuses another user's directory", async () => {
+    const stateDir = await freshStateDir();
+    await mkdir(stateDir, { mode: 0o755 });
+    await chmod(stateDir, 0o755);
+    const target = join(stateDir, "..", "planted-target");
+    await writeFile(target, "keep\n");
+    await symlink(target, join(stateDir, "read-token"));
+
+    const gateway = await startGateway(Option.some(stateDir));
+    const checks = async () => {
+      expect((await stat(stateDir)).mode & 0o777).toBe(0o700);
+      const token = await lstat(join(stateDir, "read-token"));
+      expect(token.isSymbolicLink()).toBe(false);
+      expect(token.mode & 0o777).toBe(0o600);
+      // The symlink was removed, not written through.
+      expect(await readFile(target, "utf8")).toBe("keep\n");
+    };
+    await checks().finally(() => gateway.child.kill("SIGINT"));
+    expect(await gateway.child.exited).toBe(130);
+
+    // A directory another user owns is refused (root owns /usr).
+    if (process.getuid?.() !== 0) {
+      const foreign = run(["gateway", "--origin", ORIGIN, "--port", "0", "--state-dir", "/usr"]);
+      expect(foreign.exitCode).toBe(1);
+      expect(foreign.stderr).toContain("refusing state directory /usr: another user owns it");
+    }
+  }, 30_000);
+
+  it("exits 2 without a usable default state directory", async () => {
+    const env = baseEnv();
+    const withoutHome = Object.fromEntries(
+      Object.entries(env).filter(([key]) => key !== "HOME" && key !== "XDG_STATE_HOME"),
+    );
+    const noHome = run(["gateway", "--origin", ORIGIN, "--port", "0"], withoutHome);
+    expect(noHome.exitCode).toBe(2);
+    expect(noHome.stderr).toContain("HOME is not set");
+
+    const relative = run(["gateway", "--origin", ORIGIN, "--port", "0"], {
+      ...withoutHome,
+      HOME: "/tmp",
+      XDG_STATE_HOME: "relative/state",
+    });
+    expect(relative.exitCode).toBe(2);
+    expect(relative.stderr).toContain("XDG_STATE_HOME must be an absolute path");
   }, 30_000);
 });

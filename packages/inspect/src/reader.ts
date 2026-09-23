@@ -10,13 +10,15 @@
  *           [--token-file <path>] [--max-text <chars>]
  *
  * Exit codes: 0 success, 1 operational failure, 2 invalid arguments or a
- * missing capability, 130 interrupted. Data goes to stdout; diagnostics go
+ * missing capability, 130/143/129 on SIGINT/SIGTERM/SIGHUP. Data goes to stdout; diagnostics go
  * to stderr. With `--json`, stdout holds exactly one versioned document for
  * every exit code.
  */
-import { Effect, Match, Option, Schema } from "effect";
+import { Effect, Match, Option, Result, Schema } from "effect";
 import { Protocol } from "effect-frame/inspection";
-import { hasControlCharacter } from "./text.js";
+import { DEFAULT_DEADLINE_MILLIS, MAX_DEADLINE_MILLIS } from "./limits.js";
+import { InterruptSignal, exitCodeOf, untilInterrupted, type ExitCode } from "./signals.js";
+import { escapeText } from "./text.js";
 
 export const TOKEN_ENV = "EFFECT_FRAME_INSPECT_TOKEN";
 
@@ -30,7 +32,7 @@ export interface CliEnvironment {
 }
 
 export interface CliResult {
-  readonly exitCode: 0 | 1 | 2 | 130;
+  readonly exitCode: ExitCode;
   readonly stdout: string;
   readonly stderr: string;
 }
@@ -42,7 +44,7 @@ export const ClientError = Schema.Union([
   Schema.TaggedStruct("MalformedResponse", { status: Schema.Int, detail: Schema.String }),
   Schema.TaggedStruct("InvalidArguments", { message: Schema.String }),
   Schema.TaggedStruct("MissingCapability", { tokenEnv: Schema.String }),
-  Schema.TaggedStruct("Interrupted", {}),
+  Schema.TaggedStruct("Interrupted", { signal: InterruptSignal }),
 ]);
 export type ClientError = Schema.Schema.Type<typeof ClientError>;
 
@@ -54,7 +56,7 @@ export const Document = Schema.Union([
   Protocol.RootsResponse,
   Protocol.InspectResponse,
   Schema.TaggedStruct("Error", {
-    version: Schema.Literal(Protocol.PROTOCOL_VERSION),
+    version: Schema.Literal(Protocol.wire.version),
     error: Schema.Union([Protocol.GatewayError, ClientError]),
   }),
 ]);
@@ -71,7 +73,7 @@ Flags:
   --url <gateway>      Loopback gateway, for example http://127.0.0.1:4318
   --root <selector>    Exact root ID, unique ID prefix, or exact root name
   --json               Print exactly one versioned JSON document on stdout
-  --deadline <ms>      Finite deadline, 1..${Protocol.MAX_DEADLINE_MILLIS} (default ${Protocol.DEFAULT_DEADLINE_MILLIS})
+  --deadline <ms>      Finite deadline, 1..${MAX_DEADLINE_MILLIS} (default ${DEFAULT_DEADLINE_MILLIS})
   --token-file <path>  Read capability file (else ${TOKEN_ENV})
   --max-text <chars>   Longest value shown in text output (default 160)
   -h, --help           Show this help
@@ -82,7 +84,8 @@ Examples:
   effect-frame roots --url http://127.0.0.1:4318 --token-file <state-dir>/read-token
   effect-frame inspect --url http://127.0.0.1:4318 --root frame-root-3f2a --json
 
-Exit codes: 0 ok, 1 failure, 2 invalid arguments or no capability, 130 interrupted.
+Exit codes: 0 ok, 1 failure, 2 invalid arguments or no capability,
+130/143/129 stopped by SIGINT/SIGTERM/SIGHUP.
 `;
 
 // ---------------------------------------------------------------------------
@@ -105,7 +108,8 @@ class Help extends Schema.TaggedError<Help>()("Help", {}) {}
 const invalid = (message: string) => Effect.fail(Invalid.make({ message }));
 
 const FLAGS_WITH_VALUES = new Set(["--url", "--root", "--deadline", "--token-file", "--max-text"]);
-const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
+// The gateway binds 127.0.0.1 only.
+const LOOPBACK = new Set(["127.0.0.1", "localhost"]);
 
 const integerFlag = (
   values: ReadonlyMap<string, string>,
@@ -157,6 +161,8 @@ const readUrl = (raw: Option.Option<string>) =>
     return url;
   });
 
+const isSelector = Schema.is(Protocol.RootSelector);
+
 const readRoot = (command: Parsed["command"], root: Option.Option<string>) =>
   Effect.gen(function* () {
     if (command === "inspect" && Option.isNone(root)) {
@@ -165,14 +171,13 @@ const readRoot = (command: Parsed["command"], root: Option.Option<string>) =>
       );
     }
     if (command === "roots" && Option.isSome(root)) return yield* invalid("roots takes no --root");
-    const bad = Option.exists(
-      root,
-      (selector) =>
-        selector.length > Protocol.MAX_SELECTOR_LENGTH ||
-        hasControlCharacter(selector) ||
-        /[?#%]/.test(selector),
-    );
-    if (bad) return yield* invalid("--root has control characters, ?, #, %, or is too long");
+    if (Option.exists(root, (selector) => !isSelector(selector))) {
+      return yield* invalid("--root must be 1 to 256 characters with no control characters");
+    }
+    // A pasted URL fragment is never a root selector.
+    if (Option.exists(root, (selector) => /[?#%]/.test(selector))) {
+      return yield* invalid("--root must not contain ?, #, or %");
+    }
     return root;
   });
 
@@ -191,8 +196,8 @@ const parse = Effect.fn("InspectionCli.parse")(function* (argv: ReadonlyArray<st
   const deadlineMillis = yield* integerFlag(
     values,
     "--deadline",
-    Protocol.DEFAULT_DEADLINE_MILLIS,
-    Protocol.MAX_DEADLINE_MILLIS,
+    DEFAULT_DEADLINE_MILLIS,
+    MAX_DEADLINE_MILLIS,
   );
   const maxText = yield* integerFlag(values, "--max-text", 160, 100_000);
   return {
@@ -224,10 +229,11 @@ const clip = (value: string, budget: TextBudget): string => {
 const rootLine = (root: Protocol.RootInfo): string =>
   `${root.id}  ${root.name ?? "(unnamed)"}  incarnation ${root.incarnation}`;
 
+/** Every text line passes through here, so no page string reaches the terminal raw. */
+const textLines = (lines: ReadonlyArray<string>): string => `${lines.map(escapeText).join("\n")}\n`;
+
 const rootsText = (response: Protocol.RootsResponse): string =>
-  response.roots.length === 0
-    ? "no roots attached\n"
-    : `${response.roots.map(rootLine).join("\n")}\n`;
+  response.roots.length === 0 ? "no roots attached\n" : textLines(response.roots.map(rootLine));
 
 type QueryRecord = Protocol.InspectResponse["snapshot"]["queries"][number];
 
@@ -270,7 +276,7 @@ const inspectText = (response: Protocol.InspectResponse, maxText: number): strin
       `note      text truncated ${budget.truncated} value(s); --json returns the complete snapshot`,
     );
   }
-  return `${lines.join("\n")}\n`;
+  return textLines(lines);
 };
 
 /** Whether an automatic sequence runs now; a command is never shown with its payload. */
@@ -280,7 +286,7 @@ const runningText = (running: boolean): string => {
 };
 
 const errorText = (error: { readonly _tag: string }): string => {
-  const detail = JSON.stringify(error);
+  const detail = escapeText(JSON.stringify(error));
   switch (error._tag) {
     case "AmbiguousRoot":
       return `error: the selector matches several roots; pass an exact --root\n${detail}\n`;
@@ -293,7 +299,7 @@ const errorText = (error: { readonly _tag: string }): string => {
     case "Interrupted":
       return "interrupted\n";
     default:
-      return `error: ${error._tag}\n${detail}\n`;
+      return `error: ${escapeText(error._tag)}\n${detail}\n`;
   }
 };
 
@@ -310,7 +316,7 @@ const decodeResponse = Schema.decodeUnknownEffect(Schema.fromJsonString(Protocol
 const requestInit = (parsed: Parsed, token: string): RequestInit => {
   const headers = {
     authorization: `Bearer ${token}`,
-    [Protocol.VERSION_HEADER]: String(Protocol.PROTOCOL_VERSION),
+    [Protocol.wire.versionHeader]: String(Protocol.wire.version),
     "content-type": "application/json",
   };
   if (parsed.command === "roots") return { method: "GET", headers };
@@ -318,7 +324,7 @@ const requestInit = (parsed: Parsed, token: string): RequestInit => {
     method: "POST",
     headers,
     body: JSON.stringify({
-      version: Protocol.PROTOCOL_VERSION,
+      version: Protocol.wire.version,
       root: Option.getOrElse(parsed.root, () => ""),
       deadlineMillis: parsed.deadlineMillis,
     }),
@@ -332,7 +338,7 @@ const requestInit = (parsed: Parsed, token: string): RequestInit => {
 const exchange = (parsed: Parsed, token: string) =>
   Effect.gen(function* () {
     const target = new URL(
-      parsed.command === "roots" ? Protocol.ROOTS_PATH : Protocol.INSPECT_PATH,
+      parsed.command === "roots" ? Protocol.wire.rootsPath : Protocol.wire.inspectPath,
       parsed.url,
     );
     const response = yield* Effect.tryPromise({
@@ -374,19 +380,7 @@ const readToken = (parsed: Parsed, environment: CliEnvironment) =>
   });
 
 const awaitInterrupt = (signal: Option.Option<AbortSignal>) =>
-  Option.match(signal, {
-    onNone: () => Effect.never,
-    onSome: (abort) =>
-      Effect.callback<void>((resume) => {
-        if (abort.aborted) {
-          resume(Effect.void);
-          return;
-        }
-        const onAbort = () => resume(Effect.void);
-        abort.addEventListener("abort", onAbort, { once: true });
-        return Effect.sync(() => abort.removeEventListener("abort", onAbort));
-      }),
-  });
+  Option.match(signal, { onNone: () => Effect.never, onSome: untilInterrupted });
 
 const result = (exitCode: CliResult["exitCode"], stdout: string, stderr: string): CliResult => ({
   exitCode,
@@ -417,7 +411,7 @@ const failure = (
   error: ClientError,
   stderr: string = errorText(error),
 ): CliResult => {
-  const body = { _tag: "Error", version: Protocol.PROTOCOL_VERSION, error };
+  const body = { _tag: "Error", version: Protocol.wire.version, error };
   return result(exitCode, json ? `${JSON.stringify(body)}\n` : "", stderr);
 };
 
@@ -427,13 +421,16 @@ const execute = (parsed: Parsed, environment: CliEnvironment) =>
     if (Option.isNone(token) || token.value.length === 0) {
       return failure(2, parsed.json, { _tag: "MissingCapability", tokenEnv: TOKEN_ENV });
     }
-    const interrupted = Symbol("interrupted");
+    // A signal wins the race as a failure value; a reply as a success.
     const reply = yield* Effect.raceFirst(
-      exchange(parsed, token.value),
-      Effect.as(awaitInterrupt(Option.fromNullishOr(environment.interrupt)), interrupted),
+      Effect.map(exchange(parsed, token.value), Result.succeed),
+      Effect.map(awaitInterrupt(Option.fromNullishOr(environment.interrupt)), Result.fail),
     );
-    if (reply === interrupted) return failure(130, parsed.json, { _tag: "Interrupted" });
-    return render(parsed, reply);
+    return Result.match(reply, {
+      onSuccess: (response) => render(parsed, response),
+      onFailure: (signal) =>
+        failure(exitCodeOf(signal), parsed.json, { _tag: "Interrupted", signal }),
+    });
   }).pipe(
     Effect.catchTag("Failed", (failed) => Effect.succeed(failure(1, parsed.json, failed.error))),
   );

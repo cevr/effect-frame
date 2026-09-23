@@ -27,17 +27,17 @@ const frameLayer = Frame.layer({ name: "protocol-test" });
 describe("effect-frame/inspection protocol", () => {
   it.effect("names version 1 on every boundary", () =>
     Effect.sync(() => {
-      expect(Protocol.PROTOCOL_VERSION).toBe(1);
-      expect(Protocol.ROOT_SUBPROTOCOL).toBe("effect-frame-inspection.v1");
-      expect(Protocol.ATTACH_TOKEN_PREFIX).toBe("effect-frame-attach.");
-      expect(Protocol.VERSION_HEADER).toBe("effect-frame-inspection-version");
-      expect([Protocol.ATTACH_PATH, Protocol.ROOTS_PATH, Protocol.INSPECT_PATH]).toEqual([
-        "/v1/attach",
-        "/v1/roots",
-        "/v1/inspect",
-      ]);
-      expect(Protocol.DEFAULT_DEADLINE_MILLIS).toBe(5_000);
-      expect(Protocol.MAX_DEADLINE_MILLIS).toBe(30_000);
+      expect(Protocol.wire).toEqual({
+        version: 1,
+        subprotocol: "effect-frame-inspection.v1",
+        attachTokenPrefix: "effect-frame-attach.",
+        versionHeader: "effect-frame-inspection-version",
+        attachPath: "/v1/attach",
+        rootsPath: "/v1/roots",
+        inspectPath: "/v1/inspect",
+      });
+      // The public surface holds no SCREAMING constants.
+      expect(Object.keys(Protocol).filter((key) => /^[A-Z_]+$/.test(key))).toEqual([]);
     }),
   );
 
@@ -81,32 +81,29 @@ describe("effect-frame/inspection protocol", () => {
     }),
   );
 
-  it.effect("maps every gateway error to one HTTP status", () =>
+  it.effect("puts the request contract in the schema", () =>
     Effect.sync(() => {
-      const errors: ReadonlyArray<[Protocol.GatewayError, number]> = [
-        [{ _tag: "UnsupportedProtocolVersion", received: "2", supported: [1] }, 400],
-        [{ _tag: "MalformedRequest", detail: "x" }, 400],
-        [{ _tag: "InvalidDeadline", deadlineMillis: 0, maximum: 30_000 }, 400],
-        [{ _tag: "Unauthorized" }, 401],
-        [{ _tag: "ForbiddenOrigin", origin: "http://x" }, 403],
-        [{ _tag: "ForbiddenHost", host: "x" }, 403],
-        [{ _tag: "NotFound", path: "/x" }, 404],
-        [{ _tag: "RootNotFound", selector: "x", attached: 0 }, 404],
-        [{ _tag: "AmbiguousRoot", selector: "x", candidates: [] }, 409],
-        [{ _tag: "SnapshotTooLarge", bytes: 2, limit: 1 }, 413],
-        [{ _tag: "RootDisconnected", root: "x", incarnation: 1 }, 502],
-        [{ _tag: "RootProtocolError", root: "x", incarnation: 1, detail: "x" }, 502],
-        [{ _tag: "TooManyRoots", limit: 64 }, 503],
-        [{ _tag: "DeadlineExceeded", root: "x", deadlineMillis: 1 }, 504],
-      ];
-      const is = Schema.is(Protocol.GatewayError);
-      for (const [error, status] of errors) {
-        expect({ tag: error._tag, valid: is(error), status: Protocol.statusOf(error) }).toEqual({
-          tag: error._tag,
-          valid: true,
-          status,
+      const request = Schema.is(Protocol.InspectRequest);
+      const valid = { version: 1, root: "frame-root-1", deadlineMillis: 5_000 };
+      expect(request(valid)).toBe(true);
+      expect(request({ ...valid, deadlineMillis: 1 })).toBe(true);
+      expect(request({ ...valid, deadlineMillis: 30_000 })).toBe(true);
+      expect(request({ ...valid, deadlineMillis: 0 })).toBe(false);
+      expect(request({ ...valid, deadlineMillis: 30_001 })).toBe(false);
+      expect(request({ ...valid, deadlineMillis: 1.5 })).toBe(false);
+      expect(request({ ...valid, root: "" })).toBe(false);
+      expect(request({ ...valid, root: "x".repeat(256) })).toBe(true);
+      expect(request({ ...valid, root: "x".repeat(257) })).toBe(false);
+      for (const control of ["\u0007", "\u001b[2J", "\u007f", "\u009b"]) {
+        expect({ control, valid: request({ ...valid, root: `a${control}b` }) }).toEqual({
+          control,
+          valid: false,
         });
       }
+      const info = Schema.is(Protocol.RootInfo);
+      expect(info(root)).toBe(true);
+      expect(info({ ...root, id: "has space" })).toBe(false);
+      expect(info({ ...root, name: "bad\u001b]0;x\u0007" })).toBe(false);
     }),
   );
 

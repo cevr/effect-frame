@@ -271,7 +271,7 @@ describe.skipIf(!H.hasBrowser)("live Frame inspection over a browser-originated 
       expect(await new Response(killed.stderr).text()).toContain("interrupted");
       // Even when interrupted, --json leaves exactly one versioned document.
       expect(await new Response(killed.stdout).text()).toBe(
-        `${JSON.stringify({ _tag: "Error", version: 1, error: { _tag: "Interrupted" } })}\n`,
+        `${JSON.stringify({ _tag: "Error", version: 1, error: { _tag: "Interrupted", signal: "SIGINT" } })}\n`,
       );
 
       await blocked.done;
@@ -421,6 +421,9 @@ describe.skipIf(!H.hasBrowser)("live Frame inspection over a browser-originated 
         "window.__fixture.status.filter((s) => s._tag === 'Disconnected').map((s) => s.retryInMillis)",
       );
       expect(Math.max(...retries)).toBeLessThanOrEqual(400);
+      // The delay doubles from 50 ms to the 400 ms cap; a constant delay fails this.
+      expect(retries.length).toBeGreaterThanOrEqual(4);
+      expect(retries).toEqual(retries.map((_, index) => Math.min(400, 50 * 2 ** index)));
       expect(await absent.evaluate<unknown>("Boolean(document.querySelector('#loading'))")).toBe(
         true,
       );
@@ -440,6 +443,22 @@ describe.skipIf(!H.hasBrowser)("live Frame inspection over a browser-originated 
       );
       views.push(lateView);
       await H.waitUntil(async () => (await H.stats(running)).roots === 1, "late attach");
+
+      // A gateway that drops the root at once does not reset the backoff:
+      // only a connection that stayed open for one second does.
+      const lateDelays = () =>
+        lateView.evaluate<ReadonlyArray<number>>(
+          "window.__fixture.status.filter((s) => s._tag === 'Disconnected').map((s) => s.retryInMillis)",
+        );
+      expect(await lateDelays()).toEqual([]);
+      for (let drop = 0; drop < 3; drop += 1) {
+        await H.waitUntil(async () => (await H.stats(running)).roots === 1, "late reattach");
+        const [root] = await Effect.runPromise(running.gateway.roots);
+        expect(await Effect.runPromise(running.gateway.disconnectRoot(root?.id ?? ""))).toBe(true);
+      }
+      await H.waitUntil(async () => (await lateDelays()).length === 3, "three late retries");
+      expect(await lateDelays()).toEqual([50, 100, 200]);
+      await H.waitUntil(async () => (await H.stats(running)).roots === 1, "late reattach");
 
       // Closing the root ends the retry loop: no more dials.
       await absent.evaluate<unknown>("window.__fixture.close()");

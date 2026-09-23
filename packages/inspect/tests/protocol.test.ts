@@ -34,12 +34,12 @@ const readJson = async (response: Response): Promise<Protocol.ErrorResponse["err
 
 const readerHeaders = (token: string, version = "1") => ({
   authorization: `Bearer ${token}`,
-  [Protocol.VERSION_HEADER]: version,
+  [Protocol.wire.versionHeader]: version,
   "content-type": "application/json",
 });
 
 const post = (base: string, token: string, body: string, version = "1") =>
-  fetch(new URL(Protocol.INSPECT_PATH, base), {
+  fetch(new URL(Protocol.wire.inspectPath, base), {
     method: "POST",
     headers: readerHeaders(token, version),
     body,
@@ -47,14 +47,17 @@ const post = (base: string, token: string, body: string, version = "1") =>
 
 /** A peer that passes the attach checks and speaks raw frames. */
 const rawRoot = async (running: H.RunningGateway, rootId: string) => {
-  const url = new URL(Protocol.ATTACH_PATH, running.gateway.attachUrl);
+  const url = new URL(Protocol.wire.attachPath, running.gateway.attachUrl);
   url.searchParams.set("root", rootId);
   url.searchParams.set("name", "raw");
   const frames: Array<string> = [];
   const socket = new WebSocket(url.href, {
     // @ts-expect-error The DOM lib hides Bun's constructor overload with handshake headers.
     headers: { origin: ORIGIN },
-    protocols: [Protocol.ROOT_SUBPROTOCOL, `${Protocol.ATTACH_TOKEN_PREFIX}${running.attachToken}`],
+    protocols: [
+      Protocol.wire.subprotocol,
+      `${Protocol.wire.attachTokenPrefix}${running.attachToken}`,
+    ],
   });
   socket.addEventListener("message", (event) => {
     frames.push(String(event.data));
@@ -106,7 +109,7 @@ describe("inspection protocol failures are explicit", () => {
     const base = running.gateway.url;
     const token = running.readToken;
     try {
-      const oldHeader = await fetch(new URL(Protocol.ROOTS_PATH, base), {
+      const oldHeader = await fetch(new URL(Protocol.wire.rootsPath, base), {
         headers: readerHeaders(token, "2"),
       });
       expect(oldHeader.status).toBe(400);
@@ -154,19 +157,19 @@ describe("inspection protocol failures are explicit", () => {
         maximum: 30_000,
       });
 
-      const wrongToken = await fetch(new URL(Protocol.ROOTS_PATH, base), {
+      const wrongToken = await fetch(new URL(Protocol.wire.rootsPath, base), {
         headers: readerHeaders(running.attachToken),
       });
       expect(wrongToken.status).toBe(401);
       expect(await readJson(wrongToken)).toEqual({ _tag: "Unauthorized" });
 
-      const browserOrigin = await fetch(new URL(Protocol.ROOTS_PATH, base), {
+      const browserOrigin = await fetch(new URL(Protocol.wire.rootsPath, base), {
         headers: { ...readerHeaders(token), origin: ORIGIN },
       });
       expect(browserOrigin.status).toBe(403);
       expect(await readJson(browserOrigin)).toEqual({ _tag: "ForbiddenOrigin", origin: ORIGIN });
 
-      const rebinding = await fetch(new URL(Protocol.ROOTS_PATH, base), {
+      const rebinding = await fetch(new URL(Protocol.wire.rootsPath, base), {
         headers: { ...readerHeaders(token), host: "attacker.test" },
       });
       expect(rebinding.status).toBe(403);
@@ -190,7 +193,7 @@ describe("inspection protocol failures are explicit", () => {
   it("rejects root attachments with a bad origin, version, capability, or identity", async () => {
     const running = await gateway();
     const attach = (headers: Record<string, string>, query = "?root=frame-root-a") =>
-      fetch(`${running.gateway.url}${Protocol.ATTACH_PATH}${query}`, {
+      fetch(`${running.gateway.url}${Protocol.wire.attachPath}${query}`, {
         headers: {
           connection: "Upgrade",
           upgrade: "websocket",
@@ -201,7 +204,7 @@ describe("inspection protocol failures are explicit", () => {
       });
     const good = {
       origin: ORIGIN,
-      "sec-websocket-protocol": `${Protocol.ROOT_SUBPROTOCOL}, ${Protocol.ATTACH_TOKEN_PREFIX}${running.attachToken}`,
+      "sec-websocket-protocol": `${Protocol.wire.subprotocol}, ${Protocol.wire.attachTokenPrefix}${running.attachToken}`,
     };
     try {
       const evil = await attach({ ...good, origin: "http://evil.test" });
@@ -213,7 +216,7 @@ describe("inspection protocol failures are explicit", () => {
 
       const v2 = await attach({
         ...good,
-        "sec-websocket-protocol": `effect-frame-inspection.v2, ${Protocol.ATTACH_TOKEN_PREFIX}${running.attachToken}`,
+        "sec-websocket-protocol": `effect-frame-inspection.v2, ${Protocol.wire.attachTokenPrefix}${running.attachToken}`,
       });
       expect(await readJson(v2)).toEqual({
         _tag: "UnsupportedProtocolVersion",
@@ -223,7 +226,7 @@ describe("inspection protocol failures are explicit", () => {
 
       const readTokenUsedToAttach = await attach({
         ...good,
-        "sec-websocket-protocol": `${Protocol.ROOT_SUBPROTOCOL}, ${Protocol.ATTACH_TOKEN_PREFIX}${running.readToken}`,
+        "sec-websocket-protocol": `${Protocol.wire.subprotocol}, ${Protocol.wire.attachTokenPrefix}${running.readToken}`,
       });
       expect(await readJson(readTokenUsedToAttach)).toEqual({ _tag: "Unauthorized" });
 

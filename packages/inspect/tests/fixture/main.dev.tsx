@@ -4,14 +4,14 @@
  * names a gateway; otherwise this entry creates no connection either.
  */
 import { Effect, Option } from "effect";
-import { attach } from "effect-frame/inspection";
+import { attachGateway } from "effect-frame/inspection";
 import { start } from "./app.js";
 
 start((config, status) =>
   Option.match(Option.fromNullishOr(config.gateway), {
     onNone: () => Effect.void,
     onSome: (gateway) =>
-      attach({
+      attachGateway({
         url: gateway.url,
         token: gateway.token,
         initialRetryMillis: 50,

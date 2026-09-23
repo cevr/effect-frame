@@ -19,7 +19,7 @@ import type { RpcClientError } from "effect/unstable/rpc/RpcClientError";
 import { Socket } from "effect/unstable/socket";
 import type { ServerWebSocket } from "bun";
 import { Protocol } from "effect-frame/inspection";
-import { hasControlCharacter } from "./text.js";
+import { MAX_DEADLINE_MILLIS, MAX_REQUEST_BYTES, statusOf } from "./limits.js";
 
 export interface GatewayOptions {
   /** The one application origin allowed to attach roots. */
@@ -179,9 +179,6 @@ interface Connection {
   terminated: boolean;
 }
 
-/** Reader request bodies are tiny; anything larger is refused unread. */
-const MAX_REQUEST_BYTES = 4096;
-
 /** The server messages a root may send over the root link. */
 const SERVER_TAGS = new Set(["Chunk", "Exit", "Defect", "Pong"]);
 
@@ -231,12 +228,80 @@ const encodeError = Schema.encodeSync(Protocol.ErrorResponse);
 const encodeRoots = Schema.encodeSync(Protocol.RootsResponse);
 const encodeInspection = Schema.encodeSync(Protocol.InspectResponse);
 const decodeInspectRequest = Schema.decodeUnknownExit(Protocol.InspectRequest);
+const hasProtocolVersion = Schema.is(
+  Schema.Struct({ version: Schema.Literal(Protocol.wire.version) }),
+);
+const decodeDeadline = Schema.decodeUnknownOption(Schema.Struct({ deadlineMillis: Schema.Finite }));
+const hasValidDeadline = Schema.is(Schema.Struct({ deadlineMillis: Protocol.DeadlineMillis }));
+const isRootId = Schema.is(Protocol.RootId);
+const isRootName = Schema.is(Protocol.RootName);
+
+const tooLarge = () => readerError({ _tag: "MalformedRequest", detail: "request body too large" });
+
+/**
+ * Read a reader request body, counting bytes as they arrive. A body over
+ * the limit is refused as soon as it crosses it, chunked or not; the
+ * gateway never buffers the rest.
+ */
+const readBody = (request: Request) =>
+  Effect.gen(function* () {
+    const declared = Number(request.headers.get("content-length") ?? "0");
+    if (declared > MAX_REQUEST_BYTES) return yield* tooLarge();
+    if (request.body === null) return "";
+    const reader = request.body.getReader();
+    const chunks: Array<Uint8Array> = [];
+    let total = 0;
+    while (true) {
+      const chunk = yield* Effect.promise(() => reader.read());
+      if (chunk.done) break;
+      total += chunk.value.byteLength;
+      if (total > MAX_REQUEST_BYTES) {
+        yield* Effect.sync(() => {
+          reader.cancel().catch(() => undefined);
+        });
+        return yield* tooLarge();
+      }
+      chunks.push(chunk.value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return new TextDecoder().decode(bytes);
+  });
+
+/**
+ * Name the first contract a request body breaks. The schemas hold the
+ * contract; this only picks which error the reader sees.
+ */
+const requestError = (body: unknown): Protocol.GatewayError => {
+  if (!hasProtocolVersion(body)) {
+    const version =
+      typeof body === "object" && body !== null && "version" in body ? body.version : undefined;
+    return {
+      _tag: "UnsupportedProtocolVersion",
+      received: String(version).slice(0, 32),
+      supported: [Protocol.wire.version],
+    };
+  }
+  const deadline = decodeDeadline(body);
+  if (Option.isSome(deadline) && !hasValidDeadline(body)) {
+    return {
+      _tag: "InvalidDeadline",
+      deadlineMillis: deadline.value.deadlineMillis,
+      maximum: MAX_DEADLINE_MILLIS,
+    };
+  }
+  return {
+    _tag: "MalformedRequest",
+    detail: "body must be {version, root: selector, deadlineMillis: 1..30000}",
+  };
+};
 
 const errorResponse = (error: Protocol.GatewayError): Response =>
-  json(
-    encodeError({ _tag: "Error", version: Protocol.PROTOCOL_VERSION, error }),
-    Protocol.statusOf(error),
-  );
+  json(encodeError({ _tag: "Error", version: Protocol.wire.version, error }), statusOf(error));
 
 const bearer = (request: Request): string => {
   const header = request.headers.get("authorization") ?? "";
@@ -267,7 +332,8 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
 
   const hostAllowed = (request: Request): boolean => {
     const host = request.headers.get("host") ?? "";
-    return [`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`].includes(host);
+    // The gateway binds 127.0.0.1 only, so no other loopback name reaches it.
+    return [`127.0.0.1:${port}`, `localhost:${port}`].includes(host);
   };
 
   // ------------------------------------------------------------ root link
@@ -377,36 +443,33 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
       .split(",")
       .map((value) => value.trim())
       .filter((value) => value.length > 0);
-    if (!offered.includes(Protocol.ROOT_SUBPROTOCOL)) {
+    if (!offered.includes(Protocol.wire.subprotocol)) {
       return upgradeError({
         _tag: "UnsupportedProtocolVersion",
         received: offered
-          .filter((value) => !value.startsWith(Protocol.ATTACH_TOKEN_PREFIX))
+          .filter((value) => !value.startsWith(Protocol.wire.attachTokenPrefix))
           .join(","),
-        supported: [Protocol.PROTOCOL_VERSION],
+        supported: [Protocol.wire.version],
       });
     }
-    const token = offered.find((value) => value.startsWith(Protocol.ATTACH_TOKEN_PREFIX)) ?? "";
-    if (!sameSecret(options.attachToken, token.slice(Protocol.ATTACH_TOKEN_PREFIX.length))) {
+    const token = offered.find((value) => value.startsWith(Protocol.wire.attachTokenPrefix)) ?? "";
+    if (!sameSecret(options.attachToken, token.slice(Protocol.wire.attachTokenPrefix.length))) {
       return upgradeError({ _tag: "Unauthorized" });
     }
     const url = new URL(request.url);
     const rootId = url.searchParams.get("root") ?? "";
     const name = url.searchParams.get("name");
-    if (!Schema.is(Protocol.RootId)(rootId)) {
+    if (!isRootId(rootId)) {
       return upgradeError({ _tag: "MalformedRequest", detail: "root must be a Frame root ID" });
     }
-    if (
-      name !== null &&
-      (name.length > Protocol.MAX_ROOT_NAME_LENGTH || hasControlCharacter(name))
-    ) {
+    if (name !== null && !isRootName(name)) {
       return upgradeError({ _tag: "MalformedRequest", detail: "root name is not printable" });
     }
     if (registry.size >= maxRoots && !registry.has(rootId)) {
       return upgradeError({ _tag: "TooManyRoots", limit: maxRoots });
     }
     const upgraded = server.upgrade(request, {
-      headers: { "Sec-WebSocket-Protocol": Protocol.ROOT_SUBPROTOCOL },
+      headers: { "Sec-WebSocket-Protocol": Protocol.wire.subprotocol },
       data: { rootId, name },
     });
     if (upgraded) return undefined;
@@ -499,33 +562,23 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
       if (!sameSecret(options.readToken, bearer(request))) {
         return yield* readerError({ _tag: "Unauthorized" });
       }
-      const version = request.headers.get(Protocol.VERSION_HEADER) ?? "";
-      if (version !== String(Protocol.PROTOCOL_VERSION)) {
+      const version = request.headers.get(Protocol.wire.versionHeader) ?? "";
+      if (version !== String(Protocol.wire.version)) {
         return yield* readerError({
           _tag: "UnsupportedProtocolVersion",
           received: version.slice(0, 32),
-          supported: [Protocol.PROTOCOL_VERSION],
+          supported: [Protocol.wire.version],
         });
       }
     });
 
   const handleRoots = Effect.sync(() =>
-    json(
-      encodeRoots({ _tag: "Roots", version: Protocol.PROTOCOL_VERSION, roots: rootInfos() }),
-      200,
-    ),
+    json(encodeRoots({ _tag: "Roots", version: Protocol.wire.version, roots: rootInfos() }), 200),
   );
 
   const handleInspect = (request: Request) =>
     Effect.gen(function* () {
-      const declared = Number(request.headers.get("content-length") ?? "0");
-      if (declared > MAX_REQUEST_BYTES) {
-        return yield* readerError({ _tag: "MalformedRequest", detail: "request body too large" });
-      }
-      const text = yield* Effect.promise(() => request.text());
-      if (text.length > MAX_REQUEST_BYTES) {
-        return yield* readerError({ _tag: "MalformedRequest", detail: "request body too large" });
-      }
+      const text = yield* readBody(request);
       let body: unknown;
       try {
         body = JSON.parse(text);
@@ -533,36 +586,8 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
         return yield* readerError({ _tag: "MalformedRequest", detail: "body is not JSON" });
       }
       const decoded = decodeInspectRequest(body);
-      if (Exit.isFailure(decoded)) {
-        const version =
-          typeof body === "object" && body !== null && "version" in body ? body.version : undefined;
-        if (version !== Protocol.PROTOCOL_VERSION) {
-          return yield* readerError({
-            _tag: "UnsupportedProtocolVersion",
-            received: String(version).slice(0, 32),
-            supported: [Protocol.PROTOCOL_VERSION],
-          });
-        }
-        return yield* readerError({
-          _tag: "MalformedRequest",
-          detail: "body must be {version, root, deadlineMillis}",
-        });
-      }
+      if (Exit.isFailure(decoded)) return yield* readerError(requestError(body));
       const { root, deadlineMillis } = decoded.value;
-      if (
-        root.length === 0 ||
-        root.length > Protocol.MAX_SELECTOR_LENGTH ||
-        hasControlCharacter(root)
-      ) {
-        return yield* readerError({ _tag: "MalformedRequest", detail: "root selector is invalid" });
-      }
-      if (deadlineMillis < 1 || deadlineMillis > Protocol.MAX_DEADLINE_MILLIS) {
-        return yield* readerError({
-          _tag: "InvalidDeadline",
-          deadlineMillis,
-          maximum: Protocol.MAX_DEADLINE_MILLIS,
-        });
-      }
       const connection = yield* select(root);
       counters.readsStarted += 1;
       counters.pendingReads += 1;
@@ -581,7 +606,7 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
       return json(
         encodeInspection({
           _tag: "Inspection",
-          version: Protocol.PROTOCOL_VERSION,
+          version: Protocol.wire.version,
           root: connection.info,
           snapshot,
         }),
@@ -592,8 +617,8 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
   const handleReader = (request: Request, path: string) =>
     Effect.gen(function* () {
       yield* readerGuard(request);
-      if (path === Protocol.ROOTS_PATH && request.method === "GET") return yield* handleRoots;
-      if (path === Protocol.INSPECT_PATH && request.method === "POST")
+      if (path === Protocol.wire.rootsPath && request.method === "GET") return yield* handleRoots;
+      if (path === Protocol.wire.inspectPath && request.method === "POST")
         return yield* handleInspect(request);
       return yield* readerError({ _tag: "NotFound", path: path.slice(0, 128) });
     }).pipe(
@@ -614,7 +639,7 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
               });
             }
             const path = new URL(request.url).pathname;
-            if (path === Protocol.ATTACH_PATH) return attach(request, bunServer);
+            if (path === Protocol.wire.attachPath) return attach(request, bunServer);
             return Effect.runPromiseWith(context)(handleReader(request, path), {
               signal: request.signal,
             }).catch(() => new Response(null, { status: 499 }));

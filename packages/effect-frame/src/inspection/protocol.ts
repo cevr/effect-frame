@@ -14,24 +14,40 @@ import * as Frame from "../frame.js";
 import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/unstable/rpc";
 
-export const PROTOCOL_VERSION = 1;
+/** The fixed strings of protocol version 1. */
+export interface Wire {
+  /** The protocol version every document and request carries. */
+  readonly version: 1;
+  /** The WebSocket subprotocol that carries the root-link protocol version. */
+  readonly subprotocol: "effect-frame-inspection.v1";
+  /** The WebSocket subprotocol prefix that carries the attach capability. */
+  readonly attachTokenPrefix: "effect-frame-attach.";
+  /** The reader API version header. */
+  readonly versionHeader: "effect-frame-inspection-version";
+  /** The root-link WebSocket path. */
+  readonly attachPath: "/v1/attach";
+  /** The reader path that lists roots. */
+  readonly rootsPath: "/v1/roots";
+  /** The reader path that inspects one root. */
+  readonly inspectPath: "/v1/inspect";
+}
 
-/** The WebSocket subprotocol that carries the root-link protocol version. */
-export const ROOT_SUBPROTOCOL = `effect-frame-inspection.v${PROTOCOL_VERSION}`;
-/** The WebSocket subprotocol prefix that carries the attach capability. */
-export const ATTACH_TOKEN_PREFIX = "effect-frame-attach.";
-/** The reader API version header. */
-export const VERSION_HEADER = "effect-frame-inspection-version";
+export const wire: Wire = {
+  version: 1,
+  subprotocol: "effect-frame-inspection.v1",
+  attachTokenPrefix: "effect-frame-attach.",
+  versionHeader: "effect-frame-inspection-version",
+  attachPath: "/v1/attach",
+  rootsPath: "/v1/roots",
+  inspectPath: "/v1/inspect",
+};
 
-export const ATTACH_PATH = "/v1/attach";
-export const ROOTS_PATH = "/v1/roots";
-export const INSPECT_PATH = "/v1/inspect";
-
-/** Limits shared by the attachment, the gateway, and the reader. */
-export const MAX_DEADLINE_MILLIS = 30_000;
-export const DEFAULT_DEADLINE_MILLIS = 5_000;
-export const MAX_SELECTOR_LENGTH = 256;
-export const MAX_ROOT_NAME_LENGTH = 128;
+/**
+ * Code points a terminal or a log could act on: C0 controls, DEL, and C1
+ * controls. Identity and selector strings never carry them.
+ */
+// oxlint-disable-next-line no-control-regex -- matching control characters is the point.
+const NO_CONTROL = /^[^\u0000-\u001f\u007f-\u009f]*$/;
 
 // ---------------------------------------------------------------------------
 // Root link
@@ -47,6 +63,10 @@ export type SnapshotTooLarge = Schema.Schema.Type<typeof SnapshotTooLarge>;
 /**
  * One RPC: take a fresh sample of the attached root. The gateway sends its
  * byte limit so the browser measures the encoded sample before it replies.
+ *
+ * @unstable This value is built with `effect/unstable/rpc`. Its type follows
+ * that module and can change with an Effect release. The wire format is
+ * versioned by `wire.version`, not by this type.
  */
 export const Inspect = Rpc.make("Inspect", {
   payload: { maxBytes: Schema.Int },
@@ -54,18 +74,37 @@ export const Inspect = Rpc.make("Inspect", {
   error: SnapshotTooLarge,
 });
 
+/**
+ * The root-link RPC group: the gateway is its client, the browser root its
+ * server.
+ *
+ * @unstable This value is built with `effect/unstable/rpc`. Its type follows
+ * that module and can change with an Effect release.
+ */
 export const RootRpcs = RpcGroup.make(Inspect);
 
 /** Root identities are Frame root IDs: printable, short, and URL-safe. */
 export const RootId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9._:-]{1,128}$/));
+
+/** A root's display name: at most 128 characters and no control characters. */
+export const RootName = Schema.String.check(Schema.isMaxLength(128), Schema.isPattern(NO_CONTROL));
+
+/** A reader's root selector: an exact ID, a unique ID prefix, or an exact name. */
+export const RootSelector = Schema.String.check(
+  Schema.isLengthBetween(1, 256),
+  Schema.isPattern(NO_CONTROL),
+);
+
+/** A reader deadline in milliseconds. It is always finite: 1 to 30000. */
+export const DeadlineMillis = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 30_000 }));
 
 // ---------------------------------------------------------------------------
 // Reader API
 // ---------------------------------------------------------------------------
 
 export const RootInfo = Schema.Struct({
-  id: Schema.String,
-  name: Schema.NullOr(Schema.String),
+  id: RootId,
+  name: Schema.NullOr(RootName),
   /** A gateway-local counter. A reconnect of the same root gets a new one. */
   incarnation: Schema.Int,
   attachedAt: Schema.Finite,
@@ -73,9 +112,9 @@ export const RootInfo = Schema.Struct({
 export type RootInfo = Schema.Schema.Type<typeof RootInfo>;
 
 export const InspectRequest = Schema.Struct({
-  version: Schema.Literal(PROTOCOL_VERSION),
-  root: Schema.String,
-  deadlineMillis: Schema.Int,
+  version: Schema.Literal(wire.version),
+  root: RootSelector,
+  deadlineMillis: DeadlineMillis,
 });
 export type InspectRequest = Schema.Schema.Type<typeof InspectRequest>;
 
@@ -122,52 +161,23 @@ export const GatewayError = Schema.Union(Object.values(errors));
 export type GatewayError = Schema.Schema.Type<typeof GatewayError>;
 
 export const RootsResponse = Schema.TaggedStruct("Roots", {
-  version: Schema.Literal(PROTOCOL_VERSION),
+  version: Schema.Literal(wire.version),
   roots: Schema.Array(RootInfo),
 });
 export type RootsResponse = Schema.Schema.Type<typeof RootsResponse>;
 
 export const InspectResponse = Schema.TaggedStruct("Inspection", {
-  version: Schema.Literal(PROTOCOL_VERSION),
+  version: Schema.Literal(wire.version),
   root: RootInfo,
   snapshot: Frame.Snapshot,
 });
 export type InspectResponse = Schema.Schema.Type<typeof InspectResponse>;
 
 export const ErrorResponse = Schema.TaggedStruct("Error", {
-  version: Schema.Literal(PROTOCOL_VERSION),
+  version: Schema.Literal(wire.version),
   error: GatewayError,
 });
 export type ErrorResponse = Schema.Schema.Type<typeof ErrorResponse>;
 
 export const ReaderResponse = Schema.Union([RootsResponse, InspectResponse, ErrorResponse]);
 export type ReaderResponse = Schema.Schema.Type<typeof ReaderResponse>;
-
-/** The HTTP status for each reader error. */
-export const statusOf = (error: GatewayError): number => {
-  switch (error._tag) {
-    case "UnsupportedProtocolVersion":
-    case "MalformedRequest":
-    case "InvalidDeadline":
-      return 400;
-    case "Unauthorized":
-      return 401;
-    case "ForbiddenOrigin":
-    case "ForbiddenHost":
-      return 403;
-    case "NotFound":
-    case "RootNotFound":
-      return 404;
-    case "AmbiguousRoot":
-      return 409;
-    case "SnapshotTooLarge":
-      return 413;
-    case "TooManyRoots":
-      return 503;
-    case "RootDisconnected":
-    case "RootProtocolError":
-      return 502;
-    case "DeadlineExceeded":
-      return 504;
-  }
-};

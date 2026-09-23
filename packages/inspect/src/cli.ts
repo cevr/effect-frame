@@ -16,24 +16,27 @@ import { Protocol } from "effect-frame/inspection";
 import * as Capabilities from "./capabilities.js";
 import * as Gateway from "./gateway.js";
 import * as Reader from "./reader.js";
+import { exitCodeOf, untilInterrupted, type ExitCode } from "./signals.js";
 
-export type ExitCode = 0 | 1 | 2 | 130;
+export type { ExitCode } from "./signals.js";
 
 export interface Io {
   readonly argv: ReadonlyArray<string>;
   /** The value of `EFFECT_FRAME_INSPECT_TOKEN`, when set. */
   readonly token: Option.Option<string>;
-  /** Where `gateway` writes capability files when `--state-dir` is absent. */
-  readonly defaultStateDir: string;
-  /** Aborts the running command as SIGINT does. */
+  /** `HOME`, when set. */
+  readonly home: Option.Option<string>;
+  /** `XDG_STATE_HOME`, when set. */
+  readonly xdgStateHome: Option.Option<string>;
+  /** This process's PID; it owns the gateway lock. */
+  readonly pid: number;
+  /** Aborted with `SIGINT`, `SIGTERM`, or `SIGHUP` as its reason. */
   readonly interrupt: AbortSignal;
   readonly stdout: (text: string) => void;
   readonly stderr: (text: string) => void;
 }
 
 export const DEFAULT_PORT = 4318;
-
-const INTERRUPTED: ExitCode = 130;
 
 export const HELP = `effect-frame: inspect live effect-frame roots.
 
@@ -45,7 +48,8 @@ Usage:
 
 Run 'effect-frame <command> --help' for the flags of one command.
 
-Exit codes: 0 ok, 1 failure, 2 invalid arguments or no capability, 130 interrupted.
+Exit codes: 0 ok, 1 failure, 2 invalid arguments or no capability,
+130/143/129 stopped by SIGINT/SIGTERM/SIGHUP.
 `;
 
 export const GATEWAY_HELP = `Start a loopback inspection gateway for one application origin.
@@ -60,11 +64,14 @@ Flags:
   --state-dir <dir>    Where the capability files go (default: $XDG_STATE_HOME/effect-frame/inspect)
   -h, --help           Show this help
 
-The gateway writes '${Capabilities.ATTACH_TOKEN_FILE}' and '${Capabilities.READ_TOKEN_FILE}' with mode 0600
-into the state directory and prints their paths on stderr. It never prints a
-capability on stdout. It removes both files when it stops. Stop it with Ctrl-C.
+The state directory must belong to you; the gateway sets its mode to 0700.
+One gateway owns it at a time through '${Capabilities.LOCK_FILE}'. The gateway writes
+'${Capabilities.ATTACH_TOKEN_FILE}' and '${Capabilities.READ_TOKEN_FILE}' with mode 0600 and prints their paths on
+stderr. It never prints a capability on stdout. It removes both files when
+it stops. Stop it with Ctrl-C, SIGTERM, or SIGHUP.
 
-Exit codes: 1 listen or file failure, 2 invalid arguments, 130 interrupted.
+Exit codes: 1 listen, directory, or file failure, 2 invalid arguments or no
+usable default state directory, 130/143/129 stopped by SIGINT/SIGTERM/SIGHUP.
 `;
 
 // ---------------------------------------------------------------------------
@@ -132,6 +139,29 @@ const readPort = (raw: Option.Option<string>) =>
     },
   });
 
+const present = (value: Option.Option<string>) => Option.filter(value, (text) => text.length > 0);
+
+/**
+ * `$XDG_STATE_HOME/effect-frame/inspect`, else
+ * `$HOME/.local/state/effect-frame/inspect`. A relative `XDG_STATE_HOME` or a
+ * missing `HOME` is a usage error, not a guess.
+ */
+const defaultStateDir = (io: Io) =>
+  Option.match(present(io.xdgStateHome), {
+    onSome: (dir) => {
+      if (!dir.startsWith("/")) return invalid("XDG_STATE_HOME must be an absolute path");
+      return Effect.succeed(`${dir}/effect-frame/inspect`);
+    },
+    onNone: () =>
+      Option.match(present(io.home), {
+        onNone: () => invalid("HOME is not set; pass --state-dir or set XDG_STATE_HOME"),
+        onSome: (home) => {
+          if (!home.startsWith("/")) return invalid("HOME must be an absolute path");
+          return Effect.succeed(`${home}/.local/state/effect-frame/inspect`);
+        },
+      }),
+  });
+
 const parseGateway = Effect.fn("InspectCli.parseGateway")(function* (
   rest: ReadonlyArray<string>,
   io: Io,
@@ -140,10 +170,10 @@ const parseGateway = Effect.fn("InspectCli.parseGateway")(function* (
   const values = yield* readGatewayFlags(rest);
   const origin = yield* readOrigin(Option.fromNullishOr(values.get("--origin")));
   const port = yield* readPort(Option.fromNullishOr(values.get("--port")));
-  const stateDir = Option.getOrElse(
-    Option.fromNullishOr(values.get("--state-dir")),
-    () => io.defaultStateDir,
-  );
+  const stateDir = yield* Option.match(Option.fromNullishOr(values.get("--state-dir")), {
+    onNone: () => defaultStateDir(io),
+    onSome: (dir) => Effect.succeed(dir),
+  });
   if (stateDir.length === 0) return yield* invalid("--state-dir must not be empty");
   return { origin, port, stateDir } satisfies GatewayArgs;
 });
@@ -151,17 +181,6 @@ const parseGateway = Effect.fn("InspectCli.parseGateway")(function* (
 // ---------------------------------------------------------------------------
 // gateway
 // ---------------------------------------------------------------------------
-
-const untilInterrupted = (signal: AbortSignal) =>
-  Effect.callback<void>((resume) => {
-    if (signal.aborted) {
-      resume(Effect.void);
-      return;
-    }
-    const onAbort = () => resume(Effect.void);
-    signal.addEventListener("abort", onAbort, { once: true });
-    return Effect.sync(() => signal.removeEventListener("abort", onAbort));
-  });
 
 const readyText = (
   args: GatewayArgs,
@@ -177,12 +196,16 @@ const readyText = (
     `  read token    ${files.read}`,
     "",
     `read with: effect-frame roots --url ${gateway.url} --token-file ${files.read}`,
-    "stop with: Ctrl-C",
+    "stop with: Ctrl-C, SIGTERM, or SIGHUP",
     "",
   ].join("\n");
 
 const serve = (args: GatewayArgs, io: Io): Effect.Effect<ExitCode> =>
   Effect.gen(function* () {
+    // Own the directory before anything else, so a second gateway never
+    // overwrites the first one's capabilities.
+    yield* Capabilities.prepareDirectory(args.stateDir);
+    yield* Capabilities.lock(args.stateDir, io.pid);
     const tokens = { attach: Gateway.makeToken(), read: Gateway.makeToken() };
     const gateway = yield* Gateway.make({
       allowedOrigin: args.origin,
@@ -192,11 +215,12 @@ const serve = (args: GatewayArgs, io: Io): Effect.Effect<ExitCode> =>
     });
     const files = yield* Capabilities.write(args.stateDir, tokens);
     io.stderr(readyText(args, gateway, files));
-    yield* untilInterrupted(io.interrupt);
-    io.stderr("effect-frame gateway stopped\n");
-    return INTERRUPTED;
+    const signal = yield* untilInterrupted(io.interrupt);
+    return exitCodeOf(signal);
   }).pipe(
     Effect.scoped,
+    // The scope is closed here: the capability files and the lock are gone.
+    Effect.tap(() => Effect.sync(() => io.stderr("effect-frame gateway stopped\n"))),
     Effect.catchTags({
       GatewayListenError: (error) =>
         Effect.sync((): ExitCode => {
@@ -206,6 +230,18 @@ const serve = (args: GatewayArgs, io: Io): Effect.Effect<ExitCode> =>
       CapabilityFileError: (error) =>
         Effect.sync((): ExitCode => {
           io.stderr(`error: ${error.detail}: ${error.path}\n`);
+          return 1;
+        }),
+      StateDirectoryInUse: (error) =>
+        Effect.sync((): ExitCode => {
+          io.stderr(
+            `error: another effect-frame gateway (pid ${error.pid}) owns ${error.directory}; stop it or pass another --state-dir\n`,
+          );
+          return 1;
+        }),
+      StateDirectoryRefused: (error) =>
+        Effect.sync((): ExitCode => {
+          io.stderr(`error: refusing state directory ${error.directory}: ${error.detail}\n`);
           return 1;
         }),
     }),
@@ -248,7 +284,7 @@ const misuse = (io: Io, message: string): Effect.Effect<ExitCode> =>
   Effect.sync((): ExitCode => {
     if (io.argv.includes("--json")) {
       io.stdout(
-        `${JSON.stringify({ _tag: "Error", version: Protocol.PROTOCOL_VERSION, error: { _tag: "InvalidArguments", message } })}\n`,
+        `${JSON.stringify({ _tag: "Error", version: Protocol.wire.version, error: { _tag: "InvalidArguments", message } })}\n`,
       );
     }
     io.stderr(`error: ${message}\n\n${HELP}`);

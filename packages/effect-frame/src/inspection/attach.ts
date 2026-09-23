@@ -1,6 +1,6 @@
 /* oxlint-disable effect/noGlobals -- this module is the browser boundary: it measures encoded bytes with TextEncoder and dials with the global WebSocket constructor. */
 /**
- * The opt-in browser attachment. Import it from a development entry only; a
+ * The opt-in browser attachment, exported as `attachGateway`. Import it from a development entry only; a
  * production entry that does not import `effect-frame/inspection` carries no
  * inspection, RPC, or socket code.
  *
@@ -20,14 +20,7 @@ import { Clock, Context, Duration, Effect, Layer, Option, Predicate, Schema, Sco
 import { NetAddress } from "effect/unstable/net";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { Socket, SocketServer } from "effect/unstable/socket";
-import {
-  ATTACH_PATH,
-  ATTACH_TOKEN_PREFIX,
-  MAX_ROOT_NAME_LENGTH,
-  ROOT_SUBPROTOCOL,
-  RootRpcs,
-  type SnapshotTooLarge,
-} from "./protocol.js";
+import { RootId, RootName, RootRpcs, wire, type SnapshotTooLarge } from "./protocol.js";
 import * as Frame from "../frame.js";
 
 export type AttachStatus =
@@ -40,10 +33,16 @@ export interface AttachOptions {
   readonly url: string;
   /** The attach capability issued by the gateway. */
   readonly token: string;
-  /** Optional status observer for development diagnostics. */
+  /**
+   * Optional status observer for development diagnostics. A throw from it is
+   * ignored; it never stops the connection loop.
+   */
   readonly onStatus?: (status: AttachStatus) => void;
+  /** The first retry delay. Finite and positive. Defaults to 250. */
   readonly initialRetryMillis?: number;
+  /** The largest retry delay. Finite, positive, and not below the first. Defaults to 5000. */
   readonly maxRetryMillis?: number;
+  /** How long one dial may take to open. Finite and positive. Defaults to 2000. */
   readonly openTimeoutMillis?: number;
 }
 
@@ -53,26 +52,79 @@ export class InvalidAttachOptions extends Schema.TaggedError<InvalidAttachOption
   { detail: Schema.String },
 ) {}
 
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+/**
+ * A connection that stayed open this long resets the retry delay. A shorter
+ * one, such as a gateway that drops the root at once, keeps the backoff
+ * growing.
+ */
+const STABLE_CONNECTION_MILLIS = 1_000;
+
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost"]);
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{16,256}$/;
+
+const invalid = (detail: string) => InvalidAttachOptions.make({ detail });
 
 const gatewayAddress = Effect.fn("InspectionAttach.gatewayAddress")(function* (url: string) {
   const parsed = yield* Effect.try({
     try: () => new URL(url),
-    catch: () => InvalidAttachOptions.make({ detail: "gateway URL does not parse" }),
+    catch: () => invalid("gateway URL does not parse"),
   });
-  if (parsed.protocol !== "ws:") {
-    return yield* InvalidAttachOptions.make({ detail: "gateway URL must use ws:" });
-  }
+  if (parsed.protocol !== "ws:") return yield* invalid("gateway URL must use ws:");
   if (!LOOPBACK_HOSTS.has(parsed.hostname)) {
-    return yield* InvalidAttachOptions.make({ detail: "gateway URL must be loopback" });
+    return yield* invalid("gateway URL must be 127.0.0.1 or localhost");
   }
   const port = Number(parsed.port);
   if (!Number.isInteger(port) || port <= 0) {
-    return yield* InvalidAttachOptions.make({ detail: "gateway URL needs an explicit port" });
+    return yield* invalid("gateway URL needs an explicit port");
   }
   return { origin: parsed.origin, port };
 });
+
+/** One optional duration: finite and positive, or its default. */
+const millis = (name: string, value: Option.Option<number>, fallback: number) =>
+  Option.match(value, {
+    onNone: () => Effect.succeed(fallback),
+    onSome: (given) => {
+      if (Number.isFinite(given) && given > 0) return Effect.succeed(given);
+      return Effect.fail(invalid(`${name} must be a finite number above 0`));
+    },
+  });
+
+const timing = Effect.fn("InspectionAttach.timing")(function* (options: AttachOptions) {
+  const initialRetry = yield* millis(
+    "initialRetryMillis",
+    Option.fromNullishOr(options.initialRetryMillis),
+    250,
+  );
+  const maxRetry = yield* millis(
+    "maxRetryMillis",
+    Option.fromNullishOr(options.maxRetryMillis),
+    Math.max(5_000, initialRetry),
+  );
+  if (maxRetry < initialRetry) {
+    return yield* invalid("maxRetryMillis must not be below initialRetryMillis");
+  }
+  const openTimeout = yield* millis(
+    "openTimeoutMillis",
+    Option.fromNullishOr(options.openTimeoutMillis),
+    2_000,
+  );
+  return { initialRetry, maxRetry, openTimeout };
+});
+
+const isRootId = Schema.is(RootId);
+const isRootName = Schema.is(RootName);
+
+/** The root identity the gateway registers, checked before any dial. */
+const rootIdentity = (root: Frame.Snapshot["root"]) =>
+  Effect.gen(function* () {
+    if (!isRootId(root.id)) return yield* invalid("the Frame root ID is not a valid root ID");
+    const name = Option.map(Option.fromNullishOr(root.name), (value) => value.slice(0, 128));
+    if (Option.exists(name, (value) => !isRootName(value))) {
+      return yield* invalid("the Frame root name has control characters");
+    }
+    return { id: root.id, name };
+  });
 
 const encoder = new TextEncoder();
 
@@ -96,51 +148,44 @@ const measure = (snapshot: Frame.Snapshot): number =>
   encoder.encode(JSON.stringify(encodeSnapshot(snapshot))).byteLength;
 
 /**
- * Attach the current root's Frame service to a loopback gateway.
+ * Attach the current root's Frame service to a loopback inspection gateway.
  *
- * The returned effect forks one scoped connection loop and returns at once;
- * mount never waits for the gateway. The loop ends when the caller's scope
- * closes. Its retry timers use Effect's live clock, so an application
- * TestClock neither freezes nor advances them.
+ * It checks the options and the root identity first and fails with
+ * `InvalidAttachOptions` when either is unusable. Then it forks one scoped
+ * connection loop and returns at once; mount never waits for the gateway.
+ * The loop ends when the caller's scope closes. Retry delays double from
+ * `initialRetryMillis` up to `maxRetryMillis`, and reset only after a
+ * connection stayed open for one second. The timers use
+ * Effect's live clock, so an application TestClock neither freezes nor
+ * advances them.
  */
-export const attach = Effect.fn("InspectionAttach.attach")(function* (options: AttachOptions) {
+export const attachGateway = Effect.fn("InspectionAttach.attachGateway")(function* (
+  options: AttachOptions,
+) {
   const address = yield* gatewayAddress(options.url);
   if (!TOKEN_PATTERN.test(options.token)) {
-    return yield* InvalidAttachOptions.make({ detail: "attach token has an invalid shape" });
+    return yield* invalid("attach token has an invalid shape");
   }
+  const { initialRetry, maxRetry, openTimeout } = yield* timing(options);
   const frame = yield* Frame.Service;
   // The construction context supplies application services to inspection only.
   const applicationContext = Context.omit(Scope.Scope)(yield* Effect.context<Frame.Service>());
   const liveClock = Context.get(Context.empty(), Clock.Clock);
   const report = Option.fromNullishOr(options.onStatus);
+  // A throwing observer is a development diagnostic's bug; the loop outlives it.
   const notify = (status: AttachStatus): Effect.Effect<void> =>
     Option.match(report, {
       onNone: () => Effect.void,
-      onSome: (onStatus) => Effect.sync(() => onStatus(status)),
+      onSome: (onStatus) => Effect.asVoid(Effect.exit(Effect.sync(() => onStatus(status)))),
     });
-  const initialRetry = Option.getOrElse(
-    Option.fromNullishOr(options.initialRetryMillis),
-    () => 250,
-  );
-  const maxRetry = Option.getOrElse(Option.fromNullishOr(options.maxRetryMillis), () => 5_000);
-  const openTimeout = Option.getOrElse(
-    Option.fromNullishOr(options.openTimeoutMillis),
-    () => 2_000,
-  );
 
   const sample = Effect.provideContext(frame.inspect, applicationContext);
 
-  // The root identity is read once, from the service itself, on first dial.
-  // oxlint-disable-next-line effect/noPerCallCacheConstruction -- one identity cache per attachment is the owner.
-  const identity = yield* Effect.cached(Effect.map(sample, (snapshot) => snapshot.root));
-  const dialUrl = Effect.map(identity, (root) => {
-    const url = new URL(ATTACH_PATH, address.origin);
-    url.searchParams.set("root", root.id);
-    Option.map(Option.fromNullishOr(root.name), (name) =>
-      url.searchParams.set("name", name.slice(0, MAX_ROOT_NAME_LENGTH)),
-    );
-    return url.href;
-  });
+  // The root identity is read once, from the service itself, before any dial.
+  const identity = yield* Effect.flatMap(sample, (snapshot) => rootIdentity(snapshot.root));
+  const dialUrl = new URL(wire.attachPath, address.origin);
+  dialUrl.searchParams.set("root", identity.id);
+  Option.map(identity.name, (name) => dialUrl.searchParams.set("name", name));
 
   const handlers = RootRpcs.toLayer({
     Inspect: ({ maxBytes }) =>
@@ -159,23 +204,25 @@ export const attach = Effect.fn("InspectionAttach.attach")(function* (options: A
 
   const dialOnce = (attempt: number) =>
     Effect.gen(function* () {
-      let connected = false;
-      const outgoing = yield* Socket.makeWebSocket(dialUrl, {
-        protocols: [ROOT_SUBPROTOCOL, `${ATTACH_TOKEN_PREFIX}${options.token}`],
+      let connectedAt = Option.none<number>();
+      const outgoing = yield* Socket.makeWebSocket(dialUrl.href, {
+        protocols: [wire.subprotocol, `${wire.attachTokenPrefix}${options.token}`],
         openTimeout: Duration.millis(openTimeout),
       });
       const socket = Socket.make({
         reader: Effect.tap(outgoing.reader, () =>
-          Effect.andThen(
-            Effect.sync(() => {
-              connected = true;
-            }),
-            notify({ _tag: "Connected", attempt }),
+          Effect.flatMap(Clock.currentTimeMillis, (now) =>
+            Effect.andThen(
+              Effect.sync(() => {
+                connectedAt = Option.some(now);
+              }),
+              notify({ _tag: "Connected", attempt }),
+            ),
           ),
         ),
         writer: outgoing.writer,
       });
-      return { socket, connected: () => connected };
+      return { socket, connectedAt: () => connectedAt };
     });
 
   // A SocketServer whose connections are outgoing dials. `run` never
@@ -193,7 +240,8 @@ export const attach = Effect.fn("InspectionAttach.attach")(function* (options: A
           // A failed open ends the handler with a defect; either way this
           // incarnation is over and its RpcServer client is disconnected.
           yield* Effect.exit(Effect.scoped(handler(dial.socket)));
-          if (dial.connected()) {
+          const endedAt = yield* Clock.currentTimeMillis;
+          if (Option.exists(dial.connectedAt(), (at) => endedAt - at >= STABLE_CONNECTION_MILLIS)) {
             delay = initialRetry;
           }
           yield* notify({ _tag: "Disconnected", attempt, retryInMillis: delay });

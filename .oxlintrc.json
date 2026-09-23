@@ -240,6 +240,19 @@
       }
     },
     {
+      "files": ["apps/blog/src/server.ts"],
+      "rules": {
+        "effect/noAsyncFunction": "off",
+        "effect/noGlobals": "off"
+      }
+    },
+    {
+      "files": ["apps/blog/src/prerender.server.ts"],
+      "rules": {
+        "effect/noGlobals": "off"
+      }
+    },
+    {
       "files": ["apps/notes/src/terminal.tsx"],
       "rules": {
         "effect/noAsyncFunction": "off",

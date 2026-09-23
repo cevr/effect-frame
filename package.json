@@ -17,6 +17,7 @@
     "test": "turbo run test",
     "boundary": "bun run --cwd tooling/checks boundary",
     "bench": "bun run --cwd tooling/dom-bench bench",
+    "prerender": "bun run --cwd apps/blog prerender",
     "gate": "concurrently -n type,style,build -c blue,yellow,cyan \"bun run typecheck\" \"bun run lint && bun run fmt:check\" \"bun run build && bun run boundary\" && bun run test",
     "prepare": "lefthook install && effect-tsgo patch",
     "version": "changeset version && bun install --lockfile-only --ignore-scripts",

@@ -11,6 +11,7 @@
 export const repositoryRoot = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
 
 export const browserEntries: ReadonlyArray<string> = [
+  "apps/blog/src/client.tsx",
   "apps/notes/src/client.tsx",
   "apps/dashboard/src/client.tsx",
   "packages/effect-frame/src/actor/client.ts",

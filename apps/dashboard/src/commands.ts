@@ -95,10 +95,12 @@ export const ack = Effect.fn("Dashboard.ack")(function* (
   tenant: FollowedQuery<TenantInfoValue, unknown>,
   alert: Alert,
 ) {
-  const shown = yield* tenant.state.get;
-  // An acked alert is no longer waiting: its ack changes no count.
-  if (shown._tag === "Ready" && !alert.acked) {
-    yield* tenant.override({ ...shown.value, alerts: Math.max(0, shown.value.alerts - 1) });
+  // An acked alert is no longer waiting: its ack changes no count. The
+  // guess derives from the entry the tenant names now, never from the
+  // header on screen, which during a tenant switch is still the old
+  // tenant's. With no value of its own yet, nothing is written.
+  if (!alert.acked) {
+    yield* tenant.override((info) => ({ ...info, alerts: Math.max(0, info.alerts - 1) }));
   }
   const current = yield* alerts.get;
   return yield* current.send(AlertsEvent.Ack({ id: alert.id }));

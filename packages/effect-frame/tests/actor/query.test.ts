@@ -703,7 +703,7 @@ describe("Query: the Dashboard shape", () => {
     Effect.gen(function* () {
       const revenue = yield* useQuery(Revenue, acme);
       yield* settledEntry(revenue);
-      yield* revenue.override({ total: 999 });
+      yield* revenue.override(() => ({ total: 999 }));
       expect(yield* revenue.state.get).toEqual({
         _tag: "Ready",
         value: { total: 999 },
@@ -726,7 +726,7 @@ describe("Query: the Dashboard shape", () => {
 
       // A command reply's refresh. The cache cannot tell which command an
       // override was for, so any refreshed value replaces it.
-      yield* revenue.override({ total: -1 });
+      yield* revenue.override(() => ({ total: -1 }));
       const applied = yield* book.call(
         { _tag: "PlaceOrder", sku: "override-drop", amount: 4 },
         { commandId: id("override-drop-1"), timeout: "1 second" },
@@ -735,7 +735,7 @@ describe("Query: the Dashboard shape", () => {
       expect(yield* revenue.state.get).toEqual({ _tag: "Ready", value: { total }, stale: false });
 
       // An unrelated refresh.
-      yield* revenue.override({ total: -2 });
+      yield* revenue.override(() => ({ total: -2 }));
       expect(yield* revenue.state.get).toEqual({
         _tag: "Ready",
         value: { total: -2 },
@@ -749,7 +749,7 @@ describe("Query: the Dashboard shape", () => {
       const topSku = yield* Scope.provide(useQuery(TopSku, acme), screen);
       yield* settledEntry(topSku);
       const before = yield* topSku.state.get;
-      yield* topSku.override({ sku: "guess", orders: 99 });
+      yield* topSku.override(() => ({ sku: "guess", orders: 99 }));
       yield* Scope.close(screen, Exit.void);
       const reopened = yield* useQuery(TopSku, acme);
       yield* settledEntry(reopened);
@@ -908,7 +908,7 @@ describe("Query: the Dashboard shape", () => {
       const euro = yield* useQuery(ExchangeRate, { pair: "USDEUR" });
 
       // Shown at once, stale, on the followed source and on the entry itself.
-      yield* followed.override({ rate: 1.5 });
+      yield* followed.override(() => ({ rate: 1.5 }));
       expect(yield* followed.state.get).toEqual({
         _tag: "Ready",
         value: { rate: 1.5 },
@@ -932,14 +932,14 @@ describe("Query: the Dashboard shape", () => {
         Stream.take(1),
         Stream.runDrain,
       );
-      yield* followed.override({ rate: 2 });
+      yield* followed.override(() => ({ rate: 2 }));
       expect(yield* followed.state.get).toEqual({ _tag: "Ready", value: { rate: 2 }, stale: true });
       expect(yield* euro.state.get).toEqual({ _tag: "Ready", value: { rate: 0.92 }, stale: false });
 
       // With no arguments there is no entry, and nothing is written.
       yield* SubscriptionRef.set(args, Option.none());
       yield* Effect.yieldNow;
-      yield* followed.override({ rate: 3 });
+      yield* followed.override(() => ({ rate: 3 }));
       expect((yield* followed.state.get)._tag).toBe("Loading");
     }),
   );

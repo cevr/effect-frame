@@ -1491,8 +1491,9 @@ const queryBinding = Effect.fn("Branch.queryBinding")(function* (
     state: { get: advance(output, step), changes: advancedChanges(output, step) },
     refresh: Effect.suspend(() => currentEntry.refresh),
     // The entry the binding names at the call: after a transition moved it,
-    // an override writes the new entry, never the one that exited.
-    override: (value) => Effect.suspend(() => currentEntry.override(value)),
+    // an override reads and writes the new entry, never the one that exited,
+    // and never derives from the exited entry's value the binding still shows.
+    override: (update) => Effect.suspend(() => currentEntry.override(update)),
   };
   const binding: Binding = {
     current: () => current,

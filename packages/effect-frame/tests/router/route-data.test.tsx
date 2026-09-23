@@ -826,7 +826,7 @@ const movingRoute = (mode: "SSR" | "Streamed" | "AwaitAll", mover: Mover) => {
 
 describe("a drawing whose seed never agrees with it by the limit (review round 2)", () => {
   it.scopedLive(
-    'fails DocumentTimedOut { phase: "agree" } in SSR, Streamed and AwaitAll, and writes nothing',
+    'fails DocumentTimedOut { phase: "agree" } when a Ready value keeps moving; a Loading one cannot move',
     () =>
       Effect.gen(function* () {
         const server = yield* sideOf(makeControl({ a: "Alpha" }, ["held"]));
@@ -840,7 +840,7 @@ describe("a drawing whose seed never agrees with it by the limit (review round 2
           // moves run from the start. AwaitAll waits on `held`: its moves
           // start at the limit, in the final pass.
           const mover: Mover = { on: mode !== "AwaitAll", moves: 0 };
-          const failure = yield* Effect.flip(
+          const outcome = yield* Effect.exit(
             documentOf(
               [movingRoute(mode, mover)],
               new URL(`${origin}/moving`),
@@ -850,10 +850,19 @@ describe("a drawing whose seed never agrees with it by the limit (review round 2
               ),
             ).pipe(Effect.provideContext(server)),
           );
-          expect({ mode, failure }).toEqual({
-            mode,
-            failure: DocumentTimedOut.make({ phase: "agree" }),
-          });
+          expect(mover.moves).toBeGreaterThan(0);
+          // SSR and Streamed draw while `a` is still Loading. An override
+          // derives from the entry's own Ready value (#19), so it has
+          // nothing to move: the moves write nothing and the drawing agrees.
+          // AwaitAll's moves start once `a` is Ready, and never agree.
+          if (mode === "AwaitAll") {
+            expect({ mode, outcome }).toEqual({
+              mode,
+              outcome: Exit.fail(DocumentTimedOut.make({ phase: "agree" })),
+            });
+          } else {
+            expect({ mode, rendered: Exit.isSuccess(outcome) }).toEqual({ mode, rendered: true });
+          }
         }
       }),
     10_000,

@@ -525,7 +525,7 @@ describe("Frame.inspect actor and query records", () => {
       yield* TestClock.adjust("1 second");
       expect((yield* Frame.inspect).queries[0]?.ageMs).toBe(1_000);
 
-      yield* entry.override({ value: 2 });
+      yield* entry.override(() => ({ value: 2 }));
       const overridden = yield* Frame.inspect;
       expect(overridden.queries[0]?.state).toBe("Ready");
       expect(overridden.queries[0]?.stale).toBe(true);

@@ -73,7 +73,7 @@ const cacheOf = (cells: ReadonlyMap<string, Held>): QueryCacheService => ({
           changes: Stream.mapEffect(source.changes, typed),
         },
         refresh: Effect.void,
-        override: () => Effect.void,
+        override: () => Effect.succeed(false),
       };
     }),
   active: Effect.succeed([]),

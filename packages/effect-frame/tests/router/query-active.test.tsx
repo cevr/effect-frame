@@ -339,7 +339,12 @@ describe("a route query binding's override (#19)", () => {
       // A stayed move of the child's param: the binding now names post 2.
       yield* router.navigate("/app/t1/posts/2");
       const second = yield* useQuery(Post, { tenant: "t1", postId: "2" });
-      yield* post.override("guess");
+      yield* second.state.changes.pipe(
+        Stream.filter((state) => state._tag === "Ready"),
+        Stream.take(1),
+        Stream.runDrain,
+      );
+      expect(yield* post.override(() => "guess")).toBe(true);
       expect(yield* post.state.get).toEqual({ _tag: "Ready", value: "guess", stale: true });
       expect(yield* second.state.get).toEqual({ _tag: "Ready", value: "guess", stale: true });
 
@@ -351,5 +356,87 @@ describe("a route query binding's override (#19)", () => {
         stale: false,
       });
     }),
+  );
+
+  it.scoped.layer(testLayer)(
+    "never derives the new key's value from the old key's, and writes nothing while it loads",
+    () =>
+      Effect.gen(function* () {
+        const bound = yield* Ref.make(Option.none<FollowedQuery<string, QueryFailure>>());
+        const overrideApp = Route.client(
+          "override-switch",
+          Route.layout(
+            tenantSegment,
+            [
+              Route.leaf(postSegment, (props) =>
+                Effect.as(Ref.set(bound, Option.some(props.data.post)), <p>post</p>),
+              ),
+            ],
+            (props) => Effect.map(props.outlet, (outlet) => <section>{outlet}</section>),
+          ),
+        );
+        const current = yield* Ref.make(new URL(`${origin}/app/t1/posts/1`));
+        const location: LocationService = {
+          current: Ref.get(current),
+          push: (url) => Ref.set(current, url),
+          replace: (url) => Ref.set(current, url),
+          pops: Stream.never,
+        };
+        const router = yield* mountRouter({
+          routes: [overrideApp],
+          notFound: NotFound,
+          host: Html.host,
+          root: Html.element("#root"),
+        }).pipe(Effect.provideService(Location, location));
+        const post = Option.getOrThrow(yield* Ref.get(bound));
+        yield* post.state.changes.pipe(
+          Stream.filter((state) => state._tag === "Ready"),
+          Stream.take(1),
+          Stream.runDrain,
+        );
+        expect(yield* post.state.get).toEqual({
+          _tag: "Ready",
+          value: "value:post:t1/1",
+          stale: false,
+        });
+
+        // Post 2's read is held: the move names post 2 while the binding
+        // still shows post 1's value, carried and stale.
+        const postTwo = yield* hold("post:t1/2");
+        const moving = yield* Effect.forkChild(router.navigate("/app/t1/posts/2"));
+        yield* Deferred.await(postTwo.started);
+        const second = yield* useQuery(Post, { tenant: "t1", postId: "2" });
+        expect(yield* second.state.get).toEqual({ _tag: "Loading" });
+
+        // The override reads post 2's own value, and it has none.
+        const seen: Array<string> = [];
+        const wrote = yield* post.override((value) => {
+          seen.push(value);
+          return `${value} (guess)`;
+        });
+        expect(wrote).toBe(false);
+        expect(seen).toEqual([]);
+        expect(yield* second.state.get).toEqual({ _tag: "Loading" });
+
+        yield* Deferred.succeed(postTwo.gate, void 0);
+        yield* Fiber.join(moving);
+        yield* second.state.changes.pipe(
+          Stream.filter((state) => state._tag === "Ready"),
+          Stream.take(1),
+          Stream.runDrain,
+        );
+        expect(yield* second.state.get).toEqual({
+          _tag: "Ready",
+          value: "value:post:t1/2",
+          stale: false,
+        });
+        // Once post 2 is Ready, the override derives from post 2's value.
+        expect(yield* post.override((value) => `${value} (guess)`)).toBe(true);
+        expect(yield* second.state.get).toEqual({
+          _tag: "Ready",
+          value: "value:post:t1/2 (guess)",
+          stale: true,
+        });
+      }),
   );
 });

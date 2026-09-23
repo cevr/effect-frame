@@ -110,12 +110,20 @@ export interface QueryEntry<A, E> {
    */
   readonly refresh: Effect.Effect<void>;
   /**
-   * Shows a value the caller supplies, marked stale, until the next refresh
-   * lands. The escape hatch for optimistic values the dependency graph
-   * cannot derive: an actor commit refreshes automatically, and this is for
+   * Shows an optimistic value, marked stale, until the next authoritative
+   * value lands. The escape hatch for what the dependency graph cannot
+   * derive: an actor commit refreshes automatically, and this is for
    * everything else.
+   *
+   * `update` receives this entry's own Ready value, read in the same step
+   * that writes the result, under the principal generation of that moment.
+   * The written value can therefore only be derived from this entry: never
+   * from another key's value a view still shows, and never from a value read
+   * for a principal that is gone. With no Ready value (Loading or Failed)
+   * there is nothing to derive from, and nothing is written. The result says
+   * whether a value was written.
    */
-  readonly override: (value: A) => Effect.Effect<void>;
+  readonly override: (update: (current: A) => A) => Effect.Effect<boolean>;
 }
 
 /**
@@ -161,6 +169,11 @@ interface CacheSlot {
   readonly write: (
     update: (own: QueryState<string, QueryFailure>) => QueryState<string, QueryFailure>,
   ) => Effect.Effect<void>;
+  /**
+   * Derives a stale value from the slot's own Ready value and writes it, in
+   * one serialized step. No Ready value: nothing is written, and `false`.
+   */
+  readonly amend: (update: (encoded: string) => string) => Effect.Effect<boolean>;
   /** Counts the unresolved dependent commands again, at the moment it runs. */
   readonly recount: (count: () => number) => Effect.Effect<void>;
   readonly refresh: Effect.Effect<void>;
@@ -387,6 +400,18 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
       own = update(own);
       return { state: display(own, pending), principal: ownership.principal() };
     });
+  // `own` is this slot's, and `forget` resets it to Loading when the
+  // principal changes, so a Ready `own` was read under the generation now.
+  // Synchronous, like `write`: a drawing may override inside a read that
+  // must not suspend.
+  const amend = (update: (encoded: string) => string) =>
+    SubscriptionRef.modify(state, (current): readonly [boolean, SlotState] => {
+      if (own._tag !== "Ready") {
+        return [false, current];
+      }
+      own = Ready(update(own.value), true);
+      return [true, { state: display(own, pending), principal: ownership.principal() }];
+    });
   const recount = (count: () => number) =>
     SubscriptionRef.update(state, () => {
       pending = count();
@@ -554,6 +579,7 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
     outsideRead,
     state,
     write,
+    amend,
     recount,
     refresh,
     readAfter,
@@ -930,7 +956,10 @@ const entryOf = <Q extends AnyQuery>(
   contract: Q,
   slot: CacheSlot,
 ): QueryEntry<ResultOf<Q>, QueryFailure> => {
-  const encode = Schema.encodeEffect(contract.result);
+  // A Ready value was decoded through this contract before, and the
+  // caller's result is typed by it: a failure either way is a defect.
+  const decode = Schema.decodeSync(contract.result);
+  const encode = Schema.encodeSync(contract.result);
   const decodeState = decoderOf(contract);
   return {
     key: slot.key,
@@ -941,10 +970,7 @@ const entryOf = <Q extends AnyQuery>(
       ),
     },
     refresh: slot.refresh,
-    override: (value) =>
-      Effect.flatMap(Effect.orDie(encode(value)), (encoded) =>
-        slot.write(() => Ready(encoded, true)),
-      ),
+    override: (update) => slot.amend((encoded) => encode(update(decode(encoded)))),
   };
 };
 
@@ -1207,20 +1233,22 @@ export interface FollowedQuery<A, E> {
   /** Refreshes the entry the arguments currently name. */
   readonly refresh: Effect.Effect<void>;
   /**
-   * `QueryEntry.override` on the entry the arguments name at the call: the
-   * value shows at once, marked stale, stamped with the principal generation
-   * of that moment, and any authoritative value replaces it. A command's
-   * rejection does not take it back. With no arguments there is no entry,
-   * and nothing is written.
+   * `QueryEntry.override` on the entry the arguments name at the call.
+   * `update` receives that entry's own Ready value, never the value this
+   * source still shows from the key it left, so a move between keys cannot
+   * carry one key's value into another. The result shows at once, marked
+   * stale, and any authoritative value replaces it. A command's rejection
+   * does not take it back. With no arguments, or while the entry is Loading
+   * or Failed, nothing is written and the result is `false`.
    */
-  readonly override: (value: A) => Effect.Effect<void>;
+  readonly override: (update: (current: A) => A) => Effect.Effect<boolean>;
 }
 
 interface Following<A, E> {
   readonly key: QueryKey;
   readonly scope: Scope.Closeable;
   readonly refresh: Effect.Effect<void>;
-  readonly override: (value: A) => Effect.Effect<void>;
+  readonly override: (update: (current: A) => A) => Effect.Effect<boolean>;
   /** The followed entry's state now. */
   readonly get: Effect.Effect<Stamped<QueryState<A, E>>>;
 }
@@ -1364,11 +1392,11 @@ export const followQuery = Effect.fn("followQuery")(function* <Q extends AnyQuer
         onSome: (following) => following.refresh,
       }),
     ),
-    override: (value) =>
+    override: (update) =>
       Effect.suspend(() =>
         Option.match(current, {
-          onNone: () => Effect.void,
-          onSome: (following) => following.override(value),
+          onNone: () => Effect.succeed(false),
+          onSome: (following) => following.override(update),
         }),
       ),
   };

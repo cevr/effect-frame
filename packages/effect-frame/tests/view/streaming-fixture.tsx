@@ -325,7 +325,7 @@ export const Moving = (props: { readonly mover: Mover }) =>
       get: Effect.gen(function* () {
         if (props.mover.on) {
           props.mover.moves += 1;
-          yield* entry.override({ label: `Draft-${String(props.mover.moves)}` });
+          yield* entry.override(() => ({ label: `Draft-${String(props.mover.moves)}` }));
         }
         return "moved";
       }),

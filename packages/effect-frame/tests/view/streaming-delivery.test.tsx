@@ -231,7 +231,7 @@ const Overridden = (props: { readonly server: boolean; readonly pause?: boolean 
       yield* settled("a");
       const entry = yield* useQuery(Label, { id: "a" });
       if (props.server) {
-        yield* entry.override({ label: "Draft" });
+        yield* entry.override(() => ({ label: "Draft" }));
       }
       // Setup that takes a while after the key is declared, before the drawing.
       if (props.pause === true) {
@@ -393,7 +393,11 @@ describe("a query that moves in the final pass", () => {
         expect(waiting.moves).toBeGreaterThan(0);
         expect(yield* coherentOrRefused(awaited)).toBe("refused");
 
-        // The streamed shell and SSR: the moves run from the first drawing.
+        // The streamed shell and SSR: the moves run from the first drawing,
+        // while `a` is still Loading. An override derives from the entry's
+        // own Ready value (#19), so a Loading entry has nothing to move: the
+        // moves write nothing, and both documents are coherent. The
+        // streamed shell's refusal is `Restless`'s, above.
         const streaming: Mover = { on: true, moves: 0 };
         const first = yield* Effect.exit(
           Effect.map(
@@ -405,7 +409,8 @@ describe("a query that moves in the final pass", () => {
             Option.getOrThrow,
           ),
         );
-        expect(yield* coherentOrRefused(first)).toBe("refused");
+        expect(streaming.moves).toBeGreaterThan(0);
+        expect(yield* coherentOrRefused(first)).toBe("coherent");
 
         const seeding: Mover = { on: true, moves: 0 };
         const seeded = yield* Effect.exit(
@@ -419,7 +424,8 @@ describe("a query that moves in the final pass", () => {
             server,
           ),
         );
-        expect(yield* coherentOrRefused(seeded)).toBe("refused");
+        expect(seeding.moves).toBeGreaterThan(0);
+        expect(yield* coherentOrRefused(seeded)).toBe("coherent");
       }),
     5_000,
   );

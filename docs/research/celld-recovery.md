@@ -149,6 +149,16 @@ The `@effect-frame/host-durable-object` package now runs these checks. The recei
 | `no_bundle` worker              | `bun build --target browser --format esm` output loads under `"no_bundle": true`. esbuild is not needed.                |
 | `new_sqlite_classes`            | The migration needs `new_sqlite_classes`. `new_classes` is rejected.                                                    |
 
+### The transaction handle on workerd
+
+`tests/workerd-conformance.test.ts` runs the conformance suite inside a real SQLite-backed Durable Object under workerd 1.20260901.1. That is the build Alchemy 2.0.0-beta.79 runs locally through `@alchemy.run/cloudflare-runtime`. It found one wrong assumption. Before the fix, 10 of 11 cases failed with `TypeError: Cannot read properties of undefined (reading 'exec')`.
+
+- Cloudflare's transaction handle has no `sql`. It has `get`, `put`, `delete`, `list`, `deleteAll`, `rollback`, and the three alarm calls. celld's handle has `sql`, so the store read `txn.sql`.
+- On both runtimes, a statement run through the root `storage.sql` inside an async `transaction` callback belongs to that transaction. It commits on resolve and rolls back on reject, even across an `await`. A probe showed this on workerd and on celld 0.5.0.
+- On both runtimes, `txn.setAlarm` in a rolled-back transaction arms nothing, and in a committed one it arms the wake.
+
+So `StorageTransaction` now carries only `setAlarm`, and the store writes through `storage.sql`. The bun:sqlite fake matches that shape.
+
 ### Crash matrix rows now proved
 
 | Row | Kill point or test                               | Result                                                                                                                   |

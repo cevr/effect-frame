@@ -127,6 +127,24 @@
       }
     },
     {
+      "files": ["packages/host-durable-object/fixture-conformance/index.ts"],
+      "rules": {
+        "effect/noAsyncFunction": "off",
+        "effect/noNewPromise": "off",
+        "effect/noGlobals": "off",
+        "effect/noNullish": "off",
+        "effect/noRuntimeTypeof": "off",
+        "effect/noUnknownParameters": "off"
+      }
+    },
+    {
+      "files": ["packages/host-durable-object/tests/workerd-conformance.test.ts"],
+      "rules": {
+        "effect/noGlobals": "off",
+        "effect/noNodeBuiltinImport": "off"
+      }
+    },
+    {
       "files": ["packages/host-durable-object/fixture/index.ts"],
       "rules": {
         "effect/noAsyncFunction": "off",
@@ -213,7 +231,11 @@
       }
     },
     {
-      "files": ["packages/host-durable-object/scripts/celld-process.ts"],
+      "files": [
+        "packages/host-durable-object/scripts/celld-process.ts",
+        "packages/host-durable-object/scripts/proof.ts",
+        "packages/host-durable-object/scripts/workerd-process.ts"
+      ],
       "rules": {
         "effect/noAsyncFunction": "off",
         "effect/noGlobals": "off",

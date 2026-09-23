@@ -19,6 +19,9 @@
     "effect-frame": "workspace:*",
     "effect-machine": "0.27.0"
   },
+  "devDependencies": {
+    "workerd": "1.20260901.1"
+  },
   "peerDependencies": {
     "effect": "catalog:"
   }

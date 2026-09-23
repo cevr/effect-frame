@@ -61,8 +61,8 @@ describe("storage store recovery obligations", () => {
       yield* store.append({ commandId: id("a"), payload: "1", payloadHash: 1 });
       const broken = yield* Effect.exit(
         Effect.promise(() =>
-          storage.transaction(async (txn) => {
-            txn.sql.exec(
+          storage.transaction(async () => {
+            storage.sql.exec(
               "UPDATE commands SET revision = 1, state = 'half' WHERE command_id = ?",
               "a",
             );

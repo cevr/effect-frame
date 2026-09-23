@@ -1,7 +1,14 @@
 import { Database } from "bun:sqlite";
 import type { Scope } from "effect";
 import { Effect, Option } from "effect";
-import type { DurableStorage, SqlBinding, SqlCursor, SqlRow, SqlStorage } from "../src/storage.js";
+import type {
+  DurableStorage,
+  SqlBinding,
+  SqlCursor,
+  SqlRow,
+  SqlStorage,
+  StorageTransaction,
+} from "../src/storage.js";
 
 /**
  * An in-memory stand-in for a Durable Object's storage. It mimics the shape
@@ -43,16 +50,12 @@ export const makeFake = (): FakeStorage => {
   const sql = sqlOver(database);
   const alarm = { at: Option.none<number>() };
 
-  const transaction = async <A>(
-    run: (txn: {
-      readonly sql: SqlStorage;
-      readonly setAlarm: (at: number) => Promise<void>;
-    }) => Promise<A>,
-  ): Promise<A> => {
+  const transaction = async <A>(run: (txn: StorageTransaction) => Promise<A>): Promise<A> => {
     const staged = { at: alarm.at };
     database.exec("BEGIN");
+    // Like Cloudflare's, the handle carries no SQL: the callback writes
+    // through the root `sql`, which runs inside the open BEGIN.
     const outcome: Outcome<A> = await run({
-      sql,
       setAlarm: (at: number) => {
         staged.at = Option.some(at);
         return Promise.resolve();

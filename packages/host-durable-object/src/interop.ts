@@ -43,15 +43,13 @@ export const stringColumn = (row: SqlRow, column: string): Option.Option<string>
 };
 
 /**
- * Runs SQL writes in one transaction. The runtime commits when the callback's
- * promise resolves and rolls back when it rejects, so a synchronous body that
- * only writes rows always commits as a unit.
+ * Runs SQL writes in one transaction. The body writes through `storage.sql`,
+ * which the runtime binds to the open transaction. The runtime commits when
+ * the callback's promise resolves and rolls back when it rejects, so a
+ * synchronous body that only writes rows always commits as a unit.
  */
-export const transact = <A>(
-  storage: DurableStorage,
-  body: (txn: StorageTransaction) => A,
-): Effect.Effect<A> =>
-  Effect.promise(() => storage.transaction((txn) => Promise.resolve(body(txn))));
+export const transact = <A>(storage: DurableStorage, body: () => A): Effect.Effect<A> =>
+  Effect.promise(() => storage.transaction(() => Promise.resolve(body())));
 
 /** One command's admission row. */
 export interface Admission {
@@ -72,16 +70,16 @@ export interface Admission {
  */
 export const admit = (storage: DurableStorage, admission: Admission): Effect.Effect<number> =>
   Effect.promise(() =>
-    storage.transaction(async (txn) => {
+    storage.transaction(async (txn: StorageTransaction) => {
       exec(
-        txn.sql,
+        storage.sql,
         "INSERT INTO commands (command_id, payload, payload_hash) VALUES (?, ?, ?)",
         admission.commandId,
         admission.payload,
         admission.payloadHash,
       );
       const rows = exec(
-        txn.sql,
+        storage.sql,
         "SELECT admitted FROM commands WHERE command_id = ?",
         admission.commandId,
       );

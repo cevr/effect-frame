@@ -29,15 +29,22 @@ export interface SqlStorage {
 /**
  * The handle an async transaction callback receives. Its `setAlarm` publishes
  * the wake at commit, so an admission and its alarm land together.
+ *
+ * The handle carries no SQL. Cloudflare's handle has none, and on both
+ * runtimes a statement run through the storage's own `sql` inside the
+ * callback is part of the open transaction: it commits and rolls back with
+ * it. `tests/workerd-conformance.test.ts` proves that on workerd.
  */
 export interface StorageTransaction {
-  readonly sql: SqlStorage;
   readonly setAlarm: (scheduledTime: number) => Promise<void>;
 }
 
 export interface DurableStorage {
   readonly sql: SqlStorage;
-  /** Commits on a resolved callback. Rolls back on a rejected one. */
+  /**
+   * Commits on a resolved callback. Rolls back on a rejected one, with every
+   * `sql` statement the callback ran.
+   */
   readonly transaction: <A>(run: (txn: StorageTransaction) => Promise<A>) => Promise<A>;
   readonly setAlarm: (scheduledTime: number) => Promise<void>;
   /** The armed wake time, or an absent value when no alarm is armed. */

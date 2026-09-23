@@ -179,8 +179,8 @@ export const make = Effect.fn("HostDurableObject.storageStore")(function* (
     if (Option.isNone(found)) {
       return yield* Effect.die(`MailboxStore.commit: unknown command ${commandId}`);
     }
-    const revision = yield* Interop.transact(storage, (txn) =>
-      writeReceipt(txn.sql, commandId, state),
+    const revision = yield* Interop.transact(storage, () =>
+      writeReceipt(storage.sql, commandId, state),
     );
     return {
       commandId,
@@ -205,7 +205,7 @@ export const make = Effect.fn("HostDurableObject.storageStore")(function* (
   const latest = Effect.sync(() => readCommitted(storage.sql));
 
   const advance = Effect.fn("HostDurableObject.storageStore.advance")(function* (state: string) {
-    const revision = yield* Interop.transact(storage, (txn) => writeAdvance(txn.sql, state));
+    const revision = yield* Interop.transact(storage, () => writeAdvance(storage.sql, state));
     return { revision, state } satisfies Committed;
   });
 

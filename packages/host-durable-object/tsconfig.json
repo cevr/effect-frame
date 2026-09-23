@@ -1,4 +1,4 @@
 {
   "extends": "../../tsconfig.json",
-  "include": ["src", "tests", "fixture", "fixture-contract", "scripts"]
+  "include": ["src", "tests", "fixture", "fixture-contract", "fixture-conformance", "scripts"]
 }

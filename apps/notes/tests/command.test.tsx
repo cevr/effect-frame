@@ -2,12 +2,19 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { ActorTransport, Generated, QueryCache, Refused, ref } from "effect-frame/actor/client";
+import {
+  ActorTransport,
+  Generated,
+  QueryCache,
+  Refused,
+  Unauthorized,
+  ref,
+} from "effect-frame/actor/client";
 import type { QueryState } from "effect-frame/actor/client";
 import { Effect, Layer, Option, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { notesBehavior, refusedText } from "../src/behavior.js";
-import { Notes } from "../src/contract.js";
+import { Notes, readOnlyList } from "../src/contract.js";
 import type { Counts } from "../src/queries.js";
 import { ListCounts, ListName, keyOf } from "../src/queries.js";
 import { routes } from "../src/routes.js";
@@ -26,6 +33,8 @@ import { clientOf, elementOf, mountApp, serve, settle, tappedHost, textOf } from
 
 const inbox = "http://notes.test/lists/inbox";
 const inboxName = Schema.decodeSync(ListName)("inbox");
+const archive = `http://notes.test/lists/${readOnlyList}`;
+const archiveName = Schema.decodeSync(ListName)(readOnlyList);
 
 /** The texts of the list's rows, in order. */
 const rows = (root: HTMLElement): ReadonlyArray<string> =>
@@ -114,6 +123,42 @@ describe("the compose form's command", () => {
         expect(rows(app.root)).toEqual(["keep me"]);
         expect(textOf(app.root, "#count")).toBe("1");
         expect(textOf(app.root, "#counts")).toBe("0 of 1 done");
+      }),
+  );
+
+  it.scopedLive(
+    "an add to the read-only list is predicted, then the host's policy refuses it and the row is taken back",
+    () =>
+      Effect.gen(function* () {
+        const wire = yield* tappedHost;
+        const app = yield* mountApp({ transport: wire.transport, href: archive, routes });
+        yield* settle(Effect.sync(() => textOf(app.root, "#counts") === "0 of 0 done"));
+        const before = yield* app.run(ref(Notes, keyOf(archiveName), { resume: Option.none() }));
+        const committed = yield* before.applied.get;
+
+        const held = yield* wire.holdSend("file me");
+        yield* compose(app.root, "file me");
+        yield* settle(
+          Effect.sync(() => textOf(app.root, "#status") === "Sent"),
+          "status Sent",
+        );
+        // The rule is the server's alone: the page predicted the add.
+        expect(rows(app.root)).toEqual(["file me"]);
+        expect(textOf(app.root, "#count")).toBe("1");
+
+        yield* wire.open(held);
+        yield* settle(
+          Effect.sync(() => textOf(app.root, "#status") === "Rejected"),
+          "Rejected",
+        );
+        // The real host's policy refused it, and the predicted row is gone.
+        expect(wire.refusals).toEqual([
+          { text: "file me", reason: Unauthorized.make({ contract: "Notes" }) },
+        ]);
+        expect(rows(app.root)).toEqual([]);
+        expect(textOf(app.root, "#count")).toBe("0");
+        expect(yield* before.applied.get).toEqual(committed);
+        expect(wire.commands).toEqual([]);
       }),
   );
 

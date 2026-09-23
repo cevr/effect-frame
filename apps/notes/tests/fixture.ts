@@ -7,12 +7,13 @@ import type {
   Refreshed,
   Refused,
   TransportService,
+  Unauthorized,
 } from "effect-frame/actor/client";
 import { ActorTransport, HttpTransport, queryCacheLayer } from "effect-frame/actor/client";
 import { Location, mount } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
 import { Dom, render } from "effect-frame/view";
-import { Context, Deferred, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
+import { Context, Deferred, Effect, Layer, Option, Predicate, Ref, Schema, Stream } from "effect";
 import { hydrateApp } from "../src/app.js";
 import { NotFound } from "../src/views.js";
 import { inProcess } from "../src/notes.server.js";
@@ -192,8 +193,14 @@ export interface Sighting {
  * The real transport, watched and steered. Every verb reaches the real host
  * unless the test says otherwise: a held send or query waits for its gate,
  * and a failing query fails before the host sees it. A send the host
- * refuses is recorded with the host's own `Refused`.
+ * refuses is recorded with the host's own `Refused` or `Unauthorized`.
  */
+/** A send the host refused: its behavior (`Refused`) or its policy (`Unauthorized`). */
+const isHostRefusal = Predicate.or(
+  Predicate.isTagged("Refused"),
+  Predicate.isTagged("Unauthorized"),
+);
+
 export const wiretap = (inner: TransportService) => {
   const reads: Array<string> = [];
   const snapshots: Array<string> = [];
@@ -201,7 +208,7 @@ export const wiretap = (inner: TransportService) => {
   const heldSends = new Map<string, Deferred.Deferred<void>>();
   const heldQueries = new Map<string, Deferred.Deferred<void>>();
   const failing = new Map<string, QueryFailure>();
-  const refusals: Array<{ readonly text: string; readonly reason: Refused }> = [];
+  const refusals: Array<{ readonly text: string; readonly reason: Refused | Unauthorized }> = [];
   const pass = (gate: Option.Option<Deferred.Deferred<void>>) =>
     Option.match(gate, { onNone: () => Effect.void, onSome: Deferred.await });
   const read = (key: QueryKey) =>
@@ -230,7 +237,7 @@ export const wiretap = (inner: TransportService) => {
         const reply = yield* inner.send(address, commandId, payload, active).pipe(
           Effect.tapError((error) =>
             Effect.sync(() => {
-              if (error._tag === "Refused") {
+              if (isHostRefusal(error)) {
                 refusals.push({ text, reason: error });
               }
             }),
@@ -265,7 +272,7 @@ export const wiretap = (inner: TransportService) => {
     /** Every actor snapshot read, as `Notes{"list":…,"tenant":…}`, in order. */
     snapshots,
     commands,
-    /** The sends the real host refused, with its reason, in order. */
+    /** The sends the real host refused (its behavior or its policy), with its reason, in order. */
     refusals,
     /** Hold the send of a note with this text until the gate opens. */
     holdSend: (text: string) => gate(heldSends, text),

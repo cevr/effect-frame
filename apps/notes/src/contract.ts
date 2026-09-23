@@ -36,13 +36,17 @@ export type NotesMessage = Schema.Schema.Type<typeof NotesMessage>;
 
 export const Notes = contract("Notes", {
   version: 1,
-  // A single-tenant demo: every caller may read and send. It says so here,
-  // by name, and the server registers `Policy.allowAll` under it.
-  policy: "public",
+  // Every caller may read a list; the server's `notes` rule refuses a send
+  // to a read-only list. The rule lives only on the server (`policies.server.ts`),
+  // so a client cannot foresee it and predicts the send.
+  policy: "notes",
   key: NotesKey,
   snapshot: NotesSnapshot,
   message: NotesMessage,
 });
+
+/** A list the server keeps read-only: its `notes` policy refuses every send to it. */
+export const readOnlyList = "archive";
 
 /** The inbox. The terminal client shows this list. */
 export const demoKey: NotesKey = { tenant: "demo", list: "inbox" };

@@ -39,7 +39,7 @@ Type a note in either client and press Enter. Both update. Tick a box in the bro
 | `src/app.ts`               | Hydrate the route tree over the server's nodes.                                                                                 |
 | `src/notes.server.ts`      | The host, and the two transports the server can run over. A server module: `bun run boundary` fails if `client.tsx` reaches it. |
 | `src/queries.server.ts`    | The query handlers. A server module.                                                                                            |
-| `src/policies.server.ts`   | The one `"public"` policy. A server module.                                                                                     |
+| `src/policies.server.ts`   | The policy table: `public` for the queries, `notes` for the actor (a send to `archive` is refused). A server module.            |
 | `src/commands.ts`          | Command ids and the send helpers both views share.                                                                              |
 | `src/terminal-view.tsx`    | The terminal view. Same setup, different tags.                                                                                  |
 | `src/server.ts`            | The platform boundary: `Bun.serve`, `Bun.build`, and the environment.                                                           |

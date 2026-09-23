@@ -308,6 +308,63 @@ describe("a route actor is seeded into the document (#37)", () => {
   );
 
   it.scopedLive(
+    "a layout and its leaf on one actor draw one revision when a commit lands between their opens",
+    () =>
+      Effect.gen(function* () {
+        const app = Route.ssr("between", twiceBranch);
+        const host = yield* sharedHost;
+        const transport = Context.get(host, ActorTransport);
+        const writer = yield* ref(Counter, { id: "w" }).pipe(
+          Effect.provideContext(yield* sideOver(transport)),
+        );
+        yield* writer.call({ _tag: "Add", amount: 4 }, { timeout: "1 second" });
+        // The first opener's change stream is held for the whole render, and
+        // a commit lands before any later snapshot read.
+        let snapshots = 0;
+        let streams = 0;
+        const between: TransportService = {
+          ...transport,
+          snapshot: (address) =>
+            Effect.suspend(() => {
+              snapshots += 1;
+              if (snapshots === 1) {
+                return transport.snapshot(address);
+              }
+              return Effect.andThen(
+                Effect.orDie(writer.call({ _tag: "Add", amount: 1 }, { timeout: "1 second" })),
+                transport.snapshot(address),
+              );
+            }),
+          changes: (address, after) =>
+            Stream.suspend(() => {
+              streams += 1;
+              if (streams === 1) {
+                return Stream.never;
+              }
+              return transport.changes(address, after);
+            }),
+        };
+        const server = yield* sideOver(between);
+        const url = new URL(`${origin}/counter/w/detail`);
+        const html = yield* render([app], url).pipe(Effect.provideContext(server));
+        // One address, one revision in the document and in the drawing.
+        expect(actorSeedsIn(html)).toHaveLength(1);
+
+        const client = yield* sideOver(transport);
+        const location = yield* locationAt(url.href);
+        yield* install(html);
+        const { report } = yield* hydrateWith(client, (over, root) =>
+          mountRouter({ routes: [app], notFound: NotFound, host: over, root }).pipe(
+            Effect.provideService(Location, location),
+          ),
+        );
+        expect(report.mismatches).toEqual([]);
+        expect(textOf("#count")).toBe(textOf("#again"));
+      }),
+    10_000,
+  );
+
+  it.scopedLive(
     "after hydration, a route that opens the actor again reads it, never the seed",
     () =>
       Effect.gen(function* () {

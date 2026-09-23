@@ -220,9 +220,8 @@ Other`; the render does not follow it, and the browser's next request
     projection is read with the query seed inside `readDrawn`, so the
     seed is the revision the drawing shows. The client's route opens its
     reference with `resume` from the seed, at the seed's revision, and
-    reads no snapshot. Every route that opens the actor while the page
-    hydrates takes the same seed; a seed is not taken away, so a layout
-    and a leaf can both open one actor. `Resumed.hydrated` drops every
+    reads no snapshot. A seed is not taken away: every opening of the
+    actor while the page hydrates starts from it. `Resumed.hydrated` drops every
     actor seed with the query seeds, so a route opened later reads the
     actor. A seed whose snapshot does not decode is ignored, and the
     route reads.
@@ -236,6 +235,22 @@ Other`; the render does not follow it, and the browser's next request
     the actor could disagree. The behavior is erased inside the
     declaration's `open`, so any contract's declaration is still one
     `Declaration`.
+
+    Declarations of one address in one tree share one reference (review
+    round 2). The tree keeps its route actor references in an `RcMap`
+    keyed by the address, so a layout and its leaf that declare one actor
+    hold one reference, released when the last of them exits. Before, each
+    declaration opened its own. On the server the layout could open at
+    revision 1, a commit land, and the leaf open at revision 2 while the
+    layout's change stream lagged: the drawing showed both revisions, the
+    document carried two seeds for one address, the client kept the first,
+    and the leaf did not hydrate (`text "5" became "4"`). The alternative
+    was to key a seed to the declaration that drew it. It would hydrate,
+    but it keeps two references to one actor on one page: two change
+    streams, two command owners, and two views of the actor that can show
+    different revisions after hydration too. One reference per address
+    makes one revision the only thing there is to draw. The first
+    declaration to open the address decides its options (its `behavior`).
 
     The seeding lives at the document the query seeds already use, the
     lowest owner that both hosts and the router reach. The actor stays a
@@ -267,7 +282,7 @@ All tests are in `packages/effect-frame/tests/router/`.
 | A route actor is seeded, and the client reads no snapshot                            | `route-actor-seed.test.tsx` — "SSR / Streamed / AwaitAll: the client's route opens the actor from the document and reads no snapshot"                                                                                                                                                                                     |
 | The actor seed is the revision the drawing shows                                     | `route-actor-seed.test.tsx` — "SSR / Streamed / AwaitAll: the seed and the drawing agree while the actor moves"                                                                                                                                                                                                           |
 | After hydration a route reads the actor; an untaken seed is dropped                  | `route-actor-seed.test.tsx` — "after hydration, a route that opens the actor again reads it, never the seed", "a seed no route took by the end of hydration is dropped: the route reads"                                                                                                                                  |
-| A layout and its leaf open one actor from one seed                                   | `route-actor-seed.test.tsx` — "a layout and its leaf that declare one actor both open it from the seed"                                                                                                                                                                                                                   |
+| A layout and its leaf share one reference: one revision drawn, one seed              | `route-actor-seed.test.tsx` — "a layout and its leaf that declare one actor both open it from the seed", "a layout and its leaf on one actor draw one revision when a commit lands between their opens" (red before the shared reference: two seeds, `[[1,"4"],[2,"5"]]`, and the mismatch `text "5" became "4"`)         |
 | A route actor with a behavior predicts                                               | `route-actor-seed.test.tsx` — "a route actor with a behavior predicts a send before its reply"                                                                                                                                                                                                                            |
 | A cross-origin link is left to the browser                                           | `router.test.tsx` — "a link to another origin is left to the browser"                                                                                                                                                                                                                                                     |
 
@@ -307,7 +322,8 @@ change was reverted.
 | The server's route does not hold its projection               | Killed           | the three "reads no snapshot" tests (no seed is written)                   |
 | `expire` does not drop the actor seeds                        | Killed           | "a seed no route took by the end of hydration is dropped …"                |
 | `Route.actor` drops `behavior`                                | Killed           | "a route actor with a behavior predicts a send before its reply"           |
-| The first route that opens the actor takes the seed away      | Killed           | "a layout and its leaf that declare one actor both open it from the seed"  |
+| The first route that opens the actor takes the seed away      | **Survived**     | none: see below                                                            |
+| Each declaration opens its own reference (no `RcMap`)         | Killed           | "a layout and its leaf on one actor draw one revision when …"              |
 | `SSR` reads the actor seeds before the drawing, not with it   | Killed           | "SSR: the seed and the drawing agree while the actor moves"                |
 | `AwaitAll` reads the actor seeds after the agreed read        | **Survived**     | none: see below                                                            |
 
@@ -319,7 +335,15 @@ request cache, which by then holds no entry, and the request Scope would
 release it later anyway. No test can see the difference, so the close
 stays as a guarantee that does not depend on how the pipeline is built.
 
-The surviving actor-seed mutation: `AwaitAll` serializes its live tree
+The first surviving actor-seed mutation: a tree opens each address once,
+so a seed taken away by that opening is never missed there. A second
+opening during hydration would need a second tree over the same cache,
+such as a deferred module that mounts before `Resumed.hydrated`, or the
+shared reference closing and opening again before then. No test does
+either; the seed is kept until `expire` so that such an opening starts at
+the revision the markup shows.
+
+The second: `AwaitAll` serializes its live tree
 after the last read, and the tree has caught up with the actor by then,
 so an actor seed read after the agreed read still names what the markup
 shows. The agreement stays so that the three modes read one instant the

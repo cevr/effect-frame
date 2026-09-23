@@ -38,11 +38,14 @@ import {
   Deferred,
   Duration,
   Effect,
+  Equal,
   Exit,
   Fiber,
   Function,
+  Hash,
   Option,
   Predicate,
+  RcMap,
   Ref,
   Result,
   Schema,
@@ -857,6 +860,13 @@ interface TreeState {
   readonly resolve: boolean;
   readonly cache: Option.Option<QueryCacheService>;
   readonly transport: Option.Option<TransportService>;
+  /**
+   * The tree's route actor references, one per address (#37): every
+   * declaration of one actor in the tree shares one reference, held while
+   * any of them is. So a layout and its leaf draw the same revision, and the
+   * document carries one seed for it.
+   */
+  readonly actors: RcMap.RcMap<ActorKey, RemoteActorRef<AnyContract>, TransportReadError>;
   readonly nextKey: (name: string) => string;
   /**
    * Serializes a transition with a setup failure's cleanup. Both change
@@ -1247,33 +1257,64 @@ const missing = (service: string) =>
   Effect.die(`declared route data needs ${service} where the tree is mounted`);
 
 /**
- * Open one route actor's reference (#37). On the client, while the page
- * hydrates, from the snapshot the server's document carried for this
- * route: the first frame holds the actor and nothing reads it again. Without
- * one, the reference reads the actor. On the server, the reference's
- * committed snapshot is held for the document while the route holds it,
- * and read again at each write, so the seed agrees with the drawing.
+ * One route actor's address in a tree, with what opens it. Keys are equal
+ * by address: the first declaration that opens the address opens the
+ * shared reference, and a later one of the same address shares it.
  */
+interface ActorKey extends Equal.Equal {
+  readonly id: string;
+  readonly declaration: ActorDeclaration<AnyContract>;
+  readonly transport: TransportService;
+}
+
+const actorKey = (
+  id: string,
+  declaration: ActorDeclaration<AnyContract>,
+  transport: TransportService,
+): ActorKey => ({
+  id,
+  declaration,
+  transport,
+  [Equal.symbol]: (that: Equal.Equal) => Predicate.hasProperty(that, "id") && that.id === id,
+  [Hash.symbol]: () => Hash.string(id),
+});
+
+/**
+ * Open one route actor's reference (#37), once for every declaration of
+ * its address in the tree. On the client, while the page hydrates, from
+ * the snapshot the server's document carried for it: the first frame holds
+ * the actor and nothing reads it again. Without one, the reference reads
+ * the actor. On the server, the reference's committed snapshot is held for
+ * the document while the reference is open, and read again at each write,
+ * so the seed agrees with the drawing. One reference per address means one
+ * revision drawn and one seed: two references could each draw their own
+ * revision, and the client could resume only one of them.
+ */
+const openSharedActor =
+  (cache: Option.Option<QueryCacheService>) =>
+  (key: ActorKey): Effect.Effect<RemoteActorRef<AnyContract>, TransportReadError, Scope.Scope> =>
+    Effect.gen(function* () {
+      const document = Option.flatMap(cache, documentOf);
+      const seeded = yield* Option.match(document, {
+        onNone: () => Effect.succeed(Option.none<Projection>()),
+        onSome: (found) => found.actorSeed(key.id),
+      });
+      const opened = yield* key.declaration
+        .open(seeded)
+        .pipe(Effect.provideService(ActorTransport, key.transport));
+      if (Option.isSome(document)) {
+        yield* document.value.holdActor(key.id, opened.projection);
+      }
+      return opened.ref;
+    });
+
 const openActor = (
   tree: TreeState,
   id: string,
   declaration: ActorDeclaration<AnyContract>,
   transport: TransportService,
 ): Effect.Effect<RemoteActorRef<AnyContract>, TransportReadError, Scope.Scope> =>
-  Effect.gen(function* () {
-    const document = Option.flatMap(tree.cache, documentOf);
-    const seeded = yield* Option.match(document, {
-      onNone: () => Effect.succeed(Option.none<Projection>()),
-      onSome: (found) => found.actorSeed(id),
-    });
-    const opened = yield* declaration
-      .open(seeded)
-      .pipe(Effect.provideService(ActorTransport, transport));
-    if (Option.isSome(document)) {
-      yield* document.value.holdActor(id, opened.projection);
-    }
-    return opened.ref;
-  });
+  RcMap.get(tree.actors, actorKey(id, declaration, transport));
 
 const open = (
   tree: TreeState,
@@ -2633,14 +2674,18 @@ const mountTree = <Name extends string, ViewR, DataR, Extra extends object>(
               // Forked first, so it closes last: every view closes before
               // any declaration interest is released.
               const declarations = yield* Scope.fork(owner);
+              const cache = yield* Effect.serviceOption(QueryCache);
               const tree: TreeState = {
                 navigation,
                 instance: routeInstance,
                 outline,
                 declarations,
                 resolve: yield* ResolveBeforeRender,
-                cache: yield* Effect.serviceOption(QueryCache),
+                cache,
                 transport: yield* Effect.serviceOption(ActorTransport),
+                actors: yield* RcMap.make({ lookup: openSharedActor(cache) }).pipe(
+                  Scope.provide(declarations),
+                ),
                 nextKey: (segmentName) => {
                   counter += 1;
                   return `${segmentName}#${String(counter)}`;

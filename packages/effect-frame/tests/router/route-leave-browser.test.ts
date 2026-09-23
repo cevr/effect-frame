@@ -8,6 +8,10 @@
 import { describe, expect, it } from "bun:test";
 import * as H from "./browser/harness.js";
 
+/** Each engine, probed once before the proofs are declared. Absent: undefined. */
+const chrome = await H.capabilities("chrome");
+const webkit = await H.capabilities("webkit");
+
 /** One bundle for the file, built when the first proof needs it. */
 let bundled: Promise<string> | undefined;
 const bundleOnce = (): Promise<string> => {
@@ -103,71 +107,78 @@ const settleMargin = () => Bun.sleep(150);
 // Chrome: the Navigation API with a precommit handler
 // ---------------------------------------------------------------------------
 
-describe.skipIf(!H.hasEngine("chrome"))("leave checks in Chrome", () => {
+/** The capability the fixture page itself sees; the proofs branch on the probe. */
+const pageCapabilities = (view: Bun.WebView) =>
+  read<{ readonly navigation: boolean; readonly precommit: boolean }>(
+    view,
+    `({ navigation: "navigation" in window, precommit: "NavigationPrecommitController" in window })`,
+  );
+
+describe.skipIf(chrome === undefined)("leave checks in Chrome", () => {
   it("records the engine's capabilities", async () => {
+    console.log(`chrome capability: ${JSON.stringify(chrome)}`);
     const view = await openAt("chrome", "/app/t1/posts/1");
     try {
-      const capability = await read<{
-        readonly navigation: boolean;
-        readonly precommit: boolean;
-        readonly agent: string;
-      }>(
-        view,
-        `({ navigation: "navigation" in window, precommit: "NavigationPrecommitController" in window, agent: navigator.userAgent })`,
-      );
-      console.log(`chrome capability: ${JSON.stringify(capability)}`);
-      expect(capability.navigation).toBe(true);
+      // The fixture page sees what the probe recorded, and this suite needs the API.
+      expect(await pageCapabilities(view)).toEqual({
+        navigation: chrome?.navigation ?? false,
+        precommit: chrome?.precommit ?? false,
+      });
+      expect(chrome?.navigation).toBe(true);
     } finally {
       closePage(view);
     }
   }, 30_000);
 
-  it("Back and Forward: a precommit Stay keeps everything; Leave commits once", async () => {
-    const view = await openAt("chrome", "/app/t1/posts/1");
-    try {
-      expect(await read<boolean>(view, `"NavigationPrecommitController" in window`)).toBe(true);
-      expect(await navigate(view, "/app/t1/posts/2")).toBe("Committed /app/t1/posts/2");
-      await shows(view, "2");
-      await typeDraft(view, "keep");
-      const before = await kept(view);
-      expect(before).toMatchObject({ focused: "draft", draft: "keep", caret: [1, 3] });
+  it.skipIf(chrome?.precommit !== true)(
+    "Back and Forward: a precommit Stay keeps everything; Leave commits once",
+    async () => {
+      const view = await openAt("chrome", "/app/t1/posts/1");
+      try {
+        expect(await navigate(view, "/app/t1/posts/2")).toBe("Committed /app/t1/posts/2");
+        await shows(view, "2");
+        await typeDraft(view, "keep");
+        const before = await kept(view);
+        expect(before).toMatchObject({ focused: "draft", draft: "keep", caret: [1, 3] });
 
-      // Held: the check is asked before commit. The URL and the entry wait.
-      await setMode(view, "held");
-      await read(view, "(history.back(), true)");
-      await H.waitFor(view, "window.__leave.held === 1", "the held question");
-      expect(await kept(view)).toEqual(before);
-      expect((await asked(view)).at(-1)).toBe("2?read->1?read:pop");
-      await read(view, `(window.__leave.answer("Stay"), true)`);
-      await H.waitFor(view, "window.__leave.held === 0", "the answer");
-      await settleMargin();
-      expect(await kept(view)).toEqual(before);
+        // Held: the check is asked before commit. The URL and the entry wait.
+        await setMode(view, "held");
+        await read(view, "(history.back(), true)");
+        await H.waitFor(view, "window.__leave.held === 1", "the held question");
+        expect(await kept(view)).toEqual(before);
+        expect((await asked(view)).at(-1)).toBe("2?read->1?read:pop");
+        await read(view, `(window.__leave.answer("Stay"), true)`);
+        await H.waitFor(view, "window.__leave.held === 0", "the answer");
+        await settleMargin();
+        expect(await kept(view)).toEqual(before);
 
-      // Leave: one commit, one entry back.
-      await setMode(view, "leave");
-      await read(view, "(history.back(), true)");
-      await shows(view, "1");
-      expect((await kept(view)).index).toBe((before.index ?? 0) - 1);
+        // Leave: one commit, one entry back.
+        await setMode(view, "leave");
+        await read(view, "(history.back(), true)");
+        await shows(view, "1");
+        expect((await kept(view)).index).toBe((before.index ?? 0) - 1);
 
-      // Forward: refused, then permitted.
-      await setMode(view, "stay");
-      const count = (await asked(view)).length;
-      await read(view, "(history.forward(), true)");
-      await askedCount(view, count + 1);
-      await settleMargin();
-      expect(await read<string>(view, "location.pathname")).toBe("/app/t1/posts/1");
-      expect((await asked(view)).at(-1)).toBe("1?read->2?read:pop");
-      await setMode(view, "leave");
-      // Observed in Chrome 153, on a bare page too: after a refused Forward,
-      // `history.forward()` fires no `navigate` event; `navigation.forward()` does.
-      await read(view, "(navigation.forward(), true)");
-      await shows(view, "2");
-      expect((await kept(view)).index).toBe(before.index);
-      expect(await logs(view)).toEqual([]);
-    } finally {
-      closePage(view);
-    }
-  }, 30_000);
+        // Forward: refused, then permitted.
+        await setMode(view, "stay");
+        const count = (await asked(view)).length;
+        await read(view, "(history.forward(), true)");
+        await askedCount(view, count + 1);
+        await settleMargin();
+        expect(await read<string>(view, "location.pathname")).toBe("/app/t1/posts/1");
+        expect((await asked(view)).at(-1)).toBe("1?read->2?read:pop");
+        await setMode(view, "leave");
+        // Observed in Chrome 153, on a bare page too: after a refused Forward,
+        // `history.forward()` fires no `navigate` event; `navigation.forward()` does.
+        await read(view, "(navigation.forward(), true)");
+        await shows(view, "2");
+        expect((await kept(view)).index).toBe(before.index);
+        expect(await logs(view)).toEqual([]);
+      } finally {
+        closePage(view);
+      }
+    },
+    30_000,
+  );
 
   it("without a precommit handler: the canceled event is re-issued once on Leave", async () => {
     const view = await openAt("chrome", "/app/t1/posts/1", "off");
@@ -279,34 +290,42 @@ describe.skipIf(!H.hasEngine("chrome"))("leave checks in Chrome", () => {
 // WebKit: this host's WebKit has no Navigation API
 // ---------------------------------------------------------------------------
 
-describe.skipIf(!H.hasEngine("webkit"))("leave checks in WebKit", () => {
+describe.skipIf(webkit === undefined)("leave checks in WebKit", () => {
   it("records the engine's capabilities", async () => {
+    console.log(`webkit capability: ${JSON.stringify(webkit)}`);
     const view = await openAt("webkit", "/app/t1/posts/1");
     try {
-      const capability = await read<{ readonly navigation: boolean; readonly agent: string }>(
-        view,
-        `({ navigation: "navigation" in window, agent: navigator.userAgent })`,
-      );
-      console.log(`webkit capability: ${JSON.stringify(capability)}`);
+      // The fixture page sees what the probe recorded; the Back proof branches on it.
+      expect(await pageCapabilities(view)).toEqual({
+        navigation: webkit?.navigation ?? false,
+        precommit: webkit?.precommit ?? false,
+      });
+      // A precommit handler never exists without the Navigation API.
+      expect(webkit?.precommit === true && webkit.navigation !== true).toBe(false);
     } finally {
       closePage(view);
     }
   }, 30_000);
 
-  it("Back without the Navigation API is followed and reported, never stayed", async () => {
+  it("Back is stayed where the engine can cancel it, and followed and reported where it cannot", async () => {
     const view = await openAt("webkit", "/app/t1/posts/1");
     try {
-      const navigationApi = await read<boolean>(view, `"navigation" in window`);
       expect(await navigate(view, "/app/t1/posts/2")).toBe("Committed /app/t1/posts/2");
       await shows(view, "2");
       await setMode(view, "stay");
-      await read(view, "(history.back(), true)");
-      await shows(view, "1");
-      if (navigationApi) {
-        // A programmatic Back is cancelable where the API exists.
-        expect((await asked(view)).length).toBeGreaterThan(1);
+      // Branch on the probed capability before Back, not on what Back did.
+      if (webkit?.navigation === true) {
+        // A programmatic Back is cancelable where the API exists: Stay holds.
+        await read(view, "(history.back(), true)");
+        await askedCount(view, 2);
+        await settleMargin();
+        expect(await read<string>(view, "location.pathname")).toBe("/app/t1/posts/2");
+        expect((await asked(view)).at(-1)).toBe("2?read->1?read:pop");
+        expect(await logs(view)).toEqual([]);
         return;
       }
+      await read(view, "(history.back(), true)");
+      await shows(view, "1");
       expect(await asked(view)).toEqual(["1?read->2?read:push"]);
       const reported = await logs(view);
       expect(reported).toHaveLength(1);

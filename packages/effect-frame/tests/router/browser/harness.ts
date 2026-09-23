@@ -1,4 +1,4 @@
-/* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNullish, effect/noNewError, effect/noNewPromise, effect/noRuntimeTypeof, effect/noThrowStatement, effect/noNodeBuiltinImport, no-await-in-loop -- this harness owns the real browser, the page server, and bundling for the route slice 5 browser proof. */
+/* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNullish, effect/noNewError, effect/noNewPromise, effect/noRuntimeTypeof, effect/noTryCatch, effect/noThrowStatement, effect/noNodeBuiltinImport, no-await-in-loop -- this harness owns the real browser, the page server, and bundling for the route slice 5 browser proof. */
 import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
@@ -90,6 +90,28 @@ export const serve = async (bundleText: string): Promise<PageServer> => {
       server.close();
     },
   };
+};
+
+/** What one engine offers, read from a real page on a loopback origin. */
+export interface Capabilities {
+  readonly navigation: boolean;
+  readonly precommit: boolean;
+  readonly agent: string;
+}
+
+/** Probe an engine once, so proofs can branch or skip on what it really has. */
+export const capabilities = async (engine: Engine): Promise<Capabilities | undefined> => {
+  if (!hasEngine(engine)) return undefined;
+  const server = await serve("");
+  const view = await open(engine, `${server.origin}/probe`);
+  try {
+    return await view.evaluate<Capabilities>(
+      `({ navigation: "navigation" in window, precommit: "NavigationPrecommitController" in window, agent: navigator.userAgent })`,
+    );
+  } finally {
+    view.close();
+    server.stop();
+  }
 };
 
 export const open = async (engine: Engine, url: string): Promise<Bun.WebView> => {

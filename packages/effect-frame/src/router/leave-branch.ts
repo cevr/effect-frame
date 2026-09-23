@@ -1,4 +1,4 @@
-import type { Effect } from "effect";
+import type { Effect, Scope } from "effect";
 import type { Node } from "effect-frame/view";
 import type {
   AnyBranch,
@@ -11,9 +11,9 @@ import type {
   Segment,
   SegmentProps,
   ViewROf,
-  ViewServices,
 } from "./branch.js";
 import { buildLayout, buildLeaf } from "./branch.js";
+import type { MountedRoute } from "./leave.js";
 
 /**
  * PRIVATE (route slice 5). A leaf and a layout whose views may register
@@ -24,6 +24,9 @@ import { buildLayout, buildLeaf } from "./branch.js";
  * which every instance provides to its view. The public constructors remove
  * only `Scope`, so no public type names a leave service while #56 is open.
  */
+
+/** A view's services minus the `Scope` and `MountedRoute` every instance provides. */
+type ViewServices<R> = Exclude<Exclude<R, MountedRoute>, Scope.Scope>;
 
 export const leaf = <
   Name extends string,

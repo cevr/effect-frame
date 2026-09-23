@@ -711,8 +711,12 @@ const runtimeOf = <R>(branch: AnyBranch<R>): BranchRuntime<R> =>
 
 export type ViewROf<B> = B extends Branch<AnySegment, infer R, unknown> ? R : never;
 export type DataROf<B> = B extends Branch<AnySegment, unknown, infer R> ? R : never;
-/** What a view needs beyond what its instance provides: its Scope and `MountedRoute`. */
-export type ViewServices<R> = Exclude<Exclude<R, MountedRoute>, Scope.Scope>;
+/**
+ * What a view needs beyond what its instance provides: its Scope and
+ * `MountedRoute`. Not exported, so the public declarations never name a
+ * leave service; `leave-branch.ts` spells the same type.
+ */
+type ViewServices<R> = Exclude<Exclude<R, MountedRoute>, Scope.Scope>;
 
 export type OwnServices<Seg> =
   Seg extends Segment<string, unknown, unknown, infer Own, Declarations, infer CheckR>

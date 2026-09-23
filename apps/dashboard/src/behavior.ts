@@ -1,8 +1,6 @@
 import { Behavior } from "effect-frame/actor/client";
 import { Match } from "effect";
 import type {
-  AlertsMessage,
-  AlertsSnapshot,
   MemoMessage,
   MemoSnapshot,
   Order,
@@ -11,9 +9,9 @@ import type {
 } from "./contract.js";
 
 /**
- * The three behaviors, hosted by the server. The page draws none of their
- * snapshots but the alerts', and commands the rest through send-only
- * references, so nothing here predicts in the browser. Every tenant starts
+ * The order book's and the memo's behaviors, hosted by the server. The page
+ * commands both through send-only references, so nothing here predicts in
+ * the browser. The alerts are a machine, beside their contract. Every tenant starts
  * from the same book and the same alerts: this is a memory store, not a
  * database (#25 §4).
  */
@@ -52,24 +50,6 @@ export const ordersBehavior = Behavior.reducer<OrdersSnapshot, OrdersMessage>({
         Cancel: (cancel) => settle(state, cancel.id, "cancelled"),
       }),
     )(message),
-});
-
-export const alertsBehavior = Behavior.reducer<AlertsSnapshot, AlertsMessage>({
-  initial: {
-    items: [
-      { id: "a1", text: "refund rate above 5%", acked: false },
-      { id: "a2", text: "checkout p95 over 2s", acked: false },
-      { id: "a3", text: "card processor degraded", acked: false },
-    ],
-  },
-  reduce: (state, ack) => ({
-    items: state.items.map((item) => {
-      if (item.id === ack.id) {
-        return { ...item, acked: true };
-      }
-      return item;
-    }),
-  }),
 });
 
 export const memoBehavior = Behavior.reducer<MemoSnapshot, MemoMessage>({

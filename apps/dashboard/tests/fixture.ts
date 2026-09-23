@@ -157,6 +157,7 @@ export const wiretap = (inner: TransportService) => {
   const reads: Array<string> = [];
   const snapshots: Array<string> = [];
   const streams: Array<string> = [];
+  const failedSends: Array<string> = [];
   const commands: Array<Sighting> = [];
   const heldSends = new Map<string, Deferred.Deferred<void>>();
   const heldSnapshots = new Map<string, Deferred.Deferred<void>>();
@@ -205,7 +206,9 @@ export const wiretap = (inner: TransportService) => {
       Effect.gen(function* () {
         const label = labelOf(payload);
         yield* pass(Option.fromNullishOr(heldSends.get(label)));
-        const reply = yield* inner.send(address, commandId, payload, active);
+        const reply = yield* Effect.tapError(inner.send(address, commandId, payload, active), () =>
+          Effect.sync(() => void failedSends.push(label)),
+        );
         commands.push(
           sighting(
             "send",
@@ -242,6 +245,8 @@ export const wiretap = (inner: TransportService) => {
     snapshots,
     /** Every change stream the client opened, by actor address. */
     streams,
+    /** Every send the host answered with a failure, a refusal among them, by label. */
+    failedSends,
     commands,
     /** Hold the send whose message reads `label` (`Fulfil o6`) until the gate opens. */
     holdSend: (label: string) => gate(heldSends, label),

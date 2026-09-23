@@ -6,7 +6,7 @@ import { QueryCache, useQuery } from "effect-frame/actor/client";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { TenantId } from "../src/contract.js";
-import { Revenue } from "../src/queries.js";
+import { Revenue, TenantInfo } from "../src/queries.js";
 import { routes } from "../src/routes.js";
 import { click, keyText, mountApp, settle, tappedHost, textOf } from "./fixture.js";
 
@@ -154,5 +154,104 @@ describe("the dashboard's queries (#17, #18)", () => {
         "both settled",
       );
     }),
+  );
+});
+
+describe("an ack's override on the header (#17, #19 §4)", () => {
+  const alertsShown = (root: HTMLElement) => [
+    textOf(root, "#tenant-alerts"),
+    root.querySelector("#tenant-alerts")?.getAttribute("class"),
+  ];
+  /** An authoritative read of the header's entry, as any other declaration would make. */
+  const refreshHeader = Effect.flatMap(
+    useQuery(TenantInfo, { tenant: acme }),
+    (header) => header.refresh,
+  );
+
+  it.scopedLive("the override shows at once, stale, and the ack's refresh replaces it", () =>
+    Effect.gen(function* () {
+      const { handlers, wire } = yield* tappedHost();
+      const app = yield* mountApp({ transport: wire.transport, href: overview, routes });
+      yield* painted(app.root);
+      expect(alertsShown(app.root)).toEqual(["3", "fresh"]);
+
+      const held = yield* wire.holdSend("Ack a1");
+      yield* click(app.root, '#alerts li[data-alert="a1"] .ack');
+      // The host has seen nothing and no handler ran: the 2 is the page's guess.
+      yield* settle(
+        Effect.sync(() => textOf(app.root, "#tenant-alerts") === "2"),
+        "the override on screen",
+      );
+      expect(alertsShown(app.root)).toEqual(["2", "stale"]);
+      expect(wire.commands).toEqual([]);
+      expect(handlers.runsOf("TenantInfo")).toBe(1);
+
+      yield* wire.open(held);
+      yield* settle(
+        Effect.sync(() => alertsShown(app.root)[1] === "fresh"),
+        "the ack's refresh",
+      );
+      expect(alertsShown(app.root)).toEqual(["2", "fresh"]);
+      // The authoritative 2 came in the ack's reply: one more run, no client read.
+      expect(handlers.runsOf("TenantInfo")).toBe(2);
+      expect(wire.readsOf(tenantInfo)).toBe(1);
+    }),
+  );
+
+  it.scopedLive("any authoritative value drops the override, before the ack lands", () =>
+    Effect.gen(function* () {
+      const { wire } = yield* tappedHost();
+      const app = yield* mountApp({ transport: wire.transport, href: overview, routes });
+      yield* painted(app.root);
+
+      const held = yield* wire.holdSend("Ack a1");
+      yield* click(app.root, '#alerts li[data-alert="a1"] .ack');
+      yield* settle(
+        Effect.sync(() => textOf(app.root, "#tenant-alerts") === "2"),
+        "the override on screen",
+      );
+      // An unrelated read: the host has not admitted the ack, so it says 3.
+      yield* app.run(refreshHeader);
+      yield* settle(
+        Effect.sync(() => textOf(app.root, "#tenant-alerts") === "3"),
+        "the authoritative 3",
+      );
+      // Still stale: the ack is unsettled.
+      expect(alertsShown(app.root)).toEqual(["3", "stale"]);
+
+      yield* wire.open(held);
+      yield* settle(
+        Effect.sync(() => alertsShown(app.root).join() === "2,fresh"),
+        "the ack's refresh",
+      );
+    }),
+  );
+
+  it.scopedLive(
+    "a Rejected ack leaves the override; the next authoritative value replaces it",
+    () =>
+      Effect.gen(function* () {
+        const { wire } = yield* tappedHost();
+        const app = yield* mountApp({ transport: wire.transport, href: overview, routes });
+        yield* painted(app.root);
+
+        // a3 is pinned: the host refuses its ack before admission.
+        yield* click(app.root, '#alerts li[data-alert="a3"] .ack');
+        yield* settle(
+          Effect.sync(() => wire.failedSends.includes("Ack a3")),
+          "the refused ack's reply",
+        );
+        yield* Effect.sleep("100 millis");
+        yield* settle(Effect.succeed(true), "one more flush");
+        // Not rolled back: the guess stays until something authoritative arrives.
+        expect(textOf(app.root, "#tenant-alerts")).toBe("2");
+        expect(textOf(app.root, '#alerts li[data-alert="a3"] .acked')).toBe("false");
+
+        yield* app.run(refreshHeader);
+        yield* settle(
+          Effect.sync(() => alertsShown(app.root).join() === "3,fresh"),
+          "the authoritative 3",
+        );
+      }),
   );
 });

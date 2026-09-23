@@ -137,7 +137,7 @@ const AlertsCard = (props: OverviewProps) =>
                   class="ack"
                   onClick={View.event(() =>
                     Effect.flatMap(alert.get, (value) =>
-                      Effect.asVoid(ack(props.data.alerts, value.id)),
+                      Effect.asVoid(ack(props.data.alerts, props.data.tenant, value)),
                     ),
                   )}
                 >

@@ -10,7 +10,8 @@
     "dev": "bun run --conditions=source src/server.ts"
   },
   "dependencies": {
-    "effect-frame": "workspace:*"
+    "effect-frame": "workspace:*",
+    "effect-machine": "0.27.0"
   },
   "devDependencies": {
     "@effect-frame/toolchain-checks": "workspace:*",

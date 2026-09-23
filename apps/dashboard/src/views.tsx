@@ -1,8 +1,8 @@
-import { Behavior, Form, Value, spawn } from "effect-frame/actor/client";
+import { Behavior, Form, Value, select, spawn } from "effect-frame/actor/client";
 import type { Source } from "effect-frame/actor/client";
 import { Link, link } from "effect-frame/router";
 import type { NotFoundProps, Route } from "effect-frame/router";
-import { Errored, Loading, View, orErrored, ready } from "effect-frame/view";
+import { Errored, Loading, View, orErrored, readyWithStale } from "effect-frame/view";
 import type { Node } from "effect-frame/view";
 import { Effect, Option, Predicate } from "effect";
 import { sender, writeMemo } from "./commands.js";
@@ -88,11 +88,13 @@ export const DashShell = <ChildR,>(props: Route.LayoutPropsOf<typeof dash, Child
     children: Loading({
       fallback: skeleton,
       children: Effect.gen(function* () {
-        const tenant = yield* ready(yield* orErrored(props.data.tenant.state), {
+        // Held while stale: an ack's override, or a command's refresh in flight.
+        const header = yield* readyWithStale(yield* orErrored(props.data.tenant.state), {
           name: "",
           plan: "",
           alerts: 0,
         });
+        const tenant = select(header, (shown) => shown.value);
         const params = yield* props.params.get;
         const home = yield* link(overview, params, {});
         const book = yield* link(orders, params, {});
@@ -105,7 +107,17 @@ export const DashShell = <ChildR,>(props: Route.LayoutPropsOf<typeof dash, Child
             <header>
               <h1 id="tenant-name">{View.bind(tenant, (info) => info.name)}</h1>
               <span id="tenant-plan">{View.bind(tenant, (info) => info.plan)}</span>
-              <span id="tenant-alerts">{View.bind(tenant, (info) => info.alerts)}</span>
+              <span
+                id="tenant-alerts"
+                class={View.bind(header, (shown) => {
+                  if (shown.stale) {
+                    return "stale";
+                  }
+                  return "fresh";
+                })}
+              >
+                {View.bind(tenant, (info) => info.alerts)}
+              </span>
               <nav>
                 <Link link={home}>overview</Link> <Link link={book}>orders</Link>
               </nav>

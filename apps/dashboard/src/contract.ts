@@ -1,5 +1,6 @@
 import { contract } from "effect-frame/actor/client";
 import { Schema } from "effect";
+import { Event, Machine, State } from "effect-machine";
 
 /**
  * The Dashboard's actor contracts (#25 §4). Browser safe: it imports only
@@ -64,19 +65,48 @@ export const Alert = Schema.Struct({
 });
 export type Alert = Schema.Schema.Type<typeof Alert>;
 
-export const AlertsSnapshot = Schema.Struct({ items: Schema.Array(Alert) });
-export type AlertsSnapshot = Schema.Schema.Type<typeof AlertsSnapshot>;
+/**
+ * The alerts are a machine (#25 §4). One state, `Watching`, and one event,
+ * `Ack`. A machine never predicts: a client cannot run its transitions, so
+ * the page writes its guess of an `Ack`'s effect through `override` on the
+ * query that shows it (#17, #19 §4).
+ */
+export const AlertsState = State({ Watching: { items: Schema.Array(Alert) } });
+export const AlertsEvent = Event({ Ack: { id: Schema.String } });
 
-export const Ack = Schema.TaggedStruct("Ack", { id: Schema.String });
-export const AlertsMessage = Schema.Union([Ack]);
-export type AlertsMessage = Schema.Schema.Type<typeof AlertsMessage>;
+export const alertsMachine = Machine.make({
+  state: AlertsState,
+  event: AlertsEvent,
+  initial: AlertsState.Watching({
+    items: [
+      { id: "a1", text: "refund rate above 5%", acked: false },
+      { id: "a2", text: "checkout p95 over 2s", acked: false },
+      { id: "a3", text: "card processor degraded", acked: false },
+    ],
+  }),
+}).on(AlertsState.Watching, AlertsEvent.Ack, ({ state, event }) =>
+  AlertsState.Watching({
+    items: state.items.map((item) => {
+      if (item.id === event.id) {
+        return { ...item, acked: true };
+      }
+      return item;
+    }),
+  }),
+);
+
+export type AlertsSnapshot = typeof alertsMachine.stateSchema.Type;
+export type AlertsMessage = typeof alertsMachine.eventSchema.Type;
+
+/** The alert an operator may not ack: the host refuses it (`alerts.server.ts`). */
+export const pinnedAlert = "a3";
 
 export const Alerts = contract("Alerts", {
   version: 1,
   policy: "tenantMember",
   key: TenantKey,
-  snapshot: AlertsSnapshot,
-  message: AlertsMessage,
+  snapshot: alertsMachine.stateSchema,
+  message: alertsMachine.eventSchema,
 });
 
 // ---------------------------------------------------------------------------

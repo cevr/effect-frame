@@ -2,6 +2,7 @@ import { commandRef } from "effect-frame/actor/client";
 import type {
   ActorTransport,
   AnyContract,
+  FollowedQuery,
   KeyOf,
   RemoteActorRef,
   RemoteCommandRef,
@@ -9,7 +10,8 @@ import type {
 } from "effect-frame/actor/client";
 import { Effect, Option, Semaphore, Stream } from "effect";
 import type { Scope } from "effect";
-import type { Alerts, Memo, Orders, TenantId } from "./contract.js";
+import { AlertsEvent } from "./contract.js";
+import type { Alert, Alerts, Memo, Orders, TenantId } from "./contract.js";
 
 /**
  * The four sends the dashboard makes, and the one reading every view
@@ -73,9 +75,33 @@ export const cancel = Effect.fn("Dashboard.cancel")(function* (book: OrdersComma
   return yield* current.send({ _tag: "Cancel", id });
 });
 
-export const ack = Effect.fn("Dashboard.ack")(function* (alerts: Source<AlertsRef>, id: string) {
+/** The tenant's header: its name, plan, and how many alerts wait for an ack. */
+export interface TenantInfoValue {
+  readonly name: string;
+  readonly plan: string;
+  readonly alerts: number;
+}
+
+/**
+ * Ack one alert. The alerts are a machine, so nothing predicts the ack; the
+ * page writes its guess, one fewer alert waiting, through `override` on the
+ * header's `TenantInfo` entry, and then sends (#17, #19 §4). The override
+ * shows at once, marked stale. Any authoritative value replaces it: the
+ * ack's own refresh, or any other read. A `Rejected` ack does not roll it
+ * back; the next authoritative value does.
+ */
+export const ack = Effect.fn("Dashboard.ack")(function* (
+  alerts: Source<AlertsRef>,
+  tenant: FollowedQuery<TenantInfoValue, unknown>,
+  alert: Alert,
+) {
+  const shown = yield* tenant.state.get;
+  // An acked alert is no longer waiting: its ack changes no count.
+  if (shown._tag === "Ready" && !alert.acked) {
+    yield* tenant.override({ ...shown.value, alerts: Math.max(0, shown.value.alerts - 1) });
+  }
   const current = yield* alerts.get;
-  return yield* current.send({ _tag: "Ack", id });
+  return yield* current.send(AlertsEvent.Ack({ id: alert.id }));
 });
 
 export const writeMemo = Effect.fn("Dashboard.writeMemo")(function* (

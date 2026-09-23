@@ -3,7 +3,7 @@ import { HttpServer } from "effect-frame/actor";
 import type { ActorTransport } from "effect-frame/actor/client";
 import { Anonymous, Authenticated, CurrentPrincipal, Principal } from "effect-frame/actor/client";
 import { renderDocument } from "effect-frame/router";
-import type { DocumentOutcome } from "effect-frame/router";
+import type { DocumentOutcome, DocumentTimedOut } from "effect-frame/router";
 import type { Html } from "effect-frame/view";
 import { Effect, Exit, ManagedRuntime, Option, Scope, Stream } from "effect";
 import { demoTenant } from "./contract.js";
@@ -109,21 +109,48 @@ const respond = (outcome: DocumentOutcome<unknown>, close: Effect.Effect<void>) 
     });
   });
 
-/** Answer one page request. Its Scope lives until the body is written. */
-const answerPage = (request: Request): Effect.Effect<Response, never, ActorTransport> =>
-  Effect.gen(function* () {
-    const scope = yield* Scope.make();
-    const close = Scope.close(scope, Exit.void);
-    return yield* renderPage(new URL(request.url)).pipe(
-      Scope.provide(scope),
-      Effect.flatMap((outcome) => respond(outcome, close)),
-      Effect.catchTag("DocumentTimedOut", () =>
-        Effect.as(close, new Response("the page took too long", { status: 504 })),
-      ),
-      Effect.onInterrupt(() => close),
-      Effect.provideService(CurrentPrincipal, principalOf(request)),
-    );
-  });
+/** How a page is drawn for one URL, in the request Scope it is given. */
+export type PageRenderer<R> = (
+  url: URL,
+) => Effect.Effect<DocumentOutcome<unknown>, DocumentTimedOut, R | Scope.Scope>;
+
+/**
+ * Answer one page request through `render`, in a request Scope of its own.
+ * The Scope outlives this Effect only for a returned body, and closes when
+ * that body ends. Every other exit closes it before the answer leaves: a
+ * redirect, a timeout, a failure or a defect in the drawing or in making
+ * the response, and an interruption. A defect answers 500.
+ */
+export const answerWith =
+  <R>(render: PageRenderer<R>) =>
+  (request: Request): Effect.Effect<Response, never, Exclude<R, Scope.Scope>> =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const close = Scope.close(scope, Exit.void);
+      return yield* render(new URL(request.url)).pipe(
+        Scope.provide(scope),
+        Effect.flatMap((outcome) => respond(outcome, close)),
+        Effect.onExit((exit) => {
+          if (Exit.isSuccess(exit)) {
+            return Effect.void;
+          }
+          return close;
+        }),
+        Effect.catchTag("DocumentTimedOut", () =>
+          Effect.succeed(new Response("the page took too long", { status: 504 })),
+        ),
+        Effect.catchCause((cause) =>
+          Effect.as(
+            Effect.logError("[dashboard] page failed", cause),
+            new Response("the page failed", { status: 500 }),
+          ),
+        ),
+        Effect.provideService(CurrentPrincipal, principalOf(request)),
+      );
+    });
+
+/** Answer one page request through the route tree. */
+const answerPage = answerWith((url) => renderPage(url));
 
 /** A built transport. The page render and the actor routes share it. */
 export type DashboardRuntime = ManagedRuntime.ManagedRuntime<ActorTransport, never>;

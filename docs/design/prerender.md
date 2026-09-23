@@ -208,7 +208,9 @@ does, with no body.
     removed by hand, as `build.lock` is. When no lease can be written,
     `load` fails with `PrerenderLeaseFailed { out, generation, reason }`
     and holds nothing: a site served unheld would lose its files to the
-    next build (counsel round 2 found the first version served it unheld). Clean-up is best effort: when it fails, the
+    next build (counsel round 2 found the first version served it unheld). Each attempt's lease lives in a scope of its own, and so does the
+    whole load: a failure or an interruption before `load` returns a site
+    releases the lease at once (counsel round 2). Clean-up is best effort: when it fails, the
     build still succeeds, and the next build removes what is left.
 13. **One build writes one output.** A build creates `build.lock` with the
     exclusive `wx` flag and removes it when its scope closes. A second

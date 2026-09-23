@@ -21,6 +21,7 @@ import {
   Option,
   Schema,
   SchemaGetter,
+  Scope,
 } from "effect";
 import * as PlatformError from "effect/PlatformError";
 import { describe, expect, it } from "effect-bun-test";
@@ -397,6 +398,46 @@ describe("serving a loaded generation (#86)", () => {
           generation: nameOf(generation),
         });
         expect(yield* namesIn(`${out}/leases`)).toEqual([]);
+      }),
+  );
+
+  platform(
+    "a load interrupted after it took its lease releases the lease at once, not when its scope closes",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = yield* tempDirectory;
+        const out = `${directory}/out`;
+        yield* buildInto(yield* sideOf(makeControl(blogLabels)), blogRoutes, out);
+        // The second read of the pointer, the one after the lease, never answers.
+        const reached = yield* Deferred.make<void>();
+        const pointerReads = { count: 0 };
+        const stalled: FileSystem.FileSystem = {
+          ...fs,
+          readFileString: (path, encoding) =>
+            Effect.suspend(() => {
+              if (path.endsWith("/current.json")) {
+                pointerReads.count += 1;
+                if (pointerReads.count === 2) {
+                  return Effect.andThen(Deferred.succeed(reached, void 0), Effect.never);
+                }
+              }
+              return fs.readFileString(path, encoding);
+            }),
+        };
+        // The scope the load would hold its lease in stays open throughout.
+        const serverScope = yield* Scope.make();
+        const loading = yield* Effect.forkChild(
+          Scope.provide(Prerender.load(out), serverScope).pipe(
+            Effect.provideService(FileSystem.FileSystem, stalled),
+          ),
+        );
+        yield* Deferred.await(reached);
+        expect(yield* namesIn(`${out}/leases`)).toHaveLength(1);
+        yield* Fiber.interrupt(loading);
+        // Interrupted before it returned a site: nothing holds the lease.
+        expect(yield* namesIn(`${out}/leases`)).toEqual([]);
+        yield* Scope.close(serverScope, Exit.void);
       }),
   );
 

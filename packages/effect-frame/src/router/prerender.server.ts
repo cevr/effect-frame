@@ -16,7 +16,7 @@ import {
   Unauthorized,
 } from "effect-frame/actor/client";
 import type { View } from "effect-frame/view";
-import type { Duration, Scope } from "effect";
+import type { Duration } from "effect";
 import {
   Cause,
   Clock,
@@ -29,6 +29,7 @@ import {
   Option,
   Path,
   Schema,
+  Scope,
   Stream,
 } from "effect";
 import type { PlatformError } from "effect/PlatformError";
@@ -696,9 +697,29 @@ const emptySite: Site = { generation: Option.none(), pages: new Map(), client: O
  * generation.
  */
 export const load = Effect.fn("Prerender.load")(function* (out: string) {
-  const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const output: Output = outputOf(path, out);
+  // The lease lives in a scope of its own, handed to the caller's scope
+  // only with the site: a load that fails or is interrupted releases it.
+  const outer = yield* Effect.scope;
+  return yield* Effect.uninterruptibleMask((restore) =>
+    Effect.flatMap(Scope.fork(outer), (held) =>
+      restore(Scope.provide(readSite(output), held)).pipe(
+        Effect.onExit((exit) => {
+          if (Exit.isSuccess(exit)) {
+            return Effect.void;
+          }
+          return Scope.close(held, Exit.void);
+        }),
+      ),
+    ),
+  );
+});
+
+/** Hold the published generation of `output`, and read its manifest. */
+const readSite = Effect.fnUntraced(function* (output: Output) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const found = yield* hold(output);
   if (Option.isNone(found)) {
     return emptySite;

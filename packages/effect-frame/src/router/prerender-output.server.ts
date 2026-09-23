@@ -249,23 +249,33 @@ export const hold = (
     while (Option.isSome(found)) {
       const directory = found.value;
       const generation = path.basename(directory);
-      const attempt = yield* Scope.fork(outer);
-      const leasedOn = yield* Effect.exit(
-        Scope.provide(leaseOn(fs, output, generation), attempt).pipe(
-          Effect.mapError((error) =>
-            PrerenderLeaseFailed.make({ out: output.out, generation, reason: error.message }),
+      // One attempt: its lease lives in a scope of its own, kept only when
+      // the generation is still the published one. A failure, an
+      // interruption, or a newer generation closes it at once.
+      const again = yield* Effect.uninterruptibleMask((restore) =>
+        Effect.flatMap(Scope.fork(outer), (attempt) =>
+          restore(
+            Effect.andThen(
+              Scope.provide(leaseOn(fs, output, generation), attempt).pipe(
+                Effect.mapError((error) =>
+                  PrerenderLeaseFailed.make({ out: output.out, generation, reason: error.message }),
+                ),
+              ),
+              current(output),
+            ),
+          ).pipe(
+            Effect.onExit((exit) => {
+              if (Exit.isSuccess(exit) && Option.contains(exit.value, directory)) {
+                return Effect.void;
+              }
+              return Scope.close(attempt, Exit.void);
+            }),
           ),
         ),
       );
-      if (Exit.isFailure(leasedOn)) {
-        yield* Scope.close(attempt, Exit.void);
-        return yield* Effect.failCause(leasedOn.cause);
-      }
-      const again = yield* current(output);
       if (Option.contains(again, directory)) {
         return found;
       }
-      yield* Scope.close(attempt, Exit.void);
       found = again;
     }
     return found;

@@ -25,6 +25,8 @@ is placed through `event.scroll()`, and focus moves to the entering leaf.
 Under `Preserve`, a push or replace moves nothing. A traversal (Back,
 Forward, `navigation.traverseTo`) puts back the entry's saved position
 under either behavior, and focus moves only under `Restore` (decision 9).
+A traversal lands later than shell commit: once the reads the drawn
+branch declared have settled and the drawing shows them (decision 10).
 The router holds no scroll position, reads none, and never sets
 `history.scrollRestoration`.
 
@@ -193,6 +195,27 @@ newer admission also ends the wait for `drawn` at once.
    aborted (a newer navigation); the landing then places nothing and has
    no other way to restore the position.
 
+10. **A traversal lands once its declared reads are drawn.** Notes found
+    it: Back from `/lists/errands` to `/lists/inbox` read the inbox's
+    notes again (the key was released on exit), and the router called
+    `event.scroll()` at shell commit, 5 ms before the 80 notes were drawn,
+    against a 513 px page. Chrome sometimes scrolled again when the notes
+    arrived and sometimes did not (1 run in 3 failed); WebKit never did.
+    The saved position is a place in the page's content, so a traversal
+    now waits for two more things after `drawn`: `Shell.settled` (every
+    query the drawn branch declared left `Loading`, `Ready` or `Failed`;
+    an actor binding holds its snapshot when it binds), and a catch-up
+    that brings every bound source of the router's mount to its current
+    value and flushes. A value travels from a source to the drawing on a
+    fiber, so without the catch-up the settled read is not drawn yet. The
+    router wraps its host's `sourceBound` to hear each binding, and still
+    forwards to a host that counts its own. A push or replace still lands
+    at shell commit (#31: the top while the counts are held). The
+    Navigation API holds the traversal's handler until it lands, as a
+    platform traversal with `scroll: "after-transition"` does. A read a
+    view makes itself, not declared, is not waited on. A History API pop
+    is unchanged: the browser restored its position at `popstate`.
+
 ## Server
 
 `navigation.ts` and `browser-commit.ts` are browser-only. Their top-level
@@ -208,25 +231,26 @@ Browser proofs run in real Chrome and WebKit through `Bun.WebView`
 `tests/router/browser/navigation-app.tsx`). The fixture mounts the public
 `browserNavigation` and `followLinks`. Each test runs once per engine.
 
-| Test                                                                                         | What it shows                                                                                                        |
-| -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| "a push scrolls to the top when the shell commits, while the query is still open"            | `scrollY` is 0 while the `Loading` fallback shows and the fake query never settles.                                  |
-| "a push to a URL with a fragment scrolls to the fragment, not to the top"                    | `#usage` is in the viewport and `scrollY` is not 0.                                                                  |
-| "Back restores the browser's saved position"                                                 | Scroll to 2500, push (page 2 at the top), Back: 2500 again.                                                          |
-| "history.scrollRestoration stays auto after mount and after ten navigations"                 | `"auto"` throughout.                                                                                                 |
-| "a late settle fills content in place and does not move the viewport"                        | A below-the-fold `Loading` settles; `scrollY` is unchanged.                                                          |
-| "a fragment-only click is left to the browser: no transition, the browser scrolls"           | `navigate` saw one `push:true`; no view ran again; the page scrolled; `:target` holds.                               |
-| "focus moves to the entering leaf's root on a push"                                          | `activeElement` is the leaf root; it has `tabindex="-1"`.                                                            |
-| "a leaf's own autofocus element wins over the leaf root"                                     | Focus lands on the `<h1 autofocus>`.                                                                                 |
-| "a stayed segment keeps focus and the caret across a search or param change"                 | The layout's search field keeps focus and selection over `?q=a` to `?q=b` and a param change.                        |
-| "a form's failed validation keeps focus in the field"                                        | No `navigate` event; `activeElement` is the field.                                                                   |
-| "the router adds no aria-live region"                                                        | No `[aria-live]` after navigations.                                                                                  |
-| "Preserve leaves scroll and focus alone, entering and stayed"                                | Entering and stayed `Preserve` navigations keep `scrollY` and `activeElement`.                                       |
-| "Back and Forward to a Preserve entry restore its saved position" (with and without the API) | Stayed: 430, push, 0, Back gives 430, Forward gives 0. Entering: Back from a `Restore` page gives 1500. Focus stays. |
-| "an initial redirect's replace finishes once the page is shown"                              | A first load of `/site/old` redirects; `navigation.transition` becomes `null` (finding 1).                           |
-| "each write lands only on its own event: a newer push is not released early"                 | Two pushes admitted at once; the held second push keeps its transition open until its own shell draws.               |
-| "a fragment push finds the raw id, then the decoded id, then a named anchor" (no API)        | `#part%20one` finds `id="part%20one"`, `#part%20two` finds `id="part two"`, `#legacy` an `<a name>`.                 |
-| "a push scrolls to the top and focuses the leaf root with preventScroll" (no API)            | `navigation` deleted: top, then the fragment; one `focus` call with `preventScroll: true`.                           |
+| Test                                                                                         | What it shows                                                                                                                    |
+| -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| "a push scrolls to the top when the shell commits, while the query is still open"            | `scrollY` is 0 while the `Loading` fallback shows and the fake query never settles.                                              |
+| "a push to a URL with a fragment scrolls to the fragment, not to the top"                    | `#usage` is in the viewport and `scrollY` is not 0.                                                                              |
+| "Back restores the browser's saved position"                                                 | Scroll to 2500, push (page 2 at the top), Back: 2500 again.                                                                      |
+| "Back waits for the declared read the page's height needs, then restores its position"       | Rows page at 2500, push, hold `Rows`, Back: the fallback shows; release: 2500. Killed by landing at `drawn`, and by no catch-up. |
+| "history.scrollRestoration stays auto after mount and after ten navigations"                 | `"auto"` throughout.                                                                                                             |
+| "a late settle fills content in place and does not move the viewport"                        | A below-the-fold `Loading` settles; `scrollY` is unchanged.                                                                      |
+| "a fragment-only click is left to the browser: no transition, the browser scrolls"           | `navigate` saw one `push:true`; no view ran again; the page scrolled; `:target` holds.                                           |
+| "focus moves to the entering leaf's root on a push"                                          | `activeElement` is the leaf root; it has `tabindex="-1"`.                                                                        |
+| "a leaf's own autofocus element wins over the leaf root"                                     | Focus lands on the `<h1 autofocus>`.                                                                                             |
+| "a stayed segment keeps focus and the caret across a search or param change"                 | The layout's search field keeps focus and selection over `?q=a` to `?q=b` and a param change.                                    |
+| "a form's failed validation keeps focus in the field"                                        | No `navigate` event; `activeElement` is the field.                                                                               |
+| "the router adds no aria-live region"                                                        | No `[aria-live]` after navigations.                                                                                              |
+| "Preserve leaves scroll and focus alone, entering and stayed"                                | Entering and stayed `Preserve` navigations keep `scrollY` and `activeElement`.                                                   |
+| "Back and Forward to a Preserve entry restore its saved position" (with and without the API) | Stayed: 430, push, 0, Back gives 430, Forward gives 0. Entering: Back from a `Restore` page gives 1500. Focus stays.             |
+| "an initial redirect's replace finishes once the page is shown"                              | A first load of `/site/old` redirects; `navigation.transition` becomes `null` (finding 1).                                       |
+| "each write lands only on its own event: a newer push is not released early"                 | Two pushes admitted at once; the held second push keeps its transition open until its own shell draws.                           |
+| "a fragment push finds the raw id, then the decoded id, then a named anchor" (no API)        | `#part%20one` finds `id="part%20one"`, `#part%20two` finds `id="part two"`, `#legacy` an `<a name>`.                             |
+| "a push scrolls to the top and focuses the leaf root with preventScroll" (no API)            | `navigation` deleted: top, then the fragment; one `focus` call with `preventScroll: true`.                                       |
 
 Non-browser proofs (`packages/effect-frame/tests/router/navigation-behavior.test.tsx`):
 
@@ -291,9 +315,10 @@ fake `navigation` test above proves finding 2.
 - `renderToStream` is not in this tree either. The server proof uses the
   server host render and a server bundle. The same test should render
   through `renderToStream` once #22 lands.
-- A traversal to a saved position that the shell cannot reach yet lands
-  clamped. The browser does not scroll again when content arrives. This is
-  the ticket's accepted cost.
+- A traversal waits only for declared reads (decision 10). A saved
+  position below content that a view reads itself, or below a `pending`
+  fallback, still lands clamped: the browser does not scroll again when
+  that content arrives.
 - Without the Navigation API, Back restores early, at `popstate`, before
   the branch re-resolves. This is the ticket's accepted cost.
 - The WebKit suite needs `Bun.WebView` WebKit, which is macOS only. On Linux

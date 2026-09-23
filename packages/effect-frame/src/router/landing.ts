@@ -33,6 +33,15 @@ export interface Shell {
    * Queries are not waited on: a `Loading` fallback is part of the shell.
    */
   readonly drawn: Effect.Effect<void>;
+  /**
+   * Completes when the reads the drawn branch declared have settled
+   * (`Ready` or `Failed`). A traversal waits for it as well as `drawn`:
+   * the entry's saved position is a place in the page's content, and a
+   * shell that still waits for that content cannot reach it (#31). A push
+   * or replace does not wait: it goes to the top or a fragment at shell
+   * commit. A read a view makes itself, not declared, is not waited on.
+   */
+  readonly settled: Effect.Effect<void>;
 }
 
 /** What the Location places, once, when the shell is in the document. */

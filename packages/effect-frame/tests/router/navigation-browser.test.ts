@@ -162,6 +162,28 @@ for (const engine of engines) {
       }
     }, 30_000);
 
+    it("Back waits for the declared read the page's height needs, then restores its position", async () => {
+      const view = await openAt(engine, "/site/rows/a");
+      try {
+        await shown(view, "#rows-content");
+        expect(await scrollTo(view, 2500)).toBe(2500);
+        expect(await navigate(view, "/site/pages/2")).toBe("Committed /site/pages/2");
+        await H.waitFor(view, `document.querySelector("#page-id")?.textContent === "2"`, "page 2");
+        await H.waitFor(view, "scrollY === 0", "page 2 at the top");
+        // The rows leaf exited, so its key was released: Back reads it again,
+        // and that read is held. The shell draws the fallback, a short page.
+        await read(view, "(window.__nav.holdRows(), true)");
+        await read(view, "(history.back(), true)");
+        await shown(view, "#rows-fallback");
+        await settleMargin();
+        await read(view, "(window.__nav.releaseRows(), true)");
+        await shown(view, "#rows-content");
+        await H.waitFor(view, "scrollY === 2500", "the rows page's position restored");
+      } finally {
+        closePage(view);
+      }
+    }, 30_000);
+
     it("history.scrollRestoration stays auto after mount and after ten navigations", async () => {
       const view = await openAt(engine, "/site/pages/0");
       try {

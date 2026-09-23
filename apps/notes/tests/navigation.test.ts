@@ -3,9 +3,9 @@
  * #31 in the app, in real browsers: the real Notes server and its real
  * client bundle. A push scrolls to the top when the new shell commits, while
  * its counts are still held on the server; Back puts the list page's
- * position back; a search typed into `/lists` is a `stayed` transition that
- * keeps focus and the caret; and the router leaves
- * `history.scrollRestoration` as `"auto"`. Scroll and focus are platform
+ * position back once its notes are drawn again; a search typed into
+ * `/lists` is a `stayed` transition that keeps focus and the caret; and the
+ * router leaves `history.scrollRestoration` as `"auto"`. Scroll and focus are platform
  * facts, so no fake window proves them.
  */
 import { afterAll, describe, expect, it } from "bun:test";
@@ -63,7 +63,7 @@ const openAt = async (engine: Engine, path: string): Promise<Bun.WebView> => {
 
 for (const engine of engines) {
   describe.skipIf(available.get(engine) !== true)(`Notes navigation in ${engine}`, () => {
-    it("a push scrolls to the top at shell commit; Back restores the list's position in Chrome", async () => {
+    it("a push scrolls to the top at shell commit; Back restores the list's position", async () => {
       const view = await openAt(engine, "/lists/inbox");
       try {
         expect(await read<string>(view, "history.scrollRestoration")).toBe("auto");
@@ -99,17 +99,9 @@ for (const engine of engines) {
           `document.querySelector("#list-name")?.textContent === "inbox"`,
           "back on the inbox",
         );
-        if (engine === "chrome") {
-          await waitFor(view, "scrollY === 700", "the inbox position restored");
-        } else {
-          // Open (#31 limit, recorded in notes-example.md): the inbox's notes
-          // are read again after the shell commits, so WebKit lands the saved
-          // position against a short page, clamped, and does not scroll again
-          // when the notes arrive. This pins the limit: a fix turns it red.
-          await waitFor(view, `document.querySelectorAll("#list li").length === 80`, "the notes");
-          await Bun.sleep(300);
-          expect(await read<number>(view, "scrollY")).toBe(0);
-        }
+        // The inbox's notes are read again on Back: the router places the
+        // saved position once that read settled and is drawn (#31).
+        await waitFor(view, "scrollY === 700", "the inbox position restored");
         expect(await read<string>(view, "history.scrollRestoration")).toBe("auto");
       } finally {
         view.close();

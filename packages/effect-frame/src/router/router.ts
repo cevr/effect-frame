@@ -161,6 +161,7 @@ const notFoundRoute = <R>(view: View.View<NotFoundProps, never, R>): AnyRoute<R>
             root: Ref.get(cell),
             // Its view is mounted in place, not through an outlet: drawn once shown.
             drawn: Effect.void,
+            settled: Effect.void,
           })),
         );
         return entered;
@@ -271,6 +272,7 @@ export const mount: <R, HostNode, N = R>(
   const requests = yield* Queue.unbounded<Request>();
   const surface = readSurface(location);
   const defaultBehavior = Option.getOrElse(Option.fromNullishOr(options.behavior), () => Restore);
+  const drawing = drawingOf(options.host);
   const pending = new Set<Request>();
   let closed = false;
   let mounted: Option.Option<Mounted<R | N>> = Option.none();
@@ -593,7 +595,7 @@ export const mount: <R, HostNode, N = R>(
                 UrlStateRuntime,
                 urlStateRuntime,
               );
-            let mountedPage = mountView(page, {}, options.host, options.root);
+            let mountedPage = mountView(page, {}, drawing.host, options.root);
             if (Option.isSome(routeOwner)) {
               mountedPage = Effect.provideService(mountedPage, Inspection.Owner, routeOwner.value);
             }
@@ -643,8 +645,13 @@ export const mount: <R, HostNode, N = R>(
    * the router's default. Focus is offered only when the deepest segment
    * entered: a stayed leaf keeps focus. None: a newer request that moves
    * arrived first, and this move places nothing.
+   *
+   * A traversal waits for its declared reads as well (`until` is
+   * `"settled"`): it returns to a saved position in the content, which a
+   * shell still waiting for that content cannot reach. A push or replace
+   * lands at shell commit.
    */
-  const landingOf = (shell: Shell, self: Request) =>
+  const landingOf = (shell: Shell, self: Request, until: LandingPoint) =>
     Effect.gen(function* () {
       // Any request that moves admitted after this one, whether it is still
       // queued, already done, or admitted after the shell drew, changes the
@@ -658,8 +665,9 @@ export const mount: <R, HostNode, N = R>(
       if (admittedMovers !== seen) {
         yield* Deferred.succeed(newer, void 0);
       }
+      const reached = Effect.andThen(shell.drawn, reachedAfterDrawn(shell, until, drawing.catchUp));
       const drew = yield* Effect.raceFirst(
-        Effect.as(shell.drawn, true),
+        Effect.as(reached, true),
         Effect.as(Deferred.await(newer), false),
       ).pipe(
         Effect.ensuring(
@@ -702,10 +710,11 @@ export const mount: <R, HostNode, N = R>(
     shell: Shell,
     self: Request,
     landOn: (landing: Option.Option<Landing>) => Effect.Effect<void>,
+    until: LandingPoint = "drawn",
   ) =>
     Effect.asVoid(
       Effect.forkIn(
-        Effect.flatMap(landingOf(shell, self), landOn).pipe(
+        Effect.flatMap(landingOf(shell, self, until), landOn).pipe(
           Effect.onExit((exit) => {
             if (Exit.isSuccess(exit)) {
               return Effect.void;
@@ -827,6 +836,7 @@ export const mount: <R, HostNode, N = R>(
     self: Request,
     reason: Unprotected,
     landOn: (landing: Option.Option<Landing>) => Effect.Effect<void>,
+    until: LandingPoint,
   ) =>
     Effect.gen(function* () {
       const url = yield* location.current;
@@ -835,7 +845,7 @@ export const mount: <R, HostNode, N = R>(
       // A redirected pop has already moved, so its denied entry is replaced.
       const redirect = yield* redirected(url, settled);
       const shell = yield* move(settled, "pop").pipe(Effect.ensuring(released(redirect)));
-      yield* landAfter(shell, self, landOn);
+      yield* landAfter(shell, self, landOn, until);
       return Committed(settled.url);
     });
 
@@ -859,7 +869,7 @@ export const mount: <R, HostNode, N = R>(
         Effect.sync(() => {
           handed = true;
         }),
-        landAfter(shell, request, landThenFinish),
+        landAfter(shell, request, landThenFinish, "settled"),
       );
     return Effect.gen(function* () {
       const committed = (yield* SubscriptionRef.get(navigations)).url;
@@ -867,7 +877,7 @@ export const mount: <R, HostNode, N = R>(
         if (!(yield* traversal.leave)) {
           return Unchanged(committed);
         }
-        const followed = yield* committedPop(request, "noncancelable", landThenFinish);
+        const followed = yield* committedPop(request, "noncancelable", landThenFinish, "settled");
         handed = true;
         return followed;
       }
@@ -944,7 +954,8 @@ export const mount: <R, HostNode, N = R>(
   type MountServices = Exclude<Exclude<Exclude<R | N, Router>, UrlStateRuntime>, Scope.Scope>;
   const run = (request: Request): Effect.Effect<NavigationResult, never, MountServices> => {
     if (request.operation === "pop") {
-      return committedPop(request, "committed", landPop);
+      // The browser restored this pop's position at `popstate`: only focus is left.
+      return committedPop(request, "committed", landPop, "drawn");
     }
     if (request.operation === "traverse") {
       return traverse(request);
@@ -1110,6 +1121,76 @@ export const settleRequest = <R>(
     return { _tag: "Redirect", location };
   });
 
+/**
+ * Where a landing is placed: at shell commit (`drawn`), or once the drawn
+ * branch's declared reads settled as well (`settled`, a traversal).
+ */
+type LandingPoint = "drawn" | "settled";
+
+/**
+ * After shell commit. A traversal waits for the branch's declared reads,
+ * then brings the drawing to them: a value travels from a source to the
+ * drawing on a fiber, so without the catch-up the saved position would be
+ * placed against a page that has not drawn what its reads hold.
+ */
+const reachedAfterDrawn = (
+  shell: Shell,
+  until: LandingPoint,
+  catchUp: Effect.Effect<void>,
+): Effect.Effect<void> => {
+  if (until === "settled") {
+    return Effect.andThen(shell.settled, catchUp);
+  }
+  return Effect.void;
+};
+
+/**
+ * The router's host, and a way to bring its drawing to its sources now.
+ * Every source the mounted pages bind reports itself through the host's
+ * `sourceBound`; `catchUp` writes each one's current value where the
+ * drawing shows another, and flushes. A host that counts its own bindings
+ * (the server drawing) still hears each one.
+ */
+interface Drawing<HostNode> {
+  readonly host: Host<HostNode>;
+  readonly catchUp: Effect.Effect<void>;
+}
+
+const drawingOf = <HostNode>(host: Host<HostNode>): Drawing<HostNode> => {
+  const live = new Set<{ readonly catchUp: () => void }>();
+  const own = (catchUp: () => void): (() => void) => {
+    const one = { catchUp };
+    live.add(one);
+    return () => void live.delete(one);
+  };
+  const sourceBound = Option.match(Option.fromNullishOr(host.sourceBound), {
+    onNone: () => own,
+    onSome:
+      (theirs) =>
+      (catchUp: () => void): (() => void) => {
+        const ours = own(catchUp);
+        const their = theirs(catchUp);
+        return () => {
+          ours();
+          their();
+        };
+      },
+  });
+  return {
+    host: { ...host, sourceBound },
+    catchUp: Effect.andThen(
+      Effect.sync(() => {
+        // A catch-up may draw a branch that binds more sources: those read
+        // their current value when they bind.
+        for (const one of [...live]) {
+          one.catchUp();
+        }
+      }),
+      render,
+    ),
+  };
+};
+
 /** A write nothing waits on: landing it places nothing. */
 const unplaced: Written = { land: () => Effect.void };
 
@@ -1123,6 +1204,7 @@ const shellOf = <R>(entered: Entered<R>, fresh: boolean): Effect.Effect<Shell> =
       behavior: Option.none(),
       root: Effect.succeed(Option.none()),
       drawn: Effect.void,
+      settled: Effect.void,
     }),
   );
 

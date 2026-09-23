@@ -8,6 +8,8 @@
  * `browserNavigation` Location, with the public `followLinks`.
  */
 import type { Source } from "effect-frame/actor";
+import { Policies, Policy, implementQuery, query as declareQuery } from "effect-frame/actor";
+import { QueryTest } from "effect-frame/actor/testing";
 import {
   Location,
   NavigationBehavior,
@@ -17,7 +19,7 @@ import {
   mount,
 } from "effect-frame/router";
 import { Dom, Loading, QueryState, View, ready } from "effect-frame/view";
-import { Deferred, Effect, Option, Schema, SubscriptionRef } from "effect";
+import { Deferred, Effect, Exit, Layer, Option, Schema, SubscriptionRef } from "effect";
 import * as Receipt from "../../../src/router/receipt.js";
 
 export interface NavConfig {
@@ -33,6 +35,9 @@ export interface NavWindow {
   readonly events: Array<string>;
   /** Settle the late region's query. */
   settle: () => Promise<void>;
+  /** Hold every read of the declared `Rows` query until `releaseRows`. */
+  holdRows: () => void;
+  releaseRows: () => void;
   /** Let a gated page's view finish building. */
   open: (name: string) => Promise<void>;
   navigate: (href: string) => Promise<string>;
@@ -72,6 +77,20 @@ const held = Route.child(site, "held", {
   path: "held/:name",
   params: Schema.Struct({ name: Schema.String }),
 });
+/**
+ * The declared query of the `rows` leaf: the page is as tall as its answer
+ * says. It is released when the leaf exits, so a Back reads it again.
+ */
+const Rows = declareQuery("Rows", {
+  args: Schema.Struct({ id: Schema.String }),
+  result: Schema.Struct({ height: Schema.Finite }),
+  policy: "public",
+});
+const rows = Route.child(site, "rows", {
+  path: "rows/:id",
+  params: Schema.Struct({ id: Schema.String }),
+  data: ({ params }) => ({ rows: Route.query(Rows, { id: params.id }) }),
+});
 /** Always redirects: the first load of `/site/old` replaces its entry. */
 const old = Route.child(site, "old", {
   path: "old",
@@ -85,6 +104,8 @@ const start = (): void => {
     setups: {},
     events: [],
     settle: () => Promise.reject(new Error("the late page is not shown")),
+    holdRows: () => undefined,
+    releaseRows: () => undefined,
     open: () => Promise.reject(new Error("router is not mounted")),
     navigate: () => Promise.reject(new Error("router is not mounted")),
     ready: false,
@@ -185,6 +206,44 @@ const start = (): void => {
       );
     });
 
+  // Reads of `Rows` wait on the current gate; `holdRows` swaps in a closed one.
+  let rowsGate = Deferred.makeUnsafe<void>();
+  Deferred.doneUnsafe(rowsGate, Exit.void);
+  control.holdRows = () => {
+    rowsGate = Deferred.makeUnsafe<void>();
+  };
+  control.releaseRows = () => {
+    Deferred.doneUnsafe(rowsGate, Exit.void);
+  };
+  const rowsLayer = QueryTest.layer({
+    queries: [
+      implementQuery(Rows, () =>
+        Effect.andThen(
+          Effect.suspend(() => Deferred.await(rowsGate)),
+          Effect.succeed({ height: 6000 }),
+        ),
+      ),
+    ],
+  }).pipe(
+    Layer.provide(Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }))),
+    Layer.orDie,
+  );
+
+  const RowsView = (props: Route.PropsOf<typeof rows>) =>
+    Effect.gen(function* () {
+      yield* ran("rows");
+      const body = yield* Loading({
+        fallback: <p id="rows-fallback">loading</p>,
+        children: Effect.map(ready(props.data.rows.state, { height: 0 }), (value) => (
+          <div
+            id="rows-content"
+            style={View.bind(value, (one) => `height: ${String(one.height)}px`)}
+          />
+        )),
+      });
+      return <article id="rows">{body}</article>;
+    });
+
   const FormView = () =>
     Effect.gen(function* () {
       yield* ran("form");
@@ -246,6 +305,7 @@ const start = (): void => {
         Route.leaf(slow, SlowView),
         Route.leaf(late, LateView),
         Route.leaf(formPage, FormView),
+        Route.leaf(rows, RowsView),
         Route.leaf(gated, GatedView),
         Route.leaf(held, GatedView),
         Route.leaf(old, () => Effect.succeed(<p id="old">never shown</p>)),
@@ -297,7 +357,9 @@ const start = (): void => {
     return yield* Effect.never;
   });
 
-  Effect.runFork(Effect.scoped(main));
+  // The query host lives as long as the page: the router reads through it.
+  // @effect-diagnostics-next-line strictEffectProvide:off
+  Effect.runFork(Effect.scoped(Effect.provide(main, rowsLayer)));
 };
 
 start();

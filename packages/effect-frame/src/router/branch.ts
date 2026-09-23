@@ -738,6 +738,13 @@ interface Instance<R> {
    */
   readonly drawn: Effect.Effect<boolean>;
   /**
+   * Completes once every query this instance declares has settled: its
+   * current entry left `Loading`, `Ready` or `Failed`. An actor binding is
+   * settled when it is bound (`ref` waited for its first snapshot). Read
+   * at the moment it runs, so it follows a binding the transition moved.
+   */
+  readonly settled: Effect.Effect<void>;
+  /**
    * The leave checks this instance and its descendants would ask for a
    * candidate whose matched outline at this slot is `next`, deepest first.
    */
@@ -1214,6 +1221,22 @@ const resolved = (tree: TreeState, resource: Resource): Effect.Effect<void> => {
     return Effect.void;
   }
   return resource.entry.state.changes.pipe(
+    Stream.filter((state) => state._tag !== "Loading"),
+    Stream.take(1),
+    Stream.runDrain,
+  );
+};
+
+/**
+ * Completes once one acquired interest has settled. A query entry settles
+ * when it leaves `Loading`, either way; an actor ref already holds its
+ * first snapshot.
+ */
+const settledRead = (acquired: Acquired): Effect.Effect<void> => {
+  if (acquired.resource._tag !== "Query") {
+    return Effect.void;
+  }
+  return acquired.resource.entry.state.changes.pipe(
     Stream.filter((state) => state._tag !== "Loading"),
     Stream.take(1),
     Stream.runDrain,
@@ -1709,6 +1732,8 @@ const failedEntering = <R>(
       root: Effect.succeed(Option.none()),
       // It has no outlet: nothing below it draws.
       drawn: Effect.succeed(false),
+      // It holds no binding: nothing is left to read.
+      settled: Effect.void,
       // Its view never ran, so nothing registered a check.
       questions: () => Effect.succeed([]),
     })),
@@ -2081,6 +2106,12 @@ const makeBranch = <
       behavior,
       root: Ref.get(rootCell),
       drawn: Deferred.await(drawnSignal),
+      settled: Effect.suspend(() =>
+        Effect.forEach(internals.bindings.values(), (binding) => settledRead(binding.current()), {
+          concurrency: Math.max(internals.bindings.size, 1),
+          discard: true,
+        }),
+      ),
       questions,
     };
     created.set(instance, internals);
@@ -2393,6 +2424,24 @@ const drawnFrom = (instance: Instance<unknown>): Effect.Effect<void> =>
     );
   });
 
+/**
+ * The branch's declared reads have settled: each instance from the root
+ * down, until the deepest or the first one that did not draw its view (a
+ * pending fallback stands for the rest, and its reads are its own).
+ */
+const settledFrom = (instance: Instance<unknown>): Effect.Effect<void> =>
+  Effect.andThen(
+    instance.settled,
+    Effect.flatMap(instance.drawn, (drew) => {
+      if (!drew) {
+        return Effect.void;
+      }
+      return Effect.flatMap(instance.child, (next) =>
+        Option.match(next, { onNone: () => Effect.void, onSome: settledFrom }),
+      );
+    }),
+  );
+
 /** What the last commit offers the router: see `landing.ts`. */
 const shellOf = (
   rootInstance: Instance<unknown>,
@@ -2403,6 +2452,7 @@ const shellOf = (
   behavior: deepestNow.behavior,
   root: deepestNow.root,
   drawn: drawnFrom(rootInstance),
+  settled: settledFrom(rootInstance),
 });
 
 /** The deepest instance's values, for the router's inspection record. */

@@ -2,8 +2,10 @@
 
 Blog is the example that builds its pages before anyone asks for them. It
 builds the Blog section of #25 §2 on the prerender design of #23
-(`prerender.md`). Each acceptance row there, and each #23 row, is now a test
-in `bun run gate`. The rows are in `acceptance.md`, under "Blog — prerender,
+(`prerender.md`). Each acceptance row there, and each #23 row, has a test
+in `bun run gate`. Two rows stay Open on one owner decision, per-reader
+form identity (B1, under Open): the Blog's two-reader row and the #23
+rebuild row. The rows are in `acceptance.md`, under "Blog — prerender,
 typed links, one client island" and under #23. This document gives the
 tests, the mutation that turns each one red, the decisions the build made,
 and what stays Open.
@@ -49,7 +51,7 @@ reverted. The runner restores every file after each mutation.
 | `AwaitAll`: one Patch per query, `builtAt`      | `document.test.tsx`: "a built page is one finished document: no streamed records, one Patch per declared query …"              | `html.ts` `stamp` leaves the seed unstamped                            | Killed (3 tests)                                         |
 | `PrerenderUnauthorized`, nothing written        | `build.test.ts`: "a route whose query refuses Anonymous fails the build …"; "the prerender command exits non-zero …"           | The build does not map `Unauthorized`                                  | Killed (2 tests)                                         |
 | One read for a shared query                     | `build.test.ts`: "the build reads PostIndex once for N + 1 pages"                                                              | The build's transport reads each key per page (no `once`)              | Killed                                                   |
-| A rebuild differs only in metadata              | `build.test.ts`: "a rebuild over an unchanged store is the same tree but for builtAt and each form's minted identity"          | `builtAt` from `Date.now()` instead of `Clock`                         | Killed                                                   |
+| A rebuild differs only in metadata (Open, B1)   | `build.test.ts`: "a rebuild over an unchanged store is the same tree but for builtAt and each form's minted identity"          | `builtAt` from `Date.now()` instead of `Clock`                         | Killed                                                   |
 | A crashed build leaves the previous generation  | `build.test.ts`: "a build aborted mid-way leaves the previous tree serving, and no staging"                                    | `stage` keeps the staging directory on failure                         | Killed (3 tests)                                         |
 | The actor resumes from R and catches up         | `island.test.tsx`: "the hearts resume from the baked revision R, call changes after R, …"                                      | `branch.ts` opens the route actor with no seed                         | Killed (2 tests)                                         |
 | A store past R is followed to its newest        | `island.test.tsx`: "a store that no longer holds the baked revision is followed to its newest"                                 | (the same mutation)                                                    | Killed                                                   |
@@ -134,17 +136,24 @@ The two framework changes this ticket made carry their own red-on-old tests:
 
 ## Open
 
-- **A prerendered form shares one command id among its readers.** #19 says
-  `$command` is minted once per rendered form, and #32 says a generated
-  field is minted at render. A built page is one render served to every
-  reader, so every reader without a script posts the same `$command` and
-  the same `id`, and the host keeps one heart for all of them. With a
-  script, hydration adopts the rendered id for the first send, so each
-  reader's first heart collides the same way. The island test shows the
-  mechanism: a second post of the one file adds nothing. Deciding it (mint
-  at request time for prerendered forms, mint in the client only, or keep
-  the form out of built pages) belongs to the form identity tickets (#19,
-  #32, #53). This build does not decide it.
+- **A prerendered form shares one command id among its readers (B1).**
+  A built page is one render served to every reader, so every reader
+  without a script posts the same `$command` and the same `id`, and the
+  host keeps one heart for all of them. With a script, hydration adopts the
+  rendered id for the first send, so each reader's first heart collides
+  the same way. The island test shows the mechanism: a second post of the
+  one file adds nothing. Counsel round 1 read the three tickets this way:
+  #19 assigns an id to a rendered form; #32's resolution requires
+  hydration to adopt it; #67's implemented rule (`optimistic.md`) treats
+  that adopted id as supplied. None gives separate readers of one static
+  file separate commands. Per-reader identity is an owner decision under
+  #67, and this build does not make it. It keeps two rows Open in
+  `acceptance.md`: the two-reader row under Blog, and the #23 rebuild row,
+  whose "identical apart from `builtAt`" holds for a page with no form but
+  not for a post, which differs in its minted `$command` and `id`
+  (`build.test.ts`, "a rebuild over an unchanged store is the same tree but
+  for builtAt and each form's minted identity", asserts exactly that
+  difference).
 - **Nested product.** Proven in the package only (see above).
 - **`aria-current` on the chrome link.** A post page marks the index link
   `aria-current="true"`, the index page `"page"`. That is the router's

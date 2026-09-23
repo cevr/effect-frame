@@ -65,6 +65,13 @@ export const Patch = Schema.TaggedStruct("Patch", {
    * branches on its value.
    */
   builtAt: Schema.optionalKey(Schema.Finite),
+  /**
+   * Present only when the server showed the value stale: a read, a refresh
+   * or a command that the value waits for was still open, or the value was
+   * set by `override`. The server drawing shows the flag, so the client
+   * seeds the entry `Ready{stale: true}` too, and reads it again at once.
+   */
+  stale: Schema.optionalKey(Schema.Literal(true)),
 });
 export type Patch = Schema.Schema.Type<typeof Patch>;
 
@@ -98,12 +105,17 @@ const patchOf = (key: QueryKey, state: Encoded): Option.Option<Patch> =>
     Match.withReturnType<Option.Option<Patch>>(),
     Match.tagsExhaustive({
       Loading: () => Option.none(),
-      Ready: (ready) =>
-        Option.some({
+      Ready: (ready) => {
+        const patch: Patch = {
           _tag: "Patch",
           id: recordId(key),
           outcome: { _tag: "Value", value: ready.value },
-        }),
+        };
+        if (ready.stale) {
+          return Option.some({ ...patch, stale: true });
+        }
+        return Option.some(patch);
+      },
       Failed: (failed) =>
         Option.some({
           _tag: "Patch",
@@ -117,8 +129,14 @@ const stateOf = (patch: Patch): Encoded =>
   Match.value(patch.outcome).pipe(
     Match.withReturnType<Encoded>(),
     Match.tagsExhaustive({
-      // A baked value is one this client has not confirmed.
-      Value: (value) => Ready(value.value, Option.isSome(Option.fromNullishOr(patch.builtAt))),
+      // A baked value, or one the server showed stale, is one this client
+      // has not confirmed.
+      Value: (value) =>
+        Ready(
+          value.value,
+          Option.isSome(Option.fromNullishOr(patch.builtAt)) ||
+            Option.isSome(Option.fromNullishOr(patch.stale)),
+        ),
       Error: (error) => Failed(error.error),
     }),
   );

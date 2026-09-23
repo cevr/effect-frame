@@ -8,6 +8,7 @@ import {
   SubscriptionRef,
 } from "effect";
 import type { Scope } from "effect";
+import { advance, followedChanges } from "../actor/advance.js";
 import { Match } from "./control.js";
 import type { Node, RetainedNode } from "./jsx-runtime.js";
 import type { QueryState } from "./query-state.js";
@@ -117,7 +118,7 @@ export const ready: <Value, Error>(
 ) => Effect.Effect<Source<Value>, never, LoadingScope | Scope.Scope> = Effect.fn("Readiness.ready")(
   function* <Value, Error>(state: Source<QueryState<Value, Error>>, fallback: Value) {
     const shared = yield* registerLoading(state);
-    return holdSome(fallback, select(shared, valueOf));
+    return yield* holdSome(fallback, select(shared, valueOf));
   },
 );
 
@@ -179,7 +180,7 @@ export const readyWithStale: <Value, Error>(
   "Readiness.readyWithStale",
 )(function* <Value, Error>(state: Source<QueryState<Value, Error>>, fallback: Value) {
   const shared = yield* registerLoading(state);
-  return holdSome<ReadyValue<Value>>(
+  return yield* holdSome<ReadyValue<Value>>(
     { value: fallback, stale: false },
     select(shared, readyValueOf),
   );
@@ -195,22 +196,18 @@ export interface ReadyValue<Value> {
  * dropped rather than represented: the consumer of this source is only in
  * the tree while a value exists, so it never has to read absence.
  *
- * `get` reads `source` now, so it is never older than the value it holds:
- * a server render reads it beside the seed (#22).
+ * The last value is one state, moved only by `advance`: a read and each
+ * delivery from `source` take the same step over `source` now. So `get` is
+ * never older than `source` (a server render reads it beside the seed,
+ * #22), a delivery that arrives late never puts back an older value, and
+ * `changes` holds every value `get` returned, in order.
  */
-const holdSome = <A,>(initial: A, source: Source<Option.Option<A>>): Source<A> => {
-  let last = initial;
-  const keep = (value: Option.Option<A>): A => {
-    if (Option.isSome(value)) {
-      last = value.value;
-    }
-    return last;
-  };
-  return {
-    get: Effect.map(source.get, keep),
-    changes: Stream.map(Stream.filter(source.changes, Option.isSome), keep),
-  };
-};
+const holdSome = <A,>(initial: A, source: Source<Option.Option<A>>): Effect.Effect<Source<A>> =>
+  Effect.map(SubscriptionRef.make(initial), (last) => {
+    const step = (held: A): Effect.Effect<A> =>
+      Effect.map(source.get, (now) => Option.getOrElse(now, () => held));
+    return { get: advance(last, step), changes: followedChanges(last, step, source.changes) };
+  });
 
 /**
  * `true` once the query has stopped being in flight, either way. A case

@@ -44,6 +44,7 @@ import {
   Stream,
   SubscriptionRef,
 } from "effect";
+import { advance, advancedChanges } from "../actor/advance.js";
 import { attempt } from "../view/attempt.js";
 import type { Definition as LazyDefinition, Ticket } from "../view/lazy.js";
 import { definitionOf as lazyDefinitionOf, withTicket } from "../view/lazy.js";
@@ -1303,22 +1304,20 @@ const queryBinding = Effect.fn("Branch.queryBinding")(function* (
   let current = first;
   let currentEntry = entry;
   let follow = yield* Scope.fork(owner);
+  // The one step that moves the shown state: the current entry's state now,
+  // carried over the state shown last. A read and a delivery both take it,
+  // so a read never runs ahead of `changes` and a late delivery never
+  // undoes a newer value (#22; see `advance`).
+  const step = (shown: QueryState<unknown, QueryFailure>) =>
+    Effect.map(currentEntry.state.get, (state) => carry(shown, state));
   const followEntry = (next: QueryEntry<unknown, QueryFailure>, scope: Scope.Scope) =>
     Effect.forkIn(
-      Stream.runForEach(next.state.changes, (state) =>
-        SubscriptionRef.update(output, (shown) => carry(shown, state)),
-      ),
+      Stream.runForEach(next.state.changes, () => advance(output, step)),
       scope,
     );
   yield* followEntry(entry, follow);
-  // The state now: the entry's current state carried over the copy the
-  // fiber above keeps, which may be older. A server render reads it beside
-  // the seed and must see what the seed carries (#22).
-  const get = Effect.flatMap(SubscriptionRef.get(output), (shown) =>
-    Effect.map(currentEntry.state.get, (state) => carry(shown, state)),
-  );
   const exposed: FollowedQuery<unknown, QueryFailure> = {
-    state: { get, changes: Stream.mapEffect(SubscriptionRef.changes(output), () => get) },
+    state: { get: advance(output, step), changes: advancedChanges(output, step) },
     refresh: Effect.suspend(() => currentEntry.refresh),
   };
   const binding: Binding = {
@@ -1327,12 +1326,10 @@ const queryBinding = Effect.fn("Branch.queryBinding")(function* (
     install: (next) =>
       Effect.gen(function* () {
         const nextEntry = yield* queryOf(next);
-        // Before the copy moves: `get` reads the entry named here.
         currentEntry = nextEntry;
         yield* Scope.close(follow, Exit.void);
         follow = yield* Scope.fork(owner);
-        const state = yield* nextEntry.state.get;
-        yield* SubscriptionRef.update(output, (shown) => carry(shown, state));
+        yield* advance(output, step);
         yield* followEntry(nextEntry, follow);
         const replaced = current;
         current = next;

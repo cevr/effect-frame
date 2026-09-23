@@ -13,7 +13,7 @@ import type {
 } from "effect-frame/actor";
 import { zip } from "effect-frame/actor/client";
 import type { Node } from "effect-frame/view";
-import { Html, Loading, View, mount, ready } from "effect-frame/view";
+import { Html, Loading, View, mount, ready, readyWithStale } from "effect-frame/view";
 import type { Scope } from "effect";
 import { Effect, Fiber, Option, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -205,6 +205,7 @@ describe("an SSR drawing and its seed", () => {
         renderSeeded(
           (host, root) => mount(Following, { waits: true }, host, root),
           frame,
+          { closeWhen: Effect.never },
           requestCache,
         ),
         server,
@@ -212,5 +213,105 @@ describe("an SSR drawing and its seed", () => {
       expect(html).toContain(`id="${Streaming.seedId}"`);
       expect(stateIn(html)).toBe("Alpha");
     }),
+  );
+});
+
+/**
+ * A value the server shows stale, here set by `override` on the server
+ * only. The server draws the flag, so the seed must carry it (review
+ * round 1, finding 2).
+ */
+const Overridden = (props: { readonly server: boolean }): Drawn =>
+  Loading({
+    fallback: <p id="pending">loading</p>,
+    children: Effect.gen(function* () {
+      yield* settled("a");
+      const entry = yield* useQuery(Label, { id: "a" });
+      if (props.server) {
+        yield* entry.override({ label: "Draft" });
+      }
+      const value = yield* readyWithStale(entry.state, { label: "?" });
+      return (
+        <p id="state">
+          {View.bind(value, (found) => `${found.value.label}:${String(found.stale)}`)}
+        </p>
+      );
+    }),
+  });
+
+describe("a value the server shows stale", () => {
+  it.scopedLive("is seeded stale, and the page hydrates with no mismatch", () =>
+    Effect.gen(function* () {
+      const server = yield* sideOf(makeControl({ a: "Alpha" }));
+      const html = yield* Effect.provideContext(
+        Html.renderAwaitAll(Overridden, { server: true }, frame, { closeWhen: Effect.never }),
+        server,
+      );
+      expect(stateIn(html)).toBe("Draft:true");
+
+      // The client reads the value again; the read is held past hydration.
+      const clientControl = makeControl({ a: "Alpha" }, ["a"]);
+      const client = yield* sideOf(clientControl);
+      yield* install(html);
+      const { report } = yield* hydrateWith(client, (host, root) =>
+        mount(Overridden, { server: false }, host, root),
+      );
+      expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
+      expect(textOf("#state")).toBe("Draft:true");
+    }),
+  );
+});
+
+/**
+ * A binding whose value moves on every read. Each new value is a new row,
+ * and each row declares a new query, so the records change on every pass
+ * and never agree (review round 1, finding 4).
+ */
+const Restless = (): Drawn =>
+  Effect.gen(function* () {
+    let count = 0;
+    const next = Effect.sync(() => {
+      count += 1;
+      return [String(count)];
+    });
+    const rows = yield* View.list({
+      each: { get: next, changes: Stream.fromEffect(next) },
+      keyBy: (id) => id,
+      row: (item) =>
+        Effect.gen(function* () {
+          const id = yield* item.get;
+          const entry = yield* useQuery(Label, { id });
+          return <li>{View.bind(entry.state, (state) => state._tag)}</li>;
+        }),
+    });
+    return <ul>{rows}</ul>;
+  });
+
+describe("records that change on every pass", () => {
+  it.scopedLive(
+    "end at the limit: AwaitAll, the streamed shell and SSR each write a document",
+    () =>
+      Effect.gen(function* () {
+        const server = yield* sideOf(makeControl({}));
+        const limit = { closeWhen: Effect.sleep("100 millis") };
+        const awaited = yield* Effect.provideContext(
+          Html.renderAwaitAll(Restless, {}, frame, limit),
+          server,
+        );
+        expect(awaited).toContain("</html>");
+        const first = yield* Effect.map(
+          Stream.runHead(
+            Html.renderToStream(Restless, {}, frame, limit).pipe(Stream.provideContext(server)),
+          ),
+          Option.getOrThrow,
+        );
+        expect(first).toContain("<ul>");
+        const seeded = yield* Effect.provideContext(
+          renderSeeded((host, root) => mount(Restless, {}, host, root), frame, limit, requestCache),
+          server,
+        );
+        expect(seeded).toContain("</html>");
+      }),
+    5_000,
   );
 });

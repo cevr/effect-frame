@@ -277,7 +277,7 @@ const prepareBody = <R, N>(
     );
   }
   if (mode === "SSR") {
-    return Effect.map(renderSeeded(resolvedFirst, document, shared), Stream.succeed);
+    return Effect.map(renderSeeded(resolvedFirst, document, { closeWhen }, shared), Stream.succeed);
   }
   if (mode === "AwaitAll") {
     return Effect.map(awaitAllDrawing(routed, document, { closeWhen }, shared), Stream.succeed);

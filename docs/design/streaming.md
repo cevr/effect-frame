@@ -311,16 +311,33 @@ leave before the value reaches the content.
 
 The rule has two halves.
 
-1. **A source's `get` is its value now.** A source that keeps a copy
-   which a fiber moves reads its upstream in `get` and does not return the
-   copy. `followQuery` and a route's query binding carry the entry's
-   current state over the copy (`carry` is idempotent). `ready`,
-   `readyWithStale`, `orErrored` and a readiness scope's pending source
-   derive from their state source with `select`, and `holdSome` keeps its
-   last value only for the time that has none. `select`, `zip` and `all`
-   already read their upstream. The client mount reads every binding's
-   first value with `get`, so this also makes the client's first drawing
-   the value the seed holds.
+1. **A source's `get` is its value now.** A pure derivation (`select`,
+   `zip`, `all`, and the readiness scope's pending source) reads its
+   upstream in `get`. `ready`, `readyWithStale` and `orErrored` register
+   `select`s of their state source. A derivation that keeps state
+   (`followQuery` and a route's query binding carry the value shown last;
+   `holdSome`, under `ready` and `readyWithStale`, holds the last value)
+   keeps it in one `SubscriptionRef`, and moves it in one place only:
+   `advance` (`src/actor/advance.ts`). `advance` takes the ref's lock,
+   runs one step over the upstream now, and publishes the result only
+   when it is not `Equal` to the state. `get` advances and returns the
+   state. An upstream delivery only asks for an advance: it never applies
+   the value it carried. So (review round 1, findings 1 and 3):
+   - `get` never runs ahead of `changes`. Every value `get` returns was
+     published before it returned, in order, and an equal value is never
+     published twice.
+   - A delivery that arrives late reads the upstream again, so it cannot
+     undo a newer value that a read already showed.
+   - When a followed key moves on to one still loading, the value shown
+     last stays, stale, even if only a read ever saw it.
+
+   The first version read the upstream live in `get` over a copy that a
+   fiber moved later. A read could then show B while the copy held A; a
+   switch to a loading C then carried A, not B, and B never reached
+   `changes`. `holdSome` had the same fault with a late delivery of A.
+   The client mount reads every binding's first value with `get`, so this
+   also makes the client's first drawing the value the seed holds.
+
 2. **The server drawing reads its bindings at the seed's instant.** The
    runtime tells a host that asks, through the optional capability
    `sourceBound(catchUp)`, of each source it binds. `catchUp` reads the
@@ -332,6 +349,23 @@ The rule has two halves.
    them is read again. The drawing then shows no less than the records
    carry, and no more. The equality check stops a render that waits from
    writing the same values again on each pass.
+
+   Records that change on every pass would keep the reads going for ever,
+   so the document's limit (`closeWhen`) ends them in every pipeline:
+   `AwaitAll`, the streamed shell, and `SSR` (`renderSeeded` now takes
+   the limit; the router passes the request's). A pass that starts after
+   the limit is the last. Its records, read right after it drew, are
+   written as they are, and an `AwaitAll` page is marked not complete. An
+   entry that moved inside that last pass may not agree with the drawing;
+   the client redraws it (review round 1, finding 4).
+
+3. **A value the server shows stale is seeded stale.** A patch carries
+   `stale: true` when the server's entry showed its value stale: a read,
+   refresh or command it waits for was open, or `override` set it. The
+   client seeds such a value `Ready{stale: true}` and reads it again at
+   once, as it does a prerendered value. Before this, the server drew the
+   flag and the client seeded `stale: false`, so a view that shows the
+   flag did not hydrate (review round 1, finding 2).
 
 Prerender uses the `AwaitAll` pipeline, so it gets the rule too. A
 `QueryState.held` source that a view builds from its own stream keeps
@@ -353,6 +387,32 @@ too" by the order of its fibers).
 
 The second read in `readDrawn` has no mutation test: a query that settles
 between the two reads needs a fiber order that no test can hold.
+
+Review round 1. Each mutation was applied alone, and
+`tests/view/stateful-sources.test.tsx` and
+`tests/view/streaming-delivery.test.tsx` were run. On the code before the
+round, both stateful-source tests fail, "is seeded stale, and the page
+hydrates with no mismatch" fails, and "end at the limit…" does not end
+(it times out).
+
+| Mutation                                              | Failed                                                                                 |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `advance` publishes an equal value too                | both stateful-source tests                                                             |
+| `followQuery`'s `get` reads the ref without advancing | "a value a read showed stays on screen stale…" and four drawing tests                  |
+| `holdSome` applies the value a delivery carried       | "a late delivery never undoes a value a read showed"                                   |
+| a patch drops `stale`                                 | "is seeded stale, and the page hydrates with no mismatch"                              |
+| `readDrawn` ignores the limit                         | "end at the limit: AwaitAll, the streamed shell and SSR each write a document" (hangs) |
+
+#### Known limit: a streamed view with no boundary
+
+A streamed shell draws a query that is still open as the view draws
+`Loading`, for example "searching…". When its patch arrives before the
+client hydrates, the client seeds the value, and its first drawing shows
+the value while the shell holds the loading text. A `Loading` boundary
+reconciles this through its marks; a view with no boundary has no marks,
+so hydration reports the text as a mismatch and the client's text wins.
+This fix does not change it. Put a `Loading` boundary around such a view,
+or render the route `AwaitAll`.
 
 ### A streamed shell does not wait for a late setup
 

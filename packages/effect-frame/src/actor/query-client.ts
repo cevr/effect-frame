@@ -25,6 +25,7 @@ import type { Source } from "./source.js";
 import type { Refreshed, TransportService } from "./transport.js";
 import { ActorTransport } from "./transport.js";
 import { Unreachable } from "./vocabulary.js";
+import { advance, advancedChanges } from "./advance.js";
 
 interface BatchedQueryRequest extends Request.Request<string, QueryFailure> {
   readonly _tag: "BatchedQueryRequest";
@@ -1193,6 +1194,16 @@ export const followQuery = Effect.fn("followQuery")(function* <Q extends AnyQuer
     principal: 0,
   });
   let current: Option.Option<Following<ResultOf<Q>, QueryFailure>> = Option.none();
+  type Shown = Stamped<QueryState<ResultOf<Q>, QueryFailure>>;
+  // The one step that moves what the view is shown: the followed entry's
+  // state now, carried over the state shown last. A read and a delivery
+  // both take it (see `advance`), so a read never runs ahead of `changes`
+  // and a late delivery never undoes a newer value.
+  const step = (shown: Shown): Effect.Effect<Shown> =>
+    Option.match(current, {
+      onNone: () => Effect.succeed(shown),
+      onSome: (following) => Effect.map(following.get, (incoming) => carry(shown, incoming)),
+    });
 
   const leave = Effect.suspend(() => {
     const previous = current;
@@ -1215,10 +1226,9 @@ export const followQuery = Effect.fn("followQuery")(function* <Q extends AnyQuer
         Effect.provideService(ActorTransport, transport),
       );
       current = Option.some({ key, scope: child, refresh: opened.entry.refresh, get: opened.get });
+      // A delivery only asks for a step: the step reads the entry now.
       yield* Effect.forkIn(
-        Stream.runForEach(opened.changes, (stamped) =>
-          SubscriptionRef.update(output, (shown) => carry(shown, stamped)),
-        ),
+        Stream.runForEach(opened.changes, () => advance(output, step)),
         child,
       );
     });
@@ -1228,12 +1238,8 @@ export const followQuery = Effect.fn("followQuery")(function* <Q extends AnyQuer
       onNone: () =>
         Effect.andThen(
           leave,
-          SubscriptionRef.update(
-            output,
-            (shown): Stamped<QueryState<ResultOf<Q>, QueryFailure>> => ({
-              state: Loading(),
-              principal: shown.principal,
-            }),
+          advance(output, (shown) =>
+            Effect.succeed<Shown>({ state: Loading(), principal: shown.principal }),
           ),
         ),
       onSome: enter,
@@ -1242,21 +1248,12 @@ export const followQuery = Effect.fn("followQuery")(function* <Q extends AnyQuer
   yield* follow(yield* args.get);
   yield* Effect.forkScoped(Stream.runForEach(args.changes, follow));
 
-  // The state now: the entry's current state carried over what the view
-  // was last handed. The copy in `output` moves only when the fiber above
-  // runs, so it may be older than the entry; a read never is. A server
+  // A read steps first, so it is never older than the entry: a server
   // render reads it beside the seed and must see what the seed carries.
-  const get = Effect.flatMap(SubscriptionRef.get(output), (shown) =>
-    Option.match(current, {
-      onNone: () => Effect.succeed(shown.state),
-      onSome: (following) => Effect.map(following.get, (incoming) => carry(shown, incoming).state),
-    }),
-  );
   const followed: FollowedQuery<ResultOf<Q>, QueryFailure> = {
     state: {
-      get,
-      // Each change reads the state now, so the first element is `get`.
-      changes: Stream.mapEffect(SubscriptionRef.changes(output), () => get),
+      get: Effect.map(advance(output, step), (shown) => shown.state),
+      changes: Stream.map(advancedChanges(output, step), (shown) => shown.state),
     },
     refresh: Effect.suspend(() =>
       Option.match(current, {

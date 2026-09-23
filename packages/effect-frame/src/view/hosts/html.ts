@@ -222,28 +222,56 @@ const makeBindings = (): Bindings => {
   };
 };
 
+/** The records a pass read, and whether the drawing is at their instant. */
+interface Read<A> {
+  readonly records: A;
+  /**
+   * The two reads around the last catch-up agreed. False only when the
+   * limit ended the passes first: the records are the last pass's second
+   * read, taken right after that pass drew.
+   */
+  readonly agreed: boolean;
+}
+
 /**
  * Read the records a document writes beside its drawing, and bring the
  * drawing to the same instant (#22): read, catch up, read again, until the
  * two reads agree. A query that settles between the reads is read again,
  * so the drawing never shows less than the records carry, and never more.
  * `of` picks what the records must agree on.
+ *
+ * Records that change on every pass would keep this reading for ever, so
+ * the document's limit ends it (review round 1, finding 4). A pass that
+ * starts after the limit is the last one, and its records are written with
+ * `agreed: false`. An entry that moved inside that pass may then not agree
+ * with the drawing; the client redraws it.
  */
 const readDrawn = <A, E, R>(
   read: Effect.Effect<A, E, R>,
   of: (records: A) => unknown,
   bindings: Bindings,
-): Effect.Effect<A, E, R> =>
+  limit: Deferred.Deferred<void>,
+): Effect.Effect<Read<A>, E, R> =>
   Effect.gen(function* () {
     let before = yield* read;
     yield* bindings.catchUp;
     let after = yield* read;
-    while (!Equal.equals(of(before), of(after))) {
+    let agreed = Equal.equals(of(before), of(after));
+    while (!agreed && !Deferred.isDoneUnsafe(limit)) {
       before = after;
       yield* bindings.catchUp;
       after = yield* read;
+      agreed = Equal.equals(of(before), of(after));
     }
-    return after;
+    return { records: after, agreed };
+  });
+
+/** Run `closeWhen` once in the current Scope; the Deferred completes when it does. */
+const limitOf = (closeWhen: Effect.Effect<void>) =>
+  Effect.gen(function* () {
+    const limit = yield* Deferred.make<void>();
+    yield* Effect.forkScoped(Effect.andThen(closeWhen, Deferred.succeed(limit, void 0)));
+    return limit;
   });
 
 /**
@@ -484,12 +512,19 @@ export const streamPrepared = <E, R>(
       root,
       makeHost(() => {}, Option.none(), Option.some(bindings)),
     );
+    // The limit runs once: the shell's reads and the patch stream share it.
+    const limit = yield* limitOf(options.closeWhen);
     // The shell shows every value the settled patches carry, and no value
     // an entry still behind a placeholder holds.
-    const records = yield* readDrawn(
-      Effect.provideService(Streaming.shell(options), QueryCache, cache),
+    const { records } = yield* readDrawn(
+      Effect.provideService(
+        Streaming.shell({ closeWhen: Deferred.await(limit) }),
+        QueryCache,
+        cache,
+      ),
       (read) => [read.placeholders, read.settled],
       bindings,
+      limit,
     );
     const shell = serializeChildren(root.children);
     const first = [
@@ -607,6 +642,7 @@ export const awaitAllPage: <E, R>(
       withCache(Effect.all({ ids: Streaming.declared, seed: Streaming.settledPatches })),
       (read) => [read.ids, read.seed],
       bindings,
+      limit,
     );
     const root = element("#root");
     yield* Scope.provide(draw(drawing, cache, root, watched), scope);
@@ -622,7 +658,12 @@ export const awaitAllPage: <E, R>(
       const settledSetups = setups === 0;
       // The catch-up draws, then the tree is read at once: a branch switch
       // it ran has taken its fallback away by now.
-      const { ids, seed } = yield* records;
+      const drawn = yield* records;
+      const { ids, seed } = drawn.records;
+      if (!drawn.agreed) {
+        // The limit ended the reads: write the last pass as it is.
+        return awaited(document, root, stamp(seed, builtAt), false);
+      }
       const open = seed.length < ids.length;
       if (settledSetups && setups === 0 && !open && !root.children.some(waitsForData)) {
         return awaited(document, root, stamp(seed, builtAt), true);
@@ -636,7 +677,7 @@ export const awaitAllPage: <E, R>(
       }
       waiting = yield* Effect.raceAll(wakes);
     }
-    const { seed } = yield* records;
+    const { seed } = (yield* records).records;
     return awaited(document, root, stamp(seed, builtAt), false);
   }).pipe(
     Scope.provide(scope),
@@ -650,15 +691,19 @@ export const awaitAllPage: <E, R>(
  * settled by then (the `SSR` mode of a routed tree). The drawing decides
  * what settles first: a routed `SSR` tree resolves its declared data before
  * its views draw. A query still open writes no seed; its boundary shows the
- * fallback on both sides, and the client reads it. Internal: see `Drawing`.
+ * fallback on both sides, and the client reads it. `options.closeWhen`
+ * ends the reads that bring the drawing to the seed's instant (see
+ * `readDrawn`). Internal: see `Drawing`.
  */
 export const renderSeeded: <E, R>(
   drawing: Drawing<E, R>,
   document: Document,
+  options: Streaming.ShellOptions,
   cacheOf: CacheSource,
 ) => Effect.Effect<string, E, Drawn<R>> = Effect.fn("Html.renderSeeded")(function* <E, R>(
   drawing: Drawing<E, R>,
   document: Document,
+  options: Streaming.ShellOptions,
   cacheOf: CacheSource,
 ) {
   const scope = yield* Scope.make();
@@ -672,12 +717,14 @@ export const renderSeeded: <E, R>(
       root,
       makeHost(() => {}, Option.none(), Option.some(bindings)),
     );
-    const seed = yield* readDrawn(
+    const limit = yield* limitOf(options.closeWhen);
+    const { records } = yield* readDrawn(
       Effect.provideService(Streaming.settledPatches, QueryCache, cache),
       (read) => read,
       bindings,
+      limit,
     );
-    return page(document, root, seed);
+    return page(document, root, records);
   }).pipe(
     Scope.provide(scope),
     Effect.onExit((exit) => Scope.close(scope, exit)),

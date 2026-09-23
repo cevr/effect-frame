@@ -8,6 +8,7 @@
     "build": "bun run build:client && bun run prerender",
     "build:client": "bun build --conditions=source src/client.tsx --target browser --format esm --outdir dist",
     "test": "bun test --conditions=source tests/",
+    "test:deploy": "bun test --conditions=source ./tests/deploy-build.deploy.ts",
     "dev": "bun run --conditions=source src/server.ts",
     "prerender": "bun run --conditions=source src/prerender.server.ts",
     "start": "bun run build && bun run --conditions=source src/server.ts"

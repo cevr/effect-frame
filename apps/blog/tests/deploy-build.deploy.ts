@@ -11,7 +11,9 @@ import { builtPage, generationOf, published, readText, workspace } from "./fixtu
  * The deploy build (#38): the app's `build` script compiles the client and
  * then prerenders every page. The gate never runs it; it runs `build:client`
  * only, because the gate does not read content (#23 §2.1). This runs the
- * real script, as a process, over a posts directory of its own.
+ * real script, as a process, over a posts directory of its own. Its file
+ * name is not a test name, so `bun test tests/` skips it: `bun run
+ * test:deploy` runs it, and CI runs that as a step of its own.
  */
 
 const platform = it.scopedLive.layer(BunServices.layer);

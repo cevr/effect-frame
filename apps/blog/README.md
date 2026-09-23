@@ -21,31 +21,31 @@ Open <http://127.0.0.1:3000/posts>. Every post link is a built file. Delete one 
 
 ## What each file does
 
-| File                         | Role                                                                                                                    |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `posts/*.md`                 | The posts. Front matter holds `title`, `date` and `draft`. A draft is never listed and never built.                     |
-| `src/contract.ts`            | The `Reactions` actor: one per post, keyed by slug. A heart carries a generated id.                                     |
-| `src/behavior.ts`            | The reducer. The server hosts it, and the island predicts a heart it minted.                                            |
-| `src/queries.ts`             | `PostIndex`, `PostBody` (public) and `Draft` (the `editor` policy, which refuses `Anonymous`).                          |
-| `src/segments.ts`            | The chrome, the index and the post segment, and the data each declares.                                                 |
-| `src/routes.tsx`             | The one tree, `Route.prerender("blog", ...)`, and the post inputs: `runQuery(PostIndex)`, the same key the index reads. |
-| `src/page.tsx`               | The post page and its island.                                                                                           |
-| `src/views.tsx`              | The chrome, the index and the not-found page.                                                                           |
-| `src/app.ts`                 | Hydrate the tree over a built or rendered document, then let the baked values be read again.                            |
-| `src/document.ts`            | The document around every page. The build and the server add the one module tag.                                        |
-| `src/client.tsx`             | The browser entry.                                                                                                      |
-| `src/posts.server.ts`        | The post files, and the three query handlers. A server module.                                                          |
-| `src/policies.server.ts`     | `public` and `editor`. A server module.                                                                                 |
-| `src/reactions.server.ts`    | The host: the actor and the queries over one post directory. A server module.                                           |
-| `src/prerender.server.ts`    | The build: `Prerender.build` over the host, the client bundle, and the command that exits non-zero on failure.          |
-| `src/server.ts`              | The platform boundary: `Bun.serve`, the built pages before the router, and the actor transport.                         |
-| `tests/build.test.ts`        | Paths, links, one read, the definition-time refusal, `PrerenderUnauthorized`, rebuilds, an aborted build.               |
-| `tests/document.test.tsx`    | A built page: one seed stamped `builtAt`, a stale paint, one confirming read.                                           |
-| `tests/island.test.tsx`      | The hearts resume from the baked revision; the form with no script posts one heart.                                     |
-| `tests/browser.test.ts`      | In real Chrome and WebKit: the first scripted heart goes over the transport, the page stays, and the count moves to 1.  |
-| `tests/serve.test.ts`        | A real server on a free port: a hit is the file and the router never runs; a miss renders the same page.                |
-| `tests/deploy-build.test.ts` | The deploy build, run as a process: `bun run build` writes the published page tree.                                     |
-| `tests/boundary.test.ts`     | The browser entry reaches no server module; an injected one is refused with its import chain.                           |
+| File                           | Role                                                                                                                                  |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `posts/*.md`                   | The posts. Front matter holds `title`, `date` and `draft`. A draft is never listed and never built.                                   |
+| `src/contract.ts`              | The `Reactions` actor: one per post, keyed by slug. A heart carries a generated id.                                                   |
+| `src/behavior.ts`              | The reducer. The server hosts it, and the island predicts a heart it minted.                                                          |
+| `src/queries.ts`               | `PostIndex`, `PostBody` (public) and `Draft` (the `editor` policy, which refuses `Anonymous`).                                        |
+| `src/segments.ts`              | The chrome, the index and the post segment, and the data each declares.                                                               |
+| `src/routes.tsx`               | The one tree, `Route.prerender("blog", ...)`, and the post inputs: `runQuery(PostIndex)`, the same key the index reads.               |
+| `src/page.tsx`                 | The post page and its island.                                                                                                         |
+| `src/views.tsx`                | The chrome, the index and the not-found page.                                                                                         |
+| `src/app.ts`                   | Hydrate the tree over a built or rendered document, then let the baked values be read again.                                          |
+| `src/document.ts`              | The document around every page. The build and the server add the one module tag.                                                      |
+| `src/client.tsx`               | The browser entry.                                                                                                                    |
+| `src/posts.server.ts`          | The post files, and the three query handlers. A server module.                                                                        |
+| `src/policies.server.ts`       | `public` and `editor`. A server module.                                                                                               |
+| `src/reactions.server.ts`      | The host: the actor and the queries over one post directory. A server module.                                                         |
+| `src/prerender.server.ts`      | The build: `Prerender.build` over the host, the client bundle, and the command that exits non-zero on failure.                        |
+| `src/server.ts`                | The platform boundary: `Bun.serve`, the built pages before the router, and the actor transport.                                       |
+| `tests/build.test.ts`          | Paths, links, one read, the definition-time refusal, `PrerenderUnauthorized`, rebuilds, an aborted build.                             |
+| `tests/document.test.tsx`      | A built page: one seed stamped `builtAt`, a stale paint, one confirming read.                                                         |
+| `tests/island.test.tsx`        | The hearts resume from the baked revision; the form with no script posts one heart.                                                   |
+| `tests/browser.test.ts`        | In real Chrome and WebKit: the first scripted heart goes over the transport, the page stays, and the count moves to 1.                |
+| `tests/serve.test.ts`          | A real server on a free port: a hit is the file and the router never runs; a miss renders the same page.                              |
+| `tests/deploy-build.deploy.ts` | The deploy build, run as a process: `bun run build` writes the published page tree. `bun run test:deploy` runs it; the gate does not. |
+| `tests/boundary.test.ts`       | The browser entry reaches no server module; an injected one is refused with its import chain.                                         |
 
 ## Routes
 

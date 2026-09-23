@@ -30,8 +30,10 @@ host as `Anonymous`, writes `dist/prerender/generations/<id>/<href>/index.html`,
 generation and then `current.json`. The app's `build` script is the deploy
 build: `build:client`, then `prerender` (#38). The repository gate runs
 `turbo run build` for every other package and `build:client` for the Blog,
-so it never reads content (#23 §2.1). `tests/deploy-build.test.ts` runs
-`bun run build` as a process and reads the page tree it published. The server (`src/server.ts`) loads the published generation at
+so it never reads content (#23 §2.1). `tests/deploy-build.deploy.ts` runs
+`bun run build` as a process and reads the page tree it published. Its
+name is not a test name, so `bun run test` and the gate skip it;
+`bun run test:deploy` runs it, and CI runs that as its own step after Test. The server (`src/server.ts`) loads the published generation at
 start, holds it until it stops, and puts `Prerender.serve` in front of the router.
 
 ## Rows, tests and mutations
@@ -105,6 +107,10 @@ The two framework changes this ticket made carry their own red-on-old tests:
    off for its `build`, whose output depends on content turbo does not see.
    Counsel round 1 (B2) found the first version, where `build` bundled the
    client only, so a deploy that ran the build step published no pages.
+   Counsel round 2 found that the proof of it, a test in the default suite,
+   ran the deploy build, and so prerender, inside the gate. The proof is now
+   `tests/deploy-build.deploy.ts`, run only by `test:deploy` and the CI
+   step "Deploy build".
 6. **The output is the package's layout, not a flat tree.** #23 wrote
    `dist/prerender/<href>/index.html` with `manifest.json` written to a temp
    dir and renamed. The released build (`prerender.md` decisions 10–13)

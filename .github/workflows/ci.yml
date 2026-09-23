@@ -30,3 +30,8 @@ jobs:
 
       - name: Test
         run: bun run test
+
+      # The deploy build prerenders, which reads content; the gate and
+      # `bun run test` never run it (#23 §2.1).
+      - name: Deploy build
+        run: bun run test:deploy

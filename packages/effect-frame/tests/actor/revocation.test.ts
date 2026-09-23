@@ -237,11 +237,13 @@ describe("revocation on a live connection", () => {
   it.scoped("a session machine commits Empty at expiresAt and the watching stream ends", () =>
     Effect.gen(function* () {
       // The test clock reaches the host: the session machine's sleep is the
-      // only timer, and it moves only when the test moves the clock.
+      // only timer on it, and it moves only when the test moves the clock.
+      // The browsers keep the live clock, so a dropped connection's
+      // reconnect delay still passes.
       const served = yield* serveHost(sessionPrincipal);
       yield* signIn(served, "s1", "alice", ["acme"], 60_000);
-      const first = yield* watch(served, "s1");
-      const second = yield* watch(served, "s1");
+      const first = yield* TestClock.withLive(watch(served, "s1"));
+      const second = yield* TestClock.withLive(watch(served, "s1"));
       const signedIn = yield* sessionRevision(served, "s1");
 
       yield* TestClock.adjust("59 seconds");

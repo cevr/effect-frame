@@ -244,6 +244,9 @@ describe.skipIf(chrome === undefined)("leave checks in Chrome", () => {
     try {
       expect(await read<number>(view, "(scrollTo(0, 1200), scrollY)")).toBe(1200);
       expect(await navigate(view, "/app/t1/posts/2")).toBe("Committed /app/t1/posts/2");
+      // `Committed` resolves before the push lands, and landing scrolls to the
+      // top: scroll only once the transition is over, or landing undoes it.
+      await H.waitFor(view, "navigation.transition === null", "post 2 landed");
       expect(await read<number>(view, "(scrollTo(0, 300), scrollY)")).toBe(300);
       await read(view, "(history.back(), true)");
       await shows(view, "1");

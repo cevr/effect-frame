@@ -1,0 +1,23 @@
+{
+  "name": "@effect-frame/example-dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "bun build --conditions=source src/client.tsx --target browser --format esm --outdir dist",
+    "test": "bun test --conditions=source tests/",
+    "dev": "bun run --conditions=source src/server.ts"
+  },
+  "dependencies": {
+    "effect-frame": "workspace:*"
+  },
+  "devDependencies": {
+    "@effect-frame/toolchain-checks": "workspace:*",
+    "@happy-dom/global-registrator": "20.14.5",
+    "happy-dom": "20.14.5"
+  },
+  "peerDependencies": {
+    "effect": "catalog:"
+  }
+}

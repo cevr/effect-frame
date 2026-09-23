@@ -12,6 +12,7 @@ export const repositoryRoot = new URL("../../../", import.meta.url).pathname.rep
 
 export const browserEntries: ReadonlyArray<string> = [
   "apps/notes/src/client.tsx",
+  "apps/dashboard/src/client.tsx",
   "packages/effect-frame/src/actor/client.ts",
   "packages/effect-frame/src/frame.ts",
   "packages/effect-frame/src/view/index.ts",

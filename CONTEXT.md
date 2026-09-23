@@ -112,6 +112,10 @@ _Avoid_: Pending mutation, invalidation.
 A state a client computed itself by applying a command it has sent but that no server has committed. It carries the committed revision it was computed from rather than a revision number of its own, so it can never be mistaken for, ordered against, or resumed from a committed revision. A committed revision replaces it; it is never merged with one.
 _Avoid_: Optimistic update, local revision, pending state.
 
+**Pending log**:
+The commands a client predicted and the committed base does not hold yet, in the order this client sent them. The displayed state is the base with the log applied over it. A command leaves the log when a committed base holds it or when it is rejected; that is the whole of a rollback.
+_Avoid_: Optimistic queue, undo stack, mutation cache.
+
 **Change stream**:
 Every committed revision an actor reaches, delivered to a client as the latest state rather than as a log. A client that was absent or slow observes the newest revision and not the ones it missed, which loses nothing because a later revision's state subsumes an earlier one's. It carries state, never command identity: a client learns the fate of its own command from the command's receipt, not from the stream.
 _Avoid_: Event log, event stream, revision history.

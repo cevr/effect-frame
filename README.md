@@ -80,6 +80,41 @@ Public subpaths of `effect-frame`: `actor`, `actor/client`, `actor/testing`,
 `frame`, `inspection`, `view`, `view/testing`, `view/jsx-runtime`,
 `view/jsx-dev-runtime`, `view/opentui`, and `router`.
 
+## Optimistic commands
+
+A remote reference shows a command before the server commits it when the
+client can import the actor's behavior and that behavior has `predict`.
+`Behavior.value` and `Behavior.reducer` have it. `Behavior.machine` does not.
+
+```ts
+import { Effect, Option } from "effect";
+import { Behavior } from "effect-frame/actor";
+import { ref } from "effect-frame/actor/client";
+
+const notes = Behavior.reducer({ initial: [], reduce: addNote });
+
+const program = Effect.gen(function* () {
+  const list = yield* ref(Notes, key, { resume: Option.none(), behavior: notes });
+  const handle = yield* list.send({ _tag: "Add", text: "hello" });
+  // { revision: { _tag: "Provisional", base: 0, depth: 1 }, state }
+  const shown = yield* list.displayed.get;
+  // The committed revision only.
+  const committed = yield* list.applied.get;
+  return { handle, shown, committed };
+});
+```
+
+- `displayed` is what the reference shows. `state` is `displayed.state`.
+- `applied` stays committed. Use it for resume data.
+- Only a fresh command ID predicts. A supplied ID waits for its receipt.
+- A committed state replaces the prediction. A rejected command leaves the
+  pending log, and the rest replays over the same base. An `Uncertain`
+  command keeps its prediction until a retry settles it.
+- A query `override` shows a value as stale until any authoritative value
+  replaces it: a command reply's refresh, a `refresh`, or a new declaration.
+
+See [the optimistic send design](docs/design/optimistic.md).
+
 ## Routing
 
 `effect-frame/router` exports one route model on the `Route` namespace. A

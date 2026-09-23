@@ -666,6 +666,45 @@ describe("Query: the Dashboard shape", () => {
     }),
   );
 
+  withDashboard("an override is dropped by any authoritative value", () =>
+    Effect.gen(function* () {
+      const revenue = yield* useQuery(Revenue, acme);
+      yield* settledEntry(revenue);
+      const book = yield* ref(OrderBook, acme);
+
+      // A command reply's refresh. The cache cannot tell which command an
+      // override was for, so any refreshed value replaces it.
+      yield* revenue.override({ total: -1 });
+      const applied = yield* book.call(
+        { _tag: "PlaceOrder", sku: "override-drop", amount: 4 },
+        { commandId: id("override-drop-1"), timeout: "1 second" },
+      );
+      const total = applied.state.revenue;
+      expect(yield* revenue.state.get).toEqual({ _tag: "Ready", value: { total }, stale: false });
+
+      // An unrelated refresh.
+      yield* revenue.override({ total: -2 });
+      expect(yield* revenue.state.get).toEqual({
+        _tag: "Ready",
+        value: { total: -2 },
+        stale: true,
+      });
+      yield* revenue.refresh;
+      expect(yield* revenue.state.get).toEqual({ _tag: "Ready", value: { total }, stale: false });
+
+      // A new declaration after the last one was released reads again.
+      const screen = yield* Scope.make();
+      const topSku = yield* Scope.provide(useQuery(TopSku, acme), screen);
+      yield* settledEntry(topSku);
+      const before = yield* topSku.state.get;
+      yield* topSku.override({ sku: "guess", orders: 99 });
+      yield* Scope.close(screen, Exit.void);
+      const reopened = yield* useQuery(TopSku, acme);
+      yield* settledEntry(reopened);
+      expect(yield* reopened.state.get).toEqual(before);
+    }),
+  );
+
   withDashboard("the host refuses a query whose policy it cannot resolve", () =>
     Effect.gen(function* () {
       const refused = yield* useQuery(Unpoliced, acme);

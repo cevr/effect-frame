@@ -1,0 +1,158 @@
+# Optimistic sends
+
+This note records unit 3 of [#19](https://github.com/cevr/effect-frame/issues/19):
+provisional revisions on a remote reference. It follows the selective-receipt
+rule that [#67](https://github.com/cevr/effect-frame/issues/67) accepted.
+
+Source: `packages/effect-frame/src/actor/provisional.ts`,
+`packages/effect-frame/src/actor/ref.ts`, and
+`packages/effect-frame/src/actor/behavior.ts`.
+Proofs: `packages/effect-frame/tests/actor/optimistic.test.ts`.
+
+## Public surface
+
+```ts
+interface Behavior<State, Message, R> {
+  readonly initial: State;
+  readonly open: (state: State) => Effect<Turn<State, Message>, never, R | Scope>;
+  readonly predict?: (state: State, message: Message) => State;
+}
+
+interface RefOptions<C> {
+  readonly resume: Option<Applied<SnapshotOf<C>>>;
+  readonly behavior?: Behavior<SnapshotOf<C>, MessageOf<C>, unknown>;
+}
+
+type Displayed<State> = Applied<State> | Provisional<State>;
+
+interface ActorRef<State, Message, Kind> {
+  readonly applied: Source<Applied<State>>; // committed only
+  readonly displayed: Source<Displayed<State>>; // what the reference shows
+  readonly state: Source<State>; // displayed.state
+  // send, call, kind: unchanged
+}
+```
+
+- `Behavior.value` and `Behavior.reducer` have `predict`. It is the pure
+  function that their `apply` already runs.
+- `Behavior.machine` has no `predict`. A transition can run a task with server
+  requirements, so a client cannot run it honestly. There is no flag.
+- A remote reference predicts only when `RefOptions.behavior` has `predict`.
+  A client can pass a behavior only when it can import it, so the
+  `*.server.ts` rule (#24) decides which actors are transparent.
+- A local or durable reference never predicts. Its `displayed` is its
+  `applied`.
+
+## Who predicts
+
+A send predicts when all of these are true:
+
+1. The reference is remote and its behavior has `predict`.
+2. The framework minted the command ID. A supplied ID can already be admitted
+   or committed, so it waits for its receipt (#67, rule 3).
+3. The submission created a new command record. A join or a refusal before
+   work does not predict.
+
+## The pending log
+
+The reference keeps one log. The log holds each predicted command that the
+committed base does not hold, in send order. The displayed state is the base
+with the log applied over it by `predict`. With an empty log, the revision is
+`Committed`. Otherwise it is `Provisional{base, depth}`, and `depth` is the log
+length.
+
+A new command enters the log after the base. It cannot be in a base that the
+client read before it sent the command.
+
+### Classification
+
+A committed state `V` can come from the change stream or from a same-ID call.
+It becomes the base only when it is newer than the base and the client knows,
+for each command in the log, whether `V` holds it.
+
+- A command with its own receipt: `V` holds it when the receipt revision is at
+  or below `V`.
+- Otherwise the client uses the anchor. The anchor is the receipt with the
+  greatest admission position that this reference saw. The mailbox is serial,
+  so the anchor orders other admissions:
+  - The anchor revision is above `V`: an admission at or after the anchor's is
+    not in `V`. An earlier admission is unknown.
+  - Otherwise an admission at or before the anchor's is in `V`. At the anchor
+    revision, a later admission is not in `V`. After it, a later admission is
+    unknown.
+- A command with no known admission is unknown.
+
+When all are known, `V` becomes the base. The commands that `V` holds leave
+the log. The rest replay over `V`. When one is unknown, the display keeps its
+last value, and the reference holds the greatest such `V`. Each new piece of
+evidence (an admission, a receipt, a removal) offers the held state and every
+receipt state in the log again, newest first.
+
+### How a command leaves
+
+The log entry lives in the command record's scope. The owner runs one
+`Enlist` effect in that scope when a submission creates a record, in the same
+uninterruptible step as the insertion.
+
+- Applied: the same-ID call stores the exact receipt on the entry before the
+  record closes. The entry stays until a base holds it. So an applied command
+  can stay in the display while an older base shows (#67, rule 4).
+- Rejected: the record closes with no receipt. The entry leaves, and the rest
+  replays over the same base. A rollback is not an operation.
+- Uncertain: the record stays open, so the entry stays. The guess stays on
+  screen. A same-ID retry settles it once.
+- The reference closes: every record closes, and the log goes with the
+  reference.
+
+The display changes before the handle turns terminal. A caller that waits on
+`settled` then reads the display sees the result.
+
+## Decisions against the #19 text
+
+1. **The handle has no `provisional` field.** #19 put
+   `provisional: Option<Applied<State>>` on `Admitted` and `Uncertain`. That
+   value depends on the base, and the base changes when other commands commit.
+   A copy on each handle would need its own sync (`derive-dont-sync`). The
+   reference's `displayed` is the one place. The handle keeps the application
+   lifecycle only (#67, rule 4).
+2. **`applied` stays committed.** `Applied.revision` is a `CommittedRevision`
+   by type (unit 2). The displayed value is a new source, `displayed`, of type
+   `Displayed<State>`. A resume payload and a changes cursor still come only
+   from `applied`.
+3. **The stream never settles a command** (#29). A command settles from its
+   own same-ID call. The stream only offers committed states to the log.
+4. **The machine rule is structural at run time.** `Behavior.machine` returns
+   a `Behavior` with no `predict` property. A narrower return type broke the
+   `R` inference of `implement`, so the proof is the property check and the
+   held-send test.
+
+## Limits
+
+- A command with no known admission holds every newer committed state. A lost
+  send, or an `Uncertain` record that never saw its admission, freezes remote
+  updates on this reference until a retry or a rejection. #67 accepted this
+  cost.
+- The reference holds one greatest unclassified state and the receipt states
+  of the log. An intermediate stream state can be dropped. A later state
+  subsumes it.
+- `predict` must be total, pure, and fast. A throw is a defect in `send`.
+- A reload loses the log. The next page reads committed state.
+- Notes stays opaque. No example app passes a behavior yet.
+
+## Evidence
+
+| Proof                                                   | What the test observes                                                                                                                                                                        |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An optimistic send shows the new state in the same turn | The send is held before the host. When `send` returns, the handle is `Sent` and `displayed` is `Provisional{base: 0, depth: 1}`. The change stream is down, and the receipt alone commits it. |
+| A committed revision replaces a provisional one         | The server stamps each item. A's commit replaces its `pending` stamp while B stays provisional over base 1. No predicted field survives.                                                      |
+| A rejected command rolls back by leaving the log        | A is refused while B is held. The display becomes B alone over base 0.                                                                                                                        |
+| Provisional order converges on committed order          | A is sent first and admitted second. The view goes `[a?]`, `[a?, b?]`, `[b1, a?]`, `[b1, a2]`. The last value equals the server snapshot.                                                     |
+| A supplied command ID never predicts                    | A held send with a supplied ID leaves the display committed.                                                                                                                                  |
+| Uncertain keeps the provisional state                   | A lost call reply leaves `Uncertain{attempt: 1}` and the guess. One retry settles it: two sends, two calls, one application.                                                                  |
+| A machine behavior is never applied optimistically      | `Behavior.machine` has no `predict`. At `Sent` and at `Admitted`, the display stays committed.                                                                                                |
+
+Nine mutations were checked. Each made at least one proof fail: no log entry
+on send, a rejected entry kept, included entries kept after a new base,
+unknown membership read as excluded, a machine given an identity prediction,
+a supplied ID predicted, an `Uncertain` record that closes its scope, a
+refresh that keeps an override, and an ignored receipt.

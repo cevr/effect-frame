@@ -35,6 +35,9 @@ so it never reads content (#23 §2.1). `tests/deploy-build.deploy.ts` runs
 name is not a test name, so `bun run test` and the gate skip it;
 `bun run test:deploy` runs it, and CI runs that as its own step after Test. The server (`src/server.ts`) loads the published generation at
 start, holds it until it stops, and puts `Prerender.serve` in front of the router.
+A start that fails, such as a port already taken (`ServerNotStarted`),
+releases the lease, and `stop` releases it however the stop ends (counsel
+round 2).
 
 ## Rows, tests and mutations
 

@@ -4,7 +4,7 @@ registerDom();
 
 import * as Prerender from "effect-frame/router/prerender";
 import { BunServices } from "@effect/platform-bun";
-import { Effect, FileSystem, Layer, Tracer } from "effect";
+import { Effect, Exit, FileSystem, Layer, Tracer } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import {
   buildInto,
@@ -18,6 +18,7 @@ import {
   withoutMinted,
   workspace,
 } from "./fixture.js";
+import { makeRuntime, makeServer } from "../src/server.js";
 
 /**
  * The built tree is a cache over SSR (#23 §5), on a real Bun server: a
@@ -149,6 +150,37 @@ describe("serving the built Blog over SSR (#23 §5)", () => {
         const bundle = yield* fetchPage(`${server.url}/client.js`);
         expect(bundle.status).toBe(200);
         expect(bundle.text.length).toBeGreaterThan(1_000);
+      }),
+    20_000,
+  );
+
+  platform(
+    "a start on a port already taken fails and leaves no lease behind",
+    () =>
+      Effect.gen(function* () {
+        const site = yield* workspace();
+        const store = yield* storeOf(site.posts);
+        yield* buildInto(store, site.out);
+        // Another listener holds a free port first.
+        const taken = yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            // oxlint-disable-next-line effect/noGlobals -- the occupied port is the platform fact under test.
+            Bun.serve({ port: 0, fetch: () => new Response("taken") }),
+          ),
+          (other) => Effect.promise(() => other.stop(true)),
+        );
+        const port = taken.port ?? 0;
+        expect(port).toBeGreaterThan(0);
+        expect(reservedPorts).not.toContain(port);
+        const runtime = makeRuntime(Layer.succeedContext(store));
+        const started = yield* Effect.exit(
+          Effect.tryPromise(() => makeServer({ port, runtime, out: site.out })),
+        );
+        yield* Effect.promise(() => runtime.dispose());
+        expect(Exit.isFailure(started)).toBe(true);
+        // The generation it loaded is not held: the failed start released it.
+        const fs = yield* FileSystem.FileSystem;
+        expect(yield* Effect.orDie(fs.readDirectory(`${site.out}/leases`))).toEqual([]);
       }),
     20_000,
   );

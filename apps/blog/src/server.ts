@@ -96,6 +96,16 @@ const drawAgain = (path: string) =>
     }),
   );
 
+/** The server could not start listening, for example on a port already taken. */
+export class ServerNotStarted extends Schema.TaggedError<ServerNotStarted>()("ServerNotStarted", {
+  port: Schema.Finite,
+  reason: Schema.String,
+}) {
+  override get message(): string {
+    return `the blog could not listen on port ${String(this.port)}: ${this.reason}`;
+  }
+}
+
 export interface ServerOptions {
   readonly port: number;
   readonly runtime: BlogRuntime;
@@ -137,18 +147,9 @@ export const makeServer = async (options: ServerOptions): Promise<RunningServer>
     }
     return Effect.provideContext(answerPage(request), context);
   };
-  // The loaded generation is held for as long as the server runs: a rebuild
-  // meanwhile does not remove its files. `stop` releases it.
-  const held = await runtime.runPromise(Scope.make());
-  const loaded = await runtime.runPromise(
-    Scope.provide(Effect.orDie(Prerender.load(options.out)), held),
-  );
-  const pages = await runtime.runPromise(Prerender.serve(loaded, router));
-
-  // oxlint-disable-next-line effect/noGlobals -- Bun.serve is the platform boundary.
-  const server = Bun.serve({
-    port: options.port,
-    fetch: (request: Request): Response | Promise<Response> => {
+  const fetch =
+    (pages: Prerender.WebHandler): ((request: Request) => Response | Promise<Response>) =>
+    (request) => {
       const url = new URL(request.url);
       if (url.pathname === `${actorPrefix}${Wire.paths.form}`) {
         return runtime.runPromise(forms(request));
@@ -159,17 +160,31 @@ export const makeServer = async (options: ServerOptions): Promise<RunningServer>
         return runtime.runPromise(actors(new Request(stripped, request)));
       }
       return runtime.runPromise(pages(request));
-    },
-  });
+    };
+  // The loaded generation is held for as long as the server runs: a rebuild
+  // meanwhile does not remove its files. A start that fails, such as a port
+  // already taken, releases it; so does `stop`, however the stop ends.
+  const held = await runtime.runPromise(Scope.make());
+  const server = await runtime.runPromise(
+    Effect.gen(function* () {
+      const loaded = yield* Scope.provide(Effect.orDie(Prerender.load(options.out)), held);
+      const pages = yield* Prerender.serve(loaded, router);
+      return yield* Effect.try({
+        // oxlint-disable-next-line effect/noGlobals -- Bun.serve is the platform boundary.
+        try: () => Bun.serve({ port: options.port, fetch: fetch(pages) }),
+        catch: (cause) => ServerNotStarted.make({ port: options.port, reason: String(cause) }),
+      });
+    }).pipe(Effect.onError(() => Scope.close(held, Exit.void))),
+  );
 
   const bound = Option.getOrElse(Option.fromNullishOr(server.port), () => options.port);
   return {
     url: `http://127.0.0.1:${String(bound)}`,
     port: bound,
-    stop: async (): Promise<void> => {
-      await server.stop(true);
-      await runtime.runPromise(Scope.close(held, Exit.void));
-    },
+    stop: (): Promise<void> =>
+      runtime.runPromise(
+        Effect.promise(() => server.stop(true)).pipe(Effect.ensuring(Scope.close(held, Exit.void))),
+      ),
   };
 };
 

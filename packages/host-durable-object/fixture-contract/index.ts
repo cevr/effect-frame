@@ -10,13 +10,16 @@ import {
 } from "effect-frame/actor";
 import { contract } from "effect-frame/actor/client";
 import { defineFrameHost } from "../src/frame-host.js";
+import type { DurableObjectNamespace } from "../src/route.js";
+import { route } from "../src/route.js";
 
 /**
  * The generic-host proof fixture.
  *
- * The worker routes `/actors/:contract/:version/:key/<verb>` to one Durable
- * Object per address and rewrites the inner URL to the generic wire path, so
- * the object serves exactly what `HttpTransport` sends. Nothing in the object
+ * The worker is the package's `route`: it sends
+ * `/actors/:contract/:version/:key/<verb>` to one Durable Object per address
+ * and rewrites the inner URL to the generic wire path, so the object serves
+ * exactly what `HttpTransport` sends. Nothing in the object
  * knows about these two contracts: the class takes them as implementations.
  *
  * Two contracts prove two different things. `Counter` proves that committed
@@ -118,43 +121,10 @@ export const FrameHost = defineFrameHost({
   pollInterval: Option.some("20 millis"),
 });
 
-interface HostNamespace {
-  readonly idFromName: (name: string) => unknown;
-  readonly get: (id: unknown) => { readonly fetch: (request: Request) => Promise<Response> };
-}
-
 interface Env {
-  readonly HOST: HostNamespace;
+  readonly HOST: DurableObjectNamespace<unknown>;
 }
-
-const notFound = (path: string): Response =>
-  Response.json({ error: "NotFound", path }, { status: 404 });
-
-/** The generic wire verbs this worker forwards. */
-const verbs = new Set(["send", "call", "snapshot", "changes"]);
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
-    const parts = url.pathname.split("/").filter((part) => part.length > 0);
-    // /actors/:contract/:version/:key/:verb
-    if (parts.length !== 5 || parts[0] !== "actors") {
-      return notFound(url.pathname);
-    }
-    const [, name, version, key, verb] = parts;
-    if (
-      name === undefined ||
-      version === undefined ||
-      key === undefined ||
-      verb === undefined ||
-      !verbs.has(verb)
-    ) {
-      return notFound(url.pathname);
-    }
-    const inner = new Request(new URL(`/${verb}${url.search}`, url.origin), request);
-    // The key segment is the JSON-encoded key the client put in the address,
-    // percent-escaped for the path. One address names one object.
-    const objectName = `${name}@${version}/${decodeURIComponent(key)}`;
-    return await env.HOST.get(env.HOST.idFromName(objectName)).fetch(inner);
-  },
+  fetch: (request: Request, env: Env): Promise<Response> => route(env.HOST)(request),
 };

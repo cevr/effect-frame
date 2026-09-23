@@ -1,7 +1,7 @@
 import { Effect, Exit, Layer, ManagedRuntime, Option, Scope } from "effect";
 import { DurableHostConfig } from "effect-frame/actor";
 import type { HostedActor, Reply } from "./frame-actor.js";
-import { emptyBody, handle, host, readBody, route } from "./frame-actor.js";
+import { emptyBody, handle, host, readBody, toCommand } from "./frame-actor.js";
 import type { DurableStorage } from "./storage.js";
 
 /**
@@ -42,7 +42,7 @@ const serve = Effect.fn("FrameActor.serve")(function* (
   source: unknown,
 ) {
   const body = yield* Effect.orElseSucceed(readBody(source), () => emptyBody);
-  return yield* handle(actor, route(path, body));
+  return yield* handle(actor, toCommand(path, body));
 });
 
 const failureReply = (cause: unknown): Reply => ({

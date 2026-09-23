@@ -216,7 +216,7 @@ export const emptyBody: RequestBody = {};
 
 /**
  * Parses the request body. A body this fixture cannot read stands for an
- * empty one, so a malformed request reaches `route` and returns a 4xx reply
+ * empty one, so a malformed request reaches `toCommand` and returns a 4xx reply
  * instead of a defect. The caller passes what the HTTP boundary decoded.
  */
 export const readBody = decodeRequestBody;
@@ -241,7 +241,7 @@ const commandIdOf = (body: RequestBody): CommandId =>
   Option.getOrElse(Option.fromNullishOr(body.commandId), () => decodeCommandId("anonymous"));
 
 /** Turns a path and a decoded body into the command the handler runs. */
-export const route = (path: string, body: RequestBody): Command => {
+export const toCommand = (path: string, body: RequestBody): Command => {
   const amount = amountOf(body);
   const message = Option.match(delayOfBody(body), {
     onNone: () => Add.make({ amount }),

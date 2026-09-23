@@ -150,6 +150,12 @@
       }
     },
     {
+      "files": ["packages/host-durable-object/src/route.ts"],
+      "rules": {
+        "effect/noNewPromise": "off"
+      }
+    },
+    {
       "files": ["packages/host-durable-object/src/interop.ts"],
       "rules": {
         "effect/noAsyncFunction": "off",

@@ -15,12 +15,13 @@ export {
   handle,
   host,
   readBody,
-  route,
+  toCommand,
   type Command,
   type HostedActor,
   type Reply,
 } from "./frame-actor.js";
 export { FrameActor, type DurableObjectContext } from "./durable-object.js";
+export { route, type DurableObjectNamespace, type DurableObjectStub } from "./route.js";
 export {
   defineFrameHost,
   type FrameHostClass,

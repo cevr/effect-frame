@@ -1,5 +1,21 @@
 # effect-frame
 
+## 0.19.0
+
+### Minor Changes
+
+- [`e3837e6`](https://github.com/cevr/effect-frame/commit/e3837e6361676500e1a5278f5444cdb2c007f87f) - A plain form redrawn after a lost reply keeps its command id until the command settles ([#21](https://github.com/cevr/effect-frame/issues/21), [#29](https://github.com/cevr/effect-frame/issues/29)).
+
+  - The 504 redraw draws a new framework field, `$uncertain`, into the form. When a post that carries it does not decode (for example, a required redacted field was not typed again), the route answers 200 with the issues and keeps the same `$command` and `$uncertain`. Before, it minted a fresh id, so the corrected post could apply the message a second time. A post without the marker still gets a fresh id.
+  - The route now decodes and encodes each plain post twice. When the two payloads differ, it answers 500, logs the contract name, and sends nothing. A form message codec must be repeatable: mint a value that needs entropy or a clock at render with `Generated`, never at decode.
+  - The hydrated `View.form` binding spends an id when it sends, not when the form fails to decode. A submit that does not decode sends nothing, and the next submit still carries the adopted id. Choosing the id, decoding, and spending it run under one permit per form, so two submits in flight never share an id: the second mints its own.
+
+  **Breaking:** `FormIssues` has a required `outcome: "Refused" | "Uncertain"` (`Form.FormOutcome`), and `Form.IssuesJson` carries it. Code that builds a `FormIssues` by hand must set it. `Form.frameworkFields` has `uncertain: "$uncertain"`.
+
+### Patch Changes
+
+- [`e3837e6`](https://github.com/cevr/effect-frame/commit/e3837e6361676500e1a5278f5444cdb2c007f87f) - A mailbox store no longer takes a different payload under a used command ID for a `Duplicate` when the two payload hashes are equal. `MailboxStore.layerMemory` compares the stored payload text once the hashes match, and answers `CommandConflict` when the text differs. `Hash.string` gives `{"title":"00008t"}` and `{"title":"0000fj"}` one hash, so before this fix a second message under one ID could be read as a retry of the first. The store conformance suite has a new case, "a new payload with an equal hash under a used ID fails with CommandConflict". A custom `MailboxStore` must compare the payload text too.
+
 ## 0.18.0
 
 ### Minor Changes

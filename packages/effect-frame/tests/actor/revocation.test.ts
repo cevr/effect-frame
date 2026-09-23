@@ -174,6 +174,23 @@ const watch = (served: Served, cookie: string) =>
 const endedWith = (watcher: Watcher) =>
   Effect.map(Fiber.join(watcher.ended), (error) => error._tag);
 
+/**
+ * Moves the test clock one second at a time until `done` holds, and
+ * answers how many seconds that took. Dies past `limit` seconds.
+ */
+const stepUntil = <E>(done: Effect.Effect<boolean, E>, limit: number): Effect.Effect<number, E> =>
+  Effect.gen(function* () {
+    for (let seconds = 0; seconds <= limit; seconds += 1) {
+      // The commit runs on its own fiber after the move: give it live time.
+      yield* TestClock.withLive(Effect.sleep("5 millis"));
+      if (yield* done) {
+        return seconds;
+      }
+      yield* TestClock.adjust("1 second");
+    }
+    return yield* Effect.die(`not done after ${String(limit)} test-clock seconds`);
+  });
+
 /** True while the watcher's stream is still open. */
 const isOpen = (watcher: Watcher) =>
   Effect.sync(() => Option.isNone(Option.fromNullishOr(watcher.ended.pollUnsafe())));
@@ -251,7 +268,17 @@ describe("revocation on a live connection", () => {
       expect(yield* isOpen(first)).toBe(true);
       expect(yield* isOpen(second)).toBe(true);
 
+      // The machine's timer reads the clock, then registers its sleep one
+      // step later. A move that lands between the two registers the sleep
+      // past the move, so it wakes late; it never wakes early (the 59-second
+      // check above). Step the clock until the session commits, within the
+      // time the test already moved it (59 + 1 seconds) and the steps taken
+      // while the sleep was not yet registered.
       yield* TestClock.adjust("1 second");
+      yield* stepUntil(
+        Effect.map(sessionRevision(served, "s1"), (revision) => revision > signedIn),
+        120,
+      );
       expect(yield* endedWith(first)).toBe("Unauthorized");
       expect(yield* endedWith(second)).toBe("Unauthorized");
       // One revision, Empty, committed by the session's own machine.

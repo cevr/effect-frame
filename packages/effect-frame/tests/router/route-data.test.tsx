@@ -282,6 +282,47 @@ describe("declared data on the server (#18 §3.3)", () => {
     }),
   );
 
+  const settledModes: ReadonlyArray<{
+    readonly label: string;
+    readonly make: typeof Route.ssr;
+  }> = [
+    { label: "SSR", make: Route.ssr },
+    { label: "AwaitAll", make: Route.awaitAll },
+  ];
+  for (const { label, make } of settledModes) {
+    it.scopedLive(
+      `an ${label} layout that puts its outlet in Loading draws the leaf, and the client claims it`,
+      () =>
+        Effect.gen(function* () {
+          // The first frame holds the outlet's first instance, as it holds the
+          // root: the leaf's reads register with the layout's Loading while
+          // that Loading sets up. The data is settled, so both sides draw the
+          // leaf, and the client claims the server's nodes.
+          const serverControl = makeControl({ "tenant-t1": "Acme", "post-1": "Hello" });
+          const server = yield* sideOf(serverControl);
+          const app = make(`loading-outlet-${label}`, streamBranch);
+          const html = yield* htmlIn(server, [app]);
+
+          expect(html).toContain('<!--frame-boundary:content--><article id="post"');
+          expect(html).not.toContain('<p id="wait">wait</p>');
+
+          const clientControl = makeControl({});
+          const client = yield* sideOf(clientControl);
+          const location = yield* locationAt(postUrl.href);
+          yield* install(html);
+          const { report } = yield* hydrateWith(client, (host, root) =>
+            mountRouter({ routes: [app], notFound: NotFound, host, root }).pipe(
+              Effect.provideService(Location, location),
+            ),
+          );
+          expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
+          expect(textOf("#post")).toBe("Acme: Hello");
+          expect(clientControl.calls).toEqual([]);
+        }),
+      10_000,
+    );
+  }
+
   it.scopedLive(
     "an SSR render whose declared data has not settled at the time limit times out, and releases its reads",
     () =>
@@ -341,8 +382,10 @@ describe("declared data on the server (#18 §3.3)", () => {
         );
         yield* resumed.closed;
         yield* render;
-        // The client claims the server's fallback, then draws the patched values in its place.
-        expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
+        // The whole stream is in the document before hydration, so every patch
+        // arrived ahead of it: the client's first frame draws the patched
+        // values, and replaces the server's fallback with them (#22).
+        expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 1 });
         yield* eventually("the patched post", () => textOf("#post") === "Acme: Hello");
         expect(clientControl.calls).toEqual([]);
       }),

@@ -184,6 +184,26 @@ Other`; the render does not follow it, and the browser's next request
     same pipeline. The build calls `settleAndPrepare`, the settle and
     prepare half of `renderDocument`, once per input. See
     [prerender.md](prerender.md).
+15. **The first frame holds the outlet's first instance (#37).** The
+    outlet was a keyed list of at most one instance, and a list row sets
+    up after the frame. So a layout that yields its outlet inside
+    `Loading`, the pattern in [nested-transition.md](nested-transition.md),
+    drew that `Loading`'s fallback in an `SSR` document although the data
+    had settled, and an `AwaitAll` document drew the content that the
+    client's first frame then threw away (`resolvedAhead` 1). The Notes
+    example found it. Now the outlet sets up the instance it holds when the
+    layout yields it, inside the layout's setup, as the tree already did
+    for its root, and that instance's row takes the node. Its `ready` reads
+    register while the `Loading` sets up, so a settled branch draws its
+    content on the first frame on both sides. Each setup still runs in the
+    instance's own view Scope. An instance that presents `pending` is left
+    to its row, so its timing still starts when the parent is drawn (route
+    pending, 10a and 10b). A streamed document whose patches all arrived
+    before hydration now draws the patched content on the client's first
+    frame, and the report counts one `resolvedAhead`, as #22 specifies.
+    Mutants: setting the held instance up in its row again makes both new
+    tests red (killed); holding an instance that presents `pending` too
+    makes route pending 10a and 10b red (killed).
 
 ## Evidence
 
@@ -198,6 +218,7 @@ All tests are in `packages/effect-frame/tests/router/`.
 | A layout wraps its child at the outlet                                               | `route-data.test.tsx` — "a layout's view wraps its child's at the outlet"                                                                                                                                                                                                                                                 |
 | SSR resolves declared data before render                                             | `route-data.test.tsx` — "an SSR render resolves the branch's declared data before render, and the client hydrates with no read"                                                                                                                                                                                           |
 | Streamed, AwaitAll, ClientOnly                                                       | `route-data.test.tsx` — one test per mode                                                                                                                                                                                                                                                                                 |
+| A settled outlet inside `Loading` draws its content on the first frame               | `route-data.test.tsx` — "an SSR layout that puts its outlet in Loading draws the leaf, and the client claims it", "an AwaitAll layout that puts its outlet in Loading draws the leaf, and the client claims it"; both red before decision 15                                                                              |
 | Not-found is 404, and a route named not-found is not it                              | `route-data.test.tsx` — "a URL no route matches renders not-found as SSR, with status 404", "a user route named not-found is that route, not the fallback"                                                                                                                                                                |
 | The request settles first; a redirect is the answer                                  | `route-data.test.tsx` — "an SSR route that redirects to a ClientOnly route answers Redirect, and draws nothing", "a ClientOnly route runs its checks on the server, and a redirect is the answer"                                                                                                                         |
 | One cache per request: a query read once and written once, released with the request | `route-data.test.tsx` — "a query the check and the page both read is read once and written once: SSR / AwaitAll / Streamed", "closing the request Scope releases the request cache and stops its reads"                                                                                                                   |

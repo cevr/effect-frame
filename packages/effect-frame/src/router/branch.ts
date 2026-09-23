@@ -712,6 +712,11 @@ interface Instance<R> {
   readonly branch: BranchIdentity;
   /** The view's setup, owned by this instance's view Scope. */
   readonly setup: Effect.Effect<Node, never, R>;
+  /**
+   * Its setup presents a `pending` fallback, timed from when the setup
+   * starts. The outlet then starts it in its row, when the parent is drawn.
+   */
+  readonly presents: boolean;
   /** Close descendants, the view, and the bindings, in that order. */
   readonly close: Effect.Effect<void>;
   /** Release this instance's and its descendants' declaration interests. */
@@ -1411,12 +1416,46 @@ interface Internals<Params, Search, ChildR> extends Slot<ChildR> {
   failed: boolean;
 }
 
-/** The outlet's setup: a keyed list of at most one instance. */
-const slotSetup = <R>(slot: Slot<R>): Effect.Effect<Node, never, Exclude<R, Scope.Scope>> =>
-  View.list({
-    each: { get: SubscriptionRef.get(slot.outlet), changes: SubscriptionRef.changes(slot.outlet) },
-    keyBy: (instance) => instance.key,
-    row: (item) => Effect.flatMap(item.get, (instance) => instance.setup),
+/**
+ * The outlet's setup: a keyed list of at most one instance.
+ *
+ * The instance the outlet holds when the layout yields it is set up here,
+ * in the layout's setup, and its row takes that node. So the first frame
+ * holds it, as it holds the root: its `ready` reads register with a
+ * `Loading` around the outlet while that `Loading` sets up, and a settled
+ * branch draws its content on the first frame, on the server and in
+ * hydration alike. A list row sets up after the frame, so the `Loading`
+ * would show its fallback first. A later instance comes through the list,
+ * and so does one that presents `pending`: its timing starts when the
+ * parent is drawn, not when the parent's setup yields the outlet. Each
+ * setup runs in the instance's own view Scope, wherever it is yielded.
+ */
+const slotSetup = <R>(slot: Slot<R>): Effect.Effect<Node, never, R> =>
+  Effect.gen(function* () {
+    const held = new Map<string, Node>();
+    for (const instance of yield* SubscriptionRef.get(slot.outlet)) {
+      if (!instance.presents) {
+        held.set(instance.key, yield* instance.setup);
+      }
+    }
+    return yield* View.list({
+      each: {
+        get: SubscriptionRef.get(slot.outlet),
+        changes: SubscriptionRef.changes(slot.outlet),
+      },
+      keyBy: (instance) => instance.key,
+      row: (item) =>
+        Effect.flatMap(item.get, (instance) =>
+          Option.match(Option.fromNullishOr(held.get(instance.key)), {
+            onNone: () => instance.setup,
+            onSome: (node) => {
+              // Taken once: the same key again is a new row, set up again.
+              held.delete(instance.key);
+              return Effect.succeed(node);
+            },
+          }),
+        ),
+    });
   });
 
 /**
@@ -1659,6 +1698,7 @@ const failedEntering = <R>(
         ),
         scope,
       ),
+      presents: false,
       close: Scope.close(scope, Exit.void),
       release: Effect.void,
       values: Effect.succeed(values),
@@ -2032,6 +2072,7 @@ const makeBranch = <
         ),
         viewScope,
       ),
+      presents: Option.isSome(boundary.pending) && presentable,
       close: Scope.close(scope, Exit.void),
       release,
       values: Effect.map(SubscriptionRef.get(state), (current) => current.values),

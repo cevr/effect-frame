@@ -249,6 +249,12 @@ export class RecordsUnsettled extends Schema.TaggedError<RecordsUnsettled>()(
  * query moved between the catch-up and the second read, and nothing proves
  * the drawing shows what the records carry: the read fails with
  * `RecordsUnsettled`, and no document is written (review round 2).
+ *
+ * The read starts on a turn of its own. The drawing wakes the render from
+ * inside its reactive update: a boundary that switches, a row whose setup
+ * ends. A wake resumes the render at once, so without the yield it would
+ * read the drawing half updated, where a catch-up can neither write nor
+ * flush, and write a page whose bound text shows an old value.
  */
 const readDrawn = <A, E, R>(
   read: Effect.Effect<A, E, R>,
@@ -257,6 +263,7 @@ const readDrawn = <A, E, R>(
   limit: Deferred.Deferred<void>,
 ): Effect.Effect<A, E | RecordsUnsettled, R> =>
   Effect.gen(function* () {
+    yield* Effect.yieldNow;
     let before = yield* read;
     yield* bindings.catchUp;
     let after = yield* read;

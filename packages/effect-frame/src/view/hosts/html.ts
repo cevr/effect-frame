@@ -392,6 +392,7 @@ export const jsonScript = (id: string, json: string): string =>
 
 const encodeRecord = Schema.encodeSync(Streaming.RecordJson);
 const encodeSeed = Schema.encodeSync(Streaming.SeedJson);
+const encodeActorSeed = Schema.encodeSync(Streaming.ActorSeedJson);
 
 /**
  * One record of a streamed document, as the script the client reads. It is
@@ -536,7 +537,7 @@ export const streamPrepared = <E, R>(
         QueryCache,
         cache,
       ),
-      (read) => [read.placeholders, read.settled],
+      (read) => [read.placeholders, read.actors, read.settled],
       bindings,
       limit,
     );
@@ -546,6 +547,7 @@ export const streamPrepared = <E, R>(
       shell,
       document.tail,
       `<div id="${Streaming.containerId}" hidden>`,
+      ...records.actors.map(streamRecord),
       ...records.placeholders.map(streamRecord),
       ...records.settled.map(streamRecord),
       document.bootstrap,
@@ -659,8 +661,14 @@ export const awaitAllPage: <E, R>(
       );
       // The declarations and the seed, with the drawing at the same instant.
       const records = readDrawn(
-        withCache(Effect.all({ ids: Streaming.declared, seed: Streaming.settledPatches })),
-        (read) => [read.ids, read.seed],
+        withCache(
+          Effect.all({
+            ids: Streaming.declared,
+            seed: Streaming.settledPatches,
+            actors: Streaming.actorSeeds,
+          }),
+        ),
+        (read) => [read.ids, read.seed, read.actors],
         bindings,
         limit,
       );
@@ -678,10 +686,10 @@ export const awaitAllPage: <E, R>(
         const settledSetups = setups === 0;
         // The catch-up draws, then the tree is read at once: a branch switch
         // it ran has taken its fallback away by now.
-        const { ids, seed } = yield* records;
+        const { ids, seed, actors } = yield* records;
         const open = seed.length < ids.length;
         if (settledSetups && setups === 0 && !open && !root.children.some(waitsForData)) {
-          return awaited(document, root, stamp(seed, builtAt), true);
+          return awaited(document, root, stamp(seed, builtAt), actors, true);
         }
         const wakes: Array<Effect.Effect<boolean>> = [
           Effect.as(Deferred.await(signal), true),
@@ -692,8 +700,8 @@ export const awaitAllPage: <E, R>(
         }
         waiting = yield* Effect.raceAll(wakes);
       }
-      const { seed } = yield* records;
-      return awaited(document, root, stamp(seed, builtAt), false);
+      const { seed, actors } = yield* records;
+      return awaited(document, root, stamp(seed, builtAt), actors, false);
     }).pipe(
       Scope.provide(scope),
       Effect.onExit((exit) => Scope.close(scope, exit)),
@@ -736,12 +744,16 @@ export const renderSeeded: <E, R>(
       );
       const limit = yield* limitOf(options.closeWhen);
       const records = yield* readDrawn(
-        Effect.provideService(Streaming.settledPatches, QueryCache, cache),
-        (read) => read,
+        Effect.provideService(
+          Effect.all({ seed: Streaming.settledPatches, actors: Streaming.actorSeeds }),
+          QueryCache,
+          cache,
+        ),
+        (read) => [read.seed, read.actors],
         bindings,
         limit,
       );
-      return page(document, root, records);
+      return page(document, root, records.seed, records.actors);
     }).pipe(
       Scope.provide(scope),
       Effect.onExit((exit) => Scope.close(scope, exit)),
@@ -753,11 +765,13 @@ const page = (
   document: Document,
   root: HtmlElement,
   seed: ReadonlyArray<Streaming.Patch>,
+  actors: ReadonlyArray<Streaming.ActorSeed>,
 ): string =>
   [
     document.head,
     serializeChildren(root.children),
     document.tail,
+    actorSeedScript(actors),
     seedScript(seed),
     document.bootstrap,
     document.end,
@@ -767,8 +781,9 @@ const awaited = (
   document: Document,
   root: HtmlElement,
   seed: ReadonlyArray<Streaming.Patch>,
+  actors: ReadonlyArray<Streaming.ActorSeed>,
   complete: boolean,
-): AwaitedPage => ({ html: page(document, root, seed), seed, complete });
+): AwaitedPage => ({ html: page(document, root, seed, actors), seed, complete });
 
 /** Mark every patch as read at build time. None: an ordinary request. */
 const stamp = (
@@ -785,4 +800,11 @@ const seedScript = (seed: ReadonlyArray<Streaming.Patch>): string => {
     return "";
   }
   return jsonScript(Streaming.seedId, encodeSeed(seed));
+};
+
+const actorSeedScript = (actors: ReadonlyArray<Streaming.ActorSeed>): string => {
+  if (actors.length === 0) {
+    return "";
+  }
+  return jsonScript(Streaming.actorSeedId, encodeActorSeed(actors));
 };

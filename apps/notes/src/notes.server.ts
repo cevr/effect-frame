@@ -5,7 +5,7 @@ import { Layer } from "effect";
 import { notesBehavior } from "./behavior.js";
 import { Notes } from "./contract.js";
 import { policies } from "./policies.server.js";
-import { ListCountsLive, ListIndexLive, ListNotesLive } from "./queries.server.js";
+import { ListCountsLive, ListIndexLive } from "./queries.server.js";
 
 /**
  * The server half of the notes contract: the actor, its queries, and
@@ -18,7 +18,7 @@ export const NotesLive = implementTransparent(Notes, notesBehavior);
 /** The actors and queries run in this process, over in-memory mailboxes. */
 export const inProcess: Layer.Layer<ActorTransport> = ActorHost.layerMemory(
   [NotesLive],
-  [ListIndexLive, ListCountsLive, ListNotesLive],
+  [ListIndexLive, ListCountsLive],
 ).pipe(
   Layer.provide(policies),
   // Every name the contract and the queries declare is in the table; a miss is a bug here.

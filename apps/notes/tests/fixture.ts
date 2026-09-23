@@ -196,6 +196,7 @@ export interface Sighting {
  */
 export const wiretap = (inner: TransportService) => {
   const reads: Array<string> = [];
+  const snapshots: Array<string> = [];
   const commands: Array<Sighting> = [];
   const heldSends = new Map<string, Deferred.Deferred<void>>();
   const heldQueries = new Map<string, Deferred.Deferred<void>>();
@@ -215,6 +216,11 @@ export const wiretap = (inner: TransportService) => {
     });
   const transport: TransportService = {
     ...inner,
+    snapshot: (address) =>
+      Effect.andThen(
+        Effect.sync(() => void snapshots.push(`${address.contract}${address.key}`)),
+        inner.snapshot(address),
+      ),
     query: read,
     queryBatch: (keys) => Effect.andThen(Effect.forEach(keys, read), inner.queryBatch(keys)),
     send: (address, commandId, payload, active) =>
@@ -256,6 +262,8 @@ export const wiretap = (inner: TransportService) => {
   return {
     transport,
     reads,
+    /** Every actor snapshot read, as `Notes{"list":…,"tenant":…}`, in order. */
+    snapshots,
     commands,
     /** The sends the real host refused, with its reason, in order. */
     refusals,

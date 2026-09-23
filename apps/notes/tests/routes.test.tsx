@@ -216,7 +216,7 @@ describe("every Notes route prints what it parses (#18)", () => {
 
 describe("?filter=done on the list page (#18)", () => {
   it.scopedLive(
-    "re-derives ListCounts only: the page and the notes body stay, and ListNotes is not read again",
+    "re-derives ListCounts only: the page and the notes body stay, and the notes actor is not read again",
     () =>
       Effect.gen(function* () {
         const wire = yield* tappedHost;
@@ -257,8 +257,12 @@ describe("?filter=done on the list page (#18)", () => {
         // The same nodes: ListView and the notes body were not set up again.
         expect(app.root.querySelector("#list-page")).toBe(page);
         expect(app.root.querySelector("#notes-page")).toBe(body);
-        // No key of ListNotes was read again, under any args.
-        expect(wire.readsNamed("ListNotes")).toBe(1);
+        // The route kept its actor: its snapshot was read once, on entry.
+        expect(wire.snapshots.filter((one) => one.startsWith("Notes"))).toHaveLength(1);
+        // Two queries, no more: only the counts key moved.
+        expect(new Set(wire.reads.map((one) => one.slice(0, one.indexOf("{"))))).toEqual(
+          new Set(["ListIndex", "ListCounts"]),
+        );
         expect(wire.readsOf('ListCounts{"list":"inbox"}')).toBe(1);
         expect(skeletons).toEqual([]);
         expect((yield* app.current).search).toBe("?filter=done");

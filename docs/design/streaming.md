@@ -308,6 +308,23 @@ settled values go in one `<script type="application/json"
 id="frame-query-seed">`, a JSON array of `Patch`. `Dom.readRecords` returns
 the seed as `present`, so the client entry is the same for both modes.
 
+### A route actor's snapshot is a record too (#37)
+
+A route that declares `Route.actor` holds its reference's committed
+projection (revision and encoded snapshot) in the request cache's
+document. `Streaming.actorSeeds` reads what the document holds. The
+shell writes each as an `ActorSeed` record at the head of the first
+chunk, before the placeholders; `SSR` and `AwaitAll` write them in
+`<script type="application/json" id="frame-actor-seed">`, a JSON array
+of `ActorSeed`, before the query seed. They are read inside `readDrawn`
+with the query seed, so an actor seed and the drawing agree (next
+section). `StreamRecord` is now `Placeholder | Patch | ActorSeed |
+Closed`. `Dom.readRecords` returns the actor seed script as `present`,
+before the query seed, and `Streaming.resume` lands each `ActorSeed` in
+the document: the first one for an actor wins. The client's route opens
+its reference from it while the page hydrates, and `Resumed.hydrated`
+drops every actor seed. See [route-data.md](route-data.md), decision 16.
+
 ### A server drawing shows every value its seed carries
 
 A value goes from the cache to the drawing through a chain of sources, and

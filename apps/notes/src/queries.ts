@@ -1,14 +1,15 @@
-import { CommittedRevision, query } from "effect-frame/actor/client";
+import { query } from "effect-frame/actor/client";
 import { Option, Schema } from "effect";
 import type { Note } from "./contract.js";
-import { Notes, NotesSnapshot } from "./contract.js";
+import { Notes } from "./contract.js";
 
 /**
- * The queries Notes reads (#17, #25 §1). Browser safe: contracts only.
- * The handlers are in `queries.server.ts`. `ListIndex` and `ListCounts`
- * name `Notes` in `depends`, so a commit to any notes list refreshes
- * whichever of them is on screen. `ListNotes` is where a list's notes
- * reference resumes from, and a reference follows every revision after it.
+ * The two queries Notes reads (#17, #25 §1). Browser safe: contracts
+ * only. The handlers are in `queries.server.ts`. Both name `Notes` in
+ * `depends`, so a commit to any notes list refreshes whichever of them is
+ * on screen. A list's notes are no query: the list route declares the
+ * `Notes` actor itself (`segments.ts`), and the document carries its
+ * snapshot for the first frame.
  */
 
 /** A list's name as a route param. It prints as itself. */
@@ -45,20 +46,6 @@ export const ListCounts = query("ListCounts", {
   policy: "public",
   depends: [Notes],
 });
-
-/**
- * One list's committed notes, at the revision they were read. It is route
- * data, so every rendering mode carries it in the document, and the list's
- * notes reference resumes from it instead of reading the actor again. The
- * reference then follows every revision after this one, so a command need
- * not refresh it: it names no `depends`. `list` says whose notes these are.
- */
-export const ListNotes = query("ListNotes", {
-  args: Schema.Struct({ list: ListName }),
-  result: Schema.Struct({ list: ListName, revision: CommittedRevision, state: NotesSnapshot }),
-  policy: "public",
-});
-export type ListNotes = Schema.Schema.Type<typeof ListNotes.result>;
 
 /** The notes key of one list. Notes has one tenant. */
 export const keyOf = (list: ListName) => ({ tenant: "demo", list });

@@ -475,6 +475,7 @@ export const readJsonScript = (id: string): Option.Option<string> =>
 
 const decodeRecord = Schema.decodeUnknownOption(Streaming.RecordJson);
 const decodeSeed = Schema.decodeUnknownOption(Streaming.SeedJson);
+const decodeActorSeed = Schema.decodeUnknownOption(Streaming.ActorSeedJson);
 
 const noRecords: ReadonlyArray<Streaming.StreamRecord> = [];
 
@@ -489,17 +490,25 @@ const noRecords: ReadonlyArray<Streaming.StreamRecord> = [];
  * parts, is neither lost nor read twice. `later`
  * completes on `Closed`, or when the parser has finished the document
  * without one: a cut response. An `AwaitAll` document has no container; its
- * seed script is read instead, and `later` is empty.
+ * seed script is read instead, and `later` is empty. The route actors'
+ * snapshots of a `SSR` or `AwaitAll` document are in their own script, read
+ * here too; a streamed document carries them as records.
  *
  * A record that does not decode is skipped. The query it named then settles
  * as `StreamEnded` and reads again.
  */
 export const readRecords: Effect.Effect<Streaming.DocumentRecords, never, Scope.Scope> = Effect.gen(
   function* () {
-    const seeded = Option.getOrElse(
-      Option.flatMap(readJsonScript(Streaming.seedId), decodeSeed),
-      () => noRecords,
-    );
+    const seeded: ReadonlyArray<Streaming.StreamRecord> = [
+      ...Option.getOrElse(
+        Option.flatMap(readJsonScript(Streaming.actorSeedId), decodeActorSeed),
+        () => noRecords,
+      ),
+      ...Option.getOrElse(
+        Option.flatMap(readJsonScript(Streaming.seedId), decodeSeed),
+        () => noRecords,
+      ),
+    ];
     const found = Option.fromNullishOr(document.getElementById(Streaming.containerId));
     if (Option.isNone(found)) {
       return { present: seeded, later: Stream.empty };

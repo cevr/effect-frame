@@ -1,6 +1,8 @@
 import { Route } from "effect-frame/router";
 import { Effect, Schema } from "effect";
-import { Filter, ListCounts, ListIndex, ListName, ListNotes } from "./queries.js";
+import { notesBehavior } from "./behavior.js";
+import { Notes } from "./contract.js";
+import { Filter, ListCounts, ListIndex, ListName, keyOf } from "./queries.js";
 
 /**
  * The addresses of the Notes route tree (#18, #25 §1): each segment's path,
@@ -11,8 +13,8 @@ import { Filter, ListCounts, ListIndex, ListName, ListNotes } from "./queries.js
  * shell    /
  * ├─ lists     /lists               ListIndex {}          (the list names)
  * │  ├─ index  /lists?q=            ListIndex {q}
- * │  ├─ list   /lists/:list?filter= ListCounts {list, filter}, ListNotes {list}
- * │  └─ print  /lists/:list/print   ListCounts {list, filter}, ListNotes {list}
+ * │  ├─ list   /lists/:list?filter= ListCounts {list, filter}, actor Notes {list}
+ * │  └─ print  /lists/:list/print   ListCounts {list, filter}, actor Notes {list}
  * └─ scratch   /scratch             nothing
  * home     /  redirects to /lists
  * ```
@@ -45,13 +47,15 @@ export const ListSearch = Route.search(Schema.Struct({ filter: Schema.optionalKe
 export type ListSearch = Schema.Schema.Type<typeof ListSearch>;
 
 /**
- * One list's counts under its filter, and its notes to resume from. The
- * list page and its print page declare both. A filter change moves only
- * the counts: the notes key has no filter.
+ * One list's counts under its filter, and its notes actor. The list page
+ * and its print page declare both. A filter change moves only the counts:
+ * the actor's key has no filter. The route opens the actor's reference with
+ * the behavior, so it predicts an add at once (#19), and the document
+ * carries its snapshot, so the first frame holds the notes on both sides.
  */
 const listData = ({ params, search }: Route.Values<ListParams, ListSearch>) => ({
   counts: Route.query(ListCounts, { list: params.list, ...search }),
-  notes: Route.query(ListNotes, { list: params.list }),
+  notes: Route.actor(Notes, keyOf(params.list), { behavior: notesBehavior }),
 });
 
 export const list = Route.child(lists, "list", {

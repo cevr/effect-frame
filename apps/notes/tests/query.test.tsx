@@ -20,7 +20,6 @@ const id = Schema.decodeSync(CommandId);
 
 const listIndex = "ListIndex{}";
 const inboxCounts = 'ListCounts{"list":"inbox"}';
-const inboxNotes = 'ListNotes{"list":"inbox"}';
 
 const activeKeys = Effect.gen(function* () {
   const cache = yield* QueryCache;
@@ -38,7 +37,8 @@ describe("the queries a command refreshes", () => {
         routes,
       });
       yield* settle(Effect.sync(() => textOf(app.root, "#counts") === "0 of 0 done"));
-      expect(yield* app.run(activeKeys)).toEqual([inboxCounts, listIndex, inboxNotes].toSorted());
+      // Two queries, no more (#25 §1): the notes are the route's actor.
+      expect(yield* app.run(activeKeys)).toEqual([inboxCounts, listIndex].toSorted());
 
       const draft = elementOf(app.root, "#draft", HTMLInputElement);
       draft.value = "buy milk";
@@ -49,7 +49,6 @@ describe("the queries a command refreshes", () => {
       yield* settle(Effect.sync(() => textOf(app.root, "#counts") === "0 of 1 done"));
 
       const replies = wire.commands.filter((one) => one.text === "buy milk");
-      // The notes key is where the list resumes from: it names no `depends`.
       expect(replies.map((one) => one.refreshed).filter((keys) => keys.length > 0)).toEqual([
         [inboxCounts, listIndex].toSorted(),
       ]);

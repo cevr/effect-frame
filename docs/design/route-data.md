@@ -204,6 +204,43 @@ Other`; the render does not follow it, and the browser's next request
     Mutants: setting the held instance up in its row again makes both new
     tests red (killed); holding an instance that presents `pending` too
     makes route pending 10a and 10b red (killed).
+16. **A route actor is seeded into the document (#37).** A route that
+    declares `Route.actor` opened a reference that read the actor's
+    snapshot, on the server and again on the client. The client's first
+    frame had no snapshot, so a view that drew the actor drew it one
+    frame late, and a page that needed the value on the first frame read
+    it through a query as well. The Notes example did this: `ListNotes`
+    was a query that only carried the notes actor's state to the first
+    frame. Now the server's route holds its reference's committed
+    projection (revision and encoded snapshot) in the request cache's
+    document while the route holds the reference. The document carries
+    each held projection beside the drawing: `SSR` and `AwaitAll` in
+    `<script type="application/json" id="frame-actor-seed">`, `Streamed`
+    as `ActorSeed` records at the head of the first chunk. The
+    projection is read with the query seed inside `readDrawn`, so the
+    seed is the revision the drawing shows. The client's route opens its
+    reference with `resume` from the seed, at the seed's revision, and
+    reads no snapshot. Every route that opens the actor while the page
+    hydrates takes the same seed; a seed is not taken away, so a layout
+    and a leaf can both open one actor. `Resumed.hydrated` drops every
+    actor seed with the query seeds, so a route opened later reads the
+    actor. A seed whose snapshot does not decode is ignored, and the
+    route reads.
+
+    `Route.actor(contract, key, { behavior })` gives the route's
+    reference the actor's behavior, so the view sends through the route's
+    one reference and a fresh send is predicted at once. The alternative
+    was a second reference in the view, resumed from the binding. It
+    would hold a second change stream and a second command owner for the
+    same actor on one page, and its prediction and the route's view of
+    the actor could disagree. The behavior is erased inside the
+    declaration's `open`, so any contract's declaration is still one
+    `Declaration`.
+
+    The seeding lives at the document the query seeds already use, the
+    lowest owner that both hosts and the router reach. The actor stays a
+    reference, not a query: its commands, predictions and refusals keep
+    their one path.
 
 ## Evidence
 
@@ -227,6 +264,11 @@ All tests are in `packages/effect-frame/tests/router/`.
 | A mode is a constructor                                                              | `route-data.test.tsx` — "each mode is its own constructor, and no route value carries a mode"                                                                                                                                                                                                                             |
 | Only unshared keys are released                                                      | `route-data.test.tsx` — "the leaf exits and the shared key stays; the layout exits and it goes"                                                                                                                                                                                                                           |
 | Reads are checked under the request's principal                                      | `route-data.test.tsx` — "an anonymous SSR render of a protected route query seeds the refusal, never the value", "the same render under a signed-in principal seeds the value"                                                                                                                                            |
+| A route actor is seeded, and the client reads no snapshot                            | `route-actor-seed.test.tsx` — "SSR / Streamed / AwaitAll: the client's route opens the actor from the document and reads no snapshot"                                                                                                                                                                                     |
+| The actor seed is the revision the drawing shows                                     | `route-actor-seed.test.tsx` — "SSR / Streamed / AwaitAll: the seed and the drawing agree while the actor moves"                                                                                                                                                                                                           |
+| After hydration a route reads the actor; an untaken seed is dropped                  | `route-actor-seed.test.tsx` — "after hydration, a route that opens the actor again reads it, never the seed", "a seed no route took by the end of hydration is dropped: the route reads"                                                                                                                                  |
+| A layout and its leaf open one actor from one seed                                   | `route-actor-seed.test.tsx` — "a layout and its leaf that declare one actor both open it from the seed"                                                                                                                                                                                                                   |
+| A route actor with a behavior predicts                                               | `route-actor-seed.test.tsx` — "a route actor with a behavior predicts a send before its reply"                                                                                                                                                                                                                            |
 | A cross-origin link is left to the browser                                           | `router.test.tsx` — "a link to another origin is left to the browser"                                                                                                                                                                                                                                                     |
 
 ## Mutations
@@ -261,6 +303,13 @@ change was reverted.
 | The render's Scope is not a child of the request Scope        | Killed           | "closing the request Scope releases …" (the view never closes)             |
 | `followable` drops the origin check                           | Killed           | "a link to another origin is left to the browser"                          |
 | An exited slot closes its view but does not release           | Killed           | "the leaf exits and the shared key stays; the layout exits and it goes"    |
+| The client's route ignores the actor seed                     | Killed           | the three "reads no snapshot" tests (`route-actor-seed.test.tsx`)          |
+| The server's route does not hold its projection               | Killed           | the three "reads no snapshot" tests (no seed is written)                   |
+| `expire` does not drop the actor seeds                        | Killed           | "a seed no route took by the end of hydration is dropped …"                |
+| `Route.actor` drops `behavior`                                | Killed           | "a route actor with a behavior predicts a send before its reply"           |
+| The first route that opens the actor takes the seed away      | Killed           | "a layout and its leaf that declare one actor both open it from the seed"  |
+| `SSR` reads the actor seeds before the drawing, not with it   | Killed           | "SSR: the seed and the drawing agree while the actor moves"                |
+| `AwaitAll` reads the actor seeds after the agreed read        | **Survived**     | none: see below                                                            |
 
 The surviving mutation: when the race interrupts a drawing, each
 declaration's own Scope closes on the interruption, so the reads it
@@ -269,3 +318,9 @@ opened stop, and `SSR` and `AwaitAll` close their own Scope as well. For
 request cache, which by then holds no entry, and the request Scope would
 release it later anyway. No test can see the difference, so the close
 stays as a guarantee that does not depend on how the pipeline is built.
+
+The surviving actor-seed mutation: `AwaitAll` serializes its live tree
+after the last read, and the tree has caught up with the actor by then,
+so an actor seed read after the agreed read still names what the markup
+shows. The agreement stays so that the three modes read one instant the
+same way.

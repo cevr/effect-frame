@@ -22,7 +22,8 @@ import * as Inspection from "../inspection.js";
 import type { AnyQuery, ArgsOf, QueryFailure, QueryKey, QueryState, ResultOf } from "./query.js";
 import { Failed, Loading, Ready, StreamEnded, canonicalize, keyOf, markStale } from "./query.js";
 import type { Source } from "./source.js";
-import type { Refreshed, TransportService } from "./transport.js";
+import type { ActorSeed } from "./streaming.js";
+import type { Projection, Refreshed, TransportService } from "./transport.js";
 import { ActorTransport } from "./transport.js";
 import { Unreachable } from "./vocabulary.js";
 import { advance, advancedChanges } from "./advance.js";
@@ -738,8 +739,33 @@ export interface DocumentAccess {
    * now on reads over the query path, never from the document. A read a
    * landed seed called for (a stale value, a failure that is not final)
    * starts now, not before: until then the entry shows what the server drew.
+   * An actor seed no route took is dropped too.
    */
   readonly expire: Effect.Effect<void>;
+  /**
+   * Server: the route actors the render holds now, each at its committed
+   * snapshot, in the order they were held. A route actor is written with
+   * the drawing: see `Streaming.ActorSeed`.
+   */
+  readonly actors: Effect.Effect<ReadonlyArray<ActorSeed>>;
+  /**
+   * Server: hold one route actor's committed projection for the document
+   * while the current Scope is open. `projection` is read again at each
+   * write, so the seed and the drawing agree at one instant.
+   */
+  readonly holdActor: (
+    id: string,
+    projection: Effect.Effect<Projection>,
+  ) => Effect.Effect<void, never, Scope.Scope>;
+  /** Client: the document carried this route actor's projection. The first one wins. */
+  readonly seedActor: (id: string, projection: Projection) => Effect.Effect<void>;
+  /**
+   * Client: the projection the document carried for this route actor. Every
+   * route that opens the actor while the page hydrates starts from it, at
+   * the revision the drawing shows. None once hydration is done: a route
+   * then reads the actor, never a snapshot the page has held since it loaded.
+   */
+  readonly actorSeed: (id: string) => Effect.Effect<Option.Option<Projection>>;
 }
 
 const documents = new WeakMap<QueryCacheService, DocumentAccess>();
@@ -756,6 +782,12 @@ interface CacheDocument {
 
 const makeDocument = (live: ReadonlySet<CacheSlot>): CacheDocument => {
   const table = new Map<string, Seed>();
+  // Server: the route actors held now. Client: the snapshots the document carried.
+  const held = new Map<
+    symbol,
+    { readonly id: string; readonly projection: Effect.Effect<Projection> }
+  >();
+  const actorSeeds = new Map<string, Projection>();
   let expired = false;
   const hydrated = Deferred.makeUnsafe<void>();
   const seedFor = (id: string): Seed =>
@@ -814,9 +846,35 @@ const makeDocument = (live: ReadonlySet<CacheSlot>): CacheDocument => {
     expire: Effect.andThen(
       Effect.sync(() => {
         expired = true;
+        actorSeeds.clear();
       }),
       Deferred.succeed(hydrated, void 0),
     ),
+    actors: Effect.suspend(() =>
+      Effect.forEach(Array.from(held.values()), (one) =>
+        Effect.map(one.projection, (projection): ActorSeed => ({
+          _tag: "ActorSeed",
+          id: one.id,
+          ...projection,
+        })),
+      ),
+    ),
+    holdActor: (id, projection) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          const token = Symbol(id);
+          held.set(token, { id, projection });
+          return token;
+        }),
+        (token) => Effect.sync(() => void held.delete(token)),
+      ),
+    seedActor: (id, projection) =>
+      Effect.sync(() => {
+        if (!expired && !actorSeeds.has(id)) {
+          actorSeeds.set(id, projection);
+        }
+      }),
+    actorSeed: (id) => Effect.sync(() => Option.fromNullishOr(actorSeeds.get(id))),
   };
   const seeds: Seeds = {
     take: (id) =>

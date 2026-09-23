@@ -102,7 +102,13 @@ namespace exported before is still exported.
 
 ```ts
 Route.query: <Q extends AnyQuery>(contract: Q, args: ArgsOf<Q>) => Route.QueryDeclaration<Q>;
-Route.actor: <C extends AnyContract>(contract: C, key: KeyOf<C>) => Route.ActorDeclaration<C>;
+Route.actor: <C extends AnyContract>(
+  contract: C,
+  key: KeyOf<C>,
+  options?: Route.ActorOptions<C>,
+) => Route.ActorDeclaration<C>;
+type Route.ActorOptions<C> = { readonly behavior?: Route.ActorBehavior<C> };
+type Route.ActorBehavior<C> = Behavior<SnapshotOf<C>, MessageOf<C>, unknown, Refused>;
 
 type Route.Declaration = QueryDeclaration<AnyQuery> | ActorDeclaration<AnyContract>;
 type Route.Declarations = Readonly<Record<string, Declaration>>;

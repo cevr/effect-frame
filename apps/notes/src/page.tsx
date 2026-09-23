@@ -1,14 +1,13 @@
-import type { Applied, Source } from "effect-frame/actor/client";
-import { Behavior, Value, isReady, ref, select, spawn } from "effect-frame/actor/client";
+import type { RemoteActorRef, Source } from "effect-frame/actor/client";
+import { Behavior, Value, select, spawn } from "effect-frame/actor/client";
 import { Link, Router, link } from "effect-frame/router";
 import type { Route } from "effect-frame/router";
 import { For, View, orErrored, ready } from "effect-frame/view";
 import { Effect, Option, Stream } from "effect";
-import { notesBehavior } from "./behavior.js";
 import { dispatch, writeDraft } from "./commands.js";
-import type { Note, NotesSnapshot } from "./contract.js";
+import type { Note } from "./contract.js";
 import { Add, Notes } from "./contract.js";
-import type { Filter, ListName, ListNotes } from "./queries.js";
+import type { Filter, ListName } from "./queries.js";
 import { keyOf, shows } from "./queries.js";
 import { list } from "./segments.js";
 
@@ -17,27 +16,28 @@ import { list } from "./segments.js";
  * `/lists/:list/print`, and it draws under every rendering mode the tree
  * mounts it with: the mode is the tree's constructor, never a branch here.
  *
- * The counts are route data (`ListCounts`). The notes are one actor
- * reference, opened by the list's body from the notes the route declared
- * (`ListNotes`), so the reference reads nothing more on either side and
- * the first frame holds the body. The body is keyed by the list's name, so
- * a move to another list opens a new body with its own reference and its
- * own compose form, and a filter change keeps both.
+ * The counts are route data (`ListCounts`). The notes are route data too:
+ * the route declares the `Notes` actor and opens its reference with the
+ * behavior, from the snapshot the document carries, so the first frame
+ * holds the body on both sides and nothing reads the actor again. The body
+ * is keyed by the list's name, so a move to another list opens a new body
+ * with the route's new reference and its own compose form, and a filter
+ * change keeps both.
  */
 
 export type ListProps = Route.PropsOf<typeof list>;
 
 interface BodyProps {
   readonly name: ListName;
-  readonly resume: Applied<NotesSnapshot>;
+  readonly notes: RemoteActorRef<typeof Notes>;
   readonly filter: Source<Option.Option<Filter>>;
 }
 
-const emptyNotes = (name: ListName): ListNotes => ({
-  list: name,
-  revision: { _tag: "Committed", value: 0 },
-  state: { notes: [] },
-});
+/** The list the route shows and the reference it opened for it, published together. */
+interface Opened {
+  readonly name: ListName;
+  readonly notes: RemoteActorRef<typeof Notes>;
+}
 
 /** The notes `filter` shows, as `filter` and the list change. */
 const filtered = (
@@ -55,11 +55,8 @@ const filtered = (
 const ListBody = (props: BodyProps) =>
   Effect.gen(function* () {
     const key = keyOf(props.name);
-    // The behavior makes the reference optimistic (#19): an add shows at once.
-    const notes = yield* ref(Notes, key, {
-      resume: Option.some(props.resume),
-      behavior: notesBehavior,
-    });
+    // The route's reference predicts with the behavior (#19): an add shows at once.
+    const notes = props.notes;
     const draft = yield* spawn(Behavior.value(""));
     const setDraft = writeDraft(draft);
     // The last send's state, as its handle reports it: Sent, Admitted, Applied.
@@ -150,31 +147,23 @@ export const ListView = (props: ListProps) =>
   Effect.gen(function* () {
     // A failed read goes to the nearest `Errored`, and only that read does.
     const counts = yield* ready(yield* orErrored(props.data.counts.state), { total: 0, done: 0 });
-    const first = yield* props.params.get;
-    // Registered so the nearest `Loading` waits for the notes as well.
-    yield* ready(yield* orErrored(props.data.notes.state), emptyNotes(first.list));
     const filter = select(props.search, (search) => Option.fromNullishOr(search.filter));
-    // One body per list, and only once its notes are read: a body opens its
-    // reference from them, so it never opens on a placeholder.
+    // The route publishes its params and its reference together, so the pair
+    // read here always names one list.
+    const opened = (notes: RemoteActorRef<typeof Notes>) =>
+      Effect.map(props.params.get, (params): ReadonlyArray<Opened> => [
+        { name: params.list, notes },
+      ]);
+    // One body per list: a new list is a new body over the route's new reference.
     const body = yield* View.list({
-      each: select(props.data.notes.state, (state) => {
-        if (isReady(state)) {
-          return [state.value];
-        }
-        return [];
-      }),
-      keyBy: (notes: ListNotes) => notes.list,
-      row: (notes) =>
-        Effect.flatMap(notes.get, (current) =>
-          // A list whose notes cannot be read says why, in its own place.
-          Effect.catch(
-            ListBody({
-              name: current.list,
-              resume: { revision: current.revision, state: current.state },
-              filter,
-            }),
-            (error) => Effect.succeed(<p id="unreadable">{`notes unavailable: ${error._tag}`}</p>),
-          ),
+      each: {
+        get: Effect.flatMap(props.data.notes.get, opened),
+        changes: Stream.mapEffect(props.data.notes.changes, opened),
+      },
+      keyBy: (one: Opened) => one.name,
+      row: (one) =>
+        Effect.flatMap(one.get, (current) =>
+          ListBody({ name: current.name, notes: current.notes, filter }),
         ),
     });
     return (

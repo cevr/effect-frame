@@ -1,15 +1,21 @@
 import type {
   AnyContract,
   AnyQuery,
+  Applied,
   ArgsOf,
+  Behavior,
   FollowedQuery,
   KeyOf,
+  MessageOf,
+  Projection,
   QueryCacheService,
   QueryEntry,
   QueryFailure,
   QueryState,
+  Refused,
   RemoteActorRef,
   ResultOf,
+  SnapshotOf,
   Source,
   TransportReadError,
   TransportService,
@@ -20,6 +26,7 @@ import {
   Ready,
   canonicalize,
   keyOf,
+  committedRevision,
   ref,
 } from "effect-frame/actor/client";
 import type { Node } from "effect-frame/view";
@@ -45,6 +52,7 @@ import {
   SubscriptionRef,
 } from "effect";
 import { advance, advancedChanges } from "../actor/advance.js";
+import { documentOf } from "../actor/query-client.js";
 import { attempt } from "../view/attempt.js";
 import type { Definition as LazyDefinition, Ticket } from "../view/lazy.js";
 import { definitionOf as lazyDefinitionOf, withTicket } from "../view/lazy.js";
@@ -172,6 +180,40 @@ export interface ActorDeclaration<C extends AnyContract> {
   readonly _tag: "ActorDeclaration";
   readonly contract: C;
   readonly key: KeyOf<C>;
+  /**
+   * Opens the reference: from `seed`, the projection a document carried,
+   * when its snapshot decodes, and with the declared behavior. It answers
+   * the reference and its committed projection, read at each call.
+   * Internal: the behavior's types stay inside, so any contract's
+   * declaration is one `Declaration`.
+   */
+  readonly open: (
+    seed: Option.Option<Projection>,
+  ) => Effect.Effect<OpenedActor, TransportReadError, ActorTransport | Scope.Scope>;
+}
+
+/** A route actor's reference, and its committed projection as a document carries it. */
+export interface OpenedActor {
+  readonly ref: RemoteActorRef<AnyContract>;
+  readonly projection: Effect.Effect<Projection>;
+}
+
+/** A behavior a route's actor reference can predict with (see `RefOptions.behavior`). */
+export type ActorBehavior<C extends AnyContract> = Behavior.Behavior<
+  SnapshotOf<C>,
+  MessageOf<C>,
+  unknown,
+  Refused
+>;
+
+/** How a route opens its actor reference. */
+export interface ActorOptions<C extends AnyContract> {
+  /**
+   * The actor's behavior, when the client can import it: the route's
+   * reference then predicts a fresh send at once, and never predicts a
+   * message the behavior refuses.
+   */
+  readonly behavior?: ActorBehavior<C>;
 }
 
 export type Declaration = QueryDeclaration<AnyQuery> | ActorDeclaration<AnyContract>;
@@ -188,11 +230,43 @@ export const query = <Q extends AnyQuery>(contract: Q, args: ArgsOf<Q>): QueryDe
   args,
 });
 
-export const actor = <C extends AnyContract>(contract: C, key: KeyOf<C>): ActorDeclaration<C> => ({
-  _tag: "ActorDeclaration",
-  contract,
-  key,
-});
+export const actor = <C extends AnyContract>(
+  contract: C,
+  key: KeyOf<C>,
+  options: ActorOptions<C> = {},
+): ActorDeclaration<C> => {
+  const decode = Schema.decodeUnknownOption(contract.snapshot);
+  const encode = Schema.encodeEffect(contract.snapshot);
+  const resumeOf = (seed: Projection): Option.Option<Applied<SnapshotOf<C>>> =>
+    Option.map(decode(seed.snapshot), (state) => ({
+      revision: committedRevision(seed.revision),
+      state,
+    }));
+  return {
+    _tag: "ActorDeclaration",
+    contract,
+    key,
+    open: (seed) =>
+      Effect.map(
+        ref(contract, key, {
+          resume: Option.flatMap(seed, resumeOf),
+          ...Option.match(Option.fromNullishOr(options.behavior), {
+            onNone: () => ({}),
+            onSome: (behavior) => ({ behavior }),
+          }),
+        }),
+        (opened): OpenedActor => ({
+          ref: opened,
+          projection: Effect.flatMap(opened.applied.get, (applied) =>
+            Effect.map(Effect.orDie(encode(applied.state)), (snapshot): Projection => ({
+              revision: applied.revision.value,
+              snapshot,
+            })),
+          ),
+        }),
+      ),
+  };
+};
 
 /** What a view receives for one declaration. */
 export type BindingOf<D> =
@@ -1172,8 +1246,38 @@ const declarationKey = (declaration: Declaration): Effect.Effect<string> => {
 const missing = (service: string) =>
   Effect.die(`declared route data needs ${service} where the tree is mounted`);
 
+/**
+ * Open one route actor's reference (#37). On the client, while the page
+ * hydrates, from the snapshot the server's document carried for this
+ * route: the first frame holds the actor and nothing reads it again. Without
+ * one, the reference reads the actor. On the server, the reference's
+ * committed snapshot is held for the document while the route holds it,
+ * and read again at each write, so the seed agrees with the drawing.
+ */
+const openActor = (
+  tree: TreeState,
+  id: string,
+  declaration: ActorDeclaration<AnyContract>,
+  transport: TransportService,
+): Effect.Effect<RemoteActorRef<AnyContract>, TransportReadError, Scope.Scope> =>
+  Effect.gen(function* () {
+    const document = Option.flatMap(tree.cache, documentOf);
+    const seeded = yield* Option.match(document, {
+      onNone: () => Effect.succeed(Option.none<Projection>()),
+      onSome: (found) => found.actorSeed(id),
+    });
+    const opened = yield* declaration
+      .open(seeded)
+      .pipe(Effect.provideService(ActorTransport, transport));
+    if (Option.isSome(document)) {
+      yield* document.value.holdActor(id, opened.projection);
+    }
+    return opened.ref;
+  });
+
 const open = (
   tree: TreeState,
+  id: string,
   declaration: Declaration,
 ): Effect.Effect<Resource, TransportReadError, Scope.Scope> =>
   Option.match(tree.transport, {
@@ -1191,12 +1295,10 @@ const open = (
             ),
         });
       }
-      return Effect.map(
-        ref(declaration.contract, declaration.key).pipe(
-          Effect.provideService(ActorTransport, transport),
-        ),
-        (opened): Resource => ({ _tag: "Actor", ref: opened }),
-      );
+      return Effect.map(openActor(tree, id, declaration, transport), (opened): Resource => ({
+        _tag: "Actor",
+        ref: opened,
+      }));
     },
   });
 
@@ -1253,7 +1355,7 @@ const acquire = (
   declaration: Declaration,
 ): Effect.Effect<Acquired, TransportReadError> =>
   Effect.flatMap(Scope.fork(tree.declarations), (scope) =>
-    Scope.provide(open(tree, declaration), scope).pipe(
+    Scope.provide(open(tree, key, declaration), scope).pipe(
       Effect.tap((resource) => resolved(tree, resource)),
       Effect.onExit((exit) => {
         if (Exit.isFailure(exit)) {

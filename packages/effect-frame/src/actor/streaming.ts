@@ -76,6 +76,23 @@ export const Patch = Schema.TaggedStruct("Patch", {
 });
 export type Patch = Schema.Schema.Type<typeof Patch>;
 
+/**
+ * A route actor's committed snapshot, as the document carries it (#37): the
+ * reference the route opened on the server, at the instant the drawing
+ * shows. `id` is the route's key for that actor address; `revision` and
+ * `snapshot` are the projection the wire carries, the snapshot still
+ * encoded, so the client decodes it through its own contract. The client's
+ * route opens its reference from it, so the first
+ * frame holds the actor and nothing reads its snapshot again. Written with
+ * the drawing, never later: a route actor is settled before its view draws.
+ */
+export const ActorSeed = Schema.TaggedStruct("ActorSeed", {
+  id: Schema.String,
+  revision: Schema.Finite,
+  snapshot: Schema.String,
+});
+export type ActorSeed = Schema.Schema.Type<typeof ActorSeed>;
+
 /** The close tag. Exactly one, last, and written on every exit path. */
 export const Closed = Schema.TaggedStruct("Closed", {
   /** Every id this document settled. */
@@ -83,7 +100,7 @@ export const Closed = Schema.TaggedStruct("Closed", {
 });
 export type Closed = Schema.Schema.Type<typeof Closed>;
 
-export const StreamRecord = Schema.Union([Placeholder, Patch, Closed]);
+export const StreamRecord = Schema.Union([Placeholder, Patch, ActorSeed, Closed]);
 export type StreamRecord = Schema.Schema.Type<typeof StreamRecord>;
 
 /** One record as the JSON a document carries. */
@@ -91,6 +108,16 @@ export const RecordJson = Schema.fromJsonString(StreamRecord);
 
 /** The `AwaitAll` seed as the JSON its script carries. */
 export const SeedJson = Schema.fromJsonString(Schema.Array(Patch));
+
+/**
+ * The script a `SSR` or `AwaitAll` document writes beside the query seed:
+ * the snapshot of every route actor the drawing holds. A streamed document
+ * writes them as records in its first chunk instead.
+ */
+export const actorSeedId = "frame-actor-seed";
+
+/** The route actors' snapshots as the JSON their script carries. */
+export const ActorSeedJson = Schema.fromJsonString(Schema.Array(ActorSeed));
 
 const placeholderOf = (key: QueryKey): Placeholder => ({
   _tag: "Placeholder",
@@ -149,6 +176,7 @@ const accessOf: Effect.Effect<Option.Option<DocumentAccess>, never, QueryCache> 
 );
 
 const noEntries: ReadonlyArray<DocumentEntry> = [];
+const noActors: ReadonlyArray<ActorSeed> = [];
 
 const entriesOf: Effect.Effect<ReadonlyArray<DocumentEntry>, never, QueryCache> = Effect.flatMap(
   accessOf,
@@ -170,6 +198,8 @@ const settledEntry = (entry: DocumentEntry): Effect.Effect<Option.Option<Patch>>
 export interface ShellRecords {
   /** A placeholder for every entry the shell declared. */
   readonly placeholders: ReadonlyArray<Placeholder>;
+  /** The snapshot of every route actor the shell holds. */
+  readonly actors: ReadonlyArray<ActorSeed>;
   /** The patches already due: entries that settled while the shell rendered. */
   readonly settled: ReadonlyArray<Patch>;
   /** The other patches in settle order, then `Closed`. `Closed` is always last. */
@@ -197,6 +227,7 @@ export interface ShellOptions {
 export const shell: (options: ShellOptions) => Effect.Effect<ShellRecords, never, QueryCache> =
   Effect.fn("Streaming.shell")(function* (options: ShellOptions) {
     const entries = yield* entriesOf;
+    const actors = yield* actorSeeds;
     const now = yield* Effect.forEach(entries, (entry) =>
       Effect.map(settledEntry(entry), (patch) => ({ entry, patch })),
     );
@@ -225,6 +256,7 @@ export const shell: (options: ShellOptions) => Effect.Effect<ShellRecords, never
     );
     return {
       placeholders: entries.map((entry) => placeholderOf(entry.key)),
+      actors,
       settled,
       later: Stream.concat<Patch | Closed, never, never, Patch | Closed, never, never>(
         patches,
@@ -259,6 +291,21 @@ export const awaitDeclared: Effect.Effect<void, never, QueryCache> = Effect.flat
         ),
       { concurrency: Math.max(entries.length, 1), discard: true },
     ),
+);
+
+/**
+ * The snapshot of every route actor held now, in the order the route
+ * opened them. A cache with no document holds none.
+ */
+export const actorSeeds: Effect.Effect<
+  ReadonlyArray<ActorSeed>,
+  never,
+  QueryCache
+> = Effect.flatMap(accessOf, (access) =>
+  Option.match(access, {
+    onNone: () => Effect.succeed(noActors),
+    onSome: (found) => found.actors,
+  }),
 );
 
 /** The patch of every settled entry declared now: the `AwaitAll` seed. */
@@ -310,8 +357,11 @@ export interface Resumed {
  * ends, whether `Closed` said so or the response was cut. That entry reads
  * again over the ordinary query path once hydration is done
  * (`Resumed.hydrated`), and so does an entry whose patch is a failure other
- * than the query's own `QueryFailed`. A cache not built by
- * `QueryCache.layer` has nowhere to put a seed: its views read normally.
+ * than the query's own `QueryFailed`. A route actor's snapshot is held for
+ * the routes that open the actor while the page hydrates, and dropped once
+ * hydration is done: a later route reads the actor. A cache
+ * not built by `QueryCache.layer` has nowhere to put a seed: its views read
+ * normally.
  */
 export const resume: (
   records: DocumentRecords,
@@ -331,6 +381,8 @@ export const resume: (
         Match.tagsExhaustive({
           Placeholder: (placeholder) => document.placeholder(placeholder.id),
           Patch: (patch) => document.settle(patch.id, stateOf(patch)),
+          ActorSeed: (seed) =>
+            document.seedActor(seed.id, { revision: seed.revision, snapshot: seed.snapshot }),
           Closed: () => end,
         }),
       );

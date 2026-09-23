@@ -2,12 +2,11 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import type { ActorTransport, QueryCache } from "effect-frame/actor/client";
-import { queryCacheLayer } from "effect-frame/actor/client";
+import type { QueryCache } from "effect-frame/actor/client";
+import { ActorTransport, queryCacheLayer } from "effect-frame/actor/client";
 import { Location, Route, renderDocument } from "effect-frame/router";
 import type { AnyRoute, RenderedDocument, Router } from "effect-frame/router";
-import type { Context } from "effect";
-import { Effect, Layer, Option, Stream } from "effect";
+import { Context, Effect, Layer, Option, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { hydrateRoutes } from "../src/app.js";
 import { inProcess } from "../src/notes.server.js";
@@ -38,6 +37,8 @@ interface Mode {
   /** What the server wrote in the mount element. */
   readonly drawn: (html: string) => void;
   readonly resolvedAhead: number;
+  /** The Notes snapshot reads the client makes: none when the document carried it. */
+  readonly clientSnapshots: number;
 }
 
 const contentOf = (html: string): void => {
@@ -54,9 +55,11 @@ const modes: ReadonlyArray<Mode> = [
     drawn: (html) => {
       contentOf(html);
       expect(html).toContain('id="frame-query-seed"');
+      expect(html).toContain('id="frame-actor-seed"');
       expect(html).not.toContain('id="frame-records"');
     },
     resolvedAhead: 0,
+    clientSnapshots: 0,
   },
   {
     name: "streamed",
@@ -67,10 +70,14 @@ const modes: ReadonlyArray<Mode> = [
       expect(html).toContain('<p id="skeleton">loading</p>');
       expect(html).not.toContain('id="list-name"');
       expect(html).toContain('id="frame-records"');
+      // The route's actor is settled before the shell draws: its seed is a
+      // record of the first chunk.
+      expect(html).toContain('{"_tag":"ActorSeed"');
     },
     // The whole stream is in the document before hydration: the client's
     // first frame draws the patched content in place of the skeleton.
     resolvedAhead: 1,
+    clientSnapshots: 0,
   },
   {
     name: "awaitAll",
@@ -79,9 +86,11 @@ const modes: ReadonlyArray<Mode> = [
     drawn: (html) => {
       contentOf(html);
       expect(html).toContain('id="frame-query-seed"');
+      expect(html).toContain('id="frame-actor-seed"');
       expect(html).not.toContain('id="frame-records"');
     },
     resolvedAhead: 0,
+    clientSnapshots: 0,
   },
   {
     name: "client",
@@ -90,16 +99,33 @@ const modes: ReadonlyArray<Mode> = [
     drawn: (html) => {
       expect(html).toContain('<main id="app"></main>');
       expect(html).not.toContain("frame-query-seed");
+      expect(html).not.toContain("frame-actor-seed");
     },
     resolvedAhead: 0,
+    // Nothing was drawn, so the client's route reads the actor.
+    clientSnapshots: 1,
   },
 ];
 
 /** One in-memory host: the server's reads and the client's go to the same actors. */
 const sharedHost = Layer.build(inProcess);
 
-const clientOver = (host: Context.Context<ActorTransport>) =>
-  Layer.build(Layer.provideMerge(queryCacheLayer, Layer.succeedContext(host)));
+/** The client's services over the same host, with its snapshot reads counted. */
+const clientOver = (host: Context.Context<ActorTransport>, snapshots: Array<string>) => {
+  const inner = Context.get(host, ActorTransport);
+  const counted = Layer.succeed(
+    ActorTransport,
+    ActorTransport.of({
+      ...inner,
+      snapshot: (address) =>
+        Effect.andThen(
+          Effect.sync(() => void snapshots.push(address.contract)),
+          inner.snapshot(address),
+        ),
+    }),
+  );
+  return Layer.build(Layer.provideMerge(queryCacheLayer, counted));
+};
 
 const renderAt = (tree: ListTree, host: Context.Context<ActorTransport>) =>
   Effect.gen(function* () {
@@ -129,7 +155,8 @@ describe("one ListView in every rendering mode", () => {
           mode.drawn(rendered.html);
 
           const root = yield* install(rendered.html);
-          const client = yield* clientOver(host);
+          const snapshots: Array<string> = [];
+          const client = yield* clientOver(host, snapshots);
           const { location } = yield* locationAt(inbox);
           const { report } = yield* hydrateRoutes([mode.tree])(root).pipe(
             Effect.provideService(Location, location),
@@ -145,6 +172,9 @@ describe("one ListView in every rendering mode", () => {
           expect(textOf(root, "#counts")).toBe("0 of 0 done");
           expect(has(root, "#compose")).toBe(true);
           expect(has(root, "#skeleton")).toBe(false);
+          // The first frame held the notes: the route opened its reference
+          // from the document and read the actor only in client-only mode.
+          expect(snapshots.filter((name) => name === "Notes")).toHaveLength(mode.clientSnapshots);
         }),
     );
   }

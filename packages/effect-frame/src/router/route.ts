@@ -61,7 +61,9 @@ export {
   streamed,
 } from "./branch.js";
 export type {
+  ActorBehavior,
   ActorDeclaration,
+  ActorOptions,
   AnyBranch,
   AnySegment,
   Branch,

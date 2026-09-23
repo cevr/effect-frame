@@ -3,7 +3,7 @@ import { ref } from "effect-frame/actor/client";
 import { Effect, Option } from "effect";
 import { Notes } from "./contract.js";
 import type { ListName } from "./queries.js";
-import { ListCounts, ListIndex, ListNotes, catalog, keyOf, shows } from "./queries.js";
+import { ListCounts, ListIndex, catalog, keyOf, shows } from "./queries.js";
 
 /**
  * The query handlers (#17). A server module: a browser entry that
@@ -33,10 +33,4 @@ export const ListCountsLive = implementQuery(ListCounts, (args) =>
     const visible = notes.filter(shows(Option.fromNullishOr(args.filter)));
     return { total: visible.length, done: visible.filter((note) => note.done).length };
   }).pipe(Effect.scoped),
-);
-
-export const ListNotesLive = implementQuery(ListNotes, (args) =>
-  Effect.flatMap(ref(Notes, keyOf(args.list)), (notes) =>
-    Effect.map(notes.applied.get, (applied) => ({ list: args.list, ...applied })),
-  ).pipe(Effect.scoped),
 );

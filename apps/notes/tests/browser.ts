@@ -5,7 +5,9 @@ import { existsSync } from "node:fs";
  * The real-browser harness for Notes, modelled on
  * `packages/effect-frame/tests/router/browser/harness.ts`: WebKit on macOS
  * through Bun.WebView, and a system Chrome where one exists. An engine that
- * is absent is `undefined`, and its proofs skip. The page is the real Notes
+ * is absent is `undefined`, and its proofs skip, except Chrome under CI:
+ * there a missing Chrome fails the file, so CI never passes on proofs it
+ * did not run. The page is the real Notes
  * server, so there is no bundling and no page server here.
  */
 
@@ -43,6 +45,16 @@ export const open = async (engine: Engine, url: string): Promise<Bun.WebView> =>
  * passes one.
  */
 export const hasNavigation = async (engine: Engine, origin: string): Promise<boolean> => {
+  const found = await probeNavigation(engine, origin);
+  if (!found && engine === "chrome" && (Bun.env["CI"] ?? "") !== "") {
+    throw new Error(
+      "CI needs Chrome with the Navigation API for the Notes navigation proofs: install google-chrome or chromium",
+    );
+  }
+  return found;
+};
+
+const probeNavigation = async (engine: Engine, origin: string): Promise<boolean> => {
   if (backendOf(engine) === undefined) return false;
   const view = await open(engine, `${origin}/scratch`);
   try {

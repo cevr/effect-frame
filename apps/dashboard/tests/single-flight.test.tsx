@@ -110,9 +110,16 @@ describe("single flight at width (#17, #28)", () => {
       const before = handlers.runs();
 
       yield* click(app.root, '#alerts li[data-alert="a1"] .ack');
+      // The ack's override shows 2 at once, stale, before the ack leaves the
+      // page. Only the reply's refresh makes it fresh, so fresh is the proof
+      // that the settling call landed.
       yield* settle(
-        Effect.sync(() => textOf(app.root, "#tenant-alerts") === "2"),
-        "the alert count after the ack",
+        Effect.sync(
+          () =>
+            textOf(app.root, "#tenant-alerts") === "2" &&
+            app.root.querySelector("#tenant-alerts")?.getAttribute("class") === "fresh",
+        ),
+        "the ack's refreshed alert count",
       );
 
       const sighting = settlementOf(wire, "Ack a1");

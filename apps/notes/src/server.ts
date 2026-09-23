@@ -1,27 +1,29 @@
 import type { Layer } from "effect";
 import { HttpServer } from "effect-frame/actor";
 import type { ActorTransport } from "effect-frame/actor/client";
-import { Form, Wire, ref, resumeCodec } from "effect-frame/actor/client";
+import { Form, Wire } from "effect-frame/actor/client";
+import { renderDocument } from "effect-frame/router";
+import type { DocumentOutcome } from "effect-frame/router";
 import { Html } from "effect-frame/view";
-import { Effect, ManagedRuntime, Option, Schema } from "effect";
-import { Notes, demoKey, resumeScriptId } from "./contract.js";
+import { Effect, Exit, ManagedRuntime, Option, Schema, Scope, Stream } from "effect";
+import { Notes } from "./contract.js";
 import { inProcess, upstream } from "./notes.server.js";
-import { NotesPage } from "./page.js";
+import { routes } from "./routes.js";
+import { NotFound } from "./views.js";
 
 /**
  * The platform boundary. Everything that touches Bun, the process
- * environment, or the network lives in this file. The page, the view, and
- * the actor never see them.
+ * environment, or the network lives in this file. The route tree, the
+ * views, and the actor never see them.
  *
  * Routes:
- *   GET  /           the server-rendered page plus its resume payload
- *   GET  /client.js  the browser bundle, built once at start
+ *   GET  /client.js    the browser bundle, built once at start
  *   POST /actors/form  a plain form post, for a page with no script (#21)
- *   *    /actors/*   the actor transport, as the client's `baseUrl`
+ *   *    /actors/*     the actor transport, as the client's `baseUrl`
+ *   GET  anything else the route tree's document, in the mode its tree names
  */
 
 const actorPrefix = "/actors";
-const Resume = resumeCodec(Notes);
 
 /** Build the browser bundle once, at start, and keep it in memory. */
 const buildClient = Effect.fn("Notes.buildClient")(function* () {
@@ -46,12 +48,25 @@ const buildClient = Effect.fn("Notes.buildClient")(function* () {
   return parts.join("\n");
 });
 
-/** Render the page and the snapshot it rendered from, as one document. */
-const document = Effect.fn("Notes.document")(function* () {
-  const body = yield* Html.renderToString(NotesPage, { key: demoKey, resume: Option.none() });
-  const notes = yield* ref(Notes, demoKey);
-  const applied = yield* notes.applied.get;
-  const payload = yield* Effect.orDie(Schema.encodeEffect(Resume)(applied));
+/** The document around the routed markup. A refused post adds its issues. */
+export const notesDocument = (issues = ""): Html.Document => ({
+  head: '<!doctype html><html><head><meta charset="utf-8"><title>Notes</title></head><body><main id="app">',
+  tail: `</main>${issues}`,
+  bootstrap: '<script type="module" src="/client.js"></script>',
+  end: "</body></html>",
+});
+
+/** How long a document may take to prepare, and a streamed one to finish. */
+export const pageLimit: Effect.Effect<void> = Effect.sleep("10 seconds");
+
+/**
+ * Render one URL through the route tree, in the caller's request Scope.
+ * The tree's constructor picks the mode: nothing here names one.
+ */
+export const renderPage = Effect.fn("Notes.renderPage")(function* (
+  url: URL,
+  closeWhen: Effect.Effect<void> = pageLimit,
+) {
   // A refused post's page carries its issues, so the client draws the same form.
   const refusal = yield* Effect.serviceOption(Form.FormContext);
   const issues = yield* Option.match(refusal, {
@@ -59,16 +74,62 @@ const document = Effect.fn("Notes.document")(function* () {
     onSome: (found) =>
       Effect.map(Form.encodeIssues(found), (json) => Html.jsonScript(Form.issuesScriptId, json)),
   });
-  return [
-    "<!doctype html>",
-    '<html><head><meta charset="utf-8"><title>Notes</title></head><body>',
-    `<main id="app">${body}</main>`,
-    Html.jsonScript(resumeScriptId, payload),
-    issues,
-    '<script type="module" src="/client.js"></script>',
-    "</body></html>",
-  ].join("");
+  return yield* renderDocument({
+    routes,
+    notFound: NotFound,
+    url,
+    document: notesDocument(issues),
+    closeWhen,
+  });
 });
+
+/** A document answer: 303 for a redirect, else the body in the status the tree chose. */
+const respond = (outcome: DocumentOutcome<unknown>, close: Effect.Effect<void>) =>
+  Effect.gen(function* () {
+    if (outcome._tag === "Redirect") {
+      yield* close;
+      return new Response("", { status: 303, headers: { location: outcome.location.pathname } });
+    }
+    const context = yield* Effect.context<never>();
+    // The request Scope holds a streamed drawing: it closes when the body ends.
+    const body = Stream.encodeText(outcome.body).pipe(Stream.ensuring(close));
+    return new Response(Stream.toReadableStreamWith(body, context), {
+      status: outcome.status,
+      headers: { "content-type": "text/html; charset=utf-8" },
+    });
+  });
+
+/** Answer one page request. Its Scope lives until the body is written. */
+const answerPage = (request: Request): Effect.Effect<Response, never, ActorTransport> =>
+  Effect.gen(function* () {
+    const scope = yield* Scope.make();
+    const close = Scope.close(scope, Exit.void);
+    return yield* renderPage(new URL(request.url)).pipe(
+      Scope.provide(scope),
+      Effect.flatMap((outcome) => respond(outcome, close)),
+      Effect.catchTag("DocumentTimedOut", () =>
+        Effect.as(close, new Response("the page took too long", { status: 504 })),
+      ),
+      Effect.onInterrupt(() => close),
+    );
+  });
+
+/** The page a refused post draws again, as one string. */
+class PageRedirected extends Schema.TaggedError<PageRedirected>()("PageRedirected", {
+  location: Schema.String,
+}) {}
+
+const drawAgain = (path: string) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const outcome = yield* renderPage(new URL(path, "http://notes.invalid"));
+      if (outcome._tag === "Redirect") {
+        return yield* PageRedirected.make({ location: outcome.location.pathname });
+      }
+      const chunks = yield* Stream.runCollect(outcome.body);
+      return Array.from(chunks).join("");
+    }),
+  );
 
 /**
  * A built transport. One runtime holds one set of actors, so the page render
@@ -100,14 +161,14 @@ export const makeServer = async (options: ServerOptions): Promise<RunningServer>
   const runtime = options.runtime;
   // Notes has no sessions: every request is anonymous, and that is a written line.
   const actors = await runtime.runPromise(HttpServer.make({ principal: HttpServer.anonymous }));
-  // A refused post re-renders this same document with its issues.
+  // A refused post re-renders the page it came from, with its issues.
   const forms = await runtime.runPromise(
     HttpServer.form({
       contracts: [Notes],
       principal: HttpServer.anonymous,
       // No sign-in route: `public` never refuses, and a refusal would be a 403.
       login: Option.none(),
-      render: () => Effect.scoped(document()),
+      render: drawAgain,
     }),
   );
   const client = await runtime.runPromise(buildClient());
@@ -131,15 +192,7 @@ export const makeServer = async (options: ServerOptions): Promise<RunningServer>
           headers: { "content-type": "text/javascript; charset=utf-8" },
         });
       }
-      if (url.pathname === "/") {
-        return runtime
-          .runPromise(Effect.scoped(document()))
-          .then(
-            (html) =>
-              new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } }),
-          );
-      }
-      return new Response("not found", { status: 404 });
+      return runtime.runPromise(answerPage(request));
     },
   });
 

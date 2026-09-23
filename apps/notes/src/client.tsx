@@ -1,58 +1,46 @@
-import type { Applied, SnapshotOf } from "effect-frame/actor/client";
-import { Form, HttpTransport, resumeCodec } from "effect-frame/actor/client";
-import { Dom, mount, render } from "effect-frame/view";
-import { Effect, Option, Schema } from "effect";
-import { Notes, demoKey, resumeScriptId } from "./contract.js";
-import { NotesPage } from "./page.js";
+import { HttpTransport, queryCacheLayer } from "effect-frame/actor/client";
+import { Location, browserNavigation, followLinks } from "effect-frame/router";
+import { Effect, Layer, Option } from "effect";
+import { hydrateApp } from "./app.js";
 
 /**
- * The browser entry. It reads the snapshot the server embedded, adopts the
- * server's nodes, and then follows the actor over the HTTP transport. This
- * file is the browser boundary: `document` and `location` live here only.
+ * The browser entry. It hydrates the route tree over the server's document,
+ * follows links and history, and then follows the actors over the HTTP
+ * transport. This file is the browser boundary: `document` and `location`
+ * live here only.
  */
-
-const Resume = resumeCodec(Notes);
-
-const readResume = Effect.gen(function* () {
-  const embedded = Dom.readJsonScript(resumeScriptId);
-  return yield* Option.match(embedded, {
-    onNone: () => Effect.succeed(Option.none<Applied<SnapshotOf<typeof Notes>>>()),
-    onSome: (json) => Effect.map(Effect.orDie(Schema.decodeEffect(Resume)(json)), Option.some),
-  });
-});
-
-/** The issues of a refused post, when this page redraws one. */
-const readRefusal = Option.match(Dom.readJsonScript(Form.issuesScriptId), {
-  onNone: () => Effect.succeed(Option.none<Form.FormIssues>()),
-  onSome: (json) => Effect.map(Effect.orDie(Form.decodeIssues(json)), Option.some),
-});
 
 const start = Effect.gen(function* () {
   const found = yield* Effect.sync(() => Option.fromNullishOr(document.getElementById("app")));
   if (Option.isNone(found)) {
     return yield* Effect.die("notes: no #app element to hydrate");
   }
-  const root = found.value;
-  const resume = yield* readResume;
-  const refusal = yield* readRefusal;
-  const hydration = Dom.hydrate(root);
-  yield* Form.provideIssues(refusal)(
-    mount(NotesPage, { key: demoKey, resume }, hydration.host, root),
+  const navigation = yield* browserNavigation;
+  const { router, report } = yield* Effect.provideService(
+    hydrateApp(found.value),
+    Location,
+    navigation,
   );
-  yield* render;
-  const report = yield* hydration.finish;
+  yield* followLinks(document, router);
   if (report.mismatches.length > 0) {
     yield* Effect.logWarning("notes: hydration mismatches", report);
   }
+  // The page says it is live, so a reader (or a test) knows links are followed.
+  yield* Effect.sync(() => {
+    document.documentElement.dataset["hydrated"] = "true";
+  });
   // The page lives as long as the tab does.
   return yield* Effect.never;
 });
 
-const transport = HttpTransport.layer({
-  baseUrl: `${location.origin}/actors`,
-  reconnect: HttpTransport.defaultReconnect,
-});
+const services = Layer.provideMerge(
+  queryCacheLayer,
+  HttpTransport.layer({
+    baseUrl: `${location.origin}/actors`,
+    reconnect: HttpTransport.defaultReconnect,
+  }),
+);
 
-// The browser entry point: the one place the client transport is provided.
+// The browser entry point: the one place the client services are provided.
 // @effect-diagnostics-next-line strictEffectProvide:off
-Effect.runFork(Effect.scoped(Effect.provide(start, transport)));
+Effect.runFork(Effect.scoped(Effect.provide(start, services)));

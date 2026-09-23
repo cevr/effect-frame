@@ -44,8 +44,5 @@ export const Notes = contract("Notes", {
   message: NotesMessage,
 });
 
-/** The one list this example serves. */
+/** The inbox. The terminal client shows this list. */
 export const demoKey: NotesKey = { tenant: "demo", list: "inbox" };
-
-/** The id under which the server embeds the resume payload in the page. */
-export const resumeScriptId = "notes";

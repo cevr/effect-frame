@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/codec-probe.ts"
+    ".": "./src/codec-probe.ts",
+    "./boundary": "./src/boundary.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

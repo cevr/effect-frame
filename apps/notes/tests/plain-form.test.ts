@@ -1,44 +1,19 @@
 import { platformFetch } from "./dom-setup.js";
 
-import type { ActorTransport } from "effect-frame/actor/client";
-import { Form, HttpTransport, ref } from "effect-frame/actor/client";
-import { Effect, Layer, Option, Stream } from "effect";
+import { Form, ref } from "effect-frame/actor/client";
+import { Effect, Option, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { Notes, demoKey } from "../src/contract.js";
-import { inProcess } from "../src/notes.server.js";
-import type { NotesRuntime } from "../src/server.js";
-import { makeRuntime, makeServer } from "../src/server.js";
+import { clientOf, serveFresh as serve } from "./fixture.js";
 
 /**
  * The notes page with no script (#21). A real server on a free port; the
- * browser is `fetch` with redirects left unfollowed. It reads the page,
- * fills the compose form, and posts it as a browser would.
+ * browser is `fetch` with redirects left unfollowed. It reads the inbox's
+ * print page, which draws the whole list page with its compose form, fills
+ * the form, and posts it as a browser would.
  */
 
-const realFetch: HttpTransport.FetchLike = (input, init) => platformFetch(input, init);
-
-const asClientOf =
-  (url: string) =>
-  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, ActorTransport>> =>
-    // @effect-diagnostics-next-line strictEffectProvide:off
-    Effect.provide(
-      effect,
-      HttpTransport.layer({
-        baseUrl: `${url}/actors`,
-        reconnect: HttpTransport.defaultReconnect,
-      }).pipe(Layer.provide(Layer.succeed(HttpTransport.Fetch, realFetch))),
-    );
-
-const serve = Effect.gen(function* () {
-  const runtime = yield* Effect.acquireRelease(
-    Effect.sync((): NotesRuntime => makeRuntime(inProcess)),
-    (built) => Effect.promise(() => built.dispose()),
-  );
-  return yield* Effect.acquireRelease(
-    Effect.promise(() => makeServer({ port: 0, runtime })),
-    (server) => Effect.promise(() => server.stop()),
-  );
-});
+const printPage = "/lists/inbox/print";
 
 const pageOf = (url: string) =>
   Effect.flatMap(
@@ -75,21 +50,21 @@ const post = (url: string, body: string) =>
 
 /** The committed notes once the actor reaches `revision`. */
 const notesAt = (url: string, revision: number) =>
-  asClientOf(url)(
-    Effect.scoped(
-      Effect.flatMap(ref(Notes, demoKey), (notes) =>
-        Stream.runHead(
-          Stream.filter(notes.applied.changes, (applied) => applied.revision.value >= revision),
-        ),
-      ),
-    ),
+  Effect.scoped(
+    Effect.gen(function* () {
+      const client = yield* clientOf(url);
+      const notes = yield* client(ref(Notes, demoKey));
+      return yield* Stream.runHead(
+        Stream.filter(notes.applied.changes, (applied) => applied.revision.value >= revision),
+      );
+    }),
   ).pipe(Effect.flatMap(Effect.fromOption), Effect.timeout("2 seconds"), Effect.orDie);
 
 describe("notes with no script", () => {
   it.scopedLive("the compose form posts, adds the note, and returns to the page", () =>
     Effect.gen(function* () {
       const server = yield* serve;
-      const page = yield* pageOf(server.url);
+      const page = yield* pageOf(`${server.url}${printPage}`);
       expect(page).toContain('<form id="compose" method="post" action="/actors/form">');
       const hidden = hiddenOf(page);
       const commandId = Option.getOrElse(
@@ -105,7 +80,7 @@ describe("notes with no script", () => {
         Form.toBody(Form.fromEntries([...hidden, ["text", "buy milk"]])),
       );
 
-      expect([reply.status, reply.location]).toEqual([303, "/"]);
+      expect([reply.status, reply.location]).toEqual([303, printPage]);
       const applied = yield* notesAt(server.url, 1);
       expect(applied.state.notes).toEqual([{ id: commandId, text: "buy milk", done: false }]);
     }),
@@ -114,7 +89,7 @@ describe("notes with no script", () => {
   it.scopedLive("the same form posted twice adds one note", () =>
     Effect.gen(function* () {
       const server = yield* serve;
-      const page = yield* pageOf(server.url);
+      const page = yield* pageOf(`${server.url}${printPage}`);
       const body = Form.toBody(Form.fromEntries([...hiddenOf(page), ["text", "walk dog"]]));
 
       const first = yield* post(server.url, body);
@@ -125,14 +100,14 @@ describe("notes with no script", () => {
       expect(applied.revision.value).toBe(1);
       expect(applied.state.notes.map((note) => note.text)).toEqual(["walk dog"]);
       // The page after the redirect shows the note.
-      const after = yield* pageOf(server.url);
+      const after = yield* pageOf(`${server.url}${printPage}`);
       expect(after).toContain("<span>walk dog</span>");
     }),
   );
   it.scopedLive("an empty note re-renders the page and carries its issues to the client", () =>
     Effect.gen(function* () {
       const server = yield* serve;
-      const page = yield* pageOf(server.url);
+      const page = yield* pageOf(`${server.url}${printPage}`);
 
       const reply = yield* post(server.url, Form.toBody(Form.fromEntries(hiddenOf(page))));
       const body = yield* Effect.promise(() => reply.response.text());

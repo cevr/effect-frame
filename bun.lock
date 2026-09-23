@@ -29,6 +29,7 @@
         "effect-frame": "workspace:*",
       },
       "devDependencies": {
+        "@effect-frame/toolchain-checks": "workspace:*",
         "@happy-dom/global-registrator": "20.14.5",
         "@opentui/core": "0.5.11",
         "happy-dom": "20.14.5",

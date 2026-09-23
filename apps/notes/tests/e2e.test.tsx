@@ -3,103 +3,41 @@ import { platformFetch, registerDom } from "./dom-setup.js";
 registerDom();
 
 import { serverOnly } from "effect-frame/actor";
-import type { ActorTransport, Applied, SnapshotOf } from "effect-frame/actor/client";
-import { CommandId, Form, HttpTransport, ref, resumeCodec } from "effect-frame/actor/client";
-import { Dom, mount, render } from "effect-frame/view";
+import { CommandId, Form, ref } from "effect-frame/actor/client";
+import { mount, render } from "effect-frame/view";
 import { make as makeTuiHost } from "effect-frame/view/opentui";
 import type { TestRendererSetup } from "@opentui/core/testing";
 import { createTestRenderer } from "@opentui/core/testing";
-import { Effect, Layer, Option, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
-import { Notes, demoKey, resumeScriptId } from "../src/contract.js";
-import { inProcess } from "../src/notes.server.js";
-import { NotesPage } from "../src/page.js";
-import type { NotesRuntime, RunningServer } from "../src/server.js";
-import { makeRuntime, makeServer } from "../src/server.js";
+import { Notes, demoKey } from "../src/contract.js";
+import type { RunningServer } from "../src/server.js";
 import { NotesTerminal } from "../src/terminal-view.js";
+import {
+  clientOf,
+  elementOf,
+  fetchText,
+  hydrateAt,
+  install,
+  notesRuntime,
+  serve,
+  settle,
+  textOf,
+} from "./fixture.js";
 
 /**
  * The end-to-end proof. One contract, one real Bun server on a free port,
  * and two live clients: a hydrated browser page and a terminal. Nothing is
  * mocked: both clients talk HTTP to the same actor.
+ *
+ * The page is the inbox's print page, `/lists/inbox/print`: `AwaitAll`, so
+ * the server draws the whole list page, notes and compose form included, and
+ * the client claims every node. It is the same `ListView` the list page uses.
  */
 
-const Resume = resumeCodec(Notes);
 const id = Schema.decodeSync(CommandId);
 
-/** happy-dom replaces `fetch`; the actor transport needs the real one. */
-const realFetch: HttpTransport.FetchLike = (input, init) => platformFetch(input, init);
-
-const transportTo = (url: string): Layer.Layer<ActorTransport> =>
-  HttpTransport.layer({
-    baseUrl: `${url}/actors`,
-    reconnect: HttpTransport.defaultReconnect,
-  }).pipe(Layer.provide(Layer.succeed(HttpTransport.Fetch, realFetch)));
-
-/**
- * The client side of one test. A server's port is known only once it
- * listens, so the transport cannot be the test's outer layer; this helper
- * is the client's entry point instead, and the only place it is provided.
- */
-const asClientOf =
-  (url: string) =>
-  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, ActorTransport>> =>
-    // @effect-diagnostics-next-line strictEffectProvide:off
-    Effect.provide(effect, transportTo(url));
-
-/** One host for the whole test: two servers over it share one set of actors. */
-const notesRuntime = Effect.acquireRelease(
-  Effect.sync((): NotesRuntime => makeRuntime(inProcess)),
-  (runtime) => Effect.promise(() => runtime.dispose()),
-);
-
-const serve = (runtime: NotesRuntime, port: number) =>
-  Effect.acquireRelease(
-    Effect.promise(() => makeServer({ port, runtime })),
-    (server) => Effect.promise(() => server.stop()),
-  );
-
-const fetchText = Effect.fn("test.fetchText")(function* (url: string) {
-  const response = yield* Effect.promise(() => platformFetch(url));
-  return yield* Effect.promise(() => response.text());
-});
-
-/** Put a server page into the document the way a browser would. */
-const install = (page: string) =>
-  Effect.acquireRelease(
-    Effect.sync(() => {
-      document.body.innerHTML = page.slice(
-        page.indexOf("<main"),
-        page.indexOf('<script type="module"'),
-      );
-      return Option.getOrElse(Option.fromNullishOr(document.getElementById("app")), () =>
-        document.createElement("main"),
-      );
-    }),
-    () => Effect.sync(() => void (document.body.innerHTML = "")),
-  );
-
-const readResume = Effect.gen(function* () {
-  const embedded = Dom.readJsonScript(resumeScriptId);
-  return yield* Option.match(embedded, {
-    onNone: () => Effect.succeed(Option.none<Applied<SnapshotOf<typeof Notes>>>()),
-    onSome: (json) => Effect.map(Effect.orDie(Schema.decodeEffect(Resume)(json)), Option.some),
-  });
-});
-
-const hydratePage = Effect.fn("test.hydratePage")(function* (root: HTMLElement) {
-  const resume = yield* readResume;
-  const hydration = Dom.hydrate(root);
-  yield* mount(NotesPage, { key: demoKey, resume }, hydration.host, root);
-  yield* render;
-  return yield* hydration.finish;
-});
-
-const textOf = (root: HTMLElement, selector: string): string =>
-  Option.match(Option.fromNullishOr(root.querySelector(selector)), {
-    onNone: () => "",
-    onSome: (node) => Option.getOrElse(Option.fromNullishOr(node.textContent), () => ""),
-  });
+const inbox = "/lists/inbox/print";
 
 /** Flush the reactive graph, draw one terminal frame, and read it back. */
 const draw = Effect.fn("test.draw")(function* (setup: TestRendererSetup) {
@@ -108,25 +46,18 @@ const draw = Effect.fn("test.draw")(function* (setup: TestRendererSetup) {
   return setup.captureCharFrame();
 });
 
-/** Wait until the page shows what the actor already committed. */
-const settle = Effect.fn("test.settle")(function* (check: Effect.Effect<boolean>) {
-  yield* Effect.repeat(Effect.andThen(Effect.sleep("25 millis"), render), {
-    while: () => Effect.map(check, (done) => !done),
-    times: 80,
-  });
-});
-
 describe("notes end to end", () => {
-  it.scopedLive("the server renders the page, the bundle, and the resume payload", () =>
+  it.scopedLive("the server renders the list page, and the bundle carries no server code", () =>
     Effect.gen(function* () {
       const runtime = yield* notesRuntime;
-      const server = yield* serve(runtime, 0);
+      const server = yield* serve(runtime);
 
-      const page = yield* fetchText(server.url);
+      const page = yield* fetchText(`${server.url}${inbox}`);
       expect(page).toContain('<main id="app">');
+      expect(page).toContain('<h1 id="list-name">inbox</h1>');
       expect(page).toContain('<ul id="list"></ul>');
       expect(page).toContain('<p id="count">0</p>');
-      expect(page).toContain(`id="${resumeScriptId}"`);
+      expect(page).toContain('id="frame-query-seed"');
       expect(page).toContain('src="/client.js"');
 
       const bundle = yield* fetchText(`${server.url}/client.js`);
@@ -140,14 +71,16 @@ describe("notes end to end", () => {
   it.scopedLive("the browser hydrates the server page and follows a second client", () =>
     Effect.gen(function* () {
       const runtime = yield* notesRuntime;
-      const server = yield* serve(runtime, 0);
-      const page = yield* fetchText(server.url);
+      const server = yield* serve(runtime);
+      const page = yield* fetchText(`${server.url}${inbox}`);
       const root = yield* install(page);
 
-      const report = yield* asClientOf(server.url)(hydratePage(root));
-      expect(report.mismatches).toEqual([]);
+      const { report } = yield* (yield* clientOf(server.url))(
+        hydrateAt(root, `${server.url}${inbox}`),
+      );
+      expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
 
-      const writer = yield* asClientOf(server.url)(ref(Notes, demoKey));
+      const writer = yield* (yield* clientOf(server.url))(ref(Notes, demoKey));
       yield* writer.call(
         { _tag: "Add", id: "n1", text: "buy milk" },
         { commandId: id("c1"), timeout: "2 seconds" },
@@ -162,12 +95,12 @@ describe("notes end to end", () => {
   it.scopedLive("the terminal sees the same actor at the same revision", () =>
     Effect.gen(function* () {
       const runtime = yield* notesRuntime;
-      const server = yield* serve(runtime, 0);
-      const page = yield* fetchText(server.url);
+      const server = yield* serve(runtime);
+      const page = yield* fetchText(`${server.url}${inbox}`);
       const root = yield* install(page);
 
-      const browser = yield* asClientOf(server.url)(
-        Effect.andThen(hydratePage(root), ref(Notes, demoKey)),
+      const browser = yield* (yield* clientOf(server.url))(
+        Effect.andThen(hydrateAt(root, `${server.url}${inbox}`), ref(Notes, demoKey)),
       );
 
       const setup: TestRendererSetup = yield* Effect.promise(() =>
@@ -175,7 +108,7 @@ describe("notes end to end", () => {
       );
       yield* Effect.addFinalizer(() => Effect.sync(() => setup.renderer.destroy()));
 
-      const terminal = yield* asClientOf(server.url)(
+      const terminal = yield* (yield* clientOf(server.url))(
         Effect.andThen(
           mount(
             NotesTerminal,
@@ -199,6 +132,7 @@ describe("notes end to end", () => {
           (applied) => applied.revision.value === target.revision.value,
         ),
       );
+      yield* settle(Effect.sync(() => textOf(root, "#list li span") === "walk dog"));
       const frame = yield* draw(setup);
       expect(frame).toContain("walk dog");
       expect(textOf(root, "#list li span")).toBe("walk dog");
@@ -209,12 +143,12 @@ describe("notes end to end", () => {
   it.scopedLive("a restarted server keeps the actors and the page follows again", () =>
     Effect.gen(function* () {
       const runtime = yield* notesRuntime;
-      const first: RunningServer = yield* serve(runtime, 0);
-      const page = yield* fetchText(first.url);
+      const first: RunningServer = yield* serve(runtime);
+      const page = yield* fetchText(`${first.url}${inbox}`);
       const root = yield* install(page);
 
-      const client = yield* asClientOf(first.url)(
-        Effect.andThen(hydratePage(root), ref(Notes, demoKey)),
+      const client = yield* (yield* clientOf(first.url))(
+        Effect.andThen(hydrateAt(root, `${first.url}${inbox}`), ref(Notes, demoKey)),
       );
 
       yield* Effect.promise(() => first.stop());
@@ -229,28 +163,19 @@ describe("notes end to end", () => {
       expect(textOf(root, "#list li span")).toBe("after restart");
     }),
   );
+
   it.scopedLive("a post that races hydration applies once", () =>
     Effect.gen(function* () {
       const runtime = yield* notesRuntime;
-      const server = yield* serve(runtime, 0);
-      const page = yield* fetchText(server.url);
+      const server = yield* serve(runtime);
+      const page = yield* fetchText(`${server.url}${inbox}`);
       const root = yield* install(page);
 
-      const client = yield* asClientOf(server.url)(
-        Effect.andThen(hydratePage(root), ref(Notes, demoKey)),
+      const client = yield* (yield* clientOf(server.url))(
+        Effect.andThen(hydrateAt(root, `${server.url}${inbox}`), ref(Notes, demoKey)),
       );
-      const form = Option.getOrThrow(
-        Option.filter(
-          Option.fromNullishOr(root.querySelector("#compose")),
-          (found): found is HTMLFormElement => found instanceof HTMLFormElement,
-        ),
-      );
-      const draft = Option.getOrThrow(
-        Option.filter(
-          Option.fromNullishOr(root.querySelector("#draft")),
-          (found): found is HTMLInputElement => found instanceof HTMLInputElement,
-        ),
-      );
+      const form = elementOf(root, "#compose", HTMLFormElement);
+      const draft = elementOf(root, "#draft", HTMLInputElement);
       draft.value = "race";
 
       // The native post left before the script took over; the script then

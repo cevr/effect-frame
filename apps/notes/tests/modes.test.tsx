@@ -1,0 +1,189 @@
+import { registerDom } from "./dom-setup.js";
+
+registerDom();
+
+import type { ActorTransport, QueryCache } from "effect-frame/actor/client";
+import { queryCacheLayer } from "effect-frame/actor/client";
+import { Location, Route, renderDocument } from "effect-frame/router";
+import type { AnyRoute, RenderedDocument, Router } from "effect-frame/router";
+import type { Context } from "effect";
+import { Effect, Layer, Option, Stream } from "effect";
+import { describe, expect, it } from "effect-bun-test";
+import { hydrateRoutes } from "../src/app.js";
+import { inProcess } from "../src/notes.server.js";
+import { listBranch } from "../src/routes.js";
+import { notesDocument, renderPage } from "../src/server.js";
+import { NotFound } from "../src/views.js";
+import { has, install, locationAt, settle, textOf } from "./fixture.js";
+
+/**
+ * #18, #22, #25 §1: one route tree, one view, every rendering mode. The
+ * list page's branch (`listBranch`: the shell, the lists layout, and
+ * `ListView`) is mounted by each of the four constructors, rendered by the
+ * server, and hydrated by the client with the one client path the app uses.
+ * The views never learn the mode: the constructor is the only difference.
+ */
+
+const origin = "http://notes.test";
+const inbox = `${origin}/lists/inbox`;
+
+/** The list branch under one constructor, with what its views need. */
+type ListTree = AnyRoute<ActorTransport | QueryCache | Router>;
+
+interface Mode {
+  readonly name: string;
+  readonly tree: ListTree;
+  /** The mode `renderDocument` reports. */
+  readonly reported: RenderedDocument<unknown>["mode"];
+  /** What the server wrote in the mount element. */
+  readonly drawn: (html: string) => void;
+  readonly resolvedAhead: number;
+}
+
+const contentOf = (html: string): void => {
+  expect(html).toContain('<h1 id="list-name">inbox</h1>');
+  expect(html).toContain('<p id="counts">0 of 0 done</p>');
+  expect(html).toContain('<form id="compose"');
+};
+
+const modes: ReadonlyArray<Mode> = [
+  {
+    name: "ssr",
+    tree: Route.ssr("modes-ssr", listBranch),
+    reported: "SSR",
+    drawn: (html) => {
+      contentOf(html);
+      expect(html).toContain('id="frame-query-seed"');
+      expect(html).not.toContain('id="frame-records"');
+    },
+    resolvedAhead: 0,
+  },
+  {
+    name: "streamed",
+    tree: Route.streamed("modes-streamed", listBranch),
+    reported: "Streamed",
+    drawn: (html) => {
+      // The shell and the skeleton first; the values follow as records.
+      expect(html).toContain('<p id="skeleton">loading</p>');
+      expect(html).not.toContain('id="list-name"');
+      expect(html).toContain('id="frame-records"');
+    },
+    // The whole stream is in the document before hydration: the client's
+    // first frame draws the patched content in place of the skeleton.
+    resolvedAhead: 1,
+  },
+  {
+    name: "awaitAll",
+    tree: Route.awaitAll("modes-await", listBranch),
+    reported: "AwaitAll",
+    drawn: (html) => {
+      contentOf(html);
+      expect(html).toContain('id="frame-query-seed"');
+      expect(html).not.toContain('id="frame-records"');
+    },
+    resolvedAhead: 0,
+  },
+  {
+    name: "client",
+    tree: Route.client("modes-client", listBranch),
+    reported: "ClientOnly",
+    drawn: (html) => {
+      expect(html).toContain('<main id="app"></main>');
+      expect(html).not.toContain("frame-query-seed");
+    },
+    resolvedAhead: 0,
+  },
+];
+
+/** One in-memory host: the server's reads and the client's go to the same actors. */
+const sharedHost = Layer.build(inProcess);
+
+const clientOver = (host: Context.Context<ActorTransport>) =>
+  Layer.build(Layer.provideMerge(queryCacheLayer, Layer.succeedContext(host)));
+
+const renderAt = (tree: ListTree, host: Context.Context<ActorTransport>) =>
+  Effect.gen(function* () {
+    const outcome = yield* renderDocument({
+      routes: [tree],
+      notFound: NotFound,
+      url: new URL(inbox),
+      document: notesDocument(),
+      closeWhen: Effect.sleep("5 seconds"),
+    }).pipe(Effect.provideContext(host));
+    if (outcome._tag === "Redirect") {
+      return yield* Effect.die(`redirected to ${outcome.location.href}`);
+    }
+    const chunks = yield* Stream.runCollect(outcome.body);
+    return { mode: outcome.mode, html: Array.from(chunks).join("") };
+  });
+
+describe("one ListView in every rendering mode", () => {
+  for (const mode of modes) {
+    it.scopedLive(
+      `the same ListView renders under ${mode.name}, and the client takes it over`,
+      () =>
+        Effect.gen(function* () {
+          const host = yield* sharedHost;
+          const rendered = yield* renderAt(mode.tree, host);
+          expect(rendered.mode).toBe(mode.reported);
+          mode.drawn(rendered.html);
+
+          const root = yield* install(rendered.html);
+          const client = yield* clientOver(host);
+          const { location } = yield* locationAt(inbox);
+          const { report } = yield* hydrateRoutes([mode.tree])(root).pipe(
+            Effect.provideService(Location, location),
+            Effect.provideContext(client),
+          );
+          expect(report).toEqual({
+            mismatches: [],
+            unclaimed: 0,
+            resolvedAhead: mode.resolvedAhead,
+          });
+          yield* settle(Effect.sync(() => textOf(root, "#counts") === "0 of 0 done"));
+          expect(textOf(root, "#list-name")).toBe("inbox");
+          expect(textOf(root, "#counts")).toBe("0 of 0 done");
+          expect(has(root, "#compose")).toBe(true);
+          expect(has(root, "#skeleton")).toBe(false);
+        }),
+    );
+  }
+
+  it.scopedLive("the app's trees name their modes by constructor", () =>
+    Effect.gen(function* () {
+      const host = yield* sharedHost;
+      const modeAt = (path: string) =>
+        Effect.scoped(
+          Effect.map(renderPage(new URL(path, origin)), (outcome) => {
+            if (outcome._tag === "Redirect") {
+              return `Redirect ${outcome.location.pathname}`;
+            }
+            return outcome.mode;
+          }),
+        ).pipe(Effect.provideContext(host));
+      expect(yield* modeAt("/")).toBe("Redirect /lists");
+      expect(yield* modeAt("/lists")).toBe("SSR");
+      expect(yield* modeAt("/lists/inbox")).toBe("Streamed");
+      expect(yield* modeAt("/lists/inbox/print")).toBe("AwaitAll");
+      expect(yield* modeAt("/scratch")).toBe("ClientOnly");
+    }),
+  );
+
+  it.effect("no view module names a rendering mode", () =>
+    Effect.gen(function* () {
+      const pattern =
+        /\b(SSR|Streamed|AwaitAll|ClientOnly|RenderingMode)\b|Route\.(ssr|streamed|awaitAll|client|prerender)\b|\.mode\b/;
+      for (const file of ["page.tsx", "views.tsx"]) {
+        const source = yield* Effect.promise(() =>
+          // oxlint-disable-next-line effect/noGlobals -- the test reads its own sources.
+          Bun.file(new URL(`../src/${file}`, import.meta.url)).text(),
+        );
+        const found = Option.getOrElse(
+          Option.map(Option.fromNullishOr(pattern.exec(source)), (match) => match[0]),
+          () => "",
+        );
+        expect({ file, found }).toEqual({ file, found: "" });
+      }
+    }),
+  );
+});

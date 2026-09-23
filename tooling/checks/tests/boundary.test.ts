@@ -1,4 +1,3 @@
-// oxlint-disable effect/noGlobals -- the test reads the real notes page source to inject a leak into it.
 import { Effect } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { checkEntry, formatViolation } from "../src/boundary";
@@ -11,7 +10,6 @@ import { browserEntries, repositoryRoot } from "../src/browser-entries";
  */
 
 const fixtures = `${repositoryRoot}/tooling/checks/tests/fixtures`;
-const notes = `${repositoryRoot}/apps/notes/src`;
 
 describe("server/client build rule", () => {
   for (const entry of browserEntries) {
@@ -38,22 +36,6 @@ describe("server/client build rule", () => {
           "    -> ./middle.ts",
           "      -> ./secret.server.js",
         ].join("\n"),
-      ]);
-    }),
-  );
-
-  it.effect("the notes browser entry is refused when its page imports notes.server.ts", () =>
-    Effect.gen(function* () {
-      const page = `${notes}/page.tsx`;
-      const source = yield* Effect.promise(() => Bun.file(page).text());
-      const leak = [
-        `import { inProcess } from "./notes.server.js";`,
-        `export const leaked = inProcess;`,
-        source,
-      ].join("\n");
-      const violations = yield* checkEntry(`${notes}/client.tsx`, [{ path: page, contents: leak }]);
-      expect(violations.map((violation) => violation.chain)).toEqual([
-        [`${notes}/client.tsx`, page, "./notes.server.js"],
       ]);
     }),
   );

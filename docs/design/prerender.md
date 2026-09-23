@@ -346,12 +346,18 @@ Review round 2 added these.
   path passes the build and answers 404 at run time.
 - Publishing is not durable across power loss (no `fsync`), and Windows
   replacement semantics are not claimed (decision 10).
-- An actor that a route declares is not baked. The island proof writes its
-  resume script through `document(page)`. A declared actor needs #15.
+- ~~An actor that a route declares is not baked.~~ It is now: a
+  `Route.actor` declaration is baked as an `ActorSeed` in the page's
+  `frame-actor-seed` script, and the client opens its reference from it
+  (`route-data.md` decision 16). `apps/blog/tests/document.test.tsx` reads
+  the seed of a built post, and `apps/blog/tests/island.test.tsx` resumes
+  from it. The package's island proof still writes its own resume script
+  through `document(page)`.
 - The build fails an actor refusal as a defect, not as
   `PrerenderUnauthorized`: an actor snapshot is read by the app's
   `document(page)` or by the view, and neither reports it to the build.
 - On-demand regeneration, per-route TTL, and purge (#23 "Not yet
   specified").
-- The `apps/blog` rows: there is no Blog app in the repository yet. Each
-  row is proven by its package clause.
+- The `apps/blog` rows are proven in the app too (#38,
+  `docs/design/blog-example.md`), except the nested product: the Blog has
+  no nested param, so that row stays proven in the package only.

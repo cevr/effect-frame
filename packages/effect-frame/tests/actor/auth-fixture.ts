@@ -224,6 +224,13 @@ const principalOf = (clock: Clock.Clock, encoded: string): Effect.Effect<Princip
     if (snapshot._tag === "Active" && snapshot.expiresAt > now) {
       return Authenticated.make({ subject: snapshot.subject, claims: snapshot.claims });
     }
+    console.error(
+      "[expiry] anonymous:",
+      snapshot._tag,
+      "expiresAt" in snapshot ? snapshot.expiresAt : "-",
+      "now",
+      now,
+    );
     return anonymous;
   });
 

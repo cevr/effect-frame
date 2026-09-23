@@ -1,4 +1,14 @@
-import { Deferred, Effect, Exit, Fiber, Option, Schema, Scope, Stream } from "effect";
+import {
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Option,
+  Schema,
+  Scope,
+  Stream,
+  SubscriptionRef,
+} from "effect";
 import { describe, expect, it, yieldFibers } from "effect-bun-test";
 import { Event, Machine, State } from "effect-machine";
 import {
@@ -281,6 +291,37 @@ describe("local actor", () => {
 });
 
 describe("source combinators", () => {
+  it.live("zip loses no change that lands between its first read and its subscription", () =>
+    Effect.gen(function* () {
+      // A write lands right after zip's first read of the left side, before
+      // anything follows it: the first read is 0 and the ref is then 1.
+      const ref = yield* SubscriptionRef.make(0);
+      const reads = { count: 0 };
+      const left: Source<number> = {
+        get: Effect.tap(SubscriptionRef.get(ref), () =>
+          Effect.suspend(() => {
+            reads.count += 1;
+            if (reads.count === 1) {
+              return SubscriptionRef.set(ref, 1);
+            }
+            return Effect.void;
+          }),
+        ),
+        changes: SubscriptionRef.changes(ref),
+      };
+      const letter = yield* SubscriptionRef.make("a");
+      const right: Source<string> = {
+        get: SubscriptionRef.get(letter),
+        changes: SubscriptionRef.changes(letter),
+      };
+      const pair = zip(left, right, (n, s) => `${s}${String(n)}`);
+      const reached = yield* Stream.runHead(
+        Stream.filter(pair.changes, (value) => value === "a1"),
+      ).pipe(Effect.timeoutOption("200 millis"));
+      expect(Option.flatten(reached)).toEqual(Option.some("a1"));
+    }),
+  );
+
   it.scoped("zip reads both sides on either side's change", () =>
     Effect.gen(function* () {
       const left = yield* spawn(Behavior.value(1));
@@ -289,7 +330,8 @@ describe("source combinators", () => {
       expect(yield* pair.get).toBe("a1");
 
       const seen = yield* Stream.take(pair.changes, 3).pipe(Stream.runCollect, Effect.forkScoped);
-      yield* Effect.yieldNow;
+      // Both sides followed before either changes.
+      yield* yieldFibers;
       yield* left.call(Value.Set(2));
       yield* right.call(Value.Set("b"));
       expect(Array.from(yield* Fiber.join(seen))).toEqual(["a1", "a2", "b2"]);
@@ -308,7 +350,8 @@ describe("source products and followers", () => {
       expect(yield* tuple.get).toEqual([1, "a"]);
 
       const seen = yield* Stream.take(struct.changes, 3).pipe(Stream.runCollect, Effect.forkScoped);
-      yield* Effect.yieldNow;
+      // Both sides followed before either changes.
+      yield* yieldFibers;
       yield* n.call(Value.Set(2));
       yield* s.call(Value.Set("b"));
       expect(Array.from(yield* Fiber.join(seen))).toEqual([

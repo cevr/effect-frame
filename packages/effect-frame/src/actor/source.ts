@@ -35,16 +35,16 @@ const constant = <A>(value: A): Source<A> => ({
   changes: Stream.succeed(value),
 });
 
-/** Every element after the first, which is the current value (see `Source`). */
-const later = <A>(source: Source<A>): Stream.Stream<void> =>
-  Stream.map(Stream.drop(source.changes, 1), Function.constVoid);
-
 /**
  * One source from two. It reads both when either changes, so a change to
  * one side is always seen beside the other's current value; the combined
  * source never holds a pair older than what either side would answer alone.
- * Each side's first element is its current value (see `Source`), so the
- * combined stream reads once up front and then follows only later changes.
+ *
+ * The first read waits until both sides are followed: each side's first
+ * element is its current value (see `Source`), and the combined stream
+ * reads once when both have arrived, then once per later element. A read
+ * taken before the subscriptions would lose a change that landed between
+ * the two, as `derive` explains.
  */
 export const zip = <A, B, C>(
   left: Source<A>,
@@ -54,9 +54,9 @@ export const zip = <A, B, C>(
   const get = Effect.map(Effect.all([left.get, right.get]), ([a, b]) => combine(a, b));
   return {
     get,
-    changes: Stream.concat(
-      Stream.fromEffect(get),
-      Stream.mapEffect(Stream.merge(later(left), later(right)), () => get),
+    changes: Stream.mapEffect(
+      Stream.zipLatestWith(left.changes, right.changes, Function.constVoid),
+      () => get,
     ),
   };
 };

@@ -1,171 +1,34 @@
 /**
- * The celld recovery proof.
+ * The Durable Object recovery proof.
  *
- * It runs the real celld 0.5.0 binary against an isolated copy of the fixture,
- * kills the node with SIGKILL between phases, restarts the same command, and
- * asserts what must survive. Nothing here runs in CI: it needs the binary and
- * takes about half a minute. Run it with `bun run proof:celld`.
+ * It runs a real runtime against an isolated copy of the fixture, kills it
+ * with SIGKILL between phases, restarts the same command, and asserts what
+ * must survive. `--runtime=celld` (the default) runs the celld 0.5.0 binary;
+ * `--runtime=workerd` runs the workerd build Alchemy runs locally. Nothing
+ * here runs in CI: it takes about half a minute. Run it with
+ * `bun run proof:celld` or `bun run proof:workerd`.
  *
  * This file is a test runner, not library code. It uses plain promises and the
  * process APIs a runner needs.
  */
 
-import type { ChildProcess } from "node:child_process";
-import { execFileSync, spawn } from "node:child_process";
-import { cpSync, mkdirSync, rmSync } from "node:fs";
-import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { SqlRow } from "../src/storage.js";
+import type { Node } from "./proof.js";
+import { freePort, makeReport, prepare, sleep } from "./proof.js";
+import { runtimeFromArgs } from "./runtimes.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(here, "..");
 const repoRoot = resolve(packageRoot, "..", "..");
 
-const DEFAULT_CELLD_BIN = "/Users/cvr/Developer/personal/effect-frame/.tools/celld/bin/celld";
-const celldBin = process.env["CELLD_BIN"] ?? DEFAULT_CELLD_BIN;
-
-const proofDir = join(repoRoot, ".proof", "celld");
+const runtime = runtimeFromArgs(process.argv);
+const proofDir = join(repoRoot, ".proof", runtime.name);
 const fixtureSource = join(packageRoot, "fixture");
 
-// ---------------------------------------------------------------------------
-// Reporting
-// ---------------------------------------------------------------------------
-
-interface Row {
-  readonly id: string;
-  readonly name: string;
-  passed: boolean;
-  detail: string;
-}
-
-const rows: Array<Row> = [];
-
-const record = (id: string, name: string, passed: boolean, detail: string): void => {
-  rows.push({ id, name, passed, detail });
-  const mark = passed ? "PASS" : "FAIL";
-  console.log(`  ${mark}  ${id}. ${name}${passed ? "" : ` — ${detail}`}`);
-};
-
-const check = (id: string, name: string, ok: boolean, detail: string): void => {
-  record(id, name, ok, detail);
-};
-
-// ---------------------------------------------------------------------------
-// Process control
-// ---------------------------------------------------------------------------
-
-const freePort = (): Promise<number> =>
-  new Promise((done, failed) => {
-    const server = createServer();
-    server.on("error", failed);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (address === null || typeof address === "string") {
-        server.close();
-        failed(new Error("no port"));
-        return;
-      }
-      const port = address.port;
-      server.close(() => done(port));
-    });
-  });
-
-const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
-
-interface Node {
-  readonly launcher: ChildProcess;
-  readonly port: number;
-  readonly logs: Array<string>;
-}
-
-/** Starts `celld dev` and resolves once the ready line appears. */
-const start = async (port: number): Promise<Node> => {
-  const logs: Array<string> = [];
-  const launcher = spawn(
-    celldBin,
-    ["dev", "--no-watch", "--logs", "--port", String(port), proofDir],
-    { stdio: ["ignore", "pipe", "pipe"] },
-  );
-  const collect = (chunk: Buffer): void => {
-    logs.push(chunk.toString());
-  };
-  launcher.stdout?.on("data", collect);
-  launcher.stderr?.on("data", collect);
-
-  const ready = `ready  http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    if (logs.join("").includes(ready)) {
-      // Give the node a beat after the ready line before the first request.
-      await sleep(300);
-      return { launcher, port, logs };
-    }
-    if (launcher.exitCode !== null) {
-      throw new Error(`celld dev exited early:\n${logs.join("")}`);
-    }
-    await sleep(100);
-  }
-  throw new Error(`celld dev never became ready:\n${logs.join("")}`);
-};
-
-/** The one node child the launcher spawned. */
-const nodeChild = (launcherPid: number): number => {
-  const out = execFileSync("pgrep", ["-P", String(launcherPid)], { encoding: "utf8" });
-  const pids = out
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .map((line) => Number.parseInt(line, 10))
-    .filter((pid) => Number.isInteger(pid));
-  const first = pids[0];
-  if (first === undefined) {
-    throw new Error(`launcher ${launcherPid} has no child`);
-  }
-  return first;
-};
-
-const exited = (child: ChildProcess): Promise<void> =>
-  new Promise((done) => {
-    if (child.exitCode !== null || child.signalCode !== null) {
-      done();
-      return;
-    }
-    child.on("exit", () => done());
-  });
-
-/**
- * Kills the node with SIGKILL, the way a machine loses a process. The launcher
- * then exits with an error and does not restart, so the caller starts the same
- * command again against the same state directory.
- */
-const crash = async (node: Node): Promise<void> => {
-  const launcherPid = node.launcher.pid;
-  if (launcherPid === undefined) {
-    throw new Error("launcher has no pid");
-  }
-  const child = nodeChild(launcherPid);
-  process.kill(child, "SIGKILL");
-  await Promise.race([exited(node.launcher), sleep(8000)]);
-  if (node.launcher.exitCode === null && node.launcher.signalCode === null) {
-    node.launcher.kill("SIGKILL");
-    await Promise.race([exited(node.launcher), sleep(3000)]);
-  }
-  // Let the port free up before the restart binds it again.
-  await sleep(500);
-};
-
-const stop = async (node: Node): Promise<void> => {
-  const launcherPid = node.launcher.pid;
-  if (launcherPid !== undefined) {
-    try {
-      process.kill(nodeChild(launcherPid), "SIGKILL");
-    } catch {
-      // The child may already be gone.
-    }
-  }
-  node.launcher.kill("SIGKILL");
-  await Promise.race([exited(node.launcher), sleep(3000)]);
-};
+const report = makeReport();
+const check = report.check;
 
 // ---------------------------------------------------------------------------
 // The HTTP client
@@ -233,6 +96,31 @@ const waitForTotal = async (
   return last;
 };
 
+/**
+ * Polls the objects' databases on disk until the command carries a revision,
+ * or the wait runs out. It sends no request, so it cannot wake an object.
+ */
+const waitForDisk = async (
+  readObjects: NonNullable<typeof runtime.readObjects>,
+  commandId: string,
+  timeoutMs: number,
+): Promise<ReadonlyArray<SqlRow>> => {
+  const query = `SELECT c.command_id, c.revision, k.revision AS committed_revision,
+                        k.state AS committed_state
+                   FROM commands c LEFT JOIN committed k ON k.id = 1
+                  WHERE c.command_id = '${commandId}'`;
+  const deadline = Date.now() + timeoutMs;
+  let rows = readObjects(proofDir, query);
+  while (Date.now() < deadline) {
+    if (rows.length > 0 && rows.every((row) => typeof row["revision"] === "number")) {
+      return rows;
+    }
+    await sleep(200);
+    rows = readObjects(proofDir, query);
+  }
+  return rows;
+};
+
 const totalOf = (reply: Reply): number => {
   const state = reply.body.state;
   if (typeof state === "object" && state !== null && "total" in state) {
@@ -259,13 +147,6 @@ const show = (value: unknown): string => JSON.stringify(value);
 // ---------------------------------------------------------------------------
 // The matrix
 // ---------------------------------------------------------------------------
-
-const prepare = (): void => {
-  rmSync(proofDir, { recursive: true, force: true });
-  mkdirSync(proofDir, { recursive: true });
-  cpSync(join(fixtureSource, "worker.js"), join(proofDir, "worker.js"));
-  cpSync(join(fixtureSource, "wrangler.jsonc"), join(proofDir, "wrangler.jsonc"));
-};
 
 /**
  * Row a — accepted, then killed.
@@ -294,15 +175,29 @@ const rowAcceptedThenKilled = async (node: Node): Promise<Node> => {
     `pending ${show(beforeKill.body)}`,
   );
 
-  await crash(node);
-  const restarted = await start(node.port);
+  await node.crash();
+  const restarted = await runtime.start(proofDir, node.port);
 
   // Nothing here asks the actor to run. Only the armed alarm can drain it.
+  // A runtime whose disk the proof can read shows that before any request
+  // reaches the object; the request below would otherwise open it too.
+  if (runtime.readObjects !== undefined) {
+    const committed = await waitForDisk(runtime.readObjects, "a1", 20_000);
+    check(
+      "a",
+      "with no request after the restart, the alarm commits the command exactly once",
+      committed.length === 1 &&
+        committed[0]?.["revision"] === 1 &&
+        committed[0]?.["committed_revision"] === 1 &&
+        committed[0]?.["committed_state"] === '{"total":7}',
+      `rows on disk ${show(committed)}`,
+    );
+  }
   const state = await waitForTotal(restarted.port, key, 7, 20_000);
   const pending = await call(restarted.port, key, "/pending");
   check(
     "a",
-    "after SIGKILL and restart the alarm drains the command with no request",
+    "after SIGKILL and restart the command applied once and the mailbox drained",
     totalOf(state) === 7 && pendingOf(pending).length === 0,
     `state ${show(state.body)}, pending ${show(pending.body)}`,
   );
@@ -329,8 +224,8 @@ const rowCommittedThenRetry = async (node: Node): Promise<Node> => {
     `body ${show(first.body)}`,
   );
 
-  await crash(node);
-  const restarted = await start(node.port);
+  await node.crash();
+  const restarted = await runtime.start(proofDir, node.port);
 
   const retry = await call(restarted.port, key, "/call", {
     commandId: "c2",
@@ -404,13 +299,12 @@ const rowOrdering = async (node: Node): Promise<void> => {
 // ---------------------------------------------------------------------------
 
 const main = async (): Promise<number> => {
-  console.log(`celld binary: ${celldBin}`);
-  console.log(`proof dir:    ${proofDir}`);
+  console.log(`runtime:   ${runtime.describe}`);
+  console.log(`proof dir: ${proofDir}`);
   console.log("");
-  prepare();
+  prepare(fixtureSource, proofDir);
 
-  const port = await freePort();
-  let node = await start(port);
+  let node = await runtime.start(proofDir, await freePort());
   try {
     console.log("rows:");
     node = await rowAcceptedThenKilled(node);
@@ -418,31 +312,9 @@ const main = async (): Promise<number> => {
     await rowConflict(node);
     await rowOrdering(node);
   } finally {
-    await stop(node);
+    await node.stop();
   }
-
-  console.log("");
-  console.log(
-    "| row | check                                                            | result |",
-  );
-  console.log(
-    "| --- | ---------------------------------------------------------------- | ------ |",
-  );
-  for (const row of rows) {
-    const name = row.name.padEnd(64).slice(0, 64);
-    console.log(`| ${row.id}   | ${name} | ${row.passed ? "PASS  " : "FAIL  "} |`);
-  }
-  const failed = rows.filter((row) => !row.passed);
-  console.log("");
-  if (failed.length > 0) {
-    console.log(`${failed.length} of ${rows.length} checks FAILED:`);
-    for (const row of failed) {
-      console.log(`  ${row.id}. ${row.name} — ${row.detail}`);
-    }
-    return 1;
-  }
-  console.log(`all ${rows.length} checks passed`);
-  return 0;
+  return report.print();
 };
 
 process.exitCode = await main();

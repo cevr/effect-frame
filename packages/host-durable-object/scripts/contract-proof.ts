@@ -20,7 +20,6 @@
  * runner needs at its edges; the actor calls inside are ordinary Effect.
  */
 
-import { cpSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Scope } from "effect";
@@ -28,14 +27,16 @@ import { Duration, Effect, Fiber, Option, Schema, Stream } from "effect";
 import { CommandId, HttpTransport, ref } from "effect-frame/actor/client";
 import type { RemoteActorRef } from "effect-frame/actor/client";
 import { Counter, Upload, UploadEvent } from "../fixture-contract/index.js";
-import type { Node } from "./celld-process.js";
-import { crash, celldBin, freePort, makeReport, sleep, start, stop } from "./celld-process.js";
+import type { Node } from "./proof.js";
+import { freePort, makeReport, prepare, sleep } from "./proof.js";
+import { runtimeFromArgs } from "./runtimes.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(here, "..");
 const repoRoot = resolve(packageRoot, "..", "..");
 
-const proofDir = join(repoRoot, ".proof", "celld-contract");
+const runtime = runtimeFromArgs(process.argv);
+const proofDir = join(repoRoot, ".proof", `${runtime.name}-contract`);
 const fixtureSource = join(packageRoot, "fixture-contract");
 
 const report = makeReport();
@@ -83,8 +84,8 @@ const rowCounterSurvivesKill = async (node: Node): Promise<Node> => {
     `applied ${show(first)}`,
   );
 
-  await crash(node);
-  const restarted = await start(proofDir, port);
+  await node.crash();
+  const restarted = await runtime.start(proofDir, port);
 
   const restored = await runCounter(restarted.port, key, (counter) => counter.applied.get);
   report.check(
@@ -202,8 +203,8 @@ const rowMachineResumes = async (node: Node): Promise<Node> => {
 
   // Kill well inside the task's sleep, so the work cannot have finished.
   await sleep(500);
-  await crash(node);
-  const restarted = await start(proofDir, port);
+  await node.crash();
+  const restarted = await runtime.start(proofDir, port);
 
   // One snapshot request wakes the object. This is exactly what a
   // reconnecting client sends first.
@@ -303,21 +304,13 @@ const rowChangesStream = async (node: Node): Promise<void> => {
 // Entry
 // ---------------------------------------------------------------------------
 
-const prepare = (): void => {
-  rmSync(proofDir, { recursive: true, force: true });
-  mkdirSync(proofDir, { recursive: true });
-  cpSync(join(fixtureSource, "worker.js"), join(proofDir, "worker.js"));
-  cpSync(join(fixtureSource, "wrangler.jsonc"), join(proofDir, "wrangler.jsonc"));
-};
-
 const main = async (): Promise<number> => {
-  console.log(`celld binary: ${celldBin}`);
-  console.log(`proof dir:    ${proofDir}`);
+  console.log(`runtime:   ${runtime.describe}`);
+  console.log(`proof dir: ${proofDir}`);
   console.log("");
-  prepare();
+  prepare(fixtureSource, proofDir);
 
-  const port = await freePort();
-  let node = await start(proofDir, port);
+  let node = await runtime.start(proofDir, await freePort());
   try {
     console.log("rows:");
     node = await rowCounterSurvivesKill(node);
@@ -325,7 +318,7 @@ const main = async (): Promise<number> => {
     node = await rowMachineResumes(node);
     await rowChangesStream(node);
   } finally {
-    await stop(node);
+    await node.stop();
   }
   return report.print();
 };

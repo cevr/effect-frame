@@ -137,17 +137,17 @@ Executed as source and environment checks: source reads, Git commit and tag chec
 
 The `@effect-frame/host-durable-object` package now runs these checks. The receipt for every row below is `packages/host-durable-object/scripts/crash-harness.ts`. Run it with `bun run proof:celld` in `packages/host-durable-object`. It is not in the default gate: it needs the binary and takes about 30 seconds.
 
-| Check                           | Result                                                                                                                  |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Binary download and startup     | celld 0.5.0 Darwin arm64 starts. `celld dev --no-watch --logs --port PORT <dir>` prints `ready  http://127.0.0.1:PORT`. |
-| Isolated state directory        | State lives at `<projectDir>/.celld/dev`. The harness copies the fixture into `.proof/celld` and never uses `--clean`.  |
-| SIGKILL and restart             | The launcher spawns one node child. SIGKILL on the child ends the launcher; it does not restart. The harness restarts.  |
-| SQL storage                     | `ctx.storage.sql.exec(query, ...params)` with `.toArray()` serves the mailbox schema.                                   |
-| Transaction commit and rollback | `ctx.storage.transaction(async txn => ...)` commits on resolve and rolls back on reject.                                |
-| Transaction-scoped `setAlarm`   | `await txn.setAlarm(ms)` inside the async transaction publishes the wake at commit, with the command row.               |
-| `alarm()` delivery              | The armed wake calls the object's `alarm()` after a restart, with no client request.                                    |
-| `no_bundle` worker              | `bun build --target browser --format esm` output loads under `"no_bundle": true`. esbuild is not needed.                |
-| `new_sqlite_classes`            | The migration needs `new_sqlite_classes`. `new_classes` is rejected.                                                    |
+| Check                           | Result                                                                                                                      |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Binary download and startup     | celld 0.5.0 Darwin arm64 starts. `celld dev --no-watch --logs --port PORT <dir>` prints `ready  http://127.0.0.1:PORT`.     |
+| Isolated state directory        | State lives at `<projectDir>/.celld/dev`. The harness copies the fixture into `.proof/celld` and never uses `--clean`.      |
+| SIGKILL and restart             | The launcher spawns one node child. SIGKILL on the child ends the launcher; it does not restart. The harness restarts.      |
+| SQL storage                     | `ctx.storage.sql.exec(query, ...params)` with `.toArray()` serves the mailbox schema.                                       |
+| Transaction commit and rollback | `ctx.storage.transaction(async txn => ...)` commits on resolve and rolls back on reject.                                    |
+| Transaction-scoped `setAlarm`   | `await txn.setAlarm(ms)` inside the async transaction publishes the wake at commit, with the command row.                   |
+| `alarm()` delivery              | The armed wake calls the object's `alarm()` after a restart. The proof does not isolate it from the client's poll on celld. |
+| `no_bundle` worker              | `bun build --target browser --format esm` output loads under `"no_bundle": true`. esbuild is not needed.                    |
+| `new_sqlite_classes`            | The migration needs `new_sqlite_classes`. `new_classes` is rejected.                                                        |
 
 ### The transaction handle on workerd
 
@@ -161,14 +161,22 @@ So `StorageTransaction` now carries only `setAlarm`, and the store writes throug
 
 ### Crash matrix rows now proved
 
-| Row | Kill point or test                               | Result                                                                                                                   |
-| --- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| a   | After accepted response, before processing       | The send returns 202 with the command still pending. SIGKILL, restart: the armed alarm drains it with no client request. |
-| b   | After result commit, before HTTP response        | A retry with the same ID and payload returns the stored receipt at the same revision. The state does not change again.   |
-| c   | Concurrent duplicate commands, different payload | The same ID with a different payload returns `CommandConflict` and leaves the committed state alone.                     |
-| d   | Order of several admitted commands               | Three quick sends each apply once. The committed revision reaches 3 and the mailbox drains.                              |
+| Row | Kill point or test                               | Result                                                                                                                                                                                                         |
+| --- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a   | After accepted response, before processing       | The send returns 202 with the command still pending. SIGKILL, restart: the command applies once. The check polls `/state`, which also opens the actor, so it does not isolate the alarm. The workerd run does. |
+| b   | After result commit, before HTTP response        | A retry with the same ID and payload returns the stored receipt at the same revision. The state does not change again.                                                                                         |
+| c   | Concurrent duplicate commands, different payload | The same ID with a different payload returns `CommandConflict` and leaves the committed state alone.                                                                                                           |
+| d   | Order of several admitted commands               | Three quick sends each apply once. The committed revision reaches 3 and the mailbox drains.                                                                                                                    |
 
 All ten assertions across these four rows passed. The store also passes the shared `MailboxStore` conformance suite over an in-memory SQLite fake, in `packages/host-durable-object/tests/storage-store.test.ts`.
+
+### The same proofs on workerd
+
+Both proofs take `--runtime=workerd`. They run workerd 1.20260901.1, the build Alchemy 2.0.0-beta.79 runs locally. Like Alchemy, they start the binary directly, with no Wrangler, no Miniflare, and no account. `scripts/workerd-process.ts` derives the workerd config from the fixture's `wrangler.jsonc`, so one file describes the worker for both runtimes. A `new_sqlite_classes` migration becomes `enableSql = true`. Object storage lives on disk in the proof directory, so SIGKILL loses the process and keeps the objects and their alarms.
+
+Row a had a gap. Its old check polled `/state` after the restart, and that request opens the actor, which drains pending commands by itself. A control run that armed the admission alarm an hour late still passed that check. On workerd the proof now reads each object's SQLite file on disk and sends no request. In the control run, that new check failed, with the command still pending on disk. With the real alarm it passes. The celld run keeps the old check, now named for what it shows: the command applied once. celld's disk layout is not read, so on celld the alarm alone is still not isolated.
+
+Commands: `bun run proof:workerd` and `bun run proof:contract:workerd` in `packages/host-durable-object`. Both passed on 2026-09-23: 11 of 11 and 12 of 12 checks.
 
 ### Generic host proof
 

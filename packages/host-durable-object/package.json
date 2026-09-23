@@ -12,8 +12,10 @@
     "test": "bun test --conditions=source tests/",
     "fixture": "bun build --conditions=source fixture/index.ts --target browser --format esm --outfile fixture/worker.js",
     "proof:celld": "bun --conditions=source scripts/crash-harness.ts",
+    "proof:workerd": "bun --conditions=source scripts/crash-harness.ts --runtime=workerd",
     "fixture:contract": "bun build --conditions=source fixture-contract/index.ts --target browser --format esm --outfile fixture-contract/worker.js",
-    "proof:contract": "bun --conditions=source scripts/contract-proof.ts"
+    "proof:contract": "bun --conditions=source scripts/contract-proof.ts",
+    "proof:contract:workerd": "bun --conditions=source scripts/contract-proof.ts --runtime=workerd"
   },
   "dependencies": {
     "effect-frame": "workspace:*",

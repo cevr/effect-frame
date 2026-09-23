@@ -234,6 +234,7 @@
       "files": [
         "packages/host-durable-object/scripts/celld-process.ts",
         "packages/host-durable-object/scripts/proof.ts",
+        "packages/host-durable-object/scripts/runtimes.ts",
         "packages/host-durable-object/scripts/workerd-process.ts"
       ],
       "rules": {

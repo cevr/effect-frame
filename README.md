@@ -199,6 +199,71 @@ const program = Effect.gen(function* () {
 
 See [the public route design](docs/design/route-public.md).
 
+## Plain-form commands
+
+A command form works with no JavaScript. The server renders a real
+`<form method="post">`; the hydrated page sends the same message over the
+actor transport.
+
+```tsx
+import { HttpServer } from "effect-frame/actor";
+import { Form, Generated } from "effect-frame/actor/client";
+import type { RemoteActorRef } from "effect-frame/actor/client";
+import { View } from "effect-frame/view";
+import { Effect, Schema } from "effect";
+
+// The render mints `id` with the command id. Decoding never mints it.
+const Add = Schema.TaggedStruct("Add", {
+  id: Generated.fromCommandId(Schema.String),
+  text: Schema.String,
+  pinned: Form.Checkbox, // absent is false
+});
+
+const Compose = (props: { readonly notes: RemoteActorRef<typeof Notes> }) =>
+  Effect.gen(function* () {
+    const add = yield* View.form({
+      ref: props.notes,
+      contract: Notes,
+      key: { tenant: "demo", list: "inbox" },
+      message: Add,
+      typed: ["text", "pinned"],
+      endpoint: "/actors",
+      returnTo: "/",
+    });
+    return (
+      <form onSubmit={add.submit}>
+        <input name="text" />
+        <input type="checkbox" name="pinned" />
+        {add.issues.map((issue) => (
+          <p>{issue.message}</p>
+        ))}
+      </form>
+    );
+  });
+
+// Server: mount beside the JSON handler, at `/actors/form`.
+const forms = HttpServer.form({ contracts: [Notes], render: (path) => renderPage(path) });
+```
+
+- `effect-frame/actor/client` exports `Generated` (`fromCommandId`,
+  `freshId`, `send`, `Input`) and `Form` (`codec`, `Checkbox`,
+  `FormContext`, `FormIssues`, `issuesOf`, `encodeKey`, and the field-map
+  helpers). `Wire.paths.form` is `/form`.
+- `View.form` returns `{ submit, issues, commandId }`. The runtime draws
+  `method`, `action`, and the hidden `$command`, `$contract`, `$version`,
+  `$key`, `$return`, `_tag`, and generated inputs in every host.
+- `HttpServer.form` answers 303 to `$return` on success, 200 with the page
+  and its `FormIssues` on a validation failure, 504 with the same id on a
+  lost reply, and 400 or 415 before any send.
+- `Generated.send(ref, contract, input)` sends from code. The input omits
+  every generated field.
+- A field whose name has a segment that starts with `_` is never written
+  back into a refused page. A multipart body is refused with 415.
+- `HostEvent.form` carries the submitted fields on a DOM submit.
+  `Prepared.post` carries a form's plain post.
+
+See [the plain-form design](docs/design/plain-forms.md).
+
 ## Planning
 
 Read [the GitHub tracker guide](docs/wayfinder/github.md) before changing the map. Read source findings in `docs/research/` when they are available.

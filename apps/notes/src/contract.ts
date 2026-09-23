@@ -1,4 +1,4 @@
-import { contract } from "effect-frame/actor/client";
+import { Generated, contract } from "effect-frame/actor/client";
 import { Schema } from "effect";
 
 /**
@@ -20,7 +20,14 @@ export type NotesKey = Schema.Schema.Type<typeof NotesKey>;
 export const NotesSnapshot = Schema.Struct({ notes: Schema.Array(Note) });
 export type NotesSnapshot = Schema.Schema.Type<typeof NotesSnapshot>;
 
-export const Add = Schema.TaggedStruct("Add", { id: Schema.String, text: Schema.String });
+/**
+ * A new note's id is its command id (#32). The render mints both at once,
+ * so a plain form post carries the id, and a post sent twice adds one note.
+ */
+export const Add = Schema.TaggedStruct("Add", {
+  id: Generated.fromCommandId(Schema.String),
+  text: Schema.String,
+});
 export const Toggle = Schema.TaggedStruct("Toggle", { id: Schema.String });
 export const Remove = Schema.TaggedStruct("Remove", { id: Schema.String });
 

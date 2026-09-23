@@ -1,7 +1,7 @@
 import type { Layer } from "effect";
 import { HttpServer } from "effect-frame/actor";
 import type { ActorTransport } from "effect-frame/actor/client";
-import { ref, resumeCodec } from "effect-frame/actor/client";
+import { Wire, ref, resumeCodec } from "effect-frame/actor/client";
 import { Html } from "effect-frame/view";
 import { Effect, ManagedRuntime, Option, Schema } from "effect";
 import { Notes, demoKey, resumeScriptId } from "./contract.js";
@@ -16,6 +16,7 @@ import { NotesPage } from "./page.js";
  * Routes:
  *   GET  /           the server-rendered page plus its resume payload
  *   GET  /client.js  the browser bundle, built once at start
+ *   POST /actors/form  a plain form post, for a page with no script (#21)
  *   *    /actors/*   the actor transport, as the client's `baseUrl`
  */
 
@@ -90,6 +91,10 @@ export interface RunningServer {
 export const makeServer = async (options: ServerOptions): Promise<RunningServer> => {
   const runtime = options.runtime;
   const actors = await runtime.runPromise(HttpServer.make);
+  // A refused post re-renders this same document with its issues.
+  const forms = await runtime.runPromise(
+    HttpServer.form({ contracts: [Notes], render: () => Effect.scoped(document()) }),
+  );
   const client = await runtime.runPromise(buildClient());
 
   // oxlint-disable-next-line effect/noGlobals -- Bun.serve is the platform boundary.
@@ -97,6 +102,9 @@ export const makeServer = async (options: ServerOptions): Promise<RunningServer>
     port: options.port,
     fetch: (request: Request): Response | Promise<Response> => {
       const url = new URL(request.url);
+      if (url.pathname === `${actorPrefix}${Wire.paths.form}`) {
+        return runtime.runPromise(forms(request));
+      }
       if (url.pathname.startsWith(actorPrefix)) {
         const rest = url.pathname.slice(actorPrefix.length);
         const stripped = new URL(request.url);

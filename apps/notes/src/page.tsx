@@ -3,9 +3,9 @@ import { Behavior, ref, select, spawn } from "effect-frame/actor/client";
 import { For, View } from "effect-frame/view";
 import type { Option } from "effect";
 import { Effect } from "effect";
-import { addNote, dispatch, writeDraft } from "./commands.js";
+import { dispatch, writeDraft } from "./commands.js";
 import type { Note, NotesKey } from "./contract.js";
-import { Notes } from "./contract.js";
+import { Add, Notes } from "./contract.js";
 
 /**
  * The browser page. One view, one actor reference. The list, the count, and
@@ -13,6 +13,10 @@ import { Notes } from "./contract.js";
  *
  * The draft text lives in a local actor. Local UI state stays local; the
  * notes themselves are the server's.
+ *
+ * The compose form is a command form (#21). With no script it posts to
+ * `/actors/form` and the browser comes back to `/`; with the script it
+ * sends the same message over the transport and clears the draft.
  */
 
 export interface NotesPageProps {
@@ -27,13 +31,20 @@ export const NotesPage = (props: NotesPageProps) =>
     const draft = yield* spawn(Behavior.value(""));
     const setDraft = writeDraft(draft);
 
-    const submit = View.submit(() =>
-      Effect.flatMap(draft.state.get, (text) => Effect.andThen(addNote(notes, text), setDraft(""))),
-    );
+    const compose = yield* View.form({
+      ref: notes,
+      contract: Notes,
+      key: props.key,
+      message: Add,
+      typed: ["text"],
+      endpoint: "/actors",
+      returnTo: "/",
+      onSend: () => setDraft(""),
+    });
 
     return (
       <section id="notes-page">
-        <form id="compose" onSubmit={submit}>
+        <form id="compose" onSubmit={compose.submit}>
           <input
             id="draft"
             name="text"
@@ -42,6 +53,11 @@ export const NotesPage = (props: NotesPageProps) =>
           />
           <button type="submit">add</button>
         </form>
+        <ul id="issues">
+          {compose.issues.map((issue) => (
+            <li data-field={issue.field}>{issue.message}</li>
+          ))}
+        </ul>
         <ul id="list">
           <For
             each={select(notes.state, (snapshot) => snapshot.notes)}

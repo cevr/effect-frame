@@ -25,25 +25,27 @@ Type a note in either client and press Enter. Both update. Tick a box in the bro
 
 ## What each file does
 
-| File                    | Role                                                                                                                                |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `src/contract.ts`       | The contract. Browser safe: it imports only `effect` and the actor client entry.                                                    |
-| `src/notes.server.ts`   | The behavior, and the two transports the server can run over. A server module: `bun run boundary` fails if `client.tsx` reaches it. |
-| `src/commands.ts`       | Command ids and the send helpers both views share.                                                                                  |
-| `src/page.tsx`          | The browser view.                                                                                                                   |
-| `src/terminal-view.tsx` | The terminal view. Same setup, different tags.                                                                                      |
-| `src/server.ts`         | The platform boundary: `Bun.serve`, `Bun.build`, and the environment.                                                               |
-| `src/client.tsx`        | The browser entry: read the resume payload, hydrate, follow.                                                                        |
-| `src/terminal.tsx`      | The terminal entry.                                                                                                                 |
-| `tests/e2e.test.tsx`    | The proof. A real server on a free port, a real socket, both clients.                                                               |
+| File                       | Role                                                                                                                                |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `src/contract.ts`          | The contract. Browser safe: it imports only `effect` and the actor client entry.                                                    |
+| `src/notes.server.ts`      | The behavior, and the two transports the server can run over. A server module: `bun run boundary` fails if `client.tsx` reaches it. |
+| `src/commands.ts`          | Command ids and the send helpers both views share.                                                                                  |
+| `src/page.tsx`             | The browser view.                                                                                                                   |
+| `src/terminal-view.tsx`    | The terminal view. Same setup, different tags.                                                                                      |
+| `src/server.ts`            | The platform boundary: `Bun.serve`, `Bun.build`, and the environment.                                                               |
+| `src/client.tsx`           | The browser entry: read the resume payload, hydrate, follow.                                                                        |
+| `src/terminal.tsx`         | The terminal entry.                                                                                                                 |
+| `tests/e2e.test.tsx`       | The proof. A real server on a free port, a real socket, both clients.                                                               |
+| `tests/plain-form.test.ts` | The compose form with no script: a real post, a 303, and a double post that adds one note.                                          |
 
 ## Routes
 
-| Route            | Answer                                                        |
-| ---------------- | ------------------------------------------------------------- |
-| `GET /`          | The HTML document, the rendered list, and the resume payload. |
-| `GET /client.js` | The browser bundle, built once at start and held in memory.   |
-| `/actors/*`      | The actor transport. The clients use it as `baseUrl`.         |
+| Route               | Answer                                                          |
+| ------------------- | --------------------------------------------------------------- |
+| `GET /`             | The HTML document, the rendered list, and the resume payload.   |
+| `GET /client.js`    | The browser bundle, built once at start and held in memory.     |
+| `/actors/*`         | The actor transport. The clients use it as `baseUrl`.           |
+| `POST /actors/form` | A plain form post from the compose form. It answers 303 to `/`. |
 
 ## Point it at another host
 

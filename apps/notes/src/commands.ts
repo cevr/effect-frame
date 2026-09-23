@@ -1,17 +1,8 @@
 import type { LocalActorRef, RemoteActorRef, SetValue } from "effect-frame/actor/client";
-import { Value } from "effect-frame/actor/client";
-import { Effect, Random } from "effect";
-import type { Notes, NotesMessage } from "./contract.js";
-
-/**
- * A fresh note id. `Random.next` keeps it inside Effect, so a test may seed
- * it. Two draws give the id enough width for one page. Command ids are not
- * made here: the framework mints a secure one for every `send`.
- */
-export const freshId: Effect.Effect<string> = Effect.map(
-  Effect.all([Random.next, Random.next]),
-  ([high, low]) => `${high.toString(36).slice(2)}${low.toString(36).slice(2)}`,
-);
+import { Generated, Value } from "effect-frame/actor/client";
+import { Effect } from "effect";
+import type { NotesMessage } from "./contract.js";
+import { Notes } from "./contract.js";
 
 export type NotesRef = RemoteActorRef<typeof Notes>;
 
@@ -40,12 +31,15 @@ export const writeDraft =
   (text: string): Effect.Effect<void> =>
     Effect.asVoid(draft.send(Value.Set(text)));
 
-/** A new note needs its own id as well as its command id. */
+/**
+ * Add a note. The note's id is generated from the command id, so the
+ * author never writes it: `Generated.send` mints the command id and fills
+ * the id from it in one step.
+ */
 export const addNote = Effect.fn("Notes.addNote")(function* (notes: NotesRef, text: string) {
   const trimmed = text.trim();
   if (trimmed.length === 0) {
     return;
   }
-  const id = yield* freshId;
-  yield* dispatch(notes, { _tag: "Add", id, text: trimmed });
+  yield* Generated.send(notes, Notes, { _tag: "Add", text: trimmed });
 });

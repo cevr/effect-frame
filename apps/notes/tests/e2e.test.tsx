@@ -4,7 +4,7 @@ registerDom();
 
 import { serverOnly } from "effect-frame/actor";
 import type { ActorTransport, Applied, SnapshotOf } from "effect-frame/actor/client";
-import { CommandId, HttpTransport, ref, resumeCodec } from "effect-frame/actor/client";
+import { CommandId, Form, HttpTransport, ref, resumeCodec } from "effect-frame/actor/client";
 import { Dom, mount, render } from "effect-frame/view";
 import { make as makeTuiHost } from "effect-frame/view/opentui";
 import type { TestRendererSetup } from "@opentui/core/testing";
@@ -227,6 +227,58 @@ describe("notes end to end", () => {
 
       yield* settle(Effect.sync(() => textOf(root, "#count") === "1"));
       expect(textOf(root, "#list li span")).toBe("after restart");
+    }),
+  );
+  it.scopedLive("a post that races hydration applies once", () =>
+    Effect.gen(function* () {
+      const runtime = yield* notesRuntime;
+      const server = yield* serve(runtime, 0);
+      const page = yield* fetchText(server.url);
+      const root = yield* install(page);
+
+      const client = yield* asClientOf(server.url)(
+        Effect.andThen(hydratePage(root), ref(Notes, demoKey)),
+      );
+      const form = Option.getOrThrow(
+        Option.filter(
+          Option.fromNullishOr(root.querySelector("#compose")),
+          (found): found is HTMLFormElement => found instanceof HTMLFormElement,
+        ),
+      );
+      const draft = Option.getOrThrow(
+        Option.filter(
+          Option.fromNullishOr(root.querySelector("#draft")),
+          (found): found is HTMLInputElement => found instanceof HTMLInputElement,
+        ),
+      );
+      draft.value = "race";
+
+      // The native post left before the script took over; the script then
+      // sends the same form. Both carry the id the server rendered.
+      const body = Form.toBody(Form.fromEntries(new FormData(form)));
+      const native = yield* Effect.promise(() =>
+        platformFetch(`${server.url}/actors/form`, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body,
+          redirect: "manual",
+        }),
+      );
+      yield* Effect.sync(() =>
+        form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
+      );
+
+      expect(native.status).toBe(303);
+      // The draft clears only after the scripted send returned its handle.
+      yield* settle(Effect.sync(() => draft.value === ""));
+      expect(draft.value).toBe("");
+      yield* settle(Effect.sync(() => textOf(root, "#count") === "1"));
+      const applied = yield* client.applied.get;
+      expect(applied.revision.value).toBe(1);
+      expect(applied.state.notes.map((note) => note.text)).toEqual(["race"]);
+      expect(applied.state.notes[0]?.id).toBe(
+        Form.last(Form.fromBody(body), "$command").pipe(Option.getOrElse(() => "")),
+      );
     }),
   );
 });

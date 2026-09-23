@@ -91,8 +91,11 @@ const recording = <A,>(stream: Stream.Stream<A>) =>
     yield* Effect.forkScoped(
       Stream.runForEach(stream, (value) => Effect.sync(() => void seen.push(value))),
     );
-    // Subscribed before the test goes on.
-    yield* Effect.sleep("1 millis");
+    // `changes` emits the current value first: wait for it, so the
+    // subscription is open before the test goes on.
+    for (let attempt = 0; attempt < 1000 && seen.length === 0; attempt += 1) {
+      yield* Effect.sleep("1 millis");
+    }
     return seen;
   });
 

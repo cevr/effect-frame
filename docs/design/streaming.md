@@ -296,6 +296,64 @@ settled values go in one `<script type="application/json"
 id="frame-query-seed">`, a JSON array of `Patch`. `Dom.readRecords` returns
 the seed as `present`, so the client entry is the same for both modes.
 
+### A server drawing shows every value its seed carries
+
+A value goes from the cache to the drawing through a chain of sources, and
+a fiber carries each step: the tracker's subscription, a `followQuery`
+copy, a `zip`, a `ready`. The seed is read from the cache, which never
+lags. So a drawing read at the moment its seed is read can be older than
+the seed. EGW search found this: an `AwaitAll` page that followed a query
+with `followQuery` and a `zip`, with no `Loading` boundary, drew
+"searching…" beside a seed that carried the results. The client drew the
+results from the seed, and hydration did not agree. A 20 ms wait before
+the check hid it. A `Loading` boundary does not hide it: its fallback can
+leave before the value reaches the content.
+
+The rule has two halves.
+
+1. **A source's `get` is its value now.** A source that keeps a copy
+   which a fiber moves reads its upstream in `get` and does not return the
+   copy. `followQuery` and a route's query binding carry the entry's
+   current state over the copy (`carry` is idempotent). `ready`,
+   `readyWithStale`, `orErrored` and a readiness scope's pending source
+   derive from their state source with `select`, and `holdSome` keeps its
+   last value only for the time that has none. `select`, `zip` and `all`
+   already read their upstream. The client mount reads every binding's
+   first value with `get`, so this also makes the client's first drawing
+   the value the seed holds.
+2. **The server drawing reads its bindings at the seed's instant.** The
+   runtime tells a host that asks, through the optional capability
+   `sourceBound(catchUp)`, of each source it binds. `catchUp` reads the
+   source's `get` and writes it into the drawing when it is not `Equal`
+   to what the drawing shows. The HTML host of `renderAwaitAll`,
+   `renderToStream` (the first shell) and the `SSR` pipeline reads its
+   records, runs every `catchUp` and draws, and reads the records again.
+   It repeats until the two reads agree, so a query that settles between
+   them is read again. The drawing then shows no less than the records
+   carry, and no more. The equality check stops a render that waits from
+   writing the same values again on each pass.
+
+Prerender uses the `AwaitAll` pipeline, so it gets the rule too. A
+`QueryState.held` source that a view builds from its own stream keeps
+the copy semantics: it has no upstream to read.
+
+#### Mutations
+
+Each mutation was applied alone, and
+`tests/view/streaming-delivery.test.tsx` was run. The original code
+fails four of its five tests (it passes "a value that settles late draws
+too" by the order of its fibers).
+
+| Mutation                                                              | Failed                                                                                  |
+| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `catchUp` never writes (`runtime.ts`, `track`)                        | "a view that follows a query with no boundary…", "a boundary whose value goes through…" |
+| `followQuery`'s `get` returns the copy, not the entry carried over it | all four red tests                                                                      |
+| `holdSome`'s `get` returns its last value, not the source's           | "a boundary whose value goes through several sources…"                                  |
+| A readiness scope's pending `get` is a constant                       | "a boundary whose value goes through several sources…"                                  |
+
+The second read in `readDrawn` has no mutation test: a query that settles
+between the two reads needs a fiber order that no test can hold.
+
 ### A streamed shell does not wait for a late setup
 
 `Html.renderToStream` serializes the shell right after the first frame. A

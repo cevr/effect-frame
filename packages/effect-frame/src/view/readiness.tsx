@@ -11,7 +11,6 @@ import type { Scope } from "effect";
 import { Match } from "./control.js";
 import type { Node, RetainedNode } from "./jsx-runtime.js";
 import type { QueryState } from "./query-state.js";
-import { held } from "./query-state.js";
 
 /**
  * Readiness through context (#16).
@@ -118,8 +117,7 @@ export const ready: <Value, Error>(
 ) => Effect.Effect<Source<Value>, never, LoadingScope | Scope.Scope> = Effect.fn("Readiness.ready")(
   function* <Value, Error>(state: Source<QueryState<Value, Error>>, fallback: Value) {
     const shared = yield* registerLoading(state);
-    const first = yield* shared.get;
-    return yield* holdSome(valueOr(first, fallback), Stream.map(shared.changes, valueOf));
+    return holdSome(fallback, select(shared, valueOf));
   },
 );
 
@@ -140,10 +138,9 @@ export const orErrored: <Value, Error>(
   "Readiness.orErrored",
 )(function* <Value, Error>(state: Source<QueryState<Value, Error>>) {
   const erroredScope = yield* ErroredScope;
-  const initial = yield* state.get;
   yield* erroredScope.register({
-    settled: yield* held(isNotFailed(initial), Stream.map(state.changes, isNotFailed)),
-    failure: yield* held(errorOf(initial), Stream.map(state.changes, errorOf)),
+    settled: select(state, isNotFailed),
+    failure: select(state, errorOf),
   });
   return state;
 });
@@ -164,7 +161,7 @@ const registerLoading = Effect.fn("Readiness.registerLoading")(function* <Value,
 ) {
   const loadingScope = yield* LoadingScope;
   yield* loadingScope.register({
-    settled: yield* held(hasSettled(yield* state.get), Stream.map(state.changes, hasSettled)),
+    settled: select(state, hasSettled),
     failure: noFailure,
   });
   return state;
@@ -182,10 +179,9 @@ export const readyWithStale: <Value, Error>(
   "Readiness.readyWithStale",
 )(function* <Value, Error>(state: Source<QueryState<Value, Error>>, fallback: Value) {
   const shared = yield* registerLoading(state);
-  const initial = yield* shared.get;
-  return yield* holdSome<ReadyValue<Value>>(
-    { value: valueOr(initial, fallback), stale: false },
-    Stream.map(shared.changes, readyValueOf),
+  return holdSome<ReadyValue<Value>>(
+    { value: fallback, stale: false },
+    select(shared, readyValueOf),
   );
 });
 
@@ -198,15 +194,23 @@ export interface ReadyValue<Value> {
  * Hold the last present value, starting from `initial`. Absent updates are
  * dropped rather than represented: the consumer of this source is only in
  * the tree while a value exists, so it never has to read absence.
+ *
+ * `get` reads `source` now, so it is never older than the value it holds:
+ * a server render reads it beside the seed (#22).
  */
-const holdSome = <A,>(
-  initial: A,
-  changes: Stream.Stream<Option.Option<A>>,
-): Effect.Effect<Source<A>> =>
-  held(
-    initial,
-    Stream.map(Stream.filter(changes, Option.isSome), (some) => some.value),
-  );
+const holdSome = <A,>(initial: A, source: Source<Option.Option<A>>): Source<A> => {
+  let last = initial;
+  const keep = (value: Option.Option<A>): A => {
+    if (Option.isSome(value)) {
+      last = value.value;
+    }
+    return last;
+  };
+  return {
+    get: Effect.map(source.get, keep),
+    changes: Stream.map(Stream.filter(source.changes, Option.isSome), keep),
+  };
+};
 
 /**
  * `true` once the query has stopped being in flight, either way. A case
@@ -238,9 +242,6 @@ const readyValueOf = <Value, Error>(
     value: found.value,
     stale: found.stale,
   }));
-
-const valueOr = <Value, Error>(state: QueryState<Value, Error>, fallback: Value): Value =>
-  Option.getOrElse(valueOf(state), () => fallback);
 
 const errorOf = <Value, Error>(state: QueryState<Value, Error>): Option.Option<Error> =>
   Option.map(Option.liftPredicate(state, isFailed), (found) => found.error);
@@ -283,7 +284,7 @@ const derive = <A,>(
   registry: Registry,
   fold: (contributions: ReadonlyArray<Contribution>) => A,
 ): Effect.Effect<Source<A>> =>
-  Effect.gen(function* () {
+  Effect.sync(() => {
     const contribution = (entry: Registration): Effect.Effect<Contribution> =>
       Effect.map(Effect.all([entry.settled.get, entry.failure.get]), ([settled, failure]) => ({
         settled,
@@ -308,8 +309,11 @@ const derive = <A,>(
       ),
     );
 
-    const initial = yield* Effect.flatMap(registry.entries.get, compute);
-    return yield* held(initial, Stream.mapEffect(entryChanges, compute));
+    // Read now on every `get`: a server render reads it beside the seed (#22).
+    return {
+      get: Effect.flatMap(registry.entries.get, compute),
+      changes: Stream.mapEffect(entryChanges, compute),
+    } satisfies Source<A>;
   });
 
 // ---------------------------------------------------------------------------

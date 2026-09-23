@@ -61,6 +61,16 @@ export interface Host<Node> {
    */
   readonly setupStarted?: () => () => void;
   /**
+   * Streamed documents (#22), server side. The runtime bound a source to
+   * the drawing. `catchUp` writes the source's current value into the
+   * drawing when the drawing shows another one. Call the returned function
+   * when the binding ends. A value travels from a source to the drawing on
+   * a fiber, so the drawing can be older than the source. A render that
+   * writes the drawing beside a seed calls every `catchUp` first, and the
+   * drawing then shows every value the seed carries.
+   */
+  readonly sourceBound?: (catchUp: () => void) => () => void;
+  /**
    * The owner that created `node` ended: the list row, branch, or mount it
    * was drawn in is gone, and the runtime never names the node again. This
    * is the end of a node's life. A remove is not: a retained branch removes

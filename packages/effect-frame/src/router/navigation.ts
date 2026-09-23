@@ -280,8 +280,9 @@ export const followLinks = /* @__PURE__ */ Effect.fn("Router.followLinks")(funct
 });
 
 /**
- * Place a landing the Navigation API intercepted: the event's own scroll
- * (top, fragment, or the entry's saved position), then focus.
+ * Place the router's own push or replace the Navigation API intercepted:
+ * the event's own scroll (top or fragment), then focus. `Preserve` places
+ * nothing. A traversal is `placeTraversal`.
  */
 export const placeIntercepted = (landing: Landing, event: NavigateEvent): void => {
   if (!restores(landing)) {
@@ -291,6 +292,21 @@ export const placeIntercepted = (landing: Landing, event: NavigateEvent): void =
   // there is no position left to place.
   Result.try(() => event.scroll());
   placeFocus(landing);
+};
+
+/**
+ * Place a traversal the Navigation API intercepted: the entry's saved
+ * position under either behavior, then focus under `Restore`. `Preserve`
+ * keeps a push or replace where the page is; a Back or Forward returns to
+ * where the entry was, as the platform does for a pop no handler held
+ * (`placePop`). So both Locations put the same landing at the same place.
+ */
+export const placeTraversal = (landing: Landing, event: NavigateEvent): void => {
+  // `scroll()` throws once the navigation finished or was aborted.
+  Result.try(() => event.scroll());
+  if (restores(landing)) {
+    placeFocus(landing);
+  }
 };
 
 /** Place a landing for a pop no handler held: focus only. The browser restored scroll. */

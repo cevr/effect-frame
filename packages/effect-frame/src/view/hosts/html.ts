@@ -1,6 +1,17 @@
 import type { ActorTransport } from "effect-frame/actor/client";
 import { QueryCache, Streaming, queryCacheLayer } from "effect-frame/actor/client";
-import { Context, Deferred, Effect, Exit, Layer, Option, Schema, Scope, Stream } from "effect";
+import {
+  Context,
+  Deferred,
+  Effect,
+  Equal,
+  Exit,
+  Layer,
+  Option,
+  Schema,
+  Scope,
+  Stream,
+} from "effect";
 import type { BoundaryMarks, Cleanup, Host, PropertyValue, StaticProps } from "../host.js";
 import type { BoundaryKind } from "../jsx-runtime.js";
 import { mount, render } from "../runtime.js";
@@ -179,13 +190,71 @@ const waitsForData = (node: HtmlNode): boolean => {
 };
 
 /**
+ * The source bindings of one server drawing (#22). A value travels from a
+ * source to the drawing on a fiber, so the drawing can lag its sources; the
+ * seed is read from the cache, which never lags. `catchUp` brings every
+ * binding to its source's current value and draws, so a drawing read after
+ * it shows what its sources hold now.
+ */
+interface Bindings {
+  readonly bound: (catchUp: () => void) => () => void;
+  readonly catchUp: Effect.Effect<void>;
+}
+
+const makeBindings = (): Bindings => {
+  const live = new Set<{ readonly catchUp: () => void }>();
+  return {
+    bound: (catchUp) => {
+      const one = { catchUp };
+      live.add(one);
+      return () => void live.delete(one);
+    },
+    catchUp: Effect.andThen(
+      Effect.sync(() => {
+        // A catch-up may draw a branch that binds more sources: those read
+        // their current value when they bind.
+        for (const one of [...live]) {
+          one.catchUp();
+        }
+      }),
+      render,
+    ),
+  };
+};
+
+/**
+ * Read the records a document writes beside its drawing, and bring the
+ * drawing to the same instant (#22): read, catch up, read again, until the
+ * two reads agree. A query that settles between the reads is read again,
+ * so the drawing never shows less than the records carry, and never more.
+ * `of` picks what the records must agree on.
+ */
+const readDrawn = <A, E, R>(
+  read: Effect.Effect<A, E, R>,
+  of: (records: A) => unknown,
+  bindings: Bindings,
+): Effect.Effect<A, E, R> =>
+  Effect.gen(function* () {
+    let before = yield* read;
+    yield* bindings.catchUp;
+    let after = yield* read;
+    while (!Equal.equals(of(before), of(after))) {
+      before = after;
+      yield* bindings.catchUp;
+      after = yield* read;
+    }
+    return after;
+  });
+
+/**
  * The server host. `changed` runs when a boundary switches branch or a node
  * leaves the tree: the two writes after which no `Loading` fallback may be
- * left (#22).
+ * left (#22). `bindings` hears every source the drawing binds.
  */
 const makeHost = (
   changed: () => void,
   setupStarted: Option.Option<() => () => void> = Option.none(),
+  bindings: Option.Option<Bindings> = Option.none(),
 ): Host<HtmlNode> => ({
   createElement: (tag: string, staticProps: StaticProps) => {
     const node = element(tag);
@@ -242,6 +311,10 @@ const makeHost = (
   ...Option.match(setupStarted, {
     onNone: () => ({}),
     onSome: (started) => ({ setupStarted: started }),
+  }),
+  ...Option.match(bindings, {
+    onNone: () => ({}),
+    onSome: (drawn) => ({ sourceBound: drawn.bound }),
   }),
 });
 
@@ -404,9 +477,21 @@ export const streamPrepared = <E, R>(
   Effect.gen(function* () {
     const cache = yield* cacheOf;
     const root = element("#root");
-    yield* draw(drawing, cache, root);
+    const bindings = makeBindings();
+    yield* draw(
+      drawing,
+      cache,
+      root,
+      makeHost(() => {}, Option.none(), Option.some(bindings)),
+    );
+    // The shell shows every value the settled patches carry, and no value
+    // an entry still behind a placeholder holds.
+    const records = yield* readDrawn(
+      Effect.provideService(Streaming.shell(options), QueryCache, cache),
+      (read) => [read.placeholders, read.settled],
+      bindings,
+    );
     const shell = serializeChildren(root.children);
-    const records = yield* Effect.provideService(Streaming.shell(options), QueryCache, cache);
     const first = [
       document.head,
       shell,
@@ -505,6 +590,7 @@ export const awaitAllPage: <E, R>(
     // Setups the runtime ran after the frame, still running: a list row's
     // setup may declare a query or draw nodes when it ends.
     let setups = 0;
+    const bindings = makeBindings();
     const watched = makeHost(
       wake,
       Option.some(() => {
@@ -514,6 +600,13 @@ export const awaitAllPage: <E, R>(
           wake();
         };
       }),
+      Option.some(bindings),
+    );
+    // The declarations and the seed, with the drawing at the same instant.
+    const records = readDrawn(
+      withCache(Effect.all({ ids: Streaming.declared, seed: Streaming.settledPatches })),
+      (read) => [read.ids, read.seed],
+      bindings,
     );
     const root = element("#root");
     yield* Scope.provide(draw(drawing, cache, root, watched), scope);
@@ -527,12 +620,10 @@ export const awaitAllPage: <E, R>(
       // Read before the declarations: a setup that ends after this read
       // wakes the next pass, which reads them again.
       const settledSetups = setups === 0;
-      const ids = yield* withCache(Streaming.declared);
-      const seed = yield* withCache(Streaming.settledPatches);
+      // The catch-up draws, then the tree is read at once: a branch switch
+      // it ran has taken its fallback away by now.
+      const { ids, seed } = yield* records;
       const open = seed.length < ids.length;
-      // Flush, then read the tree at once: a branch switch the flush ran has
-      // taken its fallback away by now.
-      yield* render;
       if (settledSetups && setups === 0 && !open && !root.children.some(waitsForData)) {
         return awaited(document, root, stamp(seed, builtAt), true);
       }
@@ -545,9 +636,8 @@ export const awaitAllPage: <E, R>(
       }
       waiting = yield* Effect.raceAll(wakes);
     }
-    yield* render;
-    const seed = stamp(yield* withCache(Streaming.settledPatches), builtAt);
-    return awaited(document, root, seed, false);
+    const { seed } = yield* records;
+    return awaited(document, root, stamp(seed, builtAt), false);
   }).pipe(
     Scope.provide(scope),
     Effect.onExit((exit) => Scope.close(scope, exit)),
@@ -575,8 +665,18 @@ export const renderSeeded: <E, R>(
   return yield* Effect.gen(function* () {
     const cache = yield* cacheOf;
     const root = element("#root");
-    yield* draw(drawing, cache, root);
-    const seed = yield* Effect.provideService(Streaming.settledPatches, QueryCache, cache);
+    const bindings = makeBindings();
+    yield* draw(
+      drawing,
+      cache,
+      root,
+      makeHost(() => {}, Option.none(), Option.some(bindings)),
+    );
+    const seed = yield* readDrawn(
+      Effect.provideService(Streaming.settledPatches, QueryCache, cache),
+      (read) => read,
+      bindings,
+    );
     return page(document, root, seed);
   }).pipe(
     Scope.provide(scope),

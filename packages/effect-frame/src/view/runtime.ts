@@ -1,6 +1,7 @@
 import type { Source } from "effect-frame/actor";
 import {
   Effect,
+  Equal,
   Exit,
   Match,
   Option,
@@ -734,6 +735,7 @@ const trackHostWrites = <HostNode>(host: Host<HostNode>): TrackedHost<HostNode> 
     boundaryMarks: host.boundaryMarks,
     adoptBoundary: host.adoptBoundary,
     setupStarted: host.setupStarted,
+    sourceBound: host.sourceBound,
     setProperty: host.setProperty,
     insert: (parent, node, anchor) => {
       remember(parent, node);
@@ -758,6 +760,7 @@ const trackHostWrites = <HostNode>(host: Host<HostNode>): TrackedHost<HostNode> 
 
 const makeTracker = Effect.fn("View.makeTracker")(function* (
   setupStarted: Option.Option<() => () => void>,
+  sourceBound: Option.Option<(catchUp: () => void) => () => void>,
 ) {
   const context = yield* Effect.context<Scope.Scope>();
   const mountScope = yield* Effect.scope;
@@ -773,13 +776,38 @@ const makeTracker = Effect.fn("View.makeTracker")(function* (
     if (isSignalSource(source)) {
       return source[SignalBacked];
     }
-    const cell = makeCell(source.get.pipe(runSync));
+    let shown = source.get.pipe(runSync);
+    const cell = makeCell(shown);
+    const show = (value: A): void => {
+      shown = value;
+      cell.write(value);
+    };
     runFork(
       Effect.forkIn(
-        Stream.runForEach(source.changes, (value) => Effect.sync(() => cell.write(value))),
+        Stream.runForEach(source.changes, (value) => Effect.sync(() => show(value))),
         current,
       ),
     );
+    // A host that writes the drawing beside a seed (#22) brings this binding
+    // to the source's current value first: a change still on its way through
+    // the fiber above is then drawn already. An equal value writes nothing.
+    Option.match(sourceBound, {
+      onNone: () => {},
+      onSome: (bound) =>
+        void runSync(
+          Effect.acquireRelease(
+            Effect.sync(() =>
+              bound(() => {
+                const now = source.get.pipe(runSync);
+                if (!Equal.equals(now, shown)) {
+                  show(now);
+                }
+              }),
+            ),
+            (unbind) => Effect.sync(unbind),
+          ).pipe(Scope.provide(current)),
+        ),
+    });
     return cell.read;
   };
 
@@ -1667,7 +1695,10 @@ export const mount = Effect.fn("View.mount")(function* <Props, E, R, HostNode>(
     }
 
     const tree: Node = yield* view(props);
-    const tracker = yield* makeTracker(Option.fromNullishOr(trackedHost.setupStarted));
+    const tracker = yield* makeTracker(
+      Option.fromNullishOr(trackedHost.setupStarted),
+      Option.fromNullishOr(trackedHost.sourceBound),
+    );
     const slot: Slot<HostNode> = { nodes: [] };
     const removeNodes = (): void => {
       trackedHost.cleanup();

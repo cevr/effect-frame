@@ -2,7 +2,13 @@ import { Deferred, Effect, Exit, Option, Result, Stream } from "effect";
 import type { Scope } from "effect";
 import type { Landing, WriteKind, Written } from "./landing.js";
 import { registerSurface } from "./landing.js";
-import { browserLocation, historyWritten, placeIntercepted, placePop } from "./navigation.js";
+import {
+  browserLocation,
+  historyWritten,
+  placeIntercepted,
+  placePop,
+  placeTraversal,
+} from "./navigation.js";
 import type { LocationService } from "./router.js";
 import type { Traversal } from "./traversal.js";
 import { makeSource, register as registerTraversals } from "./traversal.js";
@@ -229,7 +235,7 @@ export const browserCommit = /* @__PURE__ */ Effect.fn("Router.browserCommit")(f
       abandoned: Deferred.await(held.abandoned),
       land: (landing: Landing) =>
         Effect.sync(() => {
-          Option.map(held.event, (event) => placeIntercepted(landing, event));
+          Option.map(held.event, (event) => placeTraversal(landing, event));
         }),
       finish: finish(held),
     };

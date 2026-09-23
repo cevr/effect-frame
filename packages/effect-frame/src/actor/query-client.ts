@@ -290,6 +290,8 @@ export interface CacheInternals {
 
 interface StampedEntry<Q extends AnyQuery> {
   readonly entry: QueryEntry<ResultOf<Q>, QueryFailure>;
+  /** The entry's state now, with its stamp. */
+  readonly get: Effect.Effect<Stamped<QueryState<ResultOf<Q>, QueryFailure>>>;
   readonly changes: Stream.Stream<Stamped<QueryState<ResultOf<Q>, QueryFailure>>>;
 }
 
@@ -814,6 +816,16 @@ const decoderOf = <Q extends AnyQuery>(contract: Q) => {
 };
 
 /** A slot's states with their principal generation, decoded. */
+const stampedState = <Q extends AnyQuery>(
+  contract: Q,
+  slot: CacheSlot,
+): Effect.Effect<Stamped<QueryState<ResultOf<Q>, QueryFailure>>> => {
+  const decodeState = decoderOf(contract);
+  return Effect.flatMap(SubscriptionRef.get(slot.state), (stamped) =>
+    Effect.map(decodeState(stamped.state), (state) => ({ state, principal: stamped.principal })),
+  );
+};
+
 const stampedChanges = <Q extends AnyQuery>(
   contract: Q,
   slot: CacheSlot,
@@ -984,6 +996,7 @@ const make = (): Effect.Effect<QueryCacheService, never, Scope.Scope> =>
     const openStamped = <Q extends AnyQuery>(contract: Q, args: ArgsOf<Q>) =>
       Effect.map(openSlot(contract, args), (slot): StampedEntry<Q> => ({
         entry: entryOf(contract, slot),
+        get: stampedState(contract, slot),
         changes: stampedChanges(contract, slot),
       }));
 
@@ -1106,10 +1119,12 @@ export interface FollowedQuery<A, E> {
   readonly refresh: Effect.Effect<void>;
 }
 
-interface Following {
+interface Following<A, E> {
   readonly key: QueryKey;
   readonly scope: Scope.Closeable;
   readonly refresh: Effect.Effect<void>;
+  /** The followed entry's state now. */
+  readonly get: Effect.Effect<Stamped<QueryState<A, E>>>;
 }
 
 /**
@@ -1154,6 +1169,7 @@ const openStamped = <Q extends AnyQuery>(
     onNone: () =>
       Effect.map(cache.open(contract, args), (entry): StampedEntry<Q> => ({
         entry,
+        get: Effect.map(entry.state.get, (state) => ({ state, principal: 0 })),
         changes: Stream.map(entry.state.changes, (state) => ({ state, principal: 0 })),
       })),
   });
@@ -1176,7 +1192,7 @@ export const followQuery = Effect.fn("followQuery")(function* <Q extends AnyQuer
     state: Loading(),
     principal: 0,
   });
-  let current: Option.Option<Following> = Option.none();
+  let current: Option.Option<Following<ResultOf<Q>, QueryFailure>> = Option.none();
 
   const leave = Effect.suspend(() => {
     const previous = current;
@@ -1198,7 +1214,7 @@ export const followQuery = Effect.fn("followQuery")(function* <Q extends AnyQuer
       const opened = yield* Scope.provide(openStamped(cache, contract, next), child).pipe(
         Effect.provideService(ActorTransport, transport),
       );
-      current = Option.some({ key, scope: child, refresh: opened.entry.refresh });
+      current = Option.some({ key, scope: child, refresh: opened.entry.refresh, get: opened.get });
       yield* Effect.forkIn(
         Stream.runForEach(opened.changes, (stamped) =>
           SubscriptionRef.update(output, (shown) => carry(shown, stamped)),
@@ -1226,10 +1242,21 @@ export const followQuery = Effect.fn("followQuery")(function* <Q extends AnyQuer
   yield* follow(yield* args.get);
   yield* Effect.forkScoped(Stream.runForEach(args.changes, follow));
 
+  // The state now: the entry's current state carried over what the view
+  // was last handed. The copy in `output` moves only when the fiber above
+  // runs, so it may be older than the entry; a read never is. A server
+  // render reads it beside the seed and must see what the seed carries.
+  const get = Effect.flatMap(SubscriptionRef.get(output), (shown) =>
+    Option.match(current, {
+      onNone: () => Effect.succeed(shown.state),
+      onSome: (following) => Effect.map(following.get, (incoming) => carry(shown, incoming).state),
+    }),
+  );
   const followed: FollowedQuery<ResultOf<Q>, QueryFailure> = {
     state: {
-      get: Effect.map(SubscriptionRef.get(output), (shown) => shown.state),
-      changes: Stream.map(SubscriptionRef.changes(output), (shown) => shown.state),
+      get,
+      // Each change reads the state now, so the first element is `get`.
+      changes: Stream.mapEffect(SubscriptionRef.changes(output), () => get),
     },
     refresh: Effect.suspend(() =>
       Option.match(current, {

@@ -61,6 +61,56 @@ const settleMargin = () => Bun.sleep(150);
 
 const setups = (view: Bun.WebView) => read<Record<string, number>>(view, "window.__nav.setups");
 
+const tabShown = (view: Bun.WebView, tab: string) =>
+  H.waitFor(
+    view,
+    `document.querySelector("#tab")?.textContent === ${JSON.stringify(tab)}`,
+    `tab ${tab}`,
+  );
+
+/**
+ * Back and Forward between `Preserve` entries put back each entry's saved
+ * position, stayed or entering, as a pop does with no router. EGW search
+ * found the stayed case: scroll 430, push a new search, scroll 0, Back.
+ */
+const preserveTraversals = async (engine: H.Engine, api: NavConfig["api"]) => {
+  const view = await openAt(engine, "/site/tabs/a", api);
+  try {
+    await view.click("#search");
+    expect(await scrollTo(view, 430)).toBe(430);
+    expect(await navigate(view, "/site/tabs/b")).toBe("Committed /site/tabs/b");
+    await tabShown(view, "b");
+    await settleMargin();
+    // A push under Preserve does not move.
+    expect(await scrollY(view)).toBe(430);
+    expect(await scrollTo(view, 0)).toBe(0);
+
+    await read(view, "(history.back(), true)");
+    await tabShown(view, "a");
+    await H.waitFor(view, "scrollY === 430", "tab a's position restored");
+    expect(await focused(view)).toBe("search");
+    expect(await scrollTo(view, 900)).toBe(900);
+
+    await read(view, "(history.forward(), true)");
+    await tabShown(view, "b");
+    await H.waitFor(view, "scrollY === 0", "tab b's position restored");
+
+    // Enter another leaf, then come back to the Preserve leaf.
+    expect(await scrollTo(view, 1500)).toBe(1500);
+    expect(await navigate(view, "/site/pages/2")).toBe("Committed /site/pages/2");
+    await H.waitFor(view, `document.querySelector("#page-id")?.textContent === "2"`, "page 2");
+    await H.waitFor(view, "scrollY === 0", "page 2 at the top");
+    await view.click("#search");
+    await read(view, "(history.back(), true)");
+    await tabShown(view, "b");
+    await H.waitFor(view, "scrollY === 1500", "tab b's position restored on entering");
+    // Preserve moves no focus, on a traversal too.
+    expect(await focused(view)).toBe("search");
+  } finally {
+    closePage(view);
+  }
+};
+
 for (const engine of engines) {
   const capability = capabilities[engine];
   describe.skipIf(capability?.navigation !== true)(`navigation behavior in ${engine}`, () => {
@@ -290,6 +340,10 @@ for (const engine of engines) {
         closePage(view);
       }
     }, 30_000);
+    it("Back and Forward to a Preserve entry restore its saved position", async () => {
+      await preserveTraversals(engine, "native");
+    }, 30_000);
+
     it("an initial redirect's replace finishes once the page is shown", async () => {
       const view = await openAt(engine, "/site/old");
       try {
@@ -368,6 +422,10 @@ for (const engine of engines) {
         } finally {
           closePage(view);
         }
+      }, 30_000);
+
+      it("Back and Forward to a Preserve entry restore its saved position", async () => {
+        await preserveTraversals(engine, "none");
       }, 30_000);
 
       it("a fragment push finds the raw id, then the decoded id, then a named anchor", async () => {

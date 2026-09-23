@@ -185,8 +185,9 @@ describe("the command form binding", () => {
 
         expect(html).toContain('value="far too long a title" aria-invalid="true"');
         expect(html).toContain('<input id="pin" name="_pin">');
-        expect(html).not.toContain("4321");
-        expect(html).not.toContain("999");
+        // As values: a random command id may hold the digits.
+        expect(html).not.toContain('"4321"');
+        expect(html).not.toContain('"999"');
         expect(html).toContain('<li data-field="title">too long</li>');
         expect(hiddenValue(html, "add", "$command")).toBe(String(commandId));
         // An unchecked box stays unchecked after the redraw.
@@ -382,7 +383,7 @@ describe("the command form binding", () => {
             ),
           };
           const html = yield* VaultDocument.pipe(Effect.provideService(Form.FormContext, lost));
-          expect(html).not.toContain("4321");
+          expect(html).not.toContain('"4321"');
           const main = yield* install(html);
           const hydration = Dom.hydrate(main);
           yield* Form.provideIssues(Option.some(lost))(

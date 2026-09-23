@@ -1311,8 +1311,14 @@ const queryBinding = Effect.fn("Branch.queryBinding")(function* (
       scope,
     );
   yield* followEntry(entry, follow);
+  // The state now: the entry's current state carried over the copy the
+  // fiber above keeps, which may be older. A server render reads it beside
+  // the seed and must see what the seed carries (#22).
+  const get = Effect.flatMap(SubscriptionRef.get(output), (shown) =>
+    Effect.map(currentEntry.state.get, (state) => carry(shown, state)),
+  );
   const exposed: FollowedQuery<unknown, QueryFailure> = {
-    state: { get: SubscriptionRef.get(output), changes: SubscriptionRef.changes(output) },
+    state: { get, changes: Stream.mapEffect(SubscriptionRef.changes(output), () => get) },
     refresh: Effect.suspend(() => currentEntry.refresh),
   };
   const binding: Binding = {
@@ -1321,6 +1327,8 @@ const queryBinding = Effect.fn("Branch.queryBinding")(function* (
     install: (next) =>
       Effect.gen(function* () {
         const nextEntry = yield* queryOf(next);
+        // Before the copy moves: `get` reads the entry named here.
+        currentEntry = nextEntry;
         yield* Scope.close(follow, Exit.void);
         follow = yield* Scope.fork(owner);
         const state = yield* nextEntry.state.get;
@@ -1328,7 +1336,6 @@ const queryBinding = Effect.fn("Branch.queryBinding")(function* (
         yield* followEntry(nextEntry, follow);
         const replaced = current;
         current = next;
-        currentEntry = nextEntry;
         return replaced;
       }),
   };

@@ -81,6 +81,9 @@
     "tooling/checks": {
       "name": "@effect-frame/toolchain-checks",
       "version": "0.0.0",
+      "devDependencies": {
+        "effect-frame": "workspace:*",
+      },
       "peerDependencies": {
         "effect": "catalog:",
       },

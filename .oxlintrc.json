@@ -88,7 +88,24 @@
     "effect/preferMatchTagsExhaustive": "error",
     "effect/preferPredicateIsTagged": "error",
     "effect/preferServiceOf": "error",
-    "effect/requireNamedEffectFn": "error"
+    "effect/requireNamedEffectFn": "error",
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": [
+              "**/*.server",
+              "**/*.server.js",
+              "**/*.server.jsx",
+              "**/*.server.ts",
+              "**/*.server.tsx"
+            ],
+            "message": "Only a server module or a server entry may import a server module. `bun run boundary` proves the whole graph."
+          }
+        ]
+      }
+    ]
   },
   "overrides": [
     {
@@ -227,6 +244,19 @@
       "rules": {
         "effect/noAsyncFunction": "off",
         "effect/noGlobals": "off"
+      }
+    },
+    {
+      "files": [
+        "**/*.server.ts",
+        "**/*.server.tsx",
+        "**/server.ts",
+        "**/server.tsx",
+        "**/tests/**",
+        "**/scripts/**"
+      ],
+      "rules": {
+        "no-restricted-imports": "off"
       }
     }
   ],

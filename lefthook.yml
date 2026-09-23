@@ -8,6 +8,8 @@ pre-commit:
       run: bun run typecheck
     - name: build
       run: bun run build
+    - name: boundary
+      run: bun run boundary
     - name: test
       run: bun run test
 pre-push:

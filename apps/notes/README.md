@@ -25,17 +25,17 @@ Type a note in either client and press Enter. Both update. Tick a box in the bro
 
 ## What each file does
 
-| File                    | Role                                                                             |
-| ----------------------- | -------------------------------------------------------------------------------- |
-| `src/contract.ts`       | The contract. Browser safe: it imports only `effect` and the actor client entry. |
-| `src/notes.server.ts`   | The behavior, and the two transports the server can run over.                    |
-| `src/commands.ts`       | Command ids and the send helpers both views share.                               |
-| `src/page.tsx`          | The browser view.                                                                |
-| `src/terminal-view.tsx` | The terminal view. Same setup, different tags.                                   |
-| `src/server.ts`         | The platform boundary: `Bun.serve`, `Bun.build`, and the environment.            |
-| `src/client.tsx`        | The browser entry: read the resume payload, hydrate, follow.                     |
-| `src/terminal.tsx`      | The terminal entry.                                                              |
-| `tests/e2e.test.tsx`    | The proof. A real server on a free port, a real socket, both clients.            |
+| File                    | Role                                                                                                                                |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `src/contract.ts`       | The contract. Browser safe: it imports only `effect` and the actor client entry.                                                    |
+| `src/notes.server.ts`   | The behavior, and the two transports the server can run over. A server module: `bun run boundary` fails if `client.tsx` reaches it. |
+| `src/commands.ts`       | Command ids and the send helpers both views share.                                                                                  |
+| `src/page.tsx`          | The browser view.                                                                                                                   |
+| `src/terminal-view.tsx` | The terminal view. Same setup, different tags.                                                                                      |
+| `src/server.ts`         | The platform boundary: `Bun.serve`, `Bun.build`, and the environment.                                                               |
+| `src/client.tsx`        | The browser entry: read the resume payload, hydrate, follow.                                                                        |
+| `src/terminal.tsx`      | The terminal entry.                                                                                                                 |
+| `tests/e2e.test.tsx`    | The proof. A real server on a free port, a real socket, both clients.                                                               |
 
 ## Routes
 

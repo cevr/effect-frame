@@ -15,8 +15,9 @@
     "fmt:check": "oxfmt --check",
     "build": "turbo run build",
     "test": "turbo run test",
+    "boundary": "bun run --cwd tooling/checks boundary",
     "bench": "bun run --cwd tooling/dom-bench bench",
-    "gate": "concurrently -n type,style,build -c blue,yellow,cyan \"bun run typecheck\" \"bun run lint && bun run fmt:check\" \"bun run build\" && bun run test",
+    "gate": "concurrently -n type,style,build -c blue,yellow,cyan \"bun run typecheck\" \"bun run lint && bun run fmt:check\" \"bun run build && bun run boundary\" && bun run test",
     "prepare": "lefthook install && effect-tsgo patch",
     "version": "changeset version && bun install --lockfile-only --ignore-scripts",
     "release": "bun run build && changeset publish"

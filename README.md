@@ -19,7 +19,7 @@ These are release requirements. They are not implemented features.
 
 The workspace contains the project tools and their compatibility probes. It does not yet contain a framework runtime. The actor API, renderer adapter, and recovery model remain open decisions on the map.
 
-The private `tooling/checks` workspace checks Effect v4 schema codecs, scope cleanup, and browser bundling. It is not a framework package.
+The private `tooling/checks` workspace checks Effect v4 schema codecs, scope cleanup, and browser bundling. It also holds the server/client build rule. It is not a framework package.
 
 ## Commands
 
@@ -31,6 +31,10 @@ bun run gate
 The gate runs strict lint, format checks, patched TypeScript checks, a browser build, and tests. Effect runtime versions are pinned in the root catalog. Type checks use the patched `tsc` binary.
 
 No cloud deployment or npm publication is configured.
+
+## Server and client files
+
+A file that may run only on a server is named `*.server.ts` or `*.server.tsx`. A file with no suffix runs in both places. A browser entry may not reach a server module through any chain of imports, and it imports `effect-frame/actor/client`, not `effect-frame/actor`. `bun run boundary` checks every browser entry in `tooling/checks/src/browser-entries.ts` and fails the gate with the chain of files that reached the server module. See [the boundary rule](docs/design/boundary.md).
 
 ## Browser inspection
 

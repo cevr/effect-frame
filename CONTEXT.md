@@ -48,6 +48,14 @@ _Avoid_: Strategy, target.
 What a client can observe about a query at one moment: loading, ready with a value that may be stale, or failed with an error. Never two of these at once.
 _Avoid_: isLoading, resource.
 
+**Server module**:
+A file that may run only on a server, named by a `.server` suffix before its extension. Server views, query implementations, actor implementations, and hosts are server modules.
+_Avoid_: Server file, backend module, `"use server"`.
+
+**Browser entry**:
+A file a bundler compiles for a page. It is the root of the graph a browser downloads, and it is the only place the server/client boundary is measured.
+_Avoid_: Client file, frontend entry.
+
 **Readiness scope**:
 A region of a view that shows a fallback until every query it was given has a first value, and afterwards keeps showing content while values refresh. A view declares the scope; reads inside it register with it.
 _Avoid_: Suspense boundary.

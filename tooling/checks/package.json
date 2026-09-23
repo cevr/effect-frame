@@ -9,7 +9,11 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "bun build src/codec-probe.ts --target browser --outdir dist",
-    "test": "bun test tests/"
+    "test": "bun test tests/",
+    "boundary": "bun run src/boundary-cli.ts"
+  },
+  "devDependencies": {
+    "effect-frame": "workspace:*"
   },
   "peerDependencies": {
     "effect": "catalog:"

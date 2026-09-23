@@ -1,5 +1,29 @@
 # effect-frame
 
+## 0.23.0
+
+### Minor Changes
+
+- [`e99c736`](https://github.com/cevr/effect-frame/commit/e99c736b7761ad0537f5266a872e0aa44ab5e830) Thanks [@cevr](https://github.com/cevr)! - A prerender build now fails by name when an actor the page reads refuses `Anonymous` ([#23](https://github.com/cevr/effect-frame/issues/23) §2.3). Before, only a refused query failed with `PrerenderUnauthorized`; a declared `Route.actor` whose policy refused `Anonymous` died with the transport's raw `Unauthorized`. Now both fail with `PrerenderUnauthorized`, and nothing is written.
+
+  Breaking: `PrerenderUnauthorized { route, href, query }` is now `PrerenderUnauthorized { route, href, read, contract }`. `contract` replaces `query` and names the refused contract; `read` is `"query"` or `"actor"`. A caller that reads `error.query` reads `error.contract` instead.
+
+- [`6630efc`](https://github.com/cevr/effect-frame/commit/6630efc3f58a8a6a877d647768e55200df7b6858) Thanks [@cevr](https://github.com/cevr)! - A server that loaded a prerendered generation keeps its files however many builds follow. Before, a build kept only the new generation and the one before it, so after two rebuilds a running server's files were gone and every page it had built answered through the router. Now `Prerender.load` holds the generation it reads with a lease under `<out>/leases/`, and a build removes no generation a lease names. The lease goes when the scope closes, and the next build removes the generation.
+
+  Breaking: `Prerender.load` now needs a `Scope`. Run it in the scope the server lives in (for a server started with `runPromise`, a `Scope.make()` you close when the server stops). A build keeps the previous generation only while a loaded site holds it. The output directory has a new `leases/` directory beside `generations/`.
+
+- [`bfa4cb7`](https://github.com/cevr/effect-frame/commit/bfa4cb77ba1f8ef0dd7e94778bb849330de43a15) Thanks [@cevr](https://github.com/cevr)! - `Prerender.load` fails with the new `PrerenderLeaseFailed { out, generation, reason }` when it cannot take its lease under `<out>/leases/`. Before, it served the generation unheld, so the next build could remove the files the server was reading. `load`'s error type now includes `PrerenderLeaseFailed`, which is exported from `effect-frame/router/prerender`.
+
+- [`4164d39`](https://github.com/cevr/effect-frame/commit/4164d39c20179ea7a52221259a64f27752896b79) Thanks [@cevr](https://github.com/cevr)! - `runQuery(contract, args)` reads one query once, as a value. It declares the key for the length of the read, waits for the first value or failure, and lets go; a failed read fails with its `QueryFailure`. A prerender route's `inputs` read the list its pages come from with it, and in a build that read is shared with every page that declares the same key.
+
+### Patch Changes
+
+- [`29e1a45`](https://github.com/cevr/effect-frame/commit/29e1a45a98a0d53d78ea8b91ab59af19bf5e9e4f) Thanks [@cevr](https://github.com/cevr)! - An `AwaitAll` render no longer reads the page from inside the drawing's reactive update. A boundary that switched, or a list row whose setup ended, woke the render at once, and the render could write a page whose bound text still showed its old value. The render now reads on a turn of its own.
+
+- [`0de1a7e`](https://github.com/cevr/effect-frame/commit/0de1a7eb2102265271ce191e325da9b511434e61) Thanks [@cevr](https://github.com/cevr)! - A `Prerender.load` that fails or is interrupted after it took its lease now releases the lease at once. Before, the lease stayed in the caller's scope until that scope closed, so a server that gave up on a load kept a generation from being cleaned up.
+
+- [`95f083c`](https://github.com/cevr/effect-frame/commit/95f083c2eb6567dbe7b746f41125550174358f96) Thanks [@cevr](https://github.com/cevr)! - A build whose clean-up cannot read `<out>/leases/` no longer removes held generations. Before, any failure to read the directory counted as "no leases", so clean-up removed the generation a running server had loaded. Now only a missing directory means no leases; any other failure skips that build's clean-up, and the next build removes what is left.
+
 ## 0.22.0
 
 ### Minor Changes

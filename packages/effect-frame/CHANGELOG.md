@@ -1,5 +1,70 @@
 # effect-frame
 
+## 0.16.0
+
+### Minor Changes
+
+- [`a987c57`](https://github.com/cevr/effect-frame/commit/a987c57152508e4da496f4b1cd831177c825b251) - Require a named policy for every actor and query, and end a live connection when its principal changes ([#20](https://github.com/cevr/effect-frame/issues/20), [#30](https://github.com/cevr/effect-frame/issues/30)).
+
+  New exports on `effect-frame/actor`: `Policy` (`allowAll`, `authenticated`, `of`, `all`, `any`, `byAction`), `Policies`, `PolicyNamesMissing`, `MissingPolicy`, and the types `PolicyTable`, `Subject`, `Action`. `HttpServer.anonymous` and the type `HttpServer.DerivePrincipal`.
+
+  New exports on `effect-frame/actor/client`: `Principal` (`anonymous`, `constant`, `equals`, `fromSource`, `isAuthenticated`, `revisions`), `Anonymous`, `Authenticated`, `Claims`, `CurrentPrincipal`, and the types `PrincipalSource` and `PrincipalRevision`. A `PrincipalSource`'s `changes` emits numbered revisions, and a connection ends at the first revision after the one it connected under.
+
+  Breaking changes:
+
+  - `contract(...)` and `query(...)` require `policy`, a policy name.
+  - `ActorHost.make`, `ActorHost.layer`, and `ActorHost.layerMemory` require `Policies` and fail with `PolicyNamesMissing` when the table lacks a declared name. `ActorTransport.layerLocal` and `QueryCache.layerTest` carry the host's error and requirements.
+  - Removed: `Authorizer`, `AuthorizerService`, the host's `Action`, `QueryPolicies`, `QueryPolicy`, `allowAll`, and `publicPolicy`. Write `Policy.allowAll` under a name instead.
+  - `HttpServer.make` takes `{ principal }`. `HttpServer.toWebHandler` takes the same options.
+  - `HttpServer.form` requires `principal` and `login: Option<string>`. An anonymous refusal answers 303 to `login` with `next`.
+  - `FrameHost` options require `principal`, and the host layer must provide `Policies`.
+  - The HTTP client never retries `Unauthorized`, and decodes a terminal `event: error` on a changes stream.
+  - `HttpServer.toWebHandler` and `defineFrameHost` keep the derivation's requirements and supply them from their runtime.
+  - `ActorHost.layer` and `ActorHost.layerMemory` also provide `ActorHost.Recovery`. The celld alarm wakes through it, not through the public wire.
+  - `QueryCacheService` has `principalChanged`. A custom cache must implement it. The built-in cache starts a new principal generation on a reference's `Unauthorized` stream end, a refused `send` or `call`, and a refused read of a key it was granted under the same generation. A reply that settles after a new generation does not land, and `followQuery` does not carry a value across generations.
+
+  Also new: `HttpServer.shareSessions` (one subscription per session, shared by every connection, with a bounded `HttpServer.sessionBuffer` of the latest revision), `HttpServer.SessionPrincipals`, and `HttpServer.SessionBuffer`.
+
+- [`a987c57`](https://github.com/cevr/effect-frame/commit/a987c57152508e4da496f4b1cd831177c825b251) - Place scroll and focus at shell commit ([#31](https://github.com/cevr/effect-frame/issues/31)).
+
+  New exports on `effect-frame/router`:
+
+  - `NavigationBehavior`: a namespace with the `NavigationBehavior.NavigationBehavior` type and its two values, `Restore` (the default) and `Preserve`.
+  - `browserNavigation`: the browser `Location` on the Navigation API, with the History API as the fallback.
+  - `mount({ behavior })`, `Route.leaf(segment, view, { behavior })`, and `behavior` on a flat `Route.client` definition. A layout takes none.
+  - The `Route.LeafOptions` type.
+
+  Changed behavior:
+
+  - Under `Restore`, a push or replace scrolls to the top or to the URL's fragment when the new branch is in the document, and Back or Forward restores the browser's saved position. Focus moves to the entering leaf's root, or to the first `autofocus` element inside it. A stayed leaf keeps focus.
+  - A leaf's root element renders with `tabindex="-1"`, unless the view wrote a tab index (`tabindex` or `tabIndex`) or the element is focusable by the platform already (for example a `<button>` or an `<a href>`).
+  - `browserLocation` now scrolls and focuses the same way through the History API.
+  - `followLinks` no longer follows a link that only changes the current page's fragment.
+  - A cancelable Back or Forward on an engine without a precommit handler (WebKit) is no longer canceled. It is followed and reported with `reason=noncancelable`, because a canceled traversal there leaves the back-forward list out of step with the page.
+
+- [`a987c57`](https://github.com/cevr/effect-frame/commit/a987c57152508e4da496f4b1cd831177c825b251) - Stream a server render: the shell and its fallbacks first, then each query value as it settles, in JSON records that no script runs ([#22](https://github.com/cevr/effect-frame/issues/22)). Each server render holds its own query cache ([#28](https://github.com/cevr/effect-frame/issues/28)).
+
+  New exports on `effect-frame/actor/client` (and `effect-frame/actor`):
+
+  - `Streaming`: the records `Placeholder`, `Patch`, `Closed`, `StreamRecord`, their JSON codecs `RecordJson` and `SeedJson`, `recordId(key)`, `containerId`, `recordClass`, `seedId`; the server half `shell(options)`, `declared`, `awaitDeclared`, `settledPatches`, `ShellRecords`, `ShellOptions` (with a required `closeWhen`); the client half `resume(records)`, `DocumentRecords`, `Resumed` (`closed`, and `hydrated`, which drops the seeds no view took).
+  - `StreamEnded`: a new member of `QueryFailure`. A query still open when its document ends fails with it, then reads again over `POST /query`. The wire answers it with 502.
+  - A value in the document never replaces a newer read the client made. Only `QueryFailed` in the document is final; any other failure reads again. `Resumed.closed` completes once every live entry shows its value or failure.
+
+  New exports on `effect-frame/view`:
+
+  - `Html.renderToStream(view, props, document, options)`: a streamed document over a per-request cache. `options.closeWhen`, the time limit, is required.
+  - `Html.renderAwaitAll(view, props, document, options)`: one document once every declared query settled and no `Loading` boundary shows its fallback, with a seed script and no record channel. `options.closeWhen` is required: at the limit the drawing is written as it is, and the client reads what is still open.
+  - `Html.Document`, `Html.streamRecord(record)`.
+  - `Dom.readRecords`: the records present and the records still to come, or an `AwaitAll` seed.
+
+  Changes to existing types:
+
+  - `HydrationReport` has a new `resolvedAhead: number` field: boundaries the client drew with the other branch because their query settled before hydration.
+  - `Host` has three optional capabilities, `boundaryMarks(kind)`, `adoptBoundary(shown)` and `setupStarted()`, and the new type `BoundaryMarks`. A custom host may omit them.
+  - `RetainedNode` has a new required field `kind: "Loading" | "Errored"` (the new type `BoundaryKind`, exported from `effect-frame/view` and `effect-frame/view/jsx-runtime`). `Loading` and `Errored` set it; code that builds a `RetainedNode` by hand must set it too.
+  - The HTML host writes a comment pair around each readiness boundary: `<!--frame-boundary:fallback-->` or `<!--frame-boundary:content-->`, then `<!--/frame-boundary-->`. `Html.HtmlNode` has a new `Comment` member.
+  - A streamed record is followed by an empty comment, so the client reads a large record as soon as it is whole.
+
 ## 0.15.0
 
 ### Minor Changes

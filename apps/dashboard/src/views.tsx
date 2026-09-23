@@ -9,7 +9,7 @@ import { sender, writeMemo } from "./commands.js";
 import type { MemoCommands } from "./commands.js";
 import { Memo } from "./contract.js";
 import type { dash } from "./segments.js";
-import { orders, overview } from "./segments.js";
+import { ordersIndex, overview } from "./segments.js";
 
 /**
  * The shell every dashboard page shares, and the fallbacks. `DashShell`
@@ -97,7 +97,7 @@ export const DashShell = <ChildR,>(props: Route.LayoutPropsOf<typeof dash, Child
         const tenant = select(header, (shown) => shown.value);
         const params = yield* props.params.get;
         const home = yield* link(overview, params, {});
-        const book = yield* link(orders, params, {});
+        const book = yield* link(ordersIndex, params, {});
         const memo = yield* MemoCard(
           yield* sender(Memo, props.params, (now) => ({ tenant: now.tenant })),
         );

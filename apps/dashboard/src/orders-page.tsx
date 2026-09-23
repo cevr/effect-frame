@@ -1,45 +1,55 @@
-import { select } from "effect-frame/actor/client";
+import { select, zip } from "effect-frame/actor/client";
+import type { QueryState } from "effect-frame/actor/client";
 import type { Route } from "effect-frame/router";
 import { For, View, orErrored, ready } from "effect-frame/view";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { cancel, fulfil, sender } from "./commands.js";
+import type { TenantInfoValue } from "./commands.js";
 import { Orders } from "./contract.js";
 import type { Order } from "./contract.js";
-import type { orders } from "./segments.js";
+import type { order, orders, ordersIndex } from "./segments.js";
 
 /**
- * Every order, and the open ones in detail. It inherits the layout's
- * `TenantInfo` binding with the shell: one entry for the whole branch. A
- * `Fulfil` here refreshes `Orders` and `OrderDetail`, and not `Revenue`,
- * which is not on screen (#17, #28).
+ * The orders branch: a layout and two leaves under the dashboard's shell,
+ * three deep. Every view here inherits the shell's `TenantInfo` binding:
+ * one entry for the whole branch. A `Fulfil` here refreshes `Orders` and
+ * `OrderDetail`, and not `Revenue`, which is not on screen (#17, #28).
  */
 
-export type OrdersProps = Route.PropsOf<typeof orders>;
+/** The tenant's name, once its header has loaded. */
+const nameOf = (state: QueryState<TenantInfoValue, unknown>): string => {
+  if (state._tag === "Ready") {
+    return state.value.name;
+  }
+  return "";
+};
 
-export const OrdersView = (props: OrdersProps) =>
+/** The status of the order `id` names, or nothing when it is not in the book. */
+const statusOf = (id: string, rows: ReadonlyArray<Order>): string =>
+  Option.match(Option.fromNullishOr(rows.find((row) => row.id === id)), {
+    onNone: () => "no such order",
+    onSome: (row) => row.status,
+  });
+
+/** Every order, which both leaves sit under. Each can be fulfilled or cancelled here. */
+export const OrdersLayout = <ChildR,>(props: Route.LayoutPropsOf<typeof orders, ChildR>) =>
   Effect.gen(function* () {
     const book = yield* sender(Orders, props.params, (now) => ({ tenant: now.tenant }));
     const all = yield* ready(yield* orErrored(props.data.orders.state), { rows: [] });
-    const detail = yield* ready(yield* orErrored(props.data.detail.state), { rows: [] });
-    const tenant = select(props.data.tenant.state, (state) => {
-      if (state._tag === "Ready") {
-        return state.value.name;
-      }
-      return "";
-    });
+    const outlet = yield* props.outlet;
     return (
       <article id="orders-page">
-        <h2 id="orders-of">{View.bind(tenant)}</h2>
+        <h2 id="orders-of">{View.bind(props.data.tenant.state, nameOf)}</h2>
         <ul id="rows">
-          <For each={select(all, (result) => result.rows)} keyBy={(order: Order) => order.id}>
-            {(order) => (
-              <li data-order={View.bind(order, (value) => value.id)}>
-                <span>{View.bind(order, (value) => `${value.id} ${value.status}`)}</span>
+          <For each={select(all, (result) => result.rows)} keyBy={(row: Order) => row.id}>
+            {(row) => (
+              <li data-order={View.bind(row, (value) => value.id)}>
+                <span>{View.bind(row, (value) => `${value.id} ${value.status}`)}</span>
                 <button
                   type="button"
                   class="fulfil"
                   onClick={View.event(() =>
-                    Effect.flatMap(order.get, (value) => Effect.asVoid(fulfil(book, value.id))),
+                    Effect.flatMap(row.get, (value) => Effect.asVoid(fulfil(book, value.id))),
                   )}
                 >
                   fulfil
@@ -48,7 +58,7 @@ export const OrdersView = (props: OrdersProps) =>
                   type="button"
                   class="cancel"
                   onClick={View.event(() =>
-                    Effect.flatMap(order.get, (value) => Effect.asVoid(cancel(book, value.id))),
+                    Effect.flatMap(row.get, (value) => Effect.asVoid(cancel(book, value.id))),
                   )}
                 >
                   cancel
@@ -57,11 +67,43 @@ export const OrdersView = (props: OrdersProps) =>
             )}
           </For>
         </ul>
-        <ul id="detail">
-          <For each={select(detail, (result) => result.rows)} keyBy={(order: Order) => order.id}>
-            {(order) => <li>{View.bind(order, (value) => `${value.id} ${value.amount}`)}</li>}
-          </For>
-        </ul>
+        {outlet}
       </article>
+    );
+  });
+
+/** The open orders, oldest first. */
+export const OrdersIndex = (props: Route.PropsOf<typeof ordersIndex>) =>
+  Effect.gen(function* () {
+    const detail = yield* ready(yield* orErrored(props.data.detail.state), { rows: [] });
+    return (
+      <ul id="detail">
+        <For each={select(detail, (result) => result.rows)} keyBy={(row: Order) => row.id}>
+          {(row) => <li>{View.bind(row, (value) => `${value.id} ${value.amount}`)}</li>}
+        </For>
+      </ul>
+    );
+  });
+
+/**
+ * One order. Its heading reads the leaf's own `TenantInfo` declaration,
+ * the key the shell already holds: no second entry and no second read.
+ */
+export const OrderView = (props: Route.PropsOf<typeof order>) =>
+  Effect.gen(function* () {
+    const info = yield* ready(yield* orErrored(props.data.info.state), {
+      name: "",
+      plan: "",
+      alerts: 0,
+    });
+    const all = yield* ready(yield* orErrored(props.data.orders.state), { rows: [] });
+    const status = zip(props.params, all, (now, result) => statusOf(now.order, result.rows));
+    return (
+      <section id="order">
+        <h3 id="order-of">
+          {View.bind(zip(info, props.params, (value, now) => `${value.name} / ${now.order}`))}
+        </h3>
+        <p id="order-status">{View.bind(status)}</p>
+      </section>
     );
   });

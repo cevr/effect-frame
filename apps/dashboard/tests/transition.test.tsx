@@ -6,7 +6,7 @@ import { QueryCache } from "effect-frame/actor/client";
 import { Effect, Fiber } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { routes } from "../src/routes.js";
-import { keyText, mountApp, settle, tappedHost, textOf } from "./fixture.js";
+import { keyText, member, mountApp, settle, tappedHost, textOf } from "./fixture.js";
 
 /**
  * #28 on the dashboard: `active` is the keys the mounted branch declares.
@@ -117,5 +117,49 @@ describe("active follows the mounted branch (#28)", () => {
       expect(wire.readsOf(tenantInfo)).toBe(1);
       expect(handlers.runsOf("TenantInfo")).toBe(1);
     }),
+  );
+
+  it.scopedLive(
+    "a key two segments declare: the leaf exits, it stays; the layout's moves, it goes",
+    () =>
+      Effect.gen(function* () {
+        const { handlers, wire } = yield* tappedHost(member("acme", "globex"));
+        const app = yield* mountApp({
+          transport: wire.transport,
+          href: `${origin}/d/acme/orders/o7`,
+          routes,
+        });
+        yield* settle(
+          Effect.sync(() => textOf(app.root, "#order-of") === "Acme Co / o7"),
+          "the order page",
+        );
+        // The dash layout and the order leaf both declare TenantInfo{acme}: one entry.
+        expect(yield* app.run(activeKeys)).toEqual(
+          sorted([tenantInfo, 'Orders{"range":"all","tenant":"acme"}']),
+        );
+
+        // The order leaf exits. The layout still declares the key: it stays, unread.
+        yield* app.router.navigate("/d/acme/orders");
+        yield* settle(
+          Effect.sync(() => textOf(app.root, "#detail").includes("o7")),
+          "the orders index",
+        );
+        expect(yield* app.run(activeKeys)).toEqual(sorted([tenantInfo, ...ordersKeys]));
+        expect(handlers.runsOf("TenantInfo")).toBe(1);
+
+        // Back to the order, then to another tenant: the layout's acme
+        // declaration exits with the leaf's, and the key goes.
+        yield* app.router.navigate("/d/acme/orders/o7");
+        yield* app.router.navigate("/d/globex");
+        yield* settle(
+          Effect.sync(() => textOf(app.root, "#tenant-name") === "Globex"),
+          "the other tenant",
+        );
+        const now = yield* app.run(activeKeys);
+        expect(now.filter((key) => key.startsWith("TenantInfo"))).toEqual([
+          'TenantInfo{"tenant":"globex"}',
+        ]);
+        expect(wire.readsOf(tenantInfo)).toBe(1);
+      }),
   );
 });

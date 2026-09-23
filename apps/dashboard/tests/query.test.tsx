@@ -3,7 +3,7 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import { QueryCache, useQuery } from "effect-frame/actor/client";
-import { Effect, Schema } from "effect";
+import { Deferred, Effect, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { TenantId } from "../src/contract.js";
 import { Revenue, TenantInfo } from "../src/queries.js";
@@ -33,27 +33,64 @@ const painted = (root: HTMLElement) =>
   );
 
 describe("the dashboard's queries (#17, #18)", () => {
-  it.scopedLive("the layout's TenantInfo is one entry and one read for the whole branch", () =>
+  it.scopedLive("the layout's TenantInfo is one entry and one read for a three-deep branch", () =>
     Effect.gen(function* () {
       const { handlers, wire } = yield* tappedHost();
       const app = yield* mountApp({ transport: wire.transport, href: overview, routes });
       yield* painted(app.root);
       expect(textOf(app.root, "#tenant-name")).toBe("Acme Co");
 
-      // The orders leaf inherits the binding: its heading reads the same entry.
+      // dash > orders > index: the orders layout inherits the binding.
       yield* app.router.navigate("/d/acme/orders");
       yield* settle(
         Effect.sync(() => textOf(app.root, "#orders-of") === "Acme Co"),
         "the orders page",
       );
+      // dash > orders > order: the leaf declares the same key again.
+      yield* app.router.navigate("/d/acme/orders/o7");
+      yield* settle(
+        Effect.sync(
+          () =>
+            textOf(app.root, "#order-of") === "Acme Co / o7" &&
+            textOf(app.root, "#order-status") === "open",
+        ),
+        "the order page",
+      );
       yield* app.router.navigate("/d/acme");
       yield* painted(app.root);
 
-      // Three pages, two views reading it, and one read of one key.
+      // Four pages, four views reading it, three deep, and one read of one key.
       expect(wire.readsOf(tenantInfo)).toBe(1);
       expect(handlers.runsOf("TenantInfo")).toBe(1);
       const active = yield* app.run(Effect.flatMap(QueryCache, (cache) => cache.active));
       expect(active.filter((key) => key.query === "TenantInfo").map(keyText)).toEqual([tenantInfo]);
+    }),
+  );
+
+  it.scopedLive("every declaration starts before the slowest one is released", () =>
+    Effect.gen(function* () {
+      const { handlers, wire } = yield* tappedHost();
+      const slow = yield* handlers.hold("Slowest");
+      const app = yield* mountApp({ transport: wire.transport, href: overview, routes });
+      // The overview branch declares six: the layout's TenantInfo, four
+      // queries, and the Alerts actor. Slowest is held in its handler.
+      const started = () => [
+        ...["TenantInfo", "Revenue", "Orders", "Funnel", "Slowest"].filter((name) =>
+          wire.reads.some((key) => key.startsWith(`${name}{`)),
+        ),
+        ...wire.snapshots.filter((address) => address.startsWith("Alerts{")).map(() => "Alerts"),
+      ];
+      yield* settle(
+        Effect.sync(() => started().length === 6),
+        "all six declarations started",
+      );
+      // All six are in flight or done while the slowest has not answered.
+      expect(started()).toEqual(["TenantInfo", "Revenue", "Orders", "Funnel", "Slowest", "Alerts"]);
+      expect(handlers.runsOf("Slowest")).toBe(1);
+      expect(textOf(app.root, "#slowest")).toBe("");
+
+      yield* Deferred.succeed(slow, void 0);
+      yield* painted(app.root);
     }),
   );
 

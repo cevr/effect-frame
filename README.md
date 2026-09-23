@@ -104,7 +104,7 @@ const tenant = Route.segment("tenant", {
       if (yield* isSignedIn(params.tenant)) {
         return Route.Continue;
       }
-      return Route.redirect(Route.target(Login, {}, { next: url.pathname }));
+      return Route.redirect(Route.target(Login, {}, { next: `${url.pathname}${url.search}` }));
     }),
 });
 
@@ -141,7 +141,9 @@ const App = Route.client(
   ),
 );
 
-yield * mount({ routes: [App, Login], notFound, host, root });
+const program = Effect.gen(function* () {
+  yield* mount({ routes: [App, Login], notFound, host, root });
+});
 ```
 
 - `before` runs parent first, before anything commits. It returns
@@ -150,8 +152,10 @@ yield * mount({ routes: [App, Login], notFound, host, root });
   handler. It receives a `Route.RouteFailure`.
 - Every segment view gets `params`, `search`, `data`, `href`,
   `updateSearch`, and `replaceSearch`. A layout also gets `outlet`.
-- `link` takes a flat route or a segment. A segment link is active while the
-  current URL is inside it.
+- `link` takes a flat route or a segment. `Link` draws `aria-current="page"`
+  on the destination, and `aria-current="true"` on a segment the current URL
+  continues below. Neither holds on not-found or on another route.
+- `Route.client(name, root)` takes a branch of a root segment only.
 - Leave checks and navigation receipts are not public yet (#56).
 
 See [the public route design](docs/design/route-public.md).

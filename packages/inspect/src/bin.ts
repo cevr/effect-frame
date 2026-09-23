@@ -7,6 +7,7 @@
  */
 import { Effect, Option } from "effect";
 import * as Cli from "./cli.js";
+import { makeOutput } from "./exit.js";
 import { TOKEN_ENV } from "./reader.js";
 
 const interrupt = new AbortController();
@@ -18,18 +19,18 @@ for (const signal of signals) {
 const env = (name: string) => Option.fromNullishOr(process.env[name]);
 
 Effect.runFork(
-  Cli.main({
-    argv: process.argv.slice(2),
-    token: Option.filter(env(TOKEN_ENV), (token) => token.length > 0),
-    home: env("HOME"),
-    xdgStateHome: env("XDG_STATE_HOME"),
-    pid: process.pid,
-    interrupt: interrupt.signal,
-    stdout: (text) => {
-      process.stdout.write(text);
-    },
-    stderr: (text) => {
-      process.stderr.write(text);
-    },
-  }).pipe(Effect.flatMap((exitCode) => Effect.sync(() => process.exit(exitCode)))),
+  Effect.gen(function* () {
+    const output = yield* makeOutput;
+    const exitCode = yield* Cli.main({
+      argv: process.argv.slice(2),
+      token: Option.filter(env(TOKEN_ENV), (token) => token.length > 0),
+      home: env("HOME"),
+      xdgStateHome: env("XDG_STATE_HOME"),
+      pid: process.pid,
+      interrupt: interrupt.signal,
+      stdout: output.stdout,
+      stderr: output.stderr,
+    });
+    return yield* output.exit(exitCode);
+  }),
 );

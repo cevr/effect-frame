@@ -65,8 +65,8 @@ returns, even if an outer view scope still holds a query consumer.
 ### Live inspection
 
 The browser-safe `effect-frame/inspection` subpath exports `Protocol` (the
-versioned wire contract) and `attach`. A development entry calls `attach` to
-connect its root to a loopback gateway. A production entry imports nothing
+versioned wire contract) and `attachGateway`. A development entry calls
+`attachGateway` to connect its root to a loopback gateway. A production entry imports nothing
 from this subpath and carries none of it. The gateway and the reader are the
 `effect-frame` executable in `packages/inspect` (`effect-frame gateway`,
 `effect-frame roots`, `effect-frame inspect`), the only Bun piece. See

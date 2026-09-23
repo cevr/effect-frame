@@ -73,15 +73,27 @@ sockets, and a production-shaped root (`packages/inspect/tests/fixture/app.tsx`:
 Attachment (`packages/effect-frame/src/inspection/attach.ts`, browser):
 
 1. The application boundary opts in. The production entry imports no
-   inspection module. The development entry calls `attach` only when page
-   config names a gateway.
-2. `attach` reads the existing `Frame.Service` and captures its construction
+   inspection module. The development entry calls `attachGateway` only when
+   page config names a gateway.
+2. `attachGateway` validates its options and fails with
+   `InvalidAttachOptions` before any dial: a non-loopback or malformed URL
+   (only `127.0.0.1` and `localhost`), a malformed token, a non-finite or
+   non-positive retry or open timeout, or `maxRetryMillis` below
+   `initialRetryMillis`. It reads the existing `Frame.Service` and captures its construction
    context (`Context.omit(Scope)`), like `ViewTest`. It builds no Frame layer
    and copies no records. Each `Inspect` request takes one fresh sample.
-3. `attach` forks one loop in the caller's scope and returns at once. Mount
-   never waits for the gateway. The loop's backoff timers use Effect's live
-   clock, so an application `TestClock` neither freezes nor advances them.
-4. The root ID and name come from the service's own sample on first dial.
+3. The root ID and name come from one sample of the service at attach, before
+   any dial. An ID that is not a `RootId`, or a name with control characters
+   (`RootName`), fails with `InvalidAttachOptions`, so the loop never retries
+   a registration the gateway will always refuse.
+4. `attachGateway` forks one loop in the caller's scope and returns at once.
+   Mount never waits for the gateway. The loop's backoff timers use Effect's
+   live clock, so an application `TestClock` neither freezes nor advances
+   them. The delay starts at `initialRetryMillis` and doubles after each
+   dial up to `maxRetryMillis`. Reset rule: the delay returns to
+   `initialRetryMillis` only after a connection stayed open for at least one
+   second; a gateway that drops the socket at once still sees a doubling
+   delay. A throwing `onStatus` observer is ignored and never stops the loop.
 5. Closing the root scope interrupts the loop, closes the socket, and ends
    every in-flight handler. No further dials occur.
 
@@ -106,8 +118,8 @@ Reader (`packages/inspect/src/reader.ts`) and executable
 1. `Reader.run(argv, environment)` returns `{ exitCode, stdout, stderr }`.
    `Cli.main(io)` dispatches `gateway`, `roots`, and `inspect` and returns
    the exit code. Neither touches the process. `bin.ts` is the only process
-   boundary: argv, the token variable, the default state directory, SIGINT,
-   the streams, and the exit code.
+   boundary: argv, the token variable, `HOME`, `XDG_STATE_HOME`, the PID,
+   SIGINT, SIGTERM, and SIGHUP, the streams, and the exit code.
 2. Each reader command makes one HTTP exchange with a finite deadline.
 
 ## Protocol schema (version 1)
@@ -118,8 +130,9 @@ Root link, WebSocket `GET /v1/attach?root=<frame root id>&name=<name>`:
   `effect-frame-attach.<attach capability>`. Browsers cannot set handshake
   headers, so the capability travels as a subprotocol, not in the URL.
 - Checks in order: loopback `Host`, exact `Origin`, version subprotocol,
-  attach capability, root ID pattern `[A-Za-z0-9._:-]{1,128}`, printable name
-  of at most 128 characters, and at most 64 roots. A refused upgrade returns
+  attach capability, root ID (`RootId`, `[A-Za-z0-9._:-]{1,128}`), root
+  name (`RootName`: at most 128 characters, no C0, DEL, or C1 control), and
+  at most 64 roots. Only `127.0.0.1` and `localhost` are loopback hosts. A refused upgrade returns
   a JSON error body.
 - RPC group `RootRpcs` with one RPC:
   `Inspect { maxBytes: Int } -> Frame.Snapshot | SnapshotTooLarge { bytes, limit }`
@@ -136,8 +149,11 @@ Reader API:
   `effect-frame-inspection-version: 1`.
 - Requests with any `Origin` header are refused. Browsers always send one on
   cross-origin requests; the CLI never does.
-- `POST /v1/inspect` body:
-  `{ "version": 1, "root": "<selector>", "deadlineMillis": 1..30000 }`.
+- `POST /v1/inspect` body, decoded with `InspectRequest`:
+  `{ "version": 1, "root": "<selector>", "deadlineMillis": 1..30000 }`. A
+  body over 4096 bytes is refused as it streams. A decode failure maps to
+  `UnsupportedProtocolVersion` (another `version`), `InvalidDeadline` (a
+  finite number outside `DeadlineMillis`), or `MalformedRequest`.
 - Selector: exact root ID, or a unique root ID prefix, or an exact root name.
   Several matches return `AmbiguousRoot` with the candidates. No match
   returns `RootNotFound`.
@@ -162,8 +178,10 @@ Items 1-7 are `packages/inspect/tests/transport.test.ts`,
 `packages/inspect/tests/protocol.test.ts`, and
 `packages/inspect/tests/build.test.ts`. Item 8 is
 `packages/inspect/tests/cli.test.ts`. Item 9 is
-`packages/effect-frame/tests/inspection/`. Each package's `test` script runs
-them (18 tests in `packages/inspect`, 9 in `effect-frame`'s
+`packages/effect-frame/tests/inspection/`. Item 10 is
+`packages/inspect/tests/reader.test.ts` and
+`packages/inspect/tests/gateway.test.ts`. Each package's `test` script runs
+them (26 tests in `packages/inspect`, 13 in `effect-frame`'s
 `test:inspection`).
 
 1. Held query: the CLI reads the same root while its real resolver is held.
@@ -189,8 +207,10 @@ them (18 tests in `packages/inspect`, 9 in `effect-frame`'s
    Tab close with a read in flight fails that read with `RootDisconnected`.
 5. Absent gateway: the development root with a dead gateway port mounts as
    fast as the production root (within 100 ms, under 500 ms). The
-   production and disabled development roots create no WebSocket. Backoff
-   stays at or below the configured cap, with 2 to 8 dials in 1.2 s. A
+   production and disabled development roots create no WebSocket. The
+   recorded retry delays equal `min(400, 50 * 2^n)`: each delay doubles up to
+   the cap. A root that the gateway drops at once, three times, waits 50,
+   100, then 200 ms: a short connection does not reset the delay. A
    gateway that starts later is found by a correctly configured root. Root
    close ends the loop.
 6. Protocol failures: bad reader version header or body version, non-JSON
@@ -222,17 +242,38 @@ them (18 tests in `packages/inspect`, 9 in `effect-frame`'s
    succeed with `--token-file` and with `EFFECT_FRAME_INSPECT_TOKEN`; an
    unknown root exits 1 (`RootNotFound`), no capability exits 2
    (`MissingCapability`), the attach capability exits 1 (`Unauthorized`), and
-   a second gateway on the same port exits 1. SIGINT stops the gateway with
-   exit 130 and removes both files. Every `--json` stdout decodes as exactly
-   one `Reader.Document` line.
+   a second gateway on the same port exits 1. A second gateway on the SAME
+   state directory exits 1 and names the live PID; the first gateway's files
+   stay intact. A stale lock with a dead PID is taken over. SIGINT, SIGTERM,
+   and SIGHUP stop the gateway with exit 130, 143, and 129 and remove both
+   files and the lock. The state directory has mode 0700. A symlink planted
+   at a capability path is replaced, and its target keeps its content. A
+   directory that another user owns (`/usr`, when not root) exits 1. A
+   missing `HOME` and a relative `XDG_STATE_HOME` exit 2. Every `--json`
+   stdout decodes as exactly one `Reader.Document` line.
 9. Public subpath: `Protocol` documents round-trip through JSON with a real
    Frame snapshot; another version fails to decode; every `GatewayError` maps
    to its HTTP status; the `Inspect` RPC exit codec carries a snapshot and
-   `SnapshotTooLarge`. `attach` refuses non-`ws:`, non-loopback, portless,
-   and unparsable URLs and a malformed token; against a raw loopback peer it
+   `SnapshotTooLarge`. `Protocol.wire` is one camelCase object and no
+   `Protocol` key is a SCREAMING constant. The schemas accept a deadline of 1
+   and 30000 and refuse 0, 30001, and 1.5; they accept a root selector of 1
+   to 256 characters and refuse BEL, CSI, DEL, and C1 characters.
+   `attachGateway` refuses non-`ws:`, non-loopback (including `[::1]`),
+   portless, and unparsable URLs, a malformed token, retry values of 0, -1,
+   NaN, and Infinity, a maximum below the initial value, and a root name with
+   control characters (with zero dials). A throwing `onStatus` does not stop
+   dialing. Against a peer that drops each socket on open, the delays are
+   20, 40, 80, 160, 160, 160 ms. Against a raw loopback peer it
    dials `/v1/attach` with its root ID, name, and both subprotocols, answers
    `Inspect` and `SnapshotTooLarge`, and closes the socket when its scope
    closes. The subpath bundles for a browser with no Bun or Node input.
+10. Hostile snapshot and body: a gateway returns a snapshot with OSC, CSI,
+    BEL, C1 CSI, bidi controls, and DEL in a route name, a URL, and a command
+    ID. Text output contains none of those code points and shows their
+    `\u{..}` forms; `--json` keeps the raw strings. An endless chunked
+    request body gets `MalformedRequest` ("request body too large") after
+    less than 64 KiB is sent. `MAX_DEADLINE_MILLIS` accepts and 1 above it
+    fails the `DeadlineMillis` schema.
 
 ## Limits
 
@@ -246,8 +287,8 @@ them (18 tests in `packages/inspect`, 9 in `effect-frame`'s
 - The attach capability is visible to every script in the application
   origin. It is a development capability. It allows only registration; it
   cannot read other roots.
-- Root identity comes from one sample on first dial. A public API should
-  expose the root ID on `Frame.Service` so attachment needs no sample.
+- Root identity comes from one sample at attach. A public API should expose
+  the root ID on `Frame.Service` so attachment needs no sample.
 - The gateway has no rate limit and no cap on concurrent pending reads.
 - The proof runs WebKit on macOS and the system Chrome elsewhere (CI runs it on Linux Chrome). It skips on a host with neither.
 - Commands are `Available`: the text view lists each retained record (kind, lifecycle, attempt, running or idle, command ID), never its payload.
@@ -259,13 +300,20 @@ three dependency classes:
 
 - `effect-frame/inspection` (browser-safe subpath of `effect-frame`,
   source `packages/effect-frame/src/inspection/`). Exports: `Protocol` (a
-  namespace: `PROTOCOL_VERSION`, `ROOT_SUBPROTOCOL`, `ATTACH_TOKEN_PREFIX`,
-  `VERSION_HEADER`, `ATTACH_PATH`, `ROOTS_PATH`, `INSPECT_PATH`,
-  `MAX_DEADLINE_MILLIS`, `DEFAULT_DEADLINE_MILLIS`, `MAX_SELECTOR_LENGTH`,
-  `MAX_ROOT_NAME_LENGTH`, `SnapshotTooLarge`, `Inspect`, `RootRpcs`, `RootId`,
+  namespace: `wire` and its type `Wire`, `SnapshotTooLarge`, `Inspect`,
+  `RootRpcs`, `RootId`, `RootName`, `RootSelector`, `DeadlineMillis`,
   `RootInfo`, `InspectRequest`, `GatewayError`, `RootsResponse`,
-  `InspectResponse`, `ErrorResponse`, `ReaderResponse`, `statusOf`), `attach`,
+  `InspectResponse`, `ErrorResponse`, `ReaderResponse`), `attachGateway`,
   `InvalidAttachOptions`, and the types `AttachOptions` and `AttachStatus`.
+  `Protocol.wire` is the one object of fixed wire strings (`version`,
+  `subprotocol`, `attachTokenPrefix`, `versionHeader`, `attachPath`,
+  `rootsPath`, `inspectPath`). Every request bound lives in a schema:
+  `DeadlineMillis` is an integer from 1 to 30000, `RootSelector` is 1 to 256
+  characters with no C0, DEL, or C1 control, and `RootName` is at most 128
+  such characters. The gateway decodes with these schemas and repeats no
+  check. `RootRpcs` and `Inspect` are marked unstable in their TSDoc and in
+  the Changeset: they are built on `effect/unstable/rpc`, and the gateway has
+  no other source for them.
   It depends only on `effect` core (`unstable/rpc`, `unstable/socket`,
   `unstable/net`) and `effect-frame/frame`. The build proof shows it stays out
   of a production entry that does not import it. Its source sits in a
@@ -289,8 +337,8 @@ effect-frame inspect --url <gateway> --root <id|prefix|name> [--json]
                      [--deadline <ms>] [--token-file <path>] [--max-text <n>]
 ```
 
-- `gateway` writes the attach and read capabilities to files with mode 0600
-  in the state directory and prints the attach URL and the capability file
+- `gateway` takes an exclusive `gateway.lock` in the state directory, then
+  writes the attach and read capabilities to files with mode 0600 there, and prints the attach URL and the capability file
   paths on stderr. It never prints a capability on stdout or takes one as a
   flag.
 - Readers take the capability from `--token-file` or
@@ -299,7 +347,9 @@ effect-frame inspect --url <gateway> --root <id|prefix|name> [--json]
   on stdout, for success and for failure.
 - Exit codes: 0 success; 1 operational failure (gateway or root error,
   unreachable gateway, timeout); 2 invalid arguments, missing capability, or
-  empty invocation; 130 SIGINT.
+  empty invocation; 130 SIGINT; 143 SIGTERM; 129 SIGHUP. The gateway treats
+  all three signals alike: it removes its files, then exits with the
+  signal's code.
 - The deadline is always finite: default 5000 ms, maximum 30000 ms.
 - Never select a root implicitly when several match.
 
@@ -309,8 +359,11 @@ effect-frame inspect --url <gateway> --root <id|prefix|name> [--json]
   workflow publishes only through npm OIDC, and `NPM_TOKEN` is empty, so the
   first publish needs the owner to create the npm package and add a Trusted
   Publisher. Its README says so.
-- Reader validation helpers (`hasControlCharacter`) and reader-side errors
-  (`Reader.ClientError`, `Reader.Document`) live in `packages/inspect`. They
+- The reader limits (`DEFAULT_DEADLINE_MILLIS`, `MAX_DEADLINE_MILLIS`,
+  `MAX_REQUEST_BYTES`, in `packages/inspect/src/limits.ts`), `statusOf`, text
+  escaping (`packages/inspect/src/text.ts`), and reader-side errors
+  (`Reader.ClientError`, `Reader.Document`) live in `packages/inspect`. A test
+  ties `MAX_DEADLINE_MILLIS` to the `DeadlineMillis` schema. They
   describe the executable's output, not the wire between browser and gateway.
 - The internal record registry `packages/effect-frame/src/inspection.ts`
   stays internal; only `src/inspection/index.ts` is exported.
@@ -323,15 +376,31 @@ effect-frame inspect --url <gateway> --root <id|prefix|name> [--json]
   development entry can use a fixed attach URL; `--port 0` asks for an
   ephemeral port.
 - `gateway --state-dir` defaults to `$XDG_STATE_HOME/effect-frame/inspect`,
-  else `~/.local/state/effect-frame/inspect`. Each capability file is
-  removed and then created exclusively with mode 0600 and `chmod`ed, so a
-  planted symlink or a wider mode is never reused. Both files are removed
-  when the gateway stops: the capabilities die with it.
+  else `$HOME/.local/state/effect-frame/inspect`. A relative
+  `XDG_STATE_HOME` or a missing or relative `HOME` exits 2. The gateway
+  creates the directory with mode 0700, refuses a path that is not a
+  directory or that another user owns (exit 1), and `chmod`s it to 0700.
+- One gateway owns a state directory. It creates `gateway.lock` exclusively
+  with its PID. If the lock holds a live PID (`kill(pid, 0)` succeeds or
+  fails with `EPERM`), the second gateway exits 1 and names that PID; the
+  first gateway's files stay intact. If the PID is dead, the new gateway
+  removes the stale lock and takes it. On stop it removes the lock only if
+  the lock still holds its own PID.
+- Each capability file is removed and then created exclusively with mode
+  0600 and `chmod`ed, so a planted symlink or a wider mode is never reused.
+  Both files are removed when the gateway stops: the capabilities die with
+  it.
+- The gateway reads a request body chunk by chunk and refuses it with
+  `MalformedRequest` ("request body too large") once it passes 4096 bytes,
+  so a chunked body without `Content-Length` is bounded as it arrives.
+- Text output escapes every snapshot string: C0 controls, DEL, C1 controls,
+  and the bidirectional controls U+202A-U+202E and U+2066-U+2069 print as
+  `\u{..}`. `--json` keeps the raw strings; JSON encoding escapes them.
 - `--origin` must be a bare `http(s)` origin; a trailing slash is accepted
   and normalized to the browser's `Origin` value.
 - `--json` prints exactly one document for every reader exit code, including
   invalid arguments (`InvalidArguments`), a missing capability
-  (`MissingCapability`), and SIGINT (`Interrupted`). Help is not a document;
+  (`MissingCapability`), and a signal (`Interrupted`, with its `signal`). Help is not a document;
   it prints text and exits 0.
 - `gateway` has no `--json`. It prints nothing on stdout; its URLs and file
   paths go to stderr.

@@ -3,6 +3,7 @@ import type { Host, View } from "effect-frame/view";
 import { mount as mountView } from "effect-frame/view";
 import { read as readInspection, register as registerInspection } from "./route-inspection.js";
 import {
+  Cause,
   Context,
   Deferred,
   Effect,
@@ -239,41 +240,78 @@ export const mount: <R, HostNode, N = R>(
   const pending = new Set<Request>();
   let closed = false;
   let mounted: Option.Option<Mounted<R | N>> = Option.none();
-  /** The leave prompt in progress. A newer request supersedes it. */
+  /** The leave prompt in progress. A newer request that moves supersedes it. */
   let prompt = Option.none<Deferred.Deferred<void>>();
+  /** Admitted requests that would really move: only these supersede a prompt. */
+  const movers = new Set<Request>();
   const registry = yield* Effect.serviceOption(Inspection.Registry);
   let routerOwner = Option.none<Inspection.OwnerToken>();
   if (Option.isSome(registry)) {
     routerOwner = Option.some(yield* Inspection.ownerFor(registry.value));
   }
 
-  /** A request the router will never process lets its traversal through. */
-  const release = (request: Request): Effect.Effect<void> => {
-    if (request.operation === "traverse") {
-      return request.traversal.finish;
+  /** A request from an instance that is no longer shown is stale. */
+  const isLive = (request: Extract<Request, { readonly operation: "push" | "replace" }>) =>
+    Option.isNone(request.instance) ||
+    (Option.isSome(mounted) && mounted.value.entered.instance === request.instance.value);
+
+  /** The URL a push or replace asks for, from the committed one. */
+  const requested = (
+    request: Extract<Request, { readonly operation: "push" | "replace" }>,
+    base: URL,
+  ): URL => {
+    let href: string;
+    if (isUrlUpdater(request.href)) {
+      href = request.href(new URL(base.href));
+    } else {
+      href = request.href;
     }
-    return Effect.void;
+    return new URL(href, base);
   };
 
   /**
-   * Queue a request. A leave prompt in progress is superseded: the newer
-   * request is the latest intent, so an earlier prompt's answer can never
-   * decide it. False when the router is closed.
+   * Whether a request would really move. A platform move always does. A
+   * push or replace does when it comes from the live instance (or from no
+   * instance) and resolves to another URL than the committed one: a same-URL
+   * request, a stale instance's request, or a url-state write that changes
+   * nothing is not a newer intent, and must not end an open prompt.
+   */
+  const moves = (request: Request): Effect.Effect<boolean> =>
+    Effect.gen(function* () {
+      if (request.operation !== "push" && request.operation !== "replace") {
+        return true;
+      }
+      if (!isLive(request)) {
+        return false;
+      }
+      const base = yield* location.current;
+      return requested(request, base).href !== base.href;
+    });
+
+  /**
+   * Queue a request. A leave prompt in progress is superseded when the
+   * request would move: it is the latest intent, so an earlier prompt's
+   * answer can never decide it. False when the router is closed.
    */
   const admit = (request: Request) =>
     Effect.gen(function* () {
+      // A traversal never arrives here once the router closes: the
+      // traversal source's consumer closes first and lets every held one
+      // through (see `traversal.ts`).
       if (closed) {
-        yield* release(request);
         return false;
       }
       pending.add(request);
       const offered = yield* Queue.offer(requests, request);
       if (!offered) {
         pending.delete(request);
-        yield* release(request);
         yield* Deferred.succeed(request.done, Exit.succeed(Option.none()));
         return false;
       }
+      if (!(yield* moves(request))) {
+        return true;
+      }
+      movers.add(request);
       yield* Option.match(prompt, {
         onNone: () => Effect.void,
         onSome: (newer) => Effect.asVoid(Deferred.succeed(newer, void 0)),
@@ -563,7 +601,12 @@ export const mount: <R, HostNode, N = R>(
    * the traversal, interrupts the prompt: its Scope closes, and its answer,
    * if it ever comes, decides nothing.
    */
-  const decide = (settled: Settled<R | N>, kind: LeaveKind, abandoned: Effect.Effect<void>) =>
+  const decide = (
+    settled: Settled<R | N>,
+    kind: LeaveKind,
+    abandoned: Effect.Effect<void>,
+    self: Request,
+  ) =>
     Effect.gen(function* () {
       const questions = yield* questionsFor(settled.url, settled.target.route, kind);
       if (questions.length === 0) {
@@ -572,8 +615,8 @@ export const mount: <R, HostNode, N = R>(
       }
       const newer = yield* Deferred.make<void>();
       prompt = Option.some(newer);
-      if (pending.size > 1) {
-        // A request is already waiting behind this one.
+      if (Array.from(movers).some((other) => other !== self)) {
+        // A request that moves is already waiting behind this one.
         yield* Deferred.succeed(newer, void 0);
       }
       return yield* Effect.raceFirst(
@@ -621,8 +664,9 @@ export const mount: <R, HostNode, N = R>(
    * page is asked first; `Stay` refuses the platform move. Without it, the
    * platform commits and the router follows.
    */
-  const traverse = (traversal: Traversal) =>
+  const traverse = (request: Extract<Request, { readonly operation: "traverse" }>) =>
     Effect.gen(function* () {
+      const traversal = request.traversal;
       const committed = (yield* SubscriptionRef.get(navigations)).url;
       if (traversal.protection === "none") {
         if (!(yield* traversal.leave)) {
@@ -632,7 +676,7 @@ export const mount: <R, HostNode, N = R>(
       }
       const url = traversal.destination;
       const settled = yield* settle(url, "pop");
-      const decision = yield* decide(settled, "pop", traversal.abandoned);
+      const decision = yield* decide(settled, "pop", traversal.abandoned, request);
       if (decision._tag !== "Leave") {
         yield* traversal.stay;
         if (decision._tag === "Stay") {
@@ -648,25 +692,30 @@ export const mount: <R, HostNode, N = R>(
       }
       yield* move(settled, "pop");
       return Committed(settled.url);
-    }).pipe(Effect.ensuring(traversal.finish));
+    }).pipe(
+      // A failure or a defect refuses a protected move before it is let
+      // through: the platform must not commit a URL the router never showed.
+      // `stay` after a `leave` changes nothing, so an unprotected traversal,
+      // let through first, is unaffected. Interruption is root close:
+      // the traversal source's consumer, which closes first, lets it through.
+      Effect.onExit((exit) => {
+        if (Exit.isSuccess(exit)) {
+          return request.traversal.finish;
+        }
+        if (Cause.hasInterruptsOnly(exit.cause)) {
+          return Effect.void;
+        }
+        return Effect.andThen(request.traversal.stay, request.traversal.finish);
+      }),
+    );
 
   const controlled = (request: Extract<Request, { readonly operation: "push" | "replace" }>) =>
     Effect.gen(function* () {
       const base = yield* location.current;
-      if (
-        Option.isSome(request.instance) &&
-        (Option.isNone(mounted) || mounted.value.entered.instance !== request.instance.value)
-      ) {
+      if (!isLive(request)) {
         return Unchanged(base);
       }
-      const current = new URL(base.href);
-      let href: string;
-      if (isUrlUpdater(request.href)) {
-        href = request.href(current);
-      } else {
-        href = request.href;
-      }
-      const url = new URL(href, base);
+      const url = requested(request, base);
       if (url.href === base.href) {
         return Unchanged(base);
       }
@@ -674,7 +723,7 @@ export const mount: <R, HostNode, N = R>(
       if (settled.url.href === base.href) {
         return Unchanged(base);
       }
-      const decision = yield* decide(settled, request.operation, Effect.never);
+      const decision = yield* decide(settled, request.operation, Effect.never, request);
       if (decision._tag === "Stay") {
         return Stayed(base);
       }
@@ -697,7 +746,7 @@ export const mount: <R, HostNode, N = R>(
       return committedPop("committed");
     }
     if (request.operation === "traverse") {
-      return traverse(request.traversal);
+      return traverse(request);
     }
     return controlled(request);
   };
@@ -710,6 +759,7 @@ export const mount: <R, HostNode, N = R>(
           Deferred.succeed(request.done, Exit.map(outcome, Option.some)),
           Effect.sync(() => {
             pending.delete(request);
+            movers.delete(request);
           }),
         ),
       ),
@@ -732,13 +782,10 @@ export const mount: <R, HostNode, N = R>(
       closed = true;
       const waiting = Array.from(pending);
       pending.clear();
+      movers.clear();
       yield* Effect.forEach(
         waiting,
-        (request) =>
-          Effect.andThen(
-            release(request),
-            Deferred.succeed(request.done, Exit.succeed(Option.none())),
-          ),
+        (request) => Deferred.succeed(request.done, Exit.succeed(Option.none())),
         {
           discard: true,
         },
@@ -750,12 +797,16 @@ export const mount: <R, HostNode, N = R>(
     Stream.runForEach(Stream.fromQueue(requests), (request) => process(request)),
   );
   yield* Effect.forkScoped(Stream.runForEach(location.pops, () => enqueuePop()));
+  // The one consumer of this Location's traversals, for this router's
+  // lifetime. Its close lets through every traversal still held.
   yield* Option.match(readTraversals(location), {
     onNone: () => Effect.void,
-    onSome: (traversals) =>
-      Effect.asVoid(
-        Effect.forkScoped(
-          Stream.runForEach(traversals, (traversal) => enqueueTraversal(traversal)),
+    onSome: (source) =>
+      Effect.flatMap(source.consume, (traversals) =>
+        Effect.asVoid(
+          Effect.forkScoped(
+            Stream.runForEach(traversals, (traversal) => enqueueTraversal(traversal)),
+          ),
         ),
       ),
   });

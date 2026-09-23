@@ -123,7 +123,7 @@ const wired = Layer.effect(
 // ---------------------------------------------------------------------------
 
 /** How one labelled check answers. `dialog` holds the answer in a prompt. */
-type Mode = "leave" | "stay" | "refine" | "dialog";
+type Mode = "leave" | "stay" | "refine" | "dialog" | "die";
 
 interface Prompt {
   readonly label: string;
@@ -222,6 +222,9 @@ const check =
       const mode = Option.getOrElse(Option.fromNullishOr(policy.modes.get(label)), () => "leave");
       if (mode === "stay") {
         return Leave.Stay;
+      }
+      if (mode === "die") {
+        return yield* Effect.die("the check died");
       }
       if (mode === "refine") {
         if (refine(input)) {
@@ -380,7 +383,7 @@ interface FakeLocation {
   readonly history: Array<string>;
   readonly current: Ref.Ref<URL>;
   readonly pops: Queue.Queue<URL>;
-  readonly traversals: Queue.Queue<Traversal.Traversal>;
+  readonly traversals: Traversal.TraversalSource;
 }
 
 const origin = "http://frame.test";
@@ -390,7 +393,7 @@ const makeLocation = (initial: string): Effect.Effect<FakeLocation> =>
     const current = yield* Ref.make(new URL(initial));
     const history: Array<string> = [];
     const pops = yield* Queue.unbounded<URL>();
-    const traversals = yield* Queue.unbounded<Traversal.Traversal>();
+    const traversals = yield* Traversal.makeSource;
     const write = (kind: string) => (url: URL) =>
       Effect.andThen(
         Ref.set(current, url),
@@ -404,7 +407,7 @@ const makeLocation = (initial: string): Effect.Effect<FakeLocation> =>
       replace: write("replace"),
       pops: Stream.fromQueue(pops),
     };
-    Traversal.register(service, Stream.fromQueue(traversals));
+    Traversal.register(service, traversals);
     return { service, history, current, pops, traversals };
   });
 
@@ -414,6 +417,8 @@ interface FixtureTraversal {
   /** True: the router let it commit. False: it stayed. */
   readonly answered: Deferred.Deferred<boolean>;
   readonly finished: Deferred.Deferred<void>;
+  /** Complete it to abandon the traversal, as the platform would. */
+  readonly abandon: Deferred.Deferred<void>;
 }
 
 const makeTraversal = (
@@ -424,6 +429,7 @@ const makeTraversal = (
   Effect.gen(function* () {
     const answered = yield* Deferred.make<boolean>();
     const finished = yield* Deferred.make<void>();
+    const abandon = yield* Deferred.make<void>();
     const destination = new URL(`${origin}${path}`);
     const commit = Effect.gen(function* () {
       if (yield* Deferred.succeed(answered, true)) {
@@ -437,10 +443,10 @@ const makeTraversal = (
       protection,
       stay: Effect.asVoid(Deferred.succeed(answered, false)),
       leave: commit,
-      abandoned: Effect.never,
+      abandoned: Deferred.await(abandon),
       finish: Effect.andThen(Effect.asVoid(commit), Deferred.succeed(finished, void 0)),
     };
-    const made: FixtureTraversal = { traversal, answered, finished };
+    const made: FixtureTraversal = { traversal, answered, finished, abandon };
     return made;
   });
 
@@ -881,7 +887,7 @@ describe("private scoped leave checks", () => {
 
         // Protected: asked with kind pop, refused, and the platform never commits.
         const refused = yield* makeTraversal(location, "/app/t1/posts/2", "precommit");
-        yield* Queue.offer(location.traversals, refused.traversal);
+        yield* location.traversals.offer(refused.traversal);
         expect(yield* Deferred.await(refused.answered)).toBe(false);
         yield* Deferred.await(refused.finished);
         expect(policy.asked).toEqual([`post#1:${post1}->${post2}:/app/t1/posts/2:pop`]);
@@ -891,7 +897,7 @@ describe("private scoped leave checks", () => {
         // Protected and permitted: one commit, then the router shows it.
         yield* setMode("post#1", "leave");
         const permitted = yield* makeTraversal(location, "/app/t1/posts/2", "cancel");
-        yield* Queue.offer(location.traversals, permitted.traversal);
+        yield* location.traversals.offer(permitted.traversal);
         expect(yield* Deferred.await(permitted.answered)).toBe(true);
         yield* Deferred.await(permitted.finished);
         yield* readyPost(page, "t1", "2");
@@ -900,7 +906,7 @@ describe("private scoped leave checks", () => {
         // Unprotected: not asked, followed, and reported.
         yield* setMode("post#1", "stay");
         const forced = yield* makeTraversal(location, "/app/t1/posts/3", "none");
-        yield* Queue.offer(location.traversals, forced.traversal);
+        yield* location.traversals.offer(forced.traversal);
         yield* Deferred.await(forced.finished);
         yield* readyPost(page, "t1", "3");
         yield* Ref.set(location.current, new URL(`${origin}/app/t1/posts/4`));
@@ -911,6 +917,218 @@ describe("private scoped leave checks", () => {
           `Warn route.leave.unprotected url=${origin}/app/t1/posts/3 kind=pop checks=1 reason=noncancelable`,
           `Warn route.leave.unprotected url=${origin}/app/t1/posts/4 kind=pop checks=1 reason=committed`,
         ]);
+      }),
+  );
+
+  it.scoped.layer(frameLayer("leave-defect"))(
+    "11. a defect during a protected traversal refuses it; the router keeps working",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* makeRoot;
+        const policy = yield* Policy;
+        const { page, receipts, location } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
+        yield* readyPost(page, "t1", "1");
+        yield* setMode("post#1", "die");
+
+        const protections: ReadonlyArray<Traversal.Traversal["protection"]> = [
+          "precommit",
+          "cancel",
+        ];
+        for (const protection of protections) {
+          const dying = yield* makeTraversal(location, "/app/t1/posts/2", protection);
+          yield* location.traversals.offer(dying.traversal);
+          yield* Deferred.await(dying.finished);
+          // Refused before it was let through: the URL and the view agree.
+          expect(yield* Deferred.await(dying.answered)).toBe(false);
+        }
+        expect(location.history).toEqual([]);
+        expect((yield* Ref.get(location.current)).pathname).toBe("/app/t1/posts/1");
+        expect(textAt(root, "#post-param")).toBe("1");
+        expect(policy.closed).toHaveLength(2);
+
+        yield* setMode("post#1", "leave");
+        expect(pathOf(yield* receipts.navigate("/app/t1/posts/2"))).toBe(
+          "Committed /app/t1/posts/2",
+        );
+        yield* readyPost(page, "t1", "2");
+      }),
+  );
+
+  it.scoped.layer(frameLayer("leave-noop"))(
+    "12. a request that would not move leaves an open prompt alone",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* makeRoot;
+        const policy = yield* Policy;
+        const { page, receipts, location } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
+        yield* readyPost(page, "t1", "1");
+        yield* setMode("post#1", "dialog");
+        const moving = yield* Effect.forkChild(receipts.navigate("/app/t1/posts/2"));
+        const prompt = yield* Queue.take(policy.prompts);
+
+        // A url-state write that changes nothing, a same-URL request, and a
+        // stale instance's request: none of them is a newer intent.
+        const unchanged = yield* Effect.forkChild(receipts.replace((current) => current.href));
+        const same = yield* Effect.forkChild(receipts.navigate("/app/t1/posts/1"));
+        const stale = yield* Effect.forkChild(
+          receipts.navigate("/app/t1/posts/9", { _tag: "RouteInstance" }),
+        );
+        yield* Effect.yieldNow;
+        expect(policy.closed).toEqual([]);
+        expect(hasAt(document.body, `#dialog-${String(prompt.question)}`)).toBe(true);
+
+        yield* Deferred.succeed(prompt.answer, Leave.Stay);
+        expect(pathOf(yield* Fiber.join(moving))).toBe("Stayed /app/t1/posts/1");
+        expect(pathOf(yield* Fiber.join(unchanged))).toBe("Unchanged /app/t1/posts/1");
+        expect(pathOf(yield* Fiber.join(same))).toBe("Unchanged /app/t1/posts/1");
+        expect(pathOf(yield* Fiber.join(stale))).toBe("Unchanged /app/t1/posts/1");
+        expect(policy.asked).toHaveLength(1);
+        expect(location.history).toEqual([]);
+      }),
+  );
+
+  it.scoped.layer(frameLayer("leave-consumer"))(
+    "13. one router consumes a Location's traversals; a closed one holds nothing",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* makeRoot;
+        const other = yield* makeRoot;
+        const { page, location } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
+        yield* readyPost(page, "t1", "1");
+
+        // A second router on the same Location is a defect.
+        const second = yield* Effect.exit(
+          ViewTest.make({
+            host: Dom.host,
+            root: other,
+            setup: (host, mountRoot) =>
+              mountRouter({ routes: [makeApp()], notFound: NotFound, host, root: mountRoot }).pipe(
+                Effect.provideService(Location, location.service),
+              ),
+          }),
+        );
+        const defect = Exit.match(second, {
+          onSuccess: () => "mounted",
+          onFailure: (cause) => Result.getOrElse(Cause.findDefect(cause), () => "no defect"),
+        });
+        expect(
+          yield* Effect.orDie(Schema.decodeUnknownEffect(Traversal.TraversalConsumerTaken)(defect)),
+        ).toMatchObject({ _tag: "TraversalConsumerTaken" });
+        expect(location.traversals.active()).toBe(true);
+
+        // The mount closes before its Location: nothing may wait for it.
+        yield* page.close;
+        expect(location.traversals.active()).toBe(false);
+        const late = yield* makeTraversal(location, "/app/t1/posts/2", "precommit");
+        yield* location.traversals.offer(late.traversal);
+        expect(Option.isSome(yield* Deferred.poll(late.finished))).toBe(true);
+        expect(yield* Deferred.await(late.answered)).toBe(true);
+      }),
+  );
+
+  it.scoped.layer(frameLayer("leave-traversal-push"))(
+    "14. a push supersedes a traversal prompt, and the traversal is refused",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* makeRoot;
+        const policy = yield* Policy;
+        const { page, receipts, location } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
+        yield* readyPost(page, "t1", "1");
+        yield* setMode("post#1", "dialog");
+        const back = yield* makeTraversal(location, "/app/t1/posts/2", "precommit");
+        yield* location.traversals.offer(back.traversal);
+        const first = yield* Queue.take(policy.prompts);
+
+        const pushing = yield* Effect.forkChild(receipts.navigate("/app/t1/posts/3"));
+        expect(yield* Deferred.await(back.answered)).toBe(false);
+        yield* Deferred.await(back.finished);
+        const second = yield* Queue.take(policy.prompts);
+        expect(policy.closed).toEqual([`post#1#${String(first.question)}`]);
+
+        yield* Deferred.succeed(second.answer, Leave.Leave);
+        expect(pathOf(yield* Fiber.join(pushing))).toBe("Committed /app/t1/posts/3");
+        yield* readyPost(page, "t1", "3");
+        expect(location.history).toEqual(["push /app/t1/posts/3"]);
+      }),
+  );
+
+  it.scoped.layer(frameLayer("leave-pop-push"))(
+    "15. a pop supersedes a push prompt, and the router follows the pop",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* makeRoot;
+        const policy = yield* Policy;
+        const { page, receipts, location, logs } = yield* mountApp(
+          makeApp(),
+          root,
+          "/app/t1/posts/1",
+        );
+        yield* readyPost(page, "t1", "1");
+        yield* setMode("post#1", "dialog");
+        const pushing = yield* Effect.forkChild(receipts.navigate("/app/t1/posts/2"));
+        const prompt = yield* Queue.take(policy.prompts);
+
+        yield* Ref.set(location.current, new URL(`${origin}/app/t1/posts/5`));
+        yield* Queue.offer(location.pops, new URL(`${origin}/app/t1/posts/5`));
+        expect(pathOf(yield* Fiber.join(pushing))).toBe("Unchanged /app/t1/posts/1");
+        expect(policy.closed).toEqual([`post#1#${String(prompt.question)}`]);
+        yield* readyPost(page, "t1", "5");
+        expect(location.history).toEqual([]);
+        expect(logs).toEqual([
+          `Warn route.leave.unprotected url=${origin}/app/t1/posts/5 kind=pop checks=1 reason=committed`,
+        ]);
+      }),
+  );
+
+  it.scoped.layer(frameLayer("leave-abandoned"))(
+    "16. a traversal the platform abandons during its prompt decides nothing",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* makeRoot;
+        const policy = yield* Policy;
+        const { page, location } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
+        yield* readyPost(page, "t1", "1");
+        yield* setMode("post#1", "dialog");
+        const back = yield* makeTraversal(location, "/app/t1/posts/2", "precommit");
+        yield* location.traversals.offer(back.traversal);
+        const prompt = yield* Queue.take(policy.prompts);
+
+        yield* Deferred.succeed(back.abandon, void 0);
+        expect(yield* Deferred.await(back.answered)).toBe(false);
+        yield* Deferred.await(back.finished);
+        expect(policy.closed).toEqual([`post#1#${String(prompt.question)}`]);
+        expect(hasAt(document.body, "dialog")).toBe(false);
+
+        yield* Deferred.succeed(prompt.answer, Leave.Leave);
+        expect(location.history).toEqual([]);
+        expect(textAt(root, "#post-param")).toBe("1");
+      }),
+  );
+
+  it.scoped.layer(frameLayer("leave-close-traversal"))(
+    "17. a root close during a traversal prompt lets the traversal through; a closed router admits nothing",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* makeRoot;
+        const policy = yield* Policy;
+        const { page, router, location } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
+        yield* readyPost(page, "t1", "1");
+        yield* setMode("post#1", "dialog");
+        const back = yield* makeTraversal(location, "/app/t1/posts/2", "precommit");
+        yield* location.traversals.offer(back.traversal);
+        const prompt = yield* Queue.take(policy.prompts);
+
+        yield* page.close;
+        // Cleanup, not a refusal: the platform is let through.
+        expect(yield* Deferred.await(back.answered)).toBe(true);
+        yield* Deferred.await(back.finished);
+        expect(policy.closed).toEqual([`post#1#${String(prompt.question)}`]);
+        expect(policy.asked).toHaveLength(1);
+
+        // The closed router's admission refuses a command; history stays.
+        const after = yield* Effect.exit(router.navigate("/app/t1/posts/3"));
+        expect(Exit.isSuccess(after)).toBe(true);
+        expect(location.history).toEqual(["traverse /app/t1/posts/2"]);
       }),
   );
 

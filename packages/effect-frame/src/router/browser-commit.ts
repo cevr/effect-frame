@@ -1,9 +1,9 @@
-import { Deferred, Effect, Exit, Option, Queue, Result, Stream } from "effect";
+import { Deferred, Effect, Exit, Option, Result, Stream } from "effect";
 import type { Scope } from "effect";
 import type { LocationService } from "./router.js";
 import { browserLocation } from "./router.js";
 import type { Traversal } from "./traversal.js";
-import { register as registerTraversals } from "./traversal.js";
+import { makeSource, register as registerTraversals } from "./traversal.js";
 
 /**
  * PRIVATE (route slice 5). The browser `Location` with commit control over
@@ -22,6 +22,15 @@ import { register as registerTraversals } from "./traversal.js";
  *   a marker that this listener lets through. History never moved.
  * - Not cancelable (`none`): browser UI without history-action activation.
  *   The router is not asked; it follows and reports the unprotected path.
+ *
+ * A traversal is held only while a router consumes this Location's
+ * traversals. Without one, the listener intercepts nothing: the platform
+ * moves as it would without this adapter.
+ *
+ * `intercept` may throw. A key is claimed (its `popstate` dropped) only
+ * after `intercept` succeeded. A failed precommit intercept falls back to
+ * `cancel`; any other failure leaves the move to `popstate`, which the
+ * router follows and reports.
  *
  * An intercepted traversal keeps focus where it is (`focusReset: "manual"`)
  * and lets the browser restore scroll when the router has installed the
@@ -92,7 +101,8 @@ export const browserCommit = Effect.fn("Router.browserCommit")(function* (
   }
   const navigation = window.navigation;
   const precommitSupported = precommit === "detect" && "NavigationPrecommitController" in window;
-  const traversals = yield* Queue.unbounded<Traversal>();
+  const source = yield* makeSource;
+  const context = yield* Effect.context<never>();
   const outstanding = new Set<Held>();
   /** Entries whose traversal the router already has: their popstate is dropped. */
   const claimed = new Set<string>();
@@ -168,6 +178,28 @@ export const browserCommit = Effect.fn("Router.browserCommit")(function* (
     });
   };
 
+  /** Intercept, and claim the key only if the platform accepted it. */
+  const intercepted = (
+    event: NavigateEvent,
+    held: Held,
+    options: NavigationInterceptOptions,
+  ): boolean => {
+    const accepted = Result.try(() => event.intercept(options));
+    if (Result.isFailure(accepted)) {
+      return false;
+    }
+    claimed.add(held.key);
+    abandonOn(event, held);
+    return true;
+  };
+
+  const hold = (event: NavigateEvent, held: Held, protection: Traversal["protection"]) => {
+    outstanding.add(held);
+    Effect.runSyncWith(context)(
+      source.offer(traversalOf(held, new URL(event.destination.url), protection)),
+    );
+  };
+
   const listener = (event: NavigateEvent) => {
     if (event.navigationType !== "traverse" || !event.canIntercept || event.hashChange) {
       return;
@@ -180,34 +212,43 @@ export const browserCommit = Effect.fn("Router.browserCommit")(function* (
     if (Option.isSome(again)) {
       // The traversal the router already let leave: commit it, then wait.
       reissued.delete(key);
-      claimed.add(key);
-      event.intercept({ focusReset: "manual", handler: handlerOf(again.value) });
-      abandonOn(event, again.value);
+      const options: NavigationInterceptOptions = {
+        focusReset: "manual",
+        handler: handlerOf(again.value),
+      };
+      if (!intercepted(event, again.value, options)) {
+        // It commits unintercepted: `popstate` follows it, and the router
+        // stops waiting for this commit.
+        settle(again.value.committed, false);
+      }
+      return;
+    }
+    if (!source.active()) {
+      // No router consumes: hold nothing.
       return;
     }
     const held = makeHeld(key);
-    let protection: Traversal["protection"] = "none";
+    const handler = handlerOf(held);
     if (event.cancelable && precommitSupported) {
-      protection = "precommit";
-    } else if (event.cancelable) {
-      protection = "cancel";
-    }
-    if (protection === "cancel") {
-      event.preventDefault();
-    } else {
-      claimed.add(key);
       const options: NavigationInterceptOptions = {
         focusReset: "manual",
-        handler: handlerOf(held),
+        handler,
+        precommitHandler: precommitOf(held),
       };
-      if (protection === "precommit") {
-        options.precommitHandler = precommitOf(held);
+      if (intercepted(event, held, options)) {
+        hold(event, held, "precommit");
+        return;
       }
-      event.intercept(options);
-      abandonOn(event, held);
     }
-    outstanding.add(held);
-    Queue.offerUnsafe(traversals, traversalOf(held, new URL(event.destination.url), protection));
+    if (event.cancelable) {
+      event.preventDefault();
+      hold(event, held, "cancel");
+      return;
+    }
+    if (intercepted(event, held, { focusReset: "manual", handler })) {
+      hold(event, held, "none");
+    }
+    // Otherwise `popstate` carries the committed move.
   };
 
   yield* Effect.acquireRelease(
@@ -242,6 +283,6 @@ export const browserCommit = Effect.fn("Router.browserCommit")(function* (
       },
     ),
   };
-  registerTraversals(service, Stream.fromQueue(traversals));
+  registerTraversals(service, source);
   return service;
 });

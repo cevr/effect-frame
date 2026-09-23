@@ -1,11 +1,11 @@
-import type { Effect, Stream } from "effect";
-import { Option } from "effect";
+import { Effect, Option, Queue, Schema, Stream } from "effect";
+import type { Scope } from "effect";
 import type { LocationService } from "./router.js";
 
 /**
  * PRIVATE (route slice 5). A platform traversal (Back or Forward) that the
  * router sees before the platform commits it. A `Location` may carry a
- * stream of them beside its `pops`, through this registry, without a change
+ * source of them beside its `pops`, through this registry, without a change
  * to the public `LocationService`. See `docs/design/route-leave.md`.
  *
  * `pops` stays the committed path: a URL the platform already moved to. A
@@ -35,19 +35,96 @@ export interface Traversal {
   readonly abandoned: Effect.Effect<void>;
   /**
    * The router is done with it: the shell is installed, or nothing moved.
-   * An unanswered traversal is let through, since only a check may refuse.
-   * The platform's scroll restoration waits for this.
+   * An unanswered traversal is let through: only a check, or a router
+   * failure (which answers `stay` first), may refuse. The platform's scroll
+   * restoration waits for this. It is idempotent.
    */
   readonly finish: Effect.Effect<void>;
 }
 
-const traversals = new WeakMap<LocationService, Stream.Stream<Traversal>>();
+/** A second router tried to consume the traversals of one `Location`. */
+export class TraversalConsumerTaken extends Schema.TaggedError<TraversalConsumerTaken>()(
+  "TraversalConsumerTaken",
+  {},
+) {}
 
-/** Attach a traversal stream to a location service. */
-export const register = (location: LocationService, stream: Stream.Stream<Traversal>): void => {
-  traversals.set(location, stream);
+/**
+ * The traversals of one `Location`, for exactly one consumer at a time.
+ * A traversal is held only while a consumer is active: without one, a
+ * producer must not hold the platform (`active` is false), and an offered
+ * traversal is let through at once. When the consumer's Scope closes, every
+ * traversal it has not finished is let through, so the platform never
+ * waits for a router that is gone.
+ */
+export interface TraversalSource {
+  /** True while a router consumes. A producer holds nothing otherwise. */
+  readonly active: () => boolean;
+  /** Hand one traversal to the consumer, or let it through when there is none. */
+  readonly offer: (traversal: Traversal) => Effect.Effect<void>;
+  /** Become the one consumer for the caller's Scope. A second is a defect. */
+  readonly consume: Effect.Effect<Stream.Stream<Traversal>, never, Scope.Scope>;
+}
+
+/** Make the source a `Location` registers. */
+export const makeSource: Effect.Effect<TraversalSource> = Effect.gen(function* () {
+  const queue = yield* Queue.unbounded<Traversal>();
+  /** Offered and not yet finished. */
+  const live = new Set<Traversal>();
+  let consuming = false;
+
+  const track = (traversal: Traversal): Traversal => {
+    const held: Traversal = {
+      ...traversal,
+      finish: Effect.andThen(
+        traversal.finish,
+        Effect.sync(() => {
+          live.delete(held);
+        }),
+      ),
+    };
+    return held;
+  };
+
+  const offer = (traversal: Traversal): Effect.Effect<void> =>
+    Effect.suspend(() => {
+      if (!consuming) {
+        return traversal.finish;
+      }
+      const held = track(traversal);
+      live.add(held);
+      Queue.offerUnsafe(queue, held);
+      return Effect.void;
+    });
+
+  const consume = Effect.acquireRelease(
+    Effect.suspend(() => {
+      if (consuming) {
+        return Effect.die(TraversalConsumerTaken.make({}));
+      }
+      consuming = true;
+      return Effect.succeed(Stream.fromQueue(queue));
+    }),
+    () =>
+      Effect.gen(function* () {
+        consuming = false;
+        yield* Queue.clear(queue);
+        const left = Array.from(live);
+        live.clear();
+        yield* Effect.forEach(left, (traversal) => traversal.finish, { discard: true });
+      }),
+  );
+
+  const source: TraversalSource = { active: () => consuming, offer, consume };
+  return source;
+});
+
+const sources = new WeakMap<LocationService, TraversalSource>();
+
+/** Attach a traversal source to a location service. */
+export const register = (location: LocationService, source: TraversalSource): void => {
+  sources.set(location, source);
 };
 
 /** The traversals a location reports before commit, if it can. */
-export const read = (location: LocationService): Option.Option<Stream.Stream<Traversal>> =>
-  Option.fromNullishOr(traversals.get(location));
+export const read = (location: LocationService): Option.Option<TraversalSource> =>
+  Option.fromNullishOr(sources.get(location));

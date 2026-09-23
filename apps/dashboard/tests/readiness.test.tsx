@@ -82,6 +82,26 @@ describe("readiness on the overview (#16)", () => {
         expect(has(app.root, "#skeleton")).toBe(false);
         expect(has(app.root, "#funnel-card")).toBe(false);
 
+        // Every element connected under the root that is or holds the card.
+        const connected: Array<string> = [];
+        const note = (records: ReadonlyArray<MutationRecord>): void => {
+          for (const record of records) {
+            for (const added of Array.from(record.addedNodes)) {
+              if (
+                added instanceof HTMLElement &&
+                (added.id === "funnel-card" || has(added, "#funnel-card"))
+              ) {
+                connected.push(added.id || added.tagName);
+              }
+            }
+          }
+        };
+        const observer = new MutationObserver(note);
+        yield* Effect.acquireRelease(
+          Effect.sync(() => observer.observe(app.root, { childList: true, subtree: true })),
+          () => Effect.sync(() => observer.disconnect()),
+        );
+
         yield* click(app.root, "#show-funnel");
         // The late registration flips the scope pending: its fallback returns,
         // and nothing of the page, the new card included, is on screen.
@@ -95,6 +115,9 @@ describe("readiness on the overview (#16)", () => {
         yield* Effect.sleep("150 millis");
         yield* render;
         expect([has(app.root, "#skeleton"), has(app.root, "#shell")]).toEqual([true, false]);
+        // The card was built while the scope was pending: it never reached the page.
+        yield* Effect.sync(() => note(observer.takeRecords()));
+        expect(connected).toEqual([]);
 
         yield* wire.open(funnel);
         yield* settle(

@@ -27,6 +27,7 @@ import { LoadingScope, View, ready } from "effect-frame/view";
 import {
   Cause,
   Clock,
+  Context,
   Deferred,
   Duration,
   Effect,
@@ -78,6 +79,8 @@ import type { Shell } from "./landing.js";
 import { registerShell } from "./landing.js";
 import * as LeafRoot from "./leaf-root.js";
 import type { NavigationBehavior } from "./navigation-behavior.js";
+import type { RenderingMode } from "./rendering-mode.js";
+import { register as registerMode } from "./rendering-mode.js";
 
 /**
  * The nested route model: segments, branches, and the client mode. The
@@ -717,6 +720,12 @@ interface TreeState {
   /** Match a URL against the whole tree. */
   readonly outline: (url: URL) => Option.Option<Outline>;
   readonly declarations: Scope.Scope;
+  /**
+   * True only in a server render of an `SSR` tree: a query interest waits
+   * until its entry settles before the transition goes on. See
+   * `ResolveBeforeRender`.
+   */
+  readonly resolve: boolean;
   readonly cache: Option.Option<QueryCacheService>;
   readonly transport: Option.Option<TransportService>;
   readonly nextKey: (name: string) => string;
@@ -1135,6 +1144,33 @@ const open = (
   });
 
 /**
+ * Server only, `SSR` mode (#18 §3.3): a route's declared data is resolved
+ * before the render pass. The server document provides `true`, and a
+ * transition then waits, in each query's own acquisition, until the entry
+ * settles. The acquisitions run in parallel, so the branch waits for its
+ * slowest query, not for their sum. The document bounds the whole
+ * preparation with its time limit (`renderDocument`). The client never
+ * provides it: a client navigation is never blocked on data.
+ */
+export const ResolveBeforeRender = Context.Reference<boolean>(
+  "effect-frame/router/branch/ResolveBeforeRender",
+  { defaultValue: () => false },
+);
+
+/** Wait for a query entry to leave `Loading`, when the tree resolves before render. */
+const resolved = (tree: TreeState, resource: Resource): Effect.Effect<void> => {
+  // `ref` already waited for an actor's first snapshot.
+  if (!tree.resolve || resource._tag !== "Query") {
+    return Effect.void;
+  }
+  return resource.entry.state.changes.pipe(
+    Stream.filter((state) => state._tag !== "Loading"),
+    Stream.take(1),
+    Stream.runDrain,
+  );
+};
+
+/**
  * Acquire one interest in a fresh Scope under the declaration root. A
  * failure closes that Scope before it is reported.
  */
@@ -1145,6 +1181,7 @@ const acquire = (
 ): Effect.Effect<Acquired, TransportReadError> =>
   Effect.flatMap(Scope.fork(tree.declarations), (scope) =>
     Scope.provide(open(tree, declaration), scope).pipe(
+      Effect.tap((resource) => resolved(tree, resource)),
       Effect.onExit((exit) => {
         if (Exit.isFailure(exit)) {
           return Scope.close(scope, exit);
@@ -2308,6 +2345,7 @@ const mountTree = <Name extends string, ViewR, DataR, Extra extends object>(
   name: Name,
   branch: AnyBranch<ViewR>,
   extra: Extra,
+  mode: RenderingMode,
 ): Extra & Tree<Name, ViewR | DataR> => {
   // A child segment matches only below its ancestors' path, so a tree
   // mounted from one would never match. The type refuses it; so does this.
@@ -2353,6 +2391,7 @@ const mountTree = <Name extends string, ViewR, DataR, Extra extends object>(
                 instance: routeInstance,
                 outline,
                 declarations,
+                resolve: yield* ResolveBeforeRender,
                 cache: yield* Effect.serviceOption(QueryCache),
                 transport: yield* Effect.serviceOption(ActorTransport),
                 nextKey: (segmentName) => {
@@ -2448,6 +2487,7 @@ const mountTree = <Name extends string, ViewR, DataR, Extra extends object>(
       onSome: (matched) => matched.check(url, kind),
     });
   registerChecks(mountable, checks);
+  registerMode(mountable, mode);
   return mountable;
 };
 
@@ -2485,67 +2525,117 @@ const isBranch = <Params extends ParamsCodec, Search extends SearchCodec, R>(
 ): input is AnyBranch<unknown> => Predicate.hasProperty(input, "_tag") && input._tag === "Branch";
 
 /**
- * The client rendering mode (#18 §6, #62): the route renders on the client
- * only. The mode is chosen where a tree becomes mountable, and it applies to
- * the whole tree, so one branch never mixes modes.
+ * A rendering-mode constructor (#18 §6): it makes a tree mountable and names
+ * how the server renders its documents. Each mode is its own constructor,
+ * and no route value carries a mode field, so the same segments, leaves,
+ * and layouts mount under any mode, and one branch never mixes two.
  *
  * The definition form is the one-leaf shorthand. It is exactly
- * `client(name, leaf(segment(name, definition), definition.view))`, with the
+ * `mode(name, leaf(segment(name, definition), definition.view))`, with the
  * route's codecs and printers on the result. A flat route that needs
  * `before`, `data`, `errored`, or `pending` is written in the segment form.
+ *
+ * The flat overload is declared last: a call that matches neither reports
+ * the flat form's own error, which is the one people write by hand.
  */
-export function client<const Name extends string, Seg extends RootSegment, ViewR, DataR>(
-  name: Name,
-  root: Branch<Seg, ViewR, DataR>,
-): Tree<Name, ViewR | DataR>;
-export function client<
-  const Name extends string,
-  Params extends ParamsCodec,
-  Search extends SearchCodec,
-  R,
->(name: Name, definition: RouteDefinition<Params, Search, R>): Route<Name, Params, Search, R>;
-export function client<
-  const Name extends string,
-  Params extends ParamsCodec,
-  Search extends SearchCodec,
-  R,
->(
-  name: Name,
-  input: RouteDefinition<Params, Search, R> | AnyBranch<unknown>,
-): Route<Name, Params, Search, R> | Tree<Name, unknown> {
-  if (isBranch(input)) {
-    return mountTree(name, input, {});
-  }
-  const one = segment(name, {
-    path: input.path,
-    params: input.params,
-    search: input.search,
-    ...Option.match(Option.fromNullishOr(input.searchKeys), {
-      onNone: () => ({}),
-      onSome: (searchKeys) => ({ searchKeys }),
-    }),
-    ...Option.match(Option.fromNullishOr(input.retain), {
-      onNone: () => ({}),
-      onSome: (retain) => ({ retain }),
-    }),
-  });
-  return mountTree<
-    Name,
-    Exclude<R, Scope.Scope>,
-    never,
-    Omit<Route<Name, Params, Search, R>, keyof Tree<Name, R>>
-  >(name, leaf(one, input.view, ...flatOptions(Option.fromNullishOr(input.behavior))), {
-    params: input.params,
-    search: input.search,
-    href: one.href,
-    hrefAt: one.hrefAt,
-    searchAt: one.searchAt,
-    // The router resolved the document to this route: the flat rule.
-    currentAt: (current): Current => {
-      if (current.name === name) {
-        return "page";
-      }
-      return "none";
-    },
-  });
+export interface ModeConstructor {
+  <const Name extends string, Seg extends RootSegment, ViewR, DataR>(
+    name: Name,
+    root: Branch<Seg, ViewR, DataR>,
+  ): Tree<Name, ViewR | DataR>;
+  <const Name extends string, Params extends ParamsCodec, Search extends SearchCodec, R>(
+    name: Name,
+    definition: RouteDefinition<Params, Search, R>,
+  ): Route<Name, Params, Search, R>;
 }
+
+const modeConstructor = (mode: RenderingMode): ModeConstructor => {
+  function made<const Name extends string, Seg extends RootSegment, ViewR, DataR>(
+    name: Name,
+    root: Branch<Seg, ViewR, DataR>,
+  ): Tree<Name, ViewR | DataR>;
+  function made<
+    const Name extends string,
+    Params extends ParamsCodec,
+    Search extends SearchCodec,
+    R,
+  >(name: Name, definition: RouteDefinition<Params, Search, R>): Route<Name, Params, Search, R>;
+  function made<
+    const Name extends string,
+    Params extends ParamsCodec,
+    Search extends SearchCodec,
+    R,
+  >(
+    name: Name,
+    input: RouteDefinition<Params, Search, R> | AnyBranch<unknown>,
+  ): Route<Name, Params, Search, R> | Tree<Name, unknown> {
+    if (isBranch(input)) {
+      return mountTree(name, input, {}, mode);
+    }
+    const one = segment(name, {
+      path: input.path,
+      params: input.params,
+      search: input.search,
+      ...Option.match(Option.fromNullishOr(input.searchKeys), {
+        onNone: () => ({}),
+        onSome: (searchKeys) => ({ searchKeys }),
+      }),
+      ...Option.match(Option.fromNullishOr(input.retain), {
+        onNone: () => ({}),
+        onSome: (retain) => ({ retain }),
+      }),
+    });
+    return mountTree<
+      Name,
+      Exclude<R, Scope.Scope>,
+      never,
+      Omit<Route<Name, Params, Search, R>, keyof Tree<Name, R>>
+    >(
+      name,
+      leaf(one, input.view, ...flatOptions(Option.fromNullishOr(input.behavior))),
+      {
+        params: input.params,
+        search: input.search,
+        href: one.href,
+        hrefAt: one.hrefAt,
+        searchAt: one.searchAt,
+        // The router resolved the document to this route: the flat rule.
+        currentAt: (current): Current => {
+          if (current.name === name) {
+            return "page";
+          }
+          return "none";
+        },
+      },
+      mode,
+    );
+  }
+  return made;
+};
+
+/**
+ * `ClientOnly` (#22, #62): the route renders on the client only. A server
+ * document of it holds an empty mount element and reads nothing.
+ */
+export const client: ModeConstructor = modeConstructor("ClientOnly");
+
+/**
+ * `SSR` (#18 §3.3): a server document resolves every query the matched
+ * branch declares, concurrently and before the render pass, then draws once
+ * and seeds the settled values. The client hydrates with no read of them.
+ */
+export const ssr: ModeConstructor = modeConstructor("SSR");
+
+/**
+ * `Streamed` (#22): a server document writes the shell at once, with a
+ * placeholder for every query the branch declared, then one patch per
+ * query as it settles.
+ */
+export const streamed: ModeConstructor = modeConstructor("Streamed");
+
+/**
+ * `AwaitAll` (#22): a server document waits until its drawing waits for
+ * nothing, the branch's declared queries and every view read included,
+ * then writes one document and one seed.
+ */
+export const awaitAll: ModeConstructor = modeConstructor("AwaitAll");

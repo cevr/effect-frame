@@ -2,7 +2,8 @@ import type { Source } from "effect-frame/actor";
 import type { Node, View } from "effect-frame/view";
 import type { SchemaAST, Scope } from "effect";
 import { Effect, Option, Predicate, Result, Schema, SchemaGetter } from "effect";
-import { matchPrefix, segmentsOf } from "./path.js";
+import { matchPrefix, refuseOutOfDomain, segmentFault, segmentsOf, textFault } from "./path.js";
+export { UrlValueRejected } from "./path.js";
 import type { NavigationBehavior } from "./navigation-behavior.js";
 import type { Match } from "./router.js";
 
@@ -102,7 +103,18 @@ export const matchPath = (
   });
 };
 
-/** Print parts from a record. Total for a record the params Schema produced. */
+/** A param's segments: one for a scalar, each item for a tail. */
+const segmentsIn = (value: string | ReadonlyArray<string>): ReadonlyArray<string> => {
+  if (Predicate.isString(value)) {
+    return [value];
+  }
+  return value;
+};
+
+/**
+ * Print parts from a record the params Schema produced. A value outside the
+ * route domain is a defect, `UrlValueRejected`: see above.
+ */
 export const printPath = (parts: ReadonlyArray<Part>, record: PathRecord): string => {
   const printed = parts.flatMap((part): ReadonlyArray<string> => {
     if (part._tag === "Literal") {
@@ -114,10 +126,11 @@ export const printPath = (parts: ReadonlyArray<Part>, record: PathRecord): strin
         reason: "the params Schema produced no value for this part",
       }),
     );
-    if (Array.isArray(value)) {
-      return value.map(encodeURIComponent);
+    const segments = segmentsIn(value);
+    for (const segment of segments) {
+      refuseOutOfDomain(part.name, segmentFault(segment));
     }
-    return [encodeURIComponent(String(value))];
+    return segments.map(encodeURIComponent);
   });
   return `/${printed.join("/")}`;
 };
@@ -152,13 +165,18 @@ export const readSearch = (params: URLSearchParams): SearchRecord => {
   return record;
 };
 
-/** Print a record back, keeping declared or custom codec key order. */
+/**
+ * Print a record back, keeping declared or custom codec key order. A key or
+ * value outside the route domain is a defect, `UrlValueRejected`.
+ */
 export const printSearch = (record: SearchRecord, order: ReadonlyArray<string> = []): string => {
   const params = new URLSearchParams();
   const keys = [...order, ...Object.keys(record).filter((key) => !order.includes(key))];
   for (const key of keys) {
     const values = Option.getOrElse(Option.fromNullishOr(record[key]), () => []);
+    refuseOutOfDomain(key, textFault(key));
     for (const value of values) {
+      refuseOutOfDomain(key, textFault(value));
       params.append(key, value);
     }
   }

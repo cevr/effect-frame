@@ -487,6 +487,25 @@ export const mount: <R, HostNode, N = R>(
       return yield* settleFrom(next, kind, visited);
     });
 
+  /** The route a server settlement chose, as this mount's own target. */
+  const presettled = (given: SettledRoute): Settled<R | N> => {
+    const route = Option.getOrElse(
+      Option.flatMap(given.route, (chosen) =>
+        Option.fromNullishOr(routes.find((candidate) => candidate === chosen)),
+      ),
+      () => fallback,
+    );
+    return {
+      url: given.url,
+      target: {
+        route,
+        enter: Option.getOrElse(route.enter(given.url, navigation), () =>
+          Effect.die("the settled route does not match its URL"),
+        ),
+      },
+    };
+  };
+
   const settle = (url: URL, kind: NavigationKind) =>
     Effect.gen(function* () {
       const committed = yield* SubscriptionRef.get(navigations);
@@ -947,7 +966,12 @@ export const mount: <R, HostNode, N = R>(
       ),
     );
 
-  const initialSettled = yield* settle(initial, "initial");
+  // A server document settled the request already, checks included: the
+  // router shows that route, and runs no check twice.
+  const initialSettled = yield* Option.match(yield* SettledRequest, {
+    onNone: () => settle(initial, "initial"),
+    onSome: (given) => Effect.sync(() => presettled(given)),
+  });
   // The document already holds the initial entry: a redirect replaces it.
   // A first load places nothing (the browser's own load did), so the
   // replace is released once the view is shown or failed.
@@ -996,6 +1020,95 @@ export const mount: <R, HostNode, N = R>(
   });
   return service;
 });
+
+// ---------------------------------------------------------------------------
+// Server settlement (#18 §3.3; see docs/design/route-data.md)
+// ---------------------------------------------------------------------------
+
+/** A request's route, after its checks. None: not-found. */
+export interface SettledRoute {
+  readonly url: URL;
+  readonly route: Option.Option<AnyRoute<unknown>>;
+}
+
+/**
+ * Internal: the server document provides the settlement it made, so the
+ * router it mounts shows that route and runs no check again.
+ */
+export const SettledRequest = Context.Reference<Option.Option<SettledRoute>>(
+  "effect-frame/router/router/SettledRequest",
+  { defaultValue: () => Option.none() },
+);
+
+/** How a server request settles: show a route, or answer with a redirect. */
+export type Settlement<R> =
+  | {
+      readonly _tag: "Continue";
+      readonly url: URL;
+      /** None: no route matched, and not-found shows. */
+      readonly route: Option.Option<AnyRoute<R>>;
+    }
+  | { readonly _tag: "Redirect"; readonly location: URL };
+
+/** The Router a server check sees: the request URL, and no move. */
+const serverRouter = (url: URL): RouterService => {
+  const refuse = (href: string | UrlUpdater) =>
+    Effect.die(
+      CheckNavigation.make({
+        href: Option.getOrElse(Option.liftPredicate(href, Predicate.isString), () => "<updater>"),
+      }),
+    );
+  const navigation: Navigation = { url, kind: "initial" };
+  const match: Match = { name: "not-found", url };
+  return {
+    navigate: refuse,
+    replace: refuse,
+    navigations: { get: Effect.succeed(navigation), changes: Stream.make(navigation) },
+    current: { get: Effect.succeed(match), changes: Stream.make(match) },
+  };
+};
+
+/**
+ * Settle one server request: match the URL as `mount` does, then run the
+ * matched route's checks, parent first, as `mount` does for its first
+ * navigation. A redirect is the server's answer, not a hop to follow: the
+ * browser asks for the target in its own request, and that request runs
+ * the target's checks. A redirect to the request URL itself is the
+ * `RedirectCycle` defect. The checks run in the caller's Scope, which the
+ * server document closes once the drawing has declared its own data.
+ */
+export const settleRequest = <R>(
+  routes: ReadonlyArray<AnyRoute<R>>,
+  url: URL,
+): Effect.Effect<
+  Settlement<R>,
+  never,
+  Exclude<Exclude<Exclude<R, Router>, UrlStateRuntime>, Scope.Scope> | Scope.Scope
+> =>
+  Effect.gen(function* () {
+    const route = Option.fromNullishOr(
+      routes.find((candidate) => Option.isSome(candidate.enter(url))),
+    );
+    const checks = Option.flatMap(route, readChecks);
+    if (Option.isNone(checks)) {
+      return { _tag: "Continue", url, route };
+    }
+    // The check's interests live in the caller's Scope: a query it read
+    // stays in the request cache until the drawing has declared its own.
+    const verdict = yield* checks
+      .value(url, "initial")
+      .pipe(Effect.provideService(Router, serverRouter(url)));
+    if (verdict._tag === "Continue") {
+      return { _tag: "Continue", url, route };
+    }
+    const location = new URL(verdict.target.href, url);
+    if (location.href === url.href) {
+      return yield* Effect.die(
+        RedirectCycle.make({ chain: [url.href, location.href], reason: "repeated" }),
+      );
+    }
+    return { _tag: "Redirect", location };
+  });
 
 /** A write nothing waits on: landing it places nothing. */
 const unplaced: Written = { land: () => Effect.void };

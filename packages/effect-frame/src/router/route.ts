@@ -4,8 +4,9 @@
  * accident. See `docs/design/route-public.md`.
  *
  * One model: a segment is an address, a branch is a segment with its view
- * (`leaf`, `layout`), and a rendering-mode constructor (`client`) mounts a
- * tree. `client(name, definition)` is the one-leaf shorthand of that model.
+ * (`leaf`, `layout`), and a rendering-mode constructor (`client`, `ssr`,
+ * `streamed`, `awaitAll`) mounts a tree. `client(name, definition)` is the
+ * one-leaf shorthand of that model, and so is each other mode's.
  */
 
 // Addresses: templates, params, and search.
@@ -14,6 +15,7 @@ export {
   SearchRecord,
   SearchSchemaRejected,
   TemplateRejected,
+  UrlValueRejected,
   matchPath,
   mergeSearchRecord,
   parseTemplate,
@@ -42,8 +44,20 @@ export type {
   UrlUpdater,
 } from "./codec.js";
 
-// Segments, branches, and the client mode.
-export { BranchRejected, actor, child, client, layout, leaf, query, segment } from "./branch.js";
+// Segments, branches, and the rendering modes.
+export {
+  BranchRejected,
+  actor,
+  awaitAll,
+  child,
+  client,
+  layout,
+  leaf,
+  query,
+  segment,
+  ssr,
+  streamed,
+} from "./branch.js";
 export type {
   ActorDeclaration,
   AnyBranch,
@@ -54,6 +68,7 @@ export type {
   LayoutProps,
   LayoutPropsOf,
   LeafOptions,
+  ModeConstructor,
   Pending,
   Presentation,
   PropsOf,
@@ -79,3 +94,6 @@ export type {
   Target,
   Verdict,
 } from "./check.js";
+
+// Rendering modes.
+export type { RenderingMode } from "./rendering-mode.js";

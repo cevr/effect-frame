@@ -50,7 +50,7 @@ export type {
   Tag,
 } from "./jsx-runtime.js";
 export * as Dom from "./hosts/dom.js";
-export * as Html from "./hosts/html.js";
+export * as Html from "./hosts/html-public.js";
 export * as ViewTest from "./testing.js";
 
 // Readiness through context (#16).

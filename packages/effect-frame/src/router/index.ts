@@ -18,6 +18,16 @@ export {
   type NotFoundProps,
   type RouterService,
 } from "./router.js";
+export {
+  DocumentTimedOut,
+  renderDocument,
+  type DocumentOptions,
+  type DocumentOutcome,
+  type DocumentRedirect,
+  type DocumentRoute,
+  type DocumentServices,
+  type RenderedDocument,
+} from "./document.js";
 export { searchKeysOf } from "./route.js";
 export type {
   AnyRoute,

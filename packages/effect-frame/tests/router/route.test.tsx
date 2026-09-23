@@ -1,6 +1,8 @@
 import { Route } from "effect-frame/router";
-import { Effect, Option, Result, Schema, SchemaGetter } from "effect";
+import { Effect, Option, Predicate, Result, Schema, SchemaGetter } from "effect";
+import { Arbitrary } from "effect/unstable/arbitrary";
 import { describe, expect, it } from "effect-bun-test";
+import { address } from "../../src/router/codec.js";
 
 /**
  * A route is a codec. These tests never mount anything: they drive the
@@ -426,6 +428,194 @@ describe("route", () => {
     Effect.sync(() => {
       expect(encodedFilterDefault).toEqual({});
       expect(encodedFilterOther).toEqual({ filter: { sort: "date" } });
+    }),
+  );
+});
+
+/**
+ * #18 row "A route prints what it parses", as a property over the Schemas a
+ * public route accepts: `Schema.String` params, a tail of strings, a coerced
+ * number, and a search of strings, arrays, defaults, and literals.
+ *
+ * The route domain is what a URL carries both ways. A path segment is
+ * well-formed text that is not empty and not `.` or `..`; a search key or
+ * value is well-formed text. Inside it, `parse(href(params, search))` is the
+ * same values. Outside it, `href` is the `UrlValueRejected` defect, never a
+ * wrong URL. See `docs/design/route-data.md`.
+ */
+const PropertySearch = Route.search(
+  Schema.Struct({
+    q: Schema.String.pipe(Route.withDefault("")),
+    page: Schema.FiniteFromString.pipe(Route.withDefault(1)),
+    tags: Schema.Array(Schema.String).pipe(Route.withDefault([])),
+    scope: Schema.Literals(["all", "books"]).pipe(Route.withDefault("all")),
+  }).pipe(Schema.encodeKeys({ page: "p" })),
+);
+
+const templates = [
+  { template: "/books/:id", params: Schema.Struct({ id: Schema.String }) },
+  // A literal with URL syntax in it prints escaped.
+  { template: "/c#s?/:id", params: Schema.Struct({ id: Schema.String }) },
+  { template: "/pages/:page", params: Schema.Struct({ page: Schema.FiniteFromString }) },
+  { template: "/files/:rest*", params: Schema.Struct({ rest: Schema.Array(Schema.String) }) },
+  {
+    // A nested segment's whole path: its parent's parts, then its own.
+    template: "/app/:tenant/posts/:postId",
+    params: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
+  },
+];
+
+type UrlValueRejected = Route.UrlValueRejected;
+const isRejected = Schema.is(Route.UrlValueRejected);
+
+const loneSurrogate = /\p{Cs}/u;
+const segmentInDomain = (value: string) =>
+  value !== "" && value !== "." && value !== ".." && !loneSurrogate.test(value);
+
+/** Whether every encoded path segment and search text is in the route domain. */
+const inDomain = (path: Route.PathRecord, query: Route.SearchRecord): boolean =>
+  Object.values(path).every((value) => {
+    if (Predicate.isString(value)) {
+      return segmentInDomain(value);
+    }
+    return value.every(segmentInDomain);
+  }) &&
+  Object.entries(query).every(
+    ([key, values]) =>
+      !loneSurrogate.test(key) && values.every((value) => !loneSurrogate.test(value)),
+  );
+
+/** The href, or the defect it died with. */
+const printed = (print: () => string): Effect.Effect<string | UrlValueRejected> =>
+  Effect.sync(print).pipe(
+    Effect.catchDefect((defect) => {
+      if (isRejected(defect)) {
+        return Effect.succeed(defect);
+      }
+      return Effect.die(defect);
+    }),
+  );
+
+describe("a route prints what it parses (#18)", () => {
+  for (const sample of templates) {
+    it.effect(
+      `parse(href(params, search)) is the same values, or href refuses: ${sample.template}`,
+      () =>
+        Effect.gen(function* () {
+          const parts = Result.getOrThrow(Route.parseTemplate(sample.template));
+          const printer = address(parts, {
+            params: sample.params,
+            search: PropertySearch,
+            searchKeys: Option.none(),
+            retain: Option.none(),
+          });
+          const values = Schema.Struct({ params: sample.params, search: PropertySearch });
+          const same = Schema.toEquivalence(Schema.toType(values));
+          const encode = Schema.encodeEffect(values);
+          const result = yield* Arbitrary.checkEffect(
+            Arbitrary.schema(Schema.toType(values)),
+            (drawn) =>
+              Effect.map(
+                Effect.all([
+                  printed(() => printer.href(drawn.params, drawn.search)),
+                  Effect.orDie(encode(drawn)),
+                ]),
+                ([href, encoded]) => {
+                  if (!inDomain(encoded.params, encoded.search)) {
+                    return isRejected(href);
+                  }
+                  return (
+                    Predicate.isString(href) &&
+                    Option.exists(printer.parse(new URL(href, "http://app.test")), (parsed) =>
+                      same(parsed, drawn),
+                    )
+                  );
+                },
+              ),
+            { runs: 300, seed: 18 },
+          );
+          expect(Arbitrary.formatCheckFailure(result)).toBeUndefined();
+        }),
+    );
+  }
+
+  it.effect("href refuses each value a URL cannot carry both ways, and names the param", () =>
+    Effect.gen(function* () {
+      const refusal = (print: () => string) =>
+        Effect.map(printed(print), (outcome) => {
+          if (isRejected(outcome)) {
+            return { name: outcome.name, reason: outcome.reason };
+          }
+          return { href: outcome };
+        });
+      expect(yield* refusal(() => book.href({ id: "" }, { q: "" }))).toEqual({
+        name: "id",
+        reason: "empty segment",
+      });
+      expect(yield* refusal(() => book.href({ id: "." }, { q: "" }))).toEqual({
+        name: "id",
+        reason: "dot segment",
+      });
+      expect(yield* refusal(() => book.href({ id: ".." }, { q: "" }))).toEqual({
+        name: "id",
+        reason: "dot segment",
+      });
+      expect(yield* refusal(() => book.href({ id: "a\uD800" }, { q: "" }))).toEqual({
+        name: "id",
+        reason: "lone surrogate",
+      });
+      expect(yield* refusal(() => files.href({ path: ["a", "", "b"] }, {}))).toEqual({
+        name: "path",
+        reason: "empty segment",
+      });
+      expect(yield* refusal(() => book.href({ id: "1" }, { q: "\uDC00" }))).toEqual({
+        name: "q",
+        reason: "lone surrogate",
+      });
+      // Inside the domain, the same shapes print and parse back.
+      expect(yield* refusal(() => book.href({ id: ".a" }, { q: "" }))).toEqual({
+        href: "/books/.a",
+      });
+      expect(yield* refusal(() => files.href({ path: [] }, {}))).toEqual({ href: "/files" });
+      expect(yield* refusal(() => book.href({ id: "\uD83D\uDE00" }, { q: "" }))).toEqual({
+        href: "/books/%F0%9F%98%80",
+      });
+    }),
+  );
+
+  it.live("parse refuses what href refuses: an encoded dot, an empty tail item, a bad escape", () =>
+    Effect.sync(() => {
+      const bookParts = Result.getOrThrow(Route.parseTemplate("/books/:id"));
+      const tailParts = Result.getOrThrow(Route.parseTemplate("/files/:path*"));
+      // A raw pathname, as a server adapter may pass it: no URL parser ran.
+      expect(Route.matchPath(bookParts, "/books/%2E")).toEqual(Option.none());
+      expect(Route.matchPath(bookParts, "/books/%2E%2E")).toEqual(Option.none());
+      expect(Route.matchPath(bookParts, "/books/%ED%A0%80")).toEqual(Option.none());
+      expect(Route.matchPath(tailParts, "/files/a/%2E/b")).toEqual(Option.none());
+      expect(Route.matchPath(bookParts, "/books/.a")).toEqual(Option.some({ id: ".a" }));
+      // An empty segment is no segment, both ways: href refuses to print one,
+      // and parse reads `a//b` as the two segments it holds.
+      expect(Route.matchPath(tailParts, "/files/a//b")).toEqual(Option.some({ path: ["a", "b"] }));
+    }),
+  );
+
+  it.live("a search reorder and an absent optional key still match, with the same values", () =>
+    Effect.sync(() => {
+      const listing = Route.client("listing", {
+        path: "/list",
+        params: Nothing,
+        search: Route.search(
+          Schema.Struct({ a: Schema.String, b: Schema.String.pipe(Route.withDefault("none")) }),
+        ),
+        view: Blank,
+      });
+      const at = (query: string) => new URL(`/list${query}`, "http://app.test");
+      expect(
+        ["?a=1&b=2", "?b=2&a=1", "?a=1"].map((query) => matches(listing, `/list${query}`)),
+      ).toEqual([true, true, true]);
+      expect(listing.searchAt(at("?a=1&b=2"))).toEqual({ a: "1", b: "2" });
+      expect(listing.searchAt(at("?b=2&a=1"))).toEqual({ a: "1", b: "2" });
+      expect(listing.searchAt(at("?a=1"))).toEqual({ a: "1", b: "none" });
     }),
   );
 });

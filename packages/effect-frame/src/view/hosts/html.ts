@@ -318,23 +318,46 @@ export interface Document {
  * (#28). The layer is fresh: a caller whose context was built from the same
  * layer carries a memo map that would hand back the caller's own cache.
  */
-const requestCache: Effect.Effect<QueryCache["Service"], never, Scope.Scope> = Effect.map(
+/**
+ * Where a pipeline takes its query cache from. A public render builds a
+ * fresh one (`requestCache`); the router's server document passes the one
+ * cache its request already holds, so its checks and its drawing share it.
+ */
+export type CacheSource = Effect.Effect<QueryCache["Service"], never, Scope.Scope>;
+
+export const requestCache: CacheSource = Effect.map(
   Layer.build(Layer.fresh(queryCacheLayer)),
   (context) => Context.get(context, QueryCache),
 );
 
-/** Mount a view over `root` in the current scope and draw one frame. */
-const draw = <Props, E, R>(
-  view: View<Props, E, R>,
-  props: Props,
+/**
+ * What a document pipeline draws: something mounted over `root` on `host`
+ * in the current scope. A view is one; the router's server document mounts
+ * a routed tree (`src/router/document.ts`). Internal: the public `Html`
+ * namespace (`html-public.ts`) takes a view and its props.
+ */
+export type Drawing<E, R> = (
+  host: Host<HtmlNode>,
+  root: HtmlElement,
+) => Effect.Effect<unknown, E, R>;
+
+/** What a document pipeline needs: the drawing's services but its cache and Scope. */
+export type Drawn<R> = Exclude<Exclude<R, QueryCache>, Scope.Scope> | ActorTransport;
+
+/** The drawing of one view. */
+const viewDrawing =
+  <Props, E, R>(view: View<Props, E, R>, props: Props): Drawing<E, R | Scope.Scope> =>
+  (over, root) =>
+    mount(view, props, over, root);
+
+/** Mount a drawing over `root` in the current scope and draw one frame. */
+const draw = <E, R>(
+  drawing: Drawing<E, R>,
   cache: QueryCache["Service"],
   root: HtmlElement,
   over: Host<HtmlNode> = host,
-): Effect.Effect<void, E, Exclude<Exclude<R, Scope.Scope>, QueryCache> | Scope.Scope> =>
-  mount(view, props, over, root).pipe(
-    Effect.andThen(render),
-    Effect.provideService(QueryCache, cache),
-  );
+): Effect.Effect<void, E, Exclude<R, QueryCache>> =>
+  drawing(over, root).pipe(Effect.andThen(render), Effect.provideService(QueryCache, cache));
 
 /**
  * Render one view as a streamed document (#22): the shell and its
@@ -356,32 +379,51 @@ export const renderToStream = <Props, E, R>(
   props: Props,
   document: Document,
   options: Streaming.ShellOptions,
-): Stream.Stream<string, E, Exclude<Exclude<R, Scope.Scope>, QueryCache> | ActorTransport> =>
-  Stream.unwrap(
-    Effect.gen(function* () {
-      const cache = yield* requestCache;
-      const root = element("#root");
-      yield* draw(view, props, cache, root);
-      const shell = serializeChildren(root.children);
-      const records = yield* Effect.provideService(Streaming.shell(options), QueryCache, cache);
-      const first = [
-        document.head,
-        shell,
-        document.tail,
-        `<div id="${Streaming.containerId}" hidden>`,
-        ...records.placeholders.map(streamRecord),
-        ...records.settled.map(streamRecord),
-        document.bootstrap,
-      ].join("");
-      return Stream.concat(
-        Stream.succeed(first),
-        Stream.concat(
-          Stream.map(records.later, streamRecord),
-          Stream.succeed(`</div>${document.end}`),
-        ),
-      );
-    }),
-  );
+): Stream.Stream<string, E, Drawn<R>> => streamDrawing(viewDrawing(view, props), document, options);
+
+/** `renderToStream` over any drawing. Internal: see `Drawing`. */
+export const streamDrawing = <E, R>(
+  drawing: Drawing<E, R>,
+  document: Document,
+  options: Streaming.ShellOptions,
+): Stream.Stream<string, E, Drawn<R>> =>
+  Stream.unwrap(streamPrepared(drawing, document, options, requestCache));
+
+/**
+ * The shell of a streamed document, drawn in the current Scope, and the
+ * stream that writes it and then the records. The cache and the drawing
+ * live as long as that Scope: the router's server document draws before it
+ * answers, so it can refuse a render that is not ready in time.
+ */
+export const streamPrepared = <E, R>(
+  drawing: Drawing<E, R>,
+  document: Document,
+  options: Streaming.ShellOptions,
+  cacheOf: CacheSource,
+): Effect.Effect<Stream.Stream<string>, E, Exclude<R, QueryCache> | Scope.Scope> =>
+  Effect.gen(function* () {
+    const cache = yield* cacheOf;
+    const root = element("#root");
+    yield* draw(drawing, cache, root);
+    const shell = serializeChildren(root.children);
+    const records = yield* Effect.provideService(Streaming.shell(options), QueryCache, cache);
+    const first = [
+      document.head,
+      shell,
+      document.tail,
+      `<div id="${Streaming.containerId}" hidden>`,
+      ...records.placeholders.map(streamRecord),
+      ...records.settled.map(streamRecord),
+      document.bootstrap,
+    ].join("");
+    return Stream.concat(
+      Stream.succeed(first),
+      Stream.concat(
+        Stream.map(records.later, streamRecord),
+        Stream.succeed(`</div>${document.end}`),
+      ),
+    );
+  });
 
 /**
  * Render one view once its drawing waits for nothing (#22, the `AwaitAll`
@@ -402,15 +444,29 @@ export const renderToStream = <Props, E, R>(
  * `Loading` boundary that registers no query shows its fallback for ever,
  * so such a page always waits for the limit.
  */
-export const renderAwaitAll = Effect.fn("Html.renderAwaitAll")(function* <Props, E, R>(
+export const renderAwaitAll = <Props, E, R>(
   view: View<Props, E, R>,
   props: Props,
   document: Document,
   options: Streaming.ShellOptions,
+): Effect.Effect<string, E, Drawn<R>> =>
+  awaitAllDrawing(viewDrawing(view, props), document, options, requestCache);
+
+/** `renderAwaitAll` over any drawing. Internal: see `Drawing`. */
+export const awaitAllDrawing: <E, R>(
+  drawing: Drawing<E, R>,
+  document: Document,
+  options: Streaming.ShellOptions,
+  cacheOf: CacheSource,
+) => Effect.Effect<string, E, Drawn<R>> = Effect.fn("Html.renderAwaitAll")(function* <E, R>(
+  drawing: Drawing<E, R>,
+  document: Document,
+  options: Streaming.ShellOptions,
+  cacheOf: CacheSource,
 ) {
   const scope = yield* Scope.make();
   const html = yield* Effect.gen(function* () {
-    const cache = yield* requestCache;
+    const cache = yield* cacheOf;
     const withCache = <A, E2, R2>(effect: Effect.Effect<A, E2, R2>) =>
       Effect.provideService(effect, QueryCache, cache);
     // The limit runs once, from the drawing.
@@ -433,7 +489,7 @@ export const renderAwaitAll = Effect.fn("Html.renderAwaitAll")(function* <Props,
       }),
     );
     const root = element("#root");
-    yield* Scope.provide(draw(view, props, cache, root, watched), scope);
+    yield* Scope.provide(draw(drawing, cache, root, watched), scope);
     let waiting = true;
     while (waiting) {
       // A fresh signal before the check, so a write after it is never missed.
@@ -469,6 +525,35 @@ export const renderAwaitAll = Effect.fn("Html.renderAwaitAll")(function* <Props,
     Effect.onExit((exit) => Scope.close(scope, exit)),
   );
   return html;
+});
+
+/**
+ * Draw once and write the document with the seed of every query that has
+ * settled by then (the `SSR` mode of a routed tree). The drawing decides
+ * what settles first: a routed `SSR` tree resolves its declared data before
+ * its views draw. A query still open writes no seed; its boundary shows the
+ * fallback on both sides, and the client reads it. Internal: see `Drawing`.
+ */
+export const renderSeeded: <E, R>(
+  drawing: Drawing<E, R>,
+  document: Document,
+  cacheOf: CacheSource,
+) => Effect.Effect<string, E, Drawn<R>> = Effect.fn("Html.renderSeeded")(function* <E, R>(
+  drawing: Drawing<E, R>,
+  document: Document,
+  cacheOf: CacheSource,
+) {
+  const scope = yield* Scope.make();
+  return yield* Effect.gen(function* () {
+    const cache = yield* cacheOf;
+    const root = element("#root");
+    yield* draw(drawing, cache, root);
+    const seed = yield* Effect.provideService(Streaming.settledPatches, QueryCache, cache);
+    return page(document, root, seed);
+  }).pipe(
+    Scope.provide(scope),
+    Effect.onExit((exit) => Scope.close(scope, exit)),
+  );
 });
 
 const page = (

@@ -119,7 +119,8 @@ See [the optimistic send design](docs/design/optimistic.md).
 
 `effect-frame/router` exports one route model on the `Route` namespace. A
 segment is an address. A branch is a segment with its view. A mount picks the
-rendering mode for a whole tree; `Route.client` is the one mode today.
+rendering mode for a whole tree: `Route.client`, `Route.ssr`,
+`Route.streamed`, or `Route.awaitAll`.
 
 ```tsx
 import { Link, Route, link, mount } from "effect-frame/router";
@@ -194,7 +195,9 @@ const program = Effect.gen(function* () {
 - `link` takes a flat route or a segment. `Link` draws `aria-current="page"`
   on the destination, and `aria-current="true"` on a segment the current URL
   continues below. Neither holds on not-found or on another route.
-- `Route.client(name, root)` takes a branch of a root segment only.
+- `Route.client(name, root)` takes a branch of a root segment only, and so
+  do `Route.ssr`, `Route.streamed`, and `Route.awaitAll`. A mode is the
+  constructor; no route value carries a mode field.
 - Leave checks and navigation receipts are not public yet (#56).
 
 See [the public route design](docs/design/route-public.md).
@@ -248,6 +251,67 @@ Route.leaf(tab, TabView, { behavior: NavigationBehavior.Preserve });
   to the browser.
 
 See [the navigation behavior design](docs/design/navigation-behavior.md).
+
+### Server documents
+
+`renderDocument` answers one request. It settles the request first: it
+matches the URL and runs the matched route's checks, whatever the mode.
+Then it renders with the settled tree's mode. It mounts the same router on
+the HTML host, over its own query cache, at the request URL.
+
+```ts
+import { DocumentTimedOut, renderDocument } from "effect-frame/router";
+
+// Run it in the request's Scope, and stream the body before that Scope closes.
+const answer = renderDocument({
+  routes: [App, Login],
+  notFound,
+  url: new URL(request.url),
+  document: page, // an Html.Document
+  closeWhen: Effect.sleep("10 seconds"),
+}).pipe(
+  Effect.provideService(CurrentPrincipal, principal),
+  Effect.map((outcome) => {
+    if (outcome._tag === "Redirect") {
+      return seeOther(outcome.location); // 303
+    }
+    return respond(outcome.status, outcome.body); // 200, or 404 for not-found
+  }),
+  Effect.catchTag("DocumentTimedOut", () => Effect.succeed(gatewayTimeout())),
+);
+```
+
+- A check that redirects is the answer, `{ _tag: "Redirect", location }`.
+  The render does not follow it. A `Route.client` route runs its checks
+  on the server too.
+- `Rendered.route` is `{ _tag: "Matched", route }`, the route value, or
+  `{ _tag: "NotFound" }`. `status` is 404 for not-found and 200 otherwise.
+  A hand-written route and not-found render as `SSR`.
+- `Route.ssr`: the server resolves every query the matched branch
+  declares, in parallel, before any view draws. It draws once and writes
+  one seed script. The client hydrates with no read.
+- `Route.streamed`: the shell first, then one record per declared query
+  (see "Streamed documents"). Put a `Loading` boundary around what waits.
+- `Route.awaitAll`: one document once every read settled.
+- `Route.client`: the document with an empty mount element. The server
+  reads nothing.
+- `closeWhen` runs once. The checks, the declarations, and the first
+  drawing must end before it completes, or `renderDocument` fails with
+  `DocumentTimedOut { phase: "settle" | "draw" }` and closes what it
+  opened. After the first drawing, `AwaitAll` writes what it has and
+  `Streamed` writes `Closed`; the client reads what is still open.
+- Every read is checked under the `CurrentPrincipal` you provide, by the
+  policy its query names. A refusal is seeded, never the value.
+- The checks and the drawing read through one query cache, which the
+  request Scope holds. A query both read is read once and written once; a
+  query only a check read is not written into the document.
+
+A route prints only what a URL carries both ways: a path segment is
+well-formed text that is not empty and not `.` or `..`, and a search key or
+value is well-formed text. `href` dies with `Route.UrlValueRejected` for
+another value, and parse never yields one.
+
+See [the route data design](docs/design/route-data.md).
 
 ## Plain-form commands
 

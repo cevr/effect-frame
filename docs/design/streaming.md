@@ -313,6 +313,11 @@ carry it yet, so the modes are three functions: `Html.renderToString`
 (unchanged), `Html.renderToStream`, and `Html.renderAwaitAll`. The router
 will choose one per route. `ClientOnly` is not built.
 
+Update (#36): the router chooses now. A mode is a mount constructor
+(`Route.client`, `Route.ssr`, `Route.streamed`, `Route.awaitAll`), and
+`renderDocument` runs these pipelines over the matched tree. `ClientOnly`
+draws nothing on the server. See [route-data.md](route-data.md).
+
 ### The HTML host holds no `</script` in its source
 
 The HTML host builds its script close tag at run time. A browser bundle of

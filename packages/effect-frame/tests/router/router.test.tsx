@@ -102,6 +102,9 @@ const Home = (_props: Route.RouteProps<{}, {}>) =>
         <a id="to-book" href="/books/7">
           book
         </a>
+        <a id="external" href="https://elsewhere.test/books/7">
+          elsewhere
+        </a>
         <Link link={toBook} class="nav">
           typed
         </Link>
@@ -373,6 +376,29 @@ describe("router", () => {
       expect(location.history).toEqual(["push /books/7"]);
 
       expect(location.history).toEqual(["push /books/7"]);
+    }),
+  );
+
+  it.scoped("a link to another origin is left to the browser", () =>
+    Effect.gen(function* () {
+      const { root, location } = yield* start("http://app.test/");
+      const anchor = Option.getOrThrow(Option.fromNullishOr(root.querySelector("#external")));
+      // Registered after the router's listener on the same root, so it runs
+      // after it: read its decision, then stop happy-dom from leaving the page.
+      let preventedByRouter = true;
+      const after = (event: Event) => {
+        preventedByRouter = event.defaultPrevented;
+        event.preventDefault();
+      };
+      yield* Effect.acquireRelease(
+        Effect.sync(() => root.addEventListener("click", after)),
+        () => Effect.sync(() => root.removeEventListener("click", after)),
+      );
+      const plain = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+      anchor.dispatchEvent(plain);
+      expect(preventedByRouter).toBe(false);
+      expect(location.history).toEqual([]);
+      expect(textOf(root, "#book")).toBe("");
     }),
   );
 

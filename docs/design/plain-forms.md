@@ -62,8 +62,11 @@ does all coercion, so a field name never carries a type.
 
 - Grammar: `name := segment ("." segment | "[" digits "]")* "[]"?`.
 - The names `__proto__`, `constructor`, and `prototype` are refused. A leaf
-  and a branch at one path are refused. Each refusal is `FormMalformed`,
-  and it happens before the message schema runs.
+  and a branch at one path are refused. A list filled by both `[n]` and
+  `[]` is refused, because an appended value has no index to agree with a
+  written one. A name deeper than `Form.maxDepth` (32) segments and a body
+  with more than `Form.maxFields` (1000) fields are refused. Each refusal
+  is `FormMalformed`, and it happens before the message schema runs.
 - An empty value is dropped, unless the name ends in `[]`.
 - `Form.Checkbox` is an optional encoded string that decodes to a boolean.
   Absent is `false`. Present is `true`. It encodes `true` as `"on"`, on the
@@ -79,13 +82,14 @@ does all coercion, so a field name never carries a type.
 Names that start with `$` belong to the framework. The last value wins.
 `Form.strip` removes all of them before the message decodes.
 
-| Field       | Value                                              |
-| ----------- | -------------------------------------------------- |
-| `$command`  | The command id the render minted.                  |
-| `$contract` | The contract name.                                 |
-| `$version`  | The contract version.                              |
-| `$key`      | The actor key, form-urlencoded (`Form.encodeKey`). |
-| `$return`   | A root-relative path for the 303.                  |
+| Field       | Value                                                     |
+| ----------- | --------------------------------------------------------- |
+| `$command`  | The command id the render minted.                         |
+| `$contract` | The contract name.                                        |
+| `$version`  | The contract version.                                     |
+| `$key`      | The actor key, form-urlencoded (`Form.encodeKey`).        |
+| `$return`   | A root-relative path for the 303.                         |
+| `$form`     | The form's identity on the page. Default: the member tag. |
 
 A name with a segment that starts with `_` is redacted. It decodes, but a
 refused post never writes it back into the page.
@@ -96,24 +100,46 @@ refused post never writes it back into the page.
 (`Wire.paths.form`). The checks run in this order, and each refusal happens
 before a send.
 
-| Case                                               | Answer                                    |
-| -------------------------------------------------- | ----------------------------------------- |
-| A multipart body, or a type that is not urlencoded | 415, plain text                           |
-| `$return` is absent or leaves the origin           | 400, plain text                           |
-| `$command`, `$version`, or `$key` is bad or absent | 400, plain text                           |
-| `$contract` names no served contract               | 404, plain text                           |
-| `$version` is not the contract's version           | 409, plain text                           |
-| A structural failure (`FormMalformed`)             | 400, plain text                           |
-| The message does not decode                        | 200, the page with issues and a fresh id  |
-| `Admitted` or `Duplicate`                          | 303 to `$return`                          |
-| `Unreachable` (the outcome is `Uncertain`)         | 504, the page with the same id and values |
-| `CommandConflict`, `ContractMismatch`              | 409, the page with a fresh id             |
-| `UnknownContract`                                  | 404, the page with a fresh id             |
-| `Unauthorized`                                     | 403, the page with a fresh id             |
-| `ActorStopped`                                     | 503, the page with a fresh id             |
+The media type is compared without case. A `charset` parameter other than
+UTF-8 is a 415: the body is read as UTF-8, so a body in another charset is
+refused, not decoded wrongly.
+
+`$return` must be printable ASCII (no C0 control character, no space, no
+DEL, nothing above `~`). It must start with one `/` that is not followed by
+`/` or `\`. It must then resolve against a sentinel base to that same
+origin. A URL parser drops tab, LF, and CR before it reads, so `/<tab>/host`
+is `//host` to a browser. The printable check refuses it first. A value that
+passes is also a valid `Location` header, so the 303 cannot fail after the
+send. An encoded slash (`/%2f%2fhost`) is a path on this origin, and it is
+accepted.
+
+| Case                                                        | Answer                                    |
+| ----------------------------------------------------------- | ----------------------------------------- |
+| A multipart body, or a type that is not urlencoded          | 415, plain text                           |
+| `$return` is absent or leaves the origin                    | 400, plain text                           |
+| `$command`, `$version`, `$key`, or `$form` is bad or absent | 400, plain text                           |
+| `$contract` names no served contract                        | 404, plain text                           |
+| `$version` is not the contract's version                    | 409, plain text                           |
+| A structural failure (`FormMalformed`)                      | 400, plain text                           |
+| The message does not decode                                 | 200, the page with issues and a fresh id  |
+| `Admitted` or `Duplicate`                                   | 303 to `$return`                          |
+| `Unreachable` (the outcome is `Uncertain`)                  | 504, the page with the same id and values |
+| `CommandConflict`, `ContractMismatch`                       | 409, the page with a fresh id             |
+| `UnknownContract`                                           | 404, the page with a fresh id             |
+| `Unauthorized`                                              | 403, the page with a fresh id             |
+| `ActorStopped`                                              | 503, the page with a fresh id             |
 
 `render(path)` draws the page for the posted `$return`. The route provides
 `FormContext` to it. A render failure is a 500, and it is logged.
+
+The page must carry its `FormIssues` to the client, the way it carries a
+snapshot. Otherwise the hydrating client draws the form without the issues,
+and hydration finds mismatches. The server embeds
+`Html.jsonScript(Form.issuesScriptId, yield* Form.encodeIssues(issues))`
+when `FormContext` is present. The client reads that script with
+`Form.decodeIssues` and mounts through `Form.provideIssues(issues)`. The
+notes app does both, in `apps/notes/src/server.ts` and
+`apps/notes/src/client.tsx`.
 
 ## The binding
 
@@ -139,10 +165,11 @@ const Compose = (props: { readonly notes: NotesRef }) =>
 
 1. The runtime draws the plain post in every host: `method="post"`, the
    `action`, and the hidden inputs before the form's own children. The
-   order is `$command`, `$contract`, `$version`, `$key`, `$return`, `_tag`,
-   then the generated fields.
-2. With `FormContext` for this contract and key, the binding takes the
-   server's id. It keeps a fresh generated value only when the id was kept.
+   order is `$command`, `$contract`, `$version`, `$key`, `$return`,
+   `$form`, `_tag`, then the generated fields.
+2. With `FormContext` for this contract, key, and `$form`, the binding
+   takes the server's id. Another form on the same key keeps its own id,
+   its own generated values, and none of the issues. It keeps a fresh generated value only when the id was kept.
    The static `input`, `textarea`, and `select` children get the submitted
    values back, and each field with an issue gets `aria-invalid="true"`.
 3. The DOM host cancels the native post and reads `FormData` at submit
@@ -171,19 +198,33 @@ const Compose = (props: { readonly notes: NotesRef }) =>
   page. #20 has no login redirect yet.
 - A 400 answer is plain text, not a rendered page. The request is not a
   form this server rendered.
-- `FormIssues` carries `contract` and `key`, so that each binding on a page
-  finds its own refusal.
+- `FormIssues` carries `contract`, `key`, and `form`, so that each binding
+  on a page finds only its own refusal. `form` is the posted `$form`. It
+  defaults to the member tag. Two forms for one member on one key must set
+  `name` to be told apart.
+- A bound value (`value={View.bind(...)}`) on a refused control is drawn
+  from the post, not from the binding, on both sides of hydration. The
+  control keeps the posted value for the life of that mount.
 - Repopulation skips controls inside `For`, `Show`, and `Match`. Their own
   setup draws them.
 - If the script dies after a scripted send, a native post of the same
   rendered id can answer 409 (`CommandConflict`) when the fields differ.
   With the same fields it is a `Duplicate`.
 - `Unreachable` is treated as `Uncertain`: 504, same id, same values.
+- A scripted resend mints a fresh id. The first scripted send adopts the
+  rendered id. Each later send from the same form, including a retry after
+  a refusal on the client, mints a new id and new generated values. Only a
+  plain post re-sent by the browser reuses an id.
+- There is no CSRF protection, and no claim of it. The route accepts any
+  urlencoded post that names a served contract. #20 adds authorization and
+  the origin check.
 - A hydrating client runs the same setup, so `View.form` draws an id there
   too. The hydrating host keeps the server's hidden inputs and does not
   write the client's values, and the first send reads the markup. So the
-  client never sends an id it minted over a rendered one. The binding's
-  `commandId` on the client is the id it drew, not the markup's.
+  client never sends an id it minted over a rendered one. On an ordinary
+  page, the binding's `commandId` on the client is the id it drew, not the
+  markup's. On a refused page mounted through `Form.provideIssues`, it is
+  the markup's.
 
 ## Not built
 

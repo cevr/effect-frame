@@ -69,6 +69,7 @@ const post = (url: string, body: string) =>
     (response) => ({
       status: response.status,
       location: Option.getOrElse(Option.fromNullishOr(response.headers.get("location")), () => ""),
+      response,
     }),
   );
 
@@ -104,7 +105,7 @@ describe("notes with no script", () => {
         Form.toBody(Form.fromEntries([...hidden, ["text", "buy milk"]])),
       );
 
-      expect(reply).toEqual({ status: 303, location: "/" });
+      expect([reply.status, reply.location]).toEqual([303, "/"]);
       const applied = yield* notesAt(server.url, 1);
       expect(applied.state.notes).toEqual([{ id: commandId, text: "buy milk", done: false }]);
     }),
@@ -126,6 +127,24 @@ describe("notes with no script", () => {
       // The page after the redirect shows the note.
       const after = yield* pageOf(server.url);
       expect(after).toContain("<span>walk dog</span>");
+    }),
+  );
+  it.scopedLive("an empty note re-renders the page and carries its issues to the client", () =>
+    Effect.gen(function* () {
+      const server = yield* serve;
+      const page = yield* pageOf(server.url);
+
+      const reply = yield* post(server.url, Form.toBody(Form.fromEntries(hiddenOf(page))));
+      const body = yield* Effect.promise(() => reply.response.text());
+
+      expect(reply.status).toBe(200);
+      expect(body).toContain('<li data-field="text">');
+      const start = body.indexOf(`id="${Form.issuesScriptId}">`);
+      expect(start).toBeGreaterThan(0);
+      const json = body.slice(body.indexOf(">", start) + 1, body.indexOf("</script>", start));
+      const carried = yield* Form.decodeIssues(json);
+      expect(carried.form).toBe("Add");
+      expect(carried.issues.map((issue) => issue.field)).toEqual(["text"]);
     }),
   );
 });

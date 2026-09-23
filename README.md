@@ -251,12 +251,20 @@ const forms = HttpServer.form({ contracts: [Notes], render: (path) => renderPage
   helpers). `Wire.paths.form` is `/form`.
 - `View.form` returns `{ submit, issues, commandId }`. The runtime draws
   `method`, `action`, and the hidden `$command`, `$contract`, `$version`,
-  `$key`, `$return`, `_tag`, and generated inputs in every host.
+  `$key`, `$return`, `$form`, `_tag`, and generated inputs in every host.
 - `HttpServer.form` answers 303 to `$return` on success, 200 with the page
   and its `FormIssues` on a validation failure, 504 with the same id on a
   lost reply, and 400 or 415 before any send.
 - `Generated.send(ref, contract, input)` sends from code. The input omits
   every generated field.
+- A refused page must carry its issues to the client. On the server, embed
+  `Form.encodeIssues` under `Form.issuesScriptId` when `FormContext` is
+  present. On the client, read it with `Form.decodeIssues` and mount
+  through `Form.provideIssues`.
+- Each form posts `$form` (the member tag, or `name`). A refusal redraws
+  only the form that posted it.
+- `$return` must be printable ASCII, root-relative, and resolve to this
+  origin. A `charset` other than UTF-8 is refused with 415.
 - A field whose name has a segment that starts with `_` is never written
   back into a refused page. A multipart body is refused with 415.
 - `HostEvent.form` carries the submitted fields on a DOM submit.

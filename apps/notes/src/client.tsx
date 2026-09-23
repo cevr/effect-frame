@@ -1,5 +1,5 @@
 import type { Applied, SnapshotOf } from "effect-frame/actor/client";
-import { HttpTransport, resumeCodec } from "effect-frame/actor/client";
+import { Form, HttpTransport, resumeCodec } from "effect-frame/actor/client";
 import { Dom, mount, render } from "effect-frame/view";
 import { Effect, Option, Schema } from "effect";
 import { Notes, demoKey, resumeScriptId } from "./contract.js";
@@ -21,6 +21,12 @@ const readResume = Effect.gen(function* () {
   });
 });
 
+/** The issues of a refused post, when this page redraws one. */
+const readRefusal = Option.match(Dom.readJsonScript(Form.issuesScriptId), {
+  onNone: () => Effect.succeed(Option.none<Form.FormIssues>()),
+  onSome: (json) => Effect.map(Effect.orDie(Form.decodeIssues(json)), Option.some),
+});
+
 const start = Effect.gen(function* () {
   const found = yield* Effect.sync(() => Option.fromNullishOr(document.getElementById("app")));
   if (Option.isNone(found)) {
@@ -28,8 +34,11 @@ const start = Effect.gen(function* () {
   }
   const root = found.value;
   const resume = yield* readResume;
+  const refusal = yield* readRefusal;
   const hydration = Dom.hydrate(root);
-  yield* mount(NotesPage, { key: demoKey, resume }, hydration.host, root);
+  yield* Form.provideIssues(refusal)(
+    mount(NotesPage, { key: demoKey, resume }, hydration.host, root),
+  );
   yield* render;
   const report = yield* hydration.finish;
   if (report.mismatches.length > 0) {

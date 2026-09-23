@@ -1,7 +1,7 @@
 import type { Layer } from "effect";
 import { HttpServer } from "effect-frame/actor";
 import type { ActorTransport } from "effect-frame/actor/client";
-import { Wire, ref, resumeCodec } from "effect-frame/actor/client";
+import { Form, Wire, ref, resumeCodec } from "effect-frame/actor/client";
 import { Html } from "effect-frame/view";
 import { Effect, ManagedRuntime, Option, Schema } from "effect";
 import { Notes, demoKey, resumeScriptId } from "./contract.js";
@@ -52,11 +52,19 @@ const document = Effect.fn("Notes.document")(function* () {
   const notes = yield* ref(Notes, demoKey);
   const applied = yield* notes.applied.get;
   const payload = yield* Effect.orDie(Schema.encodeEffect(Resume)(applied));
+  // A refused post's page carries its issues, so the client draws the same form.
+  const refusal = yield* Effect.serviceOption(Form.FormContext);
+  const issues = yield* Option.match(refusal, {
+    onNone: () => Effect.succeed(""),
+    onSome: (found) =>
+      Effect.map(Form.encodeIssues(found), (json) => Html.jsonScript(Form.issuesScriptId, json)),
+  });
   return [
     "<!doctype html>",
     '<html><head><meta charset="utf-8"><title>Notes</title></head><body>',
     `<main id="app">${body}</main>`,
     Html.jsonScript(resumeScriptId, payload),
+    issues,
     '<script type="module" src="/client.js"></script>',
     "</body></html>",
   ].join("");

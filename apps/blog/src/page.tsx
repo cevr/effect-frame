@@ -46,8 +46,11 @@ interface IslandProps {
 
 /**
  * The island: the hearts, and a form that adds one. With no script the
- * form posts; with one, it sends over the transport and the count moves at
- * once, predicted by the behavior the route opened the reference with.
+ * form posts. With one, it sends over the transport. The first press
+ * carries the id the server minted into the page, which is supplied, so it
+ * is not predicted and the count moves when the server confirms it; a later
+ * press mints its own id, and the behavior the route opened the reference
+ * with predicts it.
  */
 const Island = (props: IslandProps) =>
   Effect.gen(function* () {

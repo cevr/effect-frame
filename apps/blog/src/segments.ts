@@ -32,7 +32,7 @@ export const index = Route.child(chrome, "index", {
 
 /**
  * One post and its reactions. The route opens the reactions reference with
- * the behavior, so a heart shows at once, and the document carries its
+ * the behavior, so a heart the client mints shows at once, and the document carries its
  * snapshot, so the island starts at the revision the page was drawn at.
  */
 export const post = Route.child(chrome, "post", {

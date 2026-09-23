@@ -15,7 +15,7 @@ bun run dev         # serve it on http://127.0.0.1:3000
 
 `bun run start` does both. `build` is the deploy build: `build:client` and then `prerender`. The repository gate runs `build:client` only, never `prerender`, because the gate does not read content (#23 §2.1). From the repository root, `bun run prerender` builds the pages alone.
 
-Open <http://127.0.0.1:3000/posts>. Every post link is a built file. Delete one post's directory under `dist/prerender/generations/<id>/posts/` and open it again: the router renders it, and the reader sees the same page. Press the heart: with a script the count moves at once; with none, the form posts and the server answers 303.
+Open <http://127.0.0.1:3000/posts>. Every post link is a built file. Delete one post's directory under `dist/prerender/generations/<id>/posts/` and open it again: the router renders it, and the reader sees the same page. Press the heart. With a script, it is sent over the transport and the page stays. The first press carries the id the server minted into the page, which counts as supplied, so it is not predicted: the count moves when the server confirms it. Each later press mints its own id, and the behavior predicts it. With no script, the form posts and the server answers 303.
 
 `BLOG_POSTS` and `BLOG_OUT` point the build and the server at other directories. `PORT` sets the port.
 
@@ -25,7 +25,7 @@ Open <http://127.0.0.1:3000/posts>. Every post link is a built file. Delete one 
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `posts/*.md`                 | The posts. Front matter holds `title`, `date` and `draft`. A draft is never listed and never built.                     |
 | `src/contract.ts`            | The `Reactions` actor: one per post, keyed by slug. A heart carries a generated id.                                     |
-| `src/behavior.ts`            | The reducer. The server hosts it, and the island predicts a heart with it.                                              |
+| `src/behavior.ts`            | The reducer. The server hosts it, and the island predicts a heart it minted.                                            |
 | `src/queries.ts`             | `PostIndex`, `PostBody` (public) and `Draft` (the `editor` policy, which refuses `Anonymous`).                          |
 | `src/segments.ts`            | The chrome, the index and the post segment, and the data each declares.                                                 |
 | `src/routes.tsx`             | The one tree, `Route.prerender("blog", ...)`, and the post inputs: `runQuery(PostIndex)`, the same key the index reads. |
@@ -42,6 +42,7 @@ Open <http://127.0.0.1:3000/posts>. Every post link is a built file. Delete one 
 | `tests/build.test.ts`        | Paths, links, one read, the definition-time refusal, `PrerenderUnauthorized`, rebuilds, an aborted build.               |
 | `tests/document.test.tsx`    | A built page: one seed stamped `builtAt`, a stale paint, one confirming read.                                           |
 | `tests/island.test.tsx`      | The hearts resume from the baked revision; the form with no script posts one heart.                                     |
+| `tests/browser.test.ts`      | In real Chrome and WebKit: the first scripted heart goes over the transport, the page stays, and the count moves to 1.  |
 | `tests/serve.test.ts`        | A real server on a free port: a hit is the file and the router never runs; a miss renders the same page.                |
 | `tests/deploy-build.test.ts` | The deploy build, run as a process: `bun run build` writes the published page tree.                                     |
 | `tests/boundary.test.ts`     | The browser entry reaches no server module; an injected one is refused with its import chain.                           |

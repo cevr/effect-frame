@@ -184,6 +184,29 @@ describe("local actor", () => {
     }),
   );
 
+  it.scoped("a machine refuses by its rule: Rejected, and no transition runs", () =>
+    Effect.gen(function* () {
+      const counter = yield* spawn(
+        Behavior.machine(counterMachine, {
+          refuse: (event) =>
+            Option.as(
+              Option.liftPredicate(event, (one) => one._tag === "Reset"),
+              Refused.make({ reason: "pinned" }),
+            ),
+        }),
+      );
+      yield* counter.call(CounterEvent.Increment);
+      const handle = yield* counter.send(CounterEvent.Reset);
+      expect(yield* handle.settled).toEqual({
+        _tag: "Rejected",
+        reason: Refused.make({ reason: "pinned" }),
+      });
+      // The refused Reset never reached the machine: the count carries on.
+      const applied = yield* counter.call(CounterEvent.Increment);
+      expect(applied.state).toEqual(CounterState.Counting({ count: 2 }));
+    }),
+  );
+
   it.scoped("a machine's own transition reaches the state source", () =>
     Effect.gen(function* () {
       const step = yield* spawn(Behavior.machine(stepMachine));

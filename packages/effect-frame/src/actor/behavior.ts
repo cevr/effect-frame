@@ -133,6 +133,11 @@ interface Tagged {
  * requirements and real effects, so its next state is not a pure function a
  * client could run.
  */
+export interface MachineOptions<Event, Refusal extends Refused = never> {
+  /** The events this behavior refuses. See `Behavior.refuse`. */
+  readonly refuse?: (event: Event) => Option.Option<Refusal>;
+}
+
 export const machine = <
   State extends Tagged,
   Event extends Tagged,
@@ -140,10 +145,16 @@ export const machine = <
   StateDefinition extends Record<string, Schema.Struct.Fields>,
   EventDefinition extends Record<string, Schema.Struct.Fields>,
   Output,
+  Refusal extends Refused = never,
 >(
   definition: Machine.Machine<State, Event, R, StateDefinition, EventDefinition, void, Output>,
-): Behavior<State, Event, R> => ({
+  options: MachineOptions<Event, Refusal> = {},
+): Behavior<State, Event, R, Refusal> => ({
   initial: definition.initial,
+  ...Option.match(Option.fromNullishOr(options.refuse), {
+    onNone: () => ({}),
+    onSome: (refuse) => ({ refuse }),
+  }),
   open: Effect.fn("Behavior.machine.open")(function* (state: State) {
     const actor = yield* Machine.spawn(definition, { hydrate: state });
     yield* actor.start;

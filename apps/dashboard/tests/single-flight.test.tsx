@@ -97,7 +97,7 @@ describe("single flight at width (#17, #28)", () => {
       });
       // The refreshed values landed from the reply: the client read none again.
       expect([revenue, orders, funnel].map(wire.readsOf)).toEqual([1, 1, 1]);
-      expect(textOf(app.root, "#open")).toBe("2");
+      expect(textOf(app.root, "#open")).toBe("1");
       expect(textOf(app.root, "#revenue")).toBe("490");
     }),
   );
@@ -223,8 +223,45 @@ describe("single flight at width (#17, #28)", () => {
         Effect.sync(() => textOf(app.root, "#revenue") === "490"),
         "revenue after the fulfil",
       );
-      expect(textOf(app.root, "#open")).toBe("2");
+      expect(textOf(app.root, "#open")).toBe("1");
       expect(textOf(app.root, '#orders li[data-order="o6"] span')).toBe("o6 fulfilled");
+    }),
+  );
+
+  it.scopedLive("the overview follows one live stream, Alerts, and commands the rest", () =>
+    Effect.gen(function* () {
+      const { wire } = yield* tappedHost();
+      const app = yield* mountApp({ transport: wire.transport, href: overview, routes });
+      yield* overviewPainted(app.root);
+
+      // A Fulfil and a memo Write, each through a send-only reference.
+      yield* click(app.root, '#orders li[data-order="o6"] .fulfil');
+      yield* Effect.sync(() => {
+        const draft = app.root.querySelector("#memo-draft");
+        if (draft instanceof HTMLInputElement) {
+          draft.value = "ship friday";
+        }
+      });
+      yield* submit(app.root, "#memo-form");
+      yield* settle(
+        Effect.sync(
+          () =>
+            wire.settlementsOf("Fulfil o6").length === 1 &&
+            wire.settlementsOf("Write").length === 1,
+        ),
+        "both replies",
+      );
+
+      // One snapshot read and one change stream, both of Alerts.
+      const alerts = 'Alerts{"tenant":"acme"}';
+      expect(wire.snapshots).toEqual([alerts]);
+      expect(wire.streams).toEqual([alerts]);
+      expect(wire.commands.map((one) => one.contract).toSorted()).toEqual([
+        "Memo",
+        "Memo",
+        "Orders",
+        "Orders",
+      ]);
     }),
   );
 });

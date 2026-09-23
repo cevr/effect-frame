@@ -1,7 +1,6 @@
 import { Route } from "effect-frame/router";
 import { Schema } from "effect";
-import { memoBehavior, ordersBehavior } from "./behavior.js";
-import { Alerts, Memo, Orders, TenantId } from "./contract.js";
+import { Alerts, TenantId } from "./contract.js";
 import { Funnel, OrderDetail, OrderList, Range, Revenue, Slowest, TenantInfo } from "./queries.js";
 
 /**
@@ -10,11 +9,10 @@ import { Funnel, OrderDetail, OrderList, Range, Revenue, Slowest, TenantInfo } f
  * views can name the segments they link to and the tree can name the views.
  *
  * ```
- * dash        /d/:tenant          TenantInfo {tenant}, actor Memo {tenant}
+ * dash        /d/:tenant          TenantInfo {tenant}
  * ├─ overview /d/:tenant?range=   Revenue, Orders, Funnel {tenant, range}, Slowest {tenant},
- * │                               actor Alerts {tenant}, actor Orders {tenant}
- * └─ orders   /d/:tenant/orders   Orders {tenant, range: "all"}, OrderDetail {tenant},
- *                                 actor Orders {tenant}
+ * │                               actor Alerts {tenant}: the one live stream
+ * └─ orders   /d/:tenant/orders   Orders {tenant, range: "all"}, OrderDetail {tenant}
  * ```
  *
  * The layout declares `TenantInfo` once, and both leaves inherit its
@@ -32,7 +30,6 @@ export const dash = Route.segment("dash", {
   params: DashParams,
   data: ({ params }) => ({
     tenant: Route.query(TenantInfo, { tenant: params.tenant }),
-    memo: Route.actor(Memo, { tenant: params.tenant }, { behavior: memoBehavior }),
   }),
 });
 
@@ -40,9 +37,9 @@ export const OverviewSearch = Route.search(Schema.Struct({ range: Schema.optiona
 export type OverviewSearch = Schema.Schema.Type<typeof OverviewSearch>;
 
 /**
- * The overview: five cards over four queries and two actors. The order book
- * is route data with its reducer, so a `Fulfil` predicts at once (#19); the
- * alerts are route data with no behavior, so an `Ack` waits for the host.
+ * The overview: five cards over four queries and one actor. The alerts are
+ * the page's one live stream. The order book is not route data: the page
+ * only commands it, through a `commandRef` its view holds (`commands.ts`).
  */
 export const overview = Route.child(dash, "overview", {
   path: "",
@@ -54,7 +51,6 @@ export const overview = Route.child(dash, "overview", {
     funnel: Route.query(Funnel, { tenant: params.tenant, ...search }),
     slowest: Route.query(Slowest, { tenant: params.tenant }),
     alerts: Route.actor(Alerts, { tenant: params.tenant }),
-    book: Route.actor(Orders, { tenant: params.tenant }, { behavior: ordersBehavior }),
   }),
 });
 
@@ -65,6 +61,5 @@ export const orders = Route.child(dash, "orders", {
   data: ({ params }) => ({
     orders: Route.query(OrderList, { tenant: params.tenant, range: "all" }),
     detail: Route.query(OrderDetail, { tenant: params.tenant }),
-    book: Route.actor(Orders, { tenant: params.tenant }, { behavior: ordersBehavior }),
   }),
 });

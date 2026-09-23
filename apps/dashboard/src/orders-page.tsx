@@ -2,7 +2,8 @@ import { select } from "effect-frame/actor/client";
 import type { Route } from "effect-frame/router";
 import { For, View, orErrored, ready } from "effect-frame/view";
 import { Effect } from "effect";
-import { cancel, fulfil } from "./commands.js";
+import { cancel, fulfil, sender } from "./commands.js";
+import { Orders } from "./contract.js";
 import type { Order } from "./contract.js";
 import type { orders } from "./segments.js";
 
@@ -17,6 +18,7 @@ export type OrdersProps = Route.PropsOf<typeof orders>;
 
 export const OrdersView = (props: OrdersProps) =>
   Effect.gen(function* () {
+    const book = yield* sender(Orders, props.params, (now) => ({ tenant: now.tenant }));
     const all = yield* ready(yield* orErrored(props.data.orders.state), { rows: [] });
     const detail = yield* ready(yield* orErrored(props.data.detail.state), { rows: [] });
     const tenant = select(props.data.tenant.state, (state) => {
@@ -37,9 +39,7 @@ export const OrdersView = (props: OrdersProps) =>
                   type="button"
                   class="fulfil"
                   onClick={View.event(() =>
-                    Effect.flatMap(order.get, (value) =>
-                      Effect.asVoid(fulfil(props.data.book, value.id)),
-                    ),
+                    Effect.flatMap(order.get, (value) => Effect.asVoid(fulfil(book, value.id))),
                   )}
                 >
                   fulfil
@@ -48,9 +48,7 @@ export const OrdersView = (props: OrdersProps) =>
                   type="button"
                   class="cancel"
                   onClick={View.event(() =>
-                    Effect.flatMap(order.get, (value) =>
-                      Effect.asVoid(cancel(props.data.book, value.id)),
-                    ),
+                    Effect.flatMap(order.get, (value) => Effect.asVoid(cancel(book, value.id))),
                   )}
                 >
                   cancel

@@ -1,12 +1,13 @@
-import { Form, select } from "effect-frame/actor/client";
+import { Behavior, Form, Value, spawn } from "effect-frame/actor/client";
 import type { Source } from "effect-frame/actor/client";
 import { Link, link } from "effect-frame/router";
 import type { NotFoundProps, Route } from "effect-frame/router";
 import { Errored, Loading, View, orErrored, ready } from "effect-frame/view";
 import type { Node } from "effect-frame/view";
 import { Effect, Option, Predicate } from "effect";
-import { snapshotOf, writeMemo } from "./commands.js";
-import type { MemoRef } from "./commands.js";
+import { sender, writeMemo } from "./commands.js";
+import type { MemoCommands } from "./commands.js";
+import { Memo } from "./contract.js";
 import type { dash } from "./segments.js";
 import { orders, overview } from "./segments.js";
 
@@ -38,24 +39,35 @@ export const failure = (first: Source<Option.Option<unknown>>): Node => (
 );
 
 /**
- * The team memo: the layout's `Memo` actor. A write refreshes no query.
- * The form's own field is the draft: a submit reads it from the event.
+ * The team memo. The page only writes it: a send-only reference, so the
+ * memo is no live stream (#25 §4). It shows what the host committed for
+ * this page's last write, from the settled handle. A write refreshes no
+ * query. The form's own field is the draft: a submit reads it from the
+ * event.
  */
-const MemoCard = (memo: Source<MemoRef>) =>
-  Effect.sync(() => {
-    const text = select(snapshotOf(memo), (snapshot) => snapshot.text);
+const MemoCard = (memo: MemoCommands) =>
+  Effect.gen(function* () {
+    const saved = yield* spawn(Behavior.value(""));
+    const write = (next: string) =>
+      Effect.gen(function* () {
+        const handle = yield* writeMemo(memo, next);
+        const settled = yield* handle.settled;
+        if (settled._tag === "Applied") {
+          yield* saved.send(Value.Set(settled.state.text));
+        }
+      });
     const save = View.submit((event) =>
       Option.match(
         Option.flatMap(event.form, (fields) => Form.last(fields, "text")),
         {
           onNone: () => Effect.void,
-          onSome: (next) => Effect.asVoid(writeMemo(memo, next)),
+          onSome: write,
         },
       ),
     );
     return (
       <section id="memo" class="card">
-        <p id="memo-text">{View.bind(text)}</p>
+        <p id="memo-text">{View.bind(saved.state)}</p>
         <form id="memo-form" onSubmit={save}>
           <input id="memo-draft" name="text" />
           <button id="memo-save" type="submit">
@@ -84,7 +96,9 @@ export const DashShell = <ChildR,>(props: Route.LayoutPropsOf<typeof dash, Child
         const params = yield* props.params.get;
         const home = yield* link(overview, params, {});
         const book = yield* link(orders, params, {});
-        const memo = yield* MemoCard(props.data.memo);
+        const memo = yield* MemoCard(
+          yield* sender(Memo, props.params, (now) => ({ tenant: now.tenant })),
+        );
         const outlet = yield* props.outlet;
         return (
           <div id="shell">

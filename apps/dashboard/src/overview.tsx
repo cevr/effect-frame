@@ -3,7 +3,9 @@ import { Link, link } from "effect-frame/router";
 import type { Route } from "effect-frame/router";
 import { For, Loading, View, orErrored, ready, readyWithStale } from "effect-frame/view";
 import { Effect, Option } from "effect";
-import { ack, fulfil, snapshotOf } from "./commands.js";
+import { ack, fulfil, sender, snapshotOf } from "./commands.js";
+import type { OrdersCommands } from "./commands.js";
+import { Orders } from "./contract.js";
 import type { Alert, Order } from "./contract.js";
 import type { Latency, Point, Stage } from "./queries.js";
 import { rangeLabel } from "./queries.js";
@@ -46,8 +48,8 @@ const RevenueCard = (props: OverviewProps) =>
     );
   });
 
-/** The orders in the window. An open one can be fulfilled from here. */
-const OrdersCard = (props: OverviewProps) =>
+/** The orders in the window, and how many of them are open. An open one can be fulfilled here. */
+const OrdersCard = (props: OverviewProps, book: OrdersCommands) =>
   Effect.gen(function* () {
     const shown = yield* ready(yield* orErrored(props.data.orders.state), { rows: [] });
     const rows = select(shown, (result) => result.rows);
@@ -63,9 +65,7 @@ const OrdersCard = (props: OverviewProps) =>
                   type="button"
                   class="fulfil"
                   onClick={View.event(() =>
-                    Effect.flatMap(order.get, (value) =>
-                      Effect.asVoid(fulfil(props.data.book, value.id)),
-                    ),
+                    Effect.flatMap(order.get, (value) => Effect.asVoid(fulfil(book, value.id))),
                   )}
                 >
                   fulfil
@@ -74,7 +74,9 @@ const OrdersCard = (props: OverviewProps) =>
             )}
           </For>
         </ul>
-        <p id="open">{View.bind(snapshotOf(props.data.book), (book) => book.open)}</p>
+        <p id="open">
+          {View.bind(rows, (all) => all.filter((order) => order.status === "open").length)}
+        </p>
       </section>
     );
   });
@@ -172,7 +174,9 @@ export const OverviewView = (props: OverviewProps) =>
     });
 
     const revenue = yield* RevenueCard(props);
-    const orders = yield* OrdersCard(props);
+    // The order book is commanded, not drawn: a send-only reference.
+    const book = yield* sender(Orders, props.params, (now) => ({ tenant: now.tenant }));
+    const orders = yield* OrdersCard(props, book);
     const slowest = yield* SlowestCard(props);
     const alerts = yield* AlertsCard(props);
     return (

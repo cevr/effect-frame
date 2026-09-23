@@ -11,10 +11,11 @@ import type {
 } from "./contract.js";
 
 /**
- * The three behaviors. Browser safe: the server hosts them, and the order
- * book's page predicts with its reducer (#19), so a fulfilled order leaves
- * the open list in the same turn. Every tenant starts from the same book
- * and the same alerts: this is a memory store, not a database (#25 §4).
+ * The three behaviors, hosted by the server. The page draws none of their
+ * snapshots but the alerts', and commands the rest through send-only
+ * references, so nothing here predicts in the browser. Every tenant starts
+ * from the same book and the same alerts: this is a memory store, not a
+ * database (#25 §4).
  */
 
 const seedOrders: ReadonlyArray<Order> = [

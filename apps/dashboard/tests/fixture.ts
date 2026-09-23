@@ -156,6 +156,7 @@ export interface Sighting {
 export const wiretap = (inner: TransportService) => {
   const reads: Array<string> = [];
   const snapshots: Array<string> = [];
+  const streams: Array<string> = [];
   const commands: Array<Sighting> = [];
   const heldSends = new Map<string, Deferred.Deferred<void>>();
   const heldSnapshots = new Map<string, Deferred.Deferred<void>>();
@@ -182,6 +183,13 @@ export const wiretap = (inner: TransportService) => {
   });
   const transport: TransportService = {
     ...inner,
+    changes: (address, after) =>
+      Stream.unwrap(
+        Effect.sync(() => {
+          streams.push(`${address.contract}${address.key}`);
+          return inner.changes(address, after);
+        }),
+      ),
     snapshot: (address) =>
       Effect.gen(function* () {
         snapshots.push(`${address.contract}${address.key}`);
@@ -232,6 +240,8 @@ export const wiretap = (inner: TransportService) => {
     transport,
     reads,
     snapshots,
+    /** Every change stream the client opened, by actor address. */
+    streams,
     commands,
     /** Hold the send whose message reads `label` (`Fulfil o6`) until the gate opens. */
     holdSend: (label: string) => gate(heldSends, label),

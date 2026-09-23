@@ -46,7 +46,7 @@ describe("readiness on the overview (#16)", () => {
         memo: true,
         revenue: "460",
         orders: 7,
-        open: "3",
+        open: "2",
         alerts: 3,
       });
       expect(has(app.root, "#skeleton")).toBe(false);

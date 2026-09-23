@@ -11,6 +11,7 @@ export {
   escapeText,
   host,
   jsonScript,
+  RecordsUnsettled,
   renderAwaitAll,
   renderToStream,
   renderToString,

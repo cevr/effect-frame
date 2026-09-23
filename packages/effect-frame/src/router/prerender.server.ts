@@ -35,7 +35,7 @@ import type { Document } from "../view/hosts/html.js";
 import { awaitAllPage, requestCache } from "../view/hosts/html.js";
 import type { AnyRoute } from "./codec.js";
 import type { DocumentServices } from "./document.js";
-import { settleAndPrepare } from "./document.js";
+import { agreedInTime, settleAndPrepare } from "./document.js";
 import type { Page, PrerenderError, PrerenderServices } from "./prerender.js";
 import { enumerate, planOf } from "./prerender.js";
 import type { NotFoundProps } from "./router.js";
@@ -162,7 +162,7 @@ export class PrerenderTimedOut extends Schema.TaggedError<PrerenderTimedOut>()(
     route: Schema.String,
     href: Schema.String,
     /** `document`: the page's `document(page)` had not answered. */
-    phase: Schema.Literals(["document", "settle", "draw", "settled"]),
+    phase: Schema.Literals(["document", "settle", "draw", "agree", "settled"]),
   },
 ) {}
 
@@ -439,12 +439,14 @@ export const build = <Routes extends AnyRoute<unknown>, N, DE, DR, CE, CR>(
             },
             requestCache,
             (_mode, pipelines) =>
-              awaitAllPage(
-                pipelines.routed,
-                document,
-                { closeWhen: pipelines.closeWhen },
-                pipelines.shared,
-                Option.some(builtAt),
+              agreedInTime(
+                awaitAllPage(
+                  pipelines.routed,
+                  document,
+                  { closeWhen: pipelines.closeWhen },
+                  pipelines.shared,
+                  Option.some(builtAt),
+                ),
               ),
           ).pipe(
             Effect.catchTag("DocumentTimedOut", (failed) => Effect.fail(timedOut(failed.phase))),

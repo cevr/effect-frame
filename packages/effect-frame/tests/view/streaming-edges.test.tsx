@@ -82,7 +82,7 @@ const sectionOf = (root: HTMLElement): string =>
  * arrived before the client ran.
  */
 const firstChunkOf = (
-  document: Stream.Stream<string, never, ActorTransport>,
+  document: Stream.Stream<string, Html.RecordsUnsettled, ActorTransport>,
   labels: Readonly<Record<string, string>>,
   held: ReadonlyArray<string>,
 ) =>

@@ -299,7 +299,9 @@ const answer = renderDocument({
   drawing must end before it completes, or `renderDocument` fails with
   `DocumentTimedOut { phase: "settle" | "draw" }` and closes what it
   opened. After the first drawing, `AwaitAll` writes what it has and
-  `Streamed` writes `Closed`; the client reads what is still open.
+  `Streamed` writes `Closed`; the client reads what is still open. If the
+  drawing and its seed still disagree at the limit (a query kept moving),
+  no document is written: `DocumentTimedOut { phase: "agree" }`.
 - Every read is checked under the `CurrentPrincipal` you provide, by the
   policy its query names. A refusal is seeded, never the value.
 - The checks and the drawing read through one query cache, which the
@@ -509,7 +511,9 @@ const start = Effect.gen(function* () {
   record channel. `Html.renderToString` is unchanged.
 - `options.closeWhen` is the time limit, and both calls require it
   (`Effect.never` waits for ever). A query still open at the limit has no
-  value in the document, and the client reads it again.
+  value in the document, and the client reads it again. A drawing whose
+  records still move at the limit is never written beside a seed it does
+  not show: the call fails with `Html.RecordsUnsettled`.
 - `Html.Document`, `Html.streamRecord(record)`.
 - `Dom.readRecords` reads the records present and follows the rest. It
   also reads an `AwaitAll` seed. `Streaming.resume(records)` puts them into

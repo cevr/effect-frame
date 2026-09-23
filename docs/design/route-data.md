@@ -22,7 +22,7 @@ const outcome =
 // outcome: { _tag: "Redirect", location }                      -> answer 303
 //        | { _tag: "Rendered", route, mode, status, body }     -> answer status, stream body
 // route:  { _tag: "Matched", route: App } | { _tag: "NotFound" }
-// fails:  DocumentTimedOut { phase: "settle" | "draw" }        -> for example 504
+// fails:  DocumentTimedOut { phase: "settle" | "draw" | "agree" } -> for example 504
 ```
 
 A request goes through three steps:
@@ -108,7 +108,9 @@ match. An empty segment is no segment both ways: `href` refuses one, and
    and no outcome member: nothing was written, so the caller answers as it
    chooses (for example 504, or a `ClientOnly` document of its own). The
    race interrupts the check or the drawing, and the drawing's Scope is
-   closed at once. An `SSR` render whose declared data has not settled at
+   closed at once. After the first drawing, a drawing whose seed still
+   disagrees with it at the limit fails `DocumentTimedOut { phase: "agree" }`
+   (streaming review round 2). An `SSR` render whose declared data has not settled at
    the limit is therefore `DocumentTimedOut` too: the mode's promise is a
    document with its route data, so a document without it is not an
    `SSR` document. The first version drew what had settled; that is

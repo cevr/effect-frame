@@ -262,6 +262,9 @@ wait for ever says so with `Effect.never`. When the limit completes first:
 - `renderAwaitAll` serializes the drawing as it is. An entry still open has
   no seed, its boundary shows the fallback on both sides, and the client
   reads it.
+- Either call fails with `Html.RecordsUnsettled`, and writes nothing, when
+  the drawing and its records still disagree in the final pass (see rule 2
+  below). The router reports it as `DocumentTimedOut { phase: "agree" }`.
 
 ### Each render holds its own cache (#28)
 
@@ -362,11 +365,20 @@ The rule has two halves.
    Records that change on every pass would keep the reads going for ever,
    so the document's limit (`closeWhen`) ends them in every pipeline:
    `AwaitAll`, the streamed shell, and `SSR` (`renderSeeded` now takes
-   the limit; the router passes the request's). A pass that starts after
-   the limit is the last. Its records, read right after it drew, are
-   written as they are, and an `AwaitAll` page is marked not complete. An
-   entry that moved inside that last pass may not agree with the drawing;
-   the client redraws it (review round 1, finding 4).
+   the limit; the router passes the request's) (review round 1, finding
+   4). A pass that starts after the limit is the last. If its two reads
+   agree, the document is written. If they do not, a query moved after
+   the catch-up drew, and nothing proves the drawing shows what the
+   records carry: the call fails with `Html.RecordsUnsettled` and writes
+   nothing, in all three pipelines. The router's document reports it as
+   `DocumentTimedOut { phase: "agree" }`, and the prerender build as
+   `PrerenderTimedOut { phase: "agree" }`, so the caller answers another
+   way (EGW answers the client-only page). Round 1 wrote the last read as
+   it was; a query that settled between the catch-up and that read put a
+   newer value in the seed than in the HTML (review round 2). Writing a
+   coherent snapshot instead would need the records read in the same
+   synchronous step the drawing caught up from, and the fiber runtime can
+   yield between the two, so the render refuses.
 
 3. **A value the server shows stale is seeded stale.** A patch carries
    `stale: true` when the server's entry showed its value stale: a read,
@@ -397,8 +409,11 @@ too" by the order of its fibers).
 | `holdSome`'s `get` returns its last value, not the source's           | "a boundary whose value goes through several sources…"                                  |
 | A readiness scope's pending `get` is a constant                       | "a boundary whose value goes through several sources…"                                  |
 
-The second read in `readDrawn` has no mutation test: a query that settles
-between the two reads needs a fiber order that no test can hold.
+The second read in `readDrawn` had no mutation test here: a query that
+settles between the two reads needs a fiber order that no test can hold.
+Review round 2 holds it another way: a binding that moves only when a
+catch-up reads it stands for the lagging one, and a later binding writes
+the query inside the same catch-up (`Moving` in the streaming fixture).
 
 Review round 1. Each mutation was applied alone, and
 `tests/view/stateful-sources.test.tsx` and
@@ -419,9 +434,10 @@ Review round 2. Each mutation was applied alone, and the named tests were
 run. The mutation is the code before the round's repair, so each test is
 red on that code.
 
-| Mutation                                                     | Failed                                                                                              |
-| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| a landed seed's read starts when it lands, not at `hydrated` | "a read that answers at once waits for hydration…" (mismatch `"Draft:true"` became `"Alpha:false"`) |
+| Mutation                                                     | Failed                                                                                                                                                                                                                      |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a landed seed's read starts when it lands, not at `hydrated` | "a read that answers at once waits for hydration…" (mismatch `"Draft:true"` became `"Alpha:false"`)                                                                                                                         |
+| `readDrawn` ignores `agreed` and returns the last read       | "AwaitAll, the streamed shell and SSR never write a seed the markup does not show" (mismatch `"Alpha:false"` became `"Draft-1:true"`); "end at the limit…" (hangs); route-data "fails DocumentTimedOut { phase: "agree" }…" |
 
 #### Known limit: a streamed view with no boundary
 

@@ -136,9 +136,13 @@ export const streamOf = (
   options: Streaming.ShellOptions = noLimit,
   awaited: ReadonlyArray<string> = [],
 ): Stream.Stream<string> =>
-  Html.renderToStream(Page, { ids, awaited }, frame, options).pipe(Stream.provideContext(server));
+  // A page of settled boundaries always agrees with its records.
+  Html.renderToStream(Page, { ids, awaited }, frame, options).pipe(
+    Stream.provideContext(server),
+    Stream.orDie,
+  );
 
-export const collect = (stream: Stream.Stream<string>) =>
+export const collect = <E,>(stream: Stream.Stream<string, E>) =>
   Effect.map(Stream.runCollect(stream), (chunks) => Array.from(chunks));
 
 // ---------------------------------------------------------------------------
@@ -285,3 +289,61 @@ export const idOf = (id: string): string =>
 export const isStreamEnded = (
   state: QueryState<{ readonly label: string }, QueryFailure>,
 ): boolean => state._tag === "Failed" && state.error._tag === "StreamEnded";
+
+// ---------------------------------------------------------------------------
+// Records that move inside the final pass (review round 2)
+// ---------------------------------------------------------------------------
+
+/** What `Moving` does each time its second binding is read. */
+export interface Mover {
+  on: boolean;
+  moves: number;
+}
+
+const shownState = (state: QueryState<{ readonly label: string }, QueryFailure>): string => {
+  if (state._tag === "Ready") {
+    return `${state.value.label}:${String(state.stale)}`;
+  }
+  return state._tag;
+};
+
+/**
+ * `a`'s state, then a binding that, once `mover.on` is set, writes a new
+ * value to `a` each time it is read. A catch-up draws `a` first and then
+ * reads that binding, so the records read after it hold a value the
+ * drawing does not show, and the reads never agree. The boundary over
+ * `held` keeps its fallback while `held` is held, so an `AwaitAll` render
+ * waits for the limit.
+ */
+export const Moving = (props: { readonly mover: Mover }) =>
+  Effect.gen(function* () {
+    const entry = yield* useQuery(Label, { id: "a" });
+    // `a`'s binding moves only when a catch-up reads it: it stands for a
+    // binding whose change is still on its way through its fiber.
+    const lagging = { get: entry.state.get, changes: Stream.never };
+    const moved = {
+      get: Effect.gen(function* () {
+        if (props.mover.on) {
+          props.mover.moves += 1;
+          yield* entry.override({ label: `Draft-${String(props.mover.moves)}` });
+        }
+        return "moved";
+      }),
+      changes: Stream.never,
+    };
+    const held = yield* Loading({
+      fallback: <p id="held-pending">loading</p>,
+      children: Effect.gen(function* () {
+        const found = yield* useQuery(Label, { id: "held" });
+        const value = yield* ready(found.state, { label: "?" });
+        return <p id="held">{View.bind(value, (one) => one.label)}</p>;
+      }),
+    });
+    return (
+      <section>
+        <p id="state">{View.bind(lagging, shownState)}</p>
+        <i>{View.bind(moved, (text) => text)}</i>
+        {held}
+      </section>
+    );
+  });

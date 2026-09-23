@@ -222,16 +222,19 @@ const makeBindings = (): Bindings => {
   };
 };
 
-/** The records a pass read, and whether the drawing is at their instant. */
-interface Read<A> {
-  readonly records: A;
-  /**
-   * The two reads around the last catch-up agreed. False only when the
-   * limit ended the passes first: the records are the last pass's second
-   * read, taken right after that pass drew.
-   */
-  readonly agreed: boolean;
-}
+/**
+ * The time limit ended the passes that bring a server drawing and the
+ * records written beside it to one instant, and the last two reads did not
+ * agree (review round 2). No document is written: its seed could carry a
+ * value its markup does not show, and the client would hydrate against the
+ * wrong markup. The caller answers another way, for example with a
+ * client-only page. The router's document reports it as
+ * `DocumentTimedOut { phase: "agree" }`.
+ */
+export class RecordsUnsettled extends Schema.TaggedError<RecordsUnsettled>()(
+  "RecordsUnsettled",
+  {},
+) {}
 
 /**
  * Read the records a document writes beside its drawing, and bring the
@@ -242,16 +245,17 @@ interface Read<A> {
  *
  * Records that change on every pass would keep this reading for ever, so
  * the document's limit ends it (review round 1, finding 4). A pass that
- * starts after the limit is the last one, and its records are written with
- * `agreed: false`. An entry that moved inside that pass may then not agree
- * with the drawing; the client redraws it.
+ * starts after the limit is the last one. If its reads still disagree, a
+ * query moved between the catch-up and the second read, and nothing proves
+ * the drawing shows what the records carry: the read fails with
+ * `RecordsUnsettled`, and no document is written (review round 2).
  */
 const readDrawn = <A, E, R>(
   read: Effect.Effect<A, E, R>,
   of: (records: A) => unknown,
   bindings: Bindings,
   limit: Deferred.Deferred<void>,
-): Effect.Effect<Read<A>, E, R> =>
+): Effect.Effect<A, E | RecordsUnsettled, R> =>
   Effect.gen(function* () {
     let before = yield* read;
     yield* bindings.catchUp;
@@ -263,7 +267,10 @@ const readDrawn = <A, E, R>(
       after = yield* read;
       agreed = Equal.equals(of(before), of(after));
     }
-    return { records: after, agreed };
+    if (!agreed) {
+      return yield* RecordsUnsettled.make({});
+    }
+    return after;
   });
 
 /** Run `closeWhen` once in the current Scope; the Deferred completes when it does. */
@@ -473,21 +480,24 @@ const draw = <E, R>(
  * released when the stream ends. `Closed` is written on every exit path
  * but a failed shell, which writes nothing. `options.closeWhen` is the
  * time limit, and it is required: a query still open when it completes
- * settles on the client as `StreamEnded`, and the client reads it again.
+ * settles on the client as `StreamEnded`, and the client reads it again. A
+ * shell whose records still move at the limit is not written: the stream
+ * fails with `RecordsUnsettled`.
  */
 export const renderToStream = <Props, E, R>(
   view: View<Props, E, R>,
   props: Props,
   document: Document,
   options: Streaming.ShellOptions,
-): Stream.Stream<string, E, Drawn<R>> => streamDrawing(viewDrawing(view, props), document, options);
+): Stream.Stream<string, E | RecordsUnsettled, Drawn<R>> =>
+  streamDrawing(viewDrawing(view, props), document, options);
 
 /** `renderToStream` over any drawing. Internal: see `Drawing`. */
 export const streamDrawing = <E, R>(
   drawing: Drawing<E, R>,
   document: Document,
   options: Streaming.ShellOptions,
-): Stream.Stream<string, E, Drawn<R>> =>
+): Stream.Stream<string, E | RecordsUnsettled, Drawn<R>> =>
   Stream.unwrap(streamPrepared(drawing, document, options, requestCache));
 
 /**
@@ -501,7 +511,11 @@ export const streamPrepared = <E, R>(
   document: Document,
   options: Streaming.ShellOptions,
   cacheOf: CacheSource,
-): Effect.Effect<Stream.Stream<string>, E, Exclude<R, QueryCache> | Scope.Scope> =>
+): Effect.Effect<
+  Stream.Stream<string>,
+  E | RecordsUnsettled,
+  Exclude<R, QueryCache> | Scope.Scope
+> =>
   Effect.gen(function* () {
     const cache = yield* cacheOf;
     const root = element("#root");
@@ -516,7 +530,7 @@ export const streamPrepared = <E, R>(
     const limit = yield* limitOf(options.closeWhen);
     // The shell shows every value the settled patches carry, and no value
     // an entry still behind a placeholder holds.
-    const { records } = yield* readDrawn(
+    const records = yield* readDrawn(
       Effect.provideService(
         Streaming.shell({ closeWhen: Deferred.await(limit) }),
         QueryCache,
@@ -559,7 +573,9 @@ export const streamPrepared = <E, R>(
  * query or draw nodes.
  *
  * `options.closeWhen` is the time limit, and it is required. When it
- * completes first, the drawing is serialized as it is: a query still open
+ * completes first, the drawing is serialized as it is, unless its records
+ * still move in the final pass: then it fails with `RecordsUnsettled` and
+ * writes nothing. A query still open
  * has no seed, its boundary shows the fallback, and the client reads it. A
  * `Loading` boundary that registers no query shows its fallback for ever,
  * so such a page always waits for the limit.
@@ -569,7 +585,7 @@ export const renderAwaitAll = <Props, E, R>(
   props: Props,
   document: Document,
   options: Streaming.ShellOptions,
-): Effect.Effect<string, E, Drawn<R>> =>
+): Effect.Effect<string, E | RecordsUnsettled, Drawn<R>> =>
   awaitAllDrawing(viewDrawing(view, props), document, options, requestCache);
 
 /** `renderAwaitAll` over any drawing. Internal: see `Drawing`. */
@@ -578,7 +594,7 @@ export const awaitAllDrawing = <E, R>(
   document: Document,
   options: Streaming.ShellOptions,
   cacheOf: CacheSource,
-): Effect.Effect<string, E, Drawn<R>> =>
+): Effect.Effect<string, E | RecordsUnsettled, Drawn<R>> =>
   Effect.map(awaitAllPage(drawing, document, options, cacheOf, Option.none()), (done) => done.html);
 
 /** An `AwaitAll` document and what it holds. Internal: the prerender build reads it. */
@@ -604,87 +620,87 @@ export const awaitAllPage: <E, R>(
   options: Streaming.ShellOptions,
   cacheOf: CacheSource,
   builtAt: Option.Option<number>,
-) => Effect.Effect<AwaitedPage, E, Drawn<R>> = Effect.fn("Html.renderAwaitAll")(function* <E, R>(
-  drawing: Drawing<E, R>,
-  document: Document,
-  options: Streaming.ShellOptions,
-  cacheOf: CacheSource,
-  builtAt: Option.Option<number>,
-) {
-  const scope = yield* Scope.make();
-  const html = yield* Effect.gen(function* () {
-    const cache = yield* cacheOf;
-    const withCache = <A, E2, R2>(effect: Effect.Effect<A, E2, R2>) =>
-      Effect.provideService(effect, QueryCache, cache);
-    // The limit runs once, from the drawing.
-    const limit = yield* Deferred.make<void>();
-    yield* Effect.forkIn(Effect.andThen(options.closeWhen, Deferred.succeed(limit, void 0)), scope);
-    // Completed by the host after a write that can clear the last fallback.
-    let changed = Deferred.makeUnsafe<void>();
-    const wake = (): void => void Deferred.doneUnsafe(changed, Exit.void);
-    // Setups the runtime ran after the frame, still running: a list row's
-    // setup may declare a query or draw nodes when it ends.
-    let setups = 0;
-    const bindings = makeBindings();
-    const watched = makeHost(
-      wake,
-      Option.some(() => {
-        setups += 1;
-        return () => {
-          setups -= 1;
-          wake();
-        };
-      }),
-      Option.some(bindings),
+) => Effect.Effect<AwaitedPage, E | RecordsUnsettled, Drawn<R>> = Effect.fn("Html.renderAwaitAll")(
+  function* <E, R>(
+    drawing: Drawing<E, R>,
+    document: Document,
+    options: Streaming.ShellOptions,
+    cacheOf: CacheSource,
+    builtAt: Option.Option<number>,
+  ) {
+    const scope = yield* Scope.make();
+    const html = yield* Effect.gen(function* () {
+      const cache = yield* cacheOf;
+      const withCache = <A, E2, R2>(effect: Effect.Effect<A, E2, R2>) =>
+        Effect.provideService(effect, QueryCache, cache);
+      // The limit runs once, from the drawing.
+      const limit = yield* Deferred.make<void>();
+      yield* Effect.forkIn(
+        Effect.andThen(options.closeWhen, Deferred.succeed(limit, void 0)),
+        scope,
+      );
+      // Completed by the host after a write that can clear the last fallback.
+      let changed = Deferred.makeUnsafe<void>();
+      const wake = (): void => void Deferred.doneUnsafe(changed, Exit.void);
+      // Setups the runtime ran after the frame, still running: a list row's
+      // setup may declare a query or draw nodes when it ends.
+      let setups = 0;
+      const bindings = makeBindings();
+      const watched = makeHost(
+        wake,
+        Option.some(() => {
+          setups += 1;
+          return () => {
+            setups -= 1;
+            wake();
+          };
+        }),
+        Option.some(bindings),
+      );
+      // The declarations and the seed, with the drawing at the same instant.
+      const records = readDrawn(
+        withCache(Effect.all({ ids: Streaming.declared, seed: Streaming.settledPatches })),
+        (read) => [read.ids, read.seed],
+        bindings,
+        limit,
+      );
+      const root = element("#root");
+      yield* Scope.provide(draw(drawing, cache, root, watched), scope);
+      let waiting = true;
+      while (waiting) {
+        // A fresh signal before the check, so a write after it is never missed.
+        if (Deferred.isDoneUnsafe(changed)) {
+          changed = Deferred.makeUnsafe<void>();
+        }
+        const signal = changed;
+        // Read before the declarations: a setup that ends after this read
+        // wakes the next pass, which reads them again.
+        const settledSetups = setups === 0;
+        // The catch-up draws, then the tree is read at once: a branch switch
+        // it ran has taken its fallback away by now.
+        const { ids, seed } = yield* records;
+        const open = seed.length < ids.length;
+        if (settledSetups && setups === 0 && !open && !root.children.some(waitsForData)) {
+          return awaited(document, root, stamp(seed, builtAt), true);
+        }
+        const wakes: Array<Effect.Effect<boolean>> = [
+          Effect.as(Deferred.await(signal), true),
+          Effect.as(Deferred.await(limit), false),
+        ];
+        if (open) {
+          wakes.push(Effect.as(withCache(Streaming.awaitDeclared), true));
+        }
+        waiting = yield* Effect.raceAll(wakes);
+      }
+      const { seed } = yield* records;
+      return awaited(document, root, stamp(seed, builtAt), false);
+    }).pipe(
+      Scope.provide(scope),
+      Effect.onExit((exit) => Scope.close(scope, exit)),
     );
-    // The declarations and the seed, with the drawing at the same instant.
-    const records = readDrawn(
-      withCache(Effect.all({ ids: Streaming.declared, seed: Streaming.settledPatches })),
-      (read) => [read.ids, read.seed],
-      bindings,
-      limit,
-    );
-    const root = element("#root");
-    yield* Scope.provide(draw(drawing, cache, root, watched), scope);
-    let waiting = true;
-    while (waiting) {
-      // A fresh signal before the check, so a write after it is never missed.
-      if (Deferred.isDoneUnsafe(changed)) {
-        changed = Deferred.makeUnsafe<void>();
-      }
-      const signal = changed;
-      // Read before the declarations: a setup that ends after this read
-      // wakes the next pass, which reads them again.
-      const settledSetups = setups === 0;
-      // The catch-up draws, then the tree is read at once: a branch switch
-      // it ran has taken its fallback away by now.
-      const drawn = yield* records;
-      const { ids, seed } = drawn.records;
-      if (!drawn.agreed) {
-        // The limit ended the reads: write the last pass as it is.
-        return awaited(document, root, stamp(seed, builtAt), false);
-      }
-      const open = seed.length < ids.length;
-      if (settledSetups && setups === 0 && !open && !root.children.some(waitsForData)) {
-        return awaited(document, root, stamp(seed, builtAt), true);
-      }
-      const wakes: Array<Effect.Effect<boolean>> = [
-        Effect.as(Deferred.await(signal), true),
-        Effect.as(Deferred.await(limit), false),
-      ];
-      if (open) {
-        wakes.push(Effect.as(withCache(Streaming.awaitDeclared), true));
-      }
-      waiting = yield* Effect.raceAll(wakes);
-    }
-    const { seed } = (yield* records).records;
-    return awaited(document, root, stamp(seed, builtAt), false);
-  }).pipe(
-    Scope.provide(scope),
-    Effect.onExit((exit) => Scope.close(scope, exit)),
-  );
-  return html;
-});
+    return html;
+  },
+);
 
 /**
  * Draw once and write the document with the seed of every query that has
@@ -700,36 +716,38 @@ export const renderSeeded: <E, R>(
   document: Document,
   options: Streaming.ShellOptions,
   cacheOf: CacheSource,
-) => Effect.Effect<string, E, Drawn<R>> = Effect.fn("Html.renderSeeded")(function* <E, R>(
-  drawing: Drawing<E, R>,
-  document: Document,
-  options: Streaming.ShellOptions,
-  cacheOf: CacheSource,
-) {
-  const scope = yield* Scope.make();
-  return yield* Effect.gen(function* () {
-    const cache = yield* cacheOf;
-    const root = element("#root");
-    const bindings = makeBindings();
-    yield* draw(
-      drawing,
-      cache,
-      root,
-      makeHost(() => {}, Option.none(), Option.some(bindings)),
+) => Effect.Effect<string, E | RecordsUnsettled, Drawn<R>> = Effect.fn("Html.renderSeeded")(
+  function* <E, R>(
+    drawing: Drawing<E, R>,
+    document: Document,
+    options: Streaming.ShellOptions,
+    cacheOf: CacheSource,
+  ) {
+    const scope = yield* Scope.make();
+    return yield* Effect.gen(function* () {
+      const cache = yield* cacheOf;
+      const root = element("#root");
+      const bindings = makeBindings();
+      yield* draw(
+        drawing,
+        cache,
+        root,
+        makeHost(() => {}, Option.none(), Option.some(bindings)),
+      );
+      const limit = yield* limitOf(options.closeWhen);
+      const records = yield* readDrawn(
+        Effect.provideService(Streaming.settledPatches, QueryCache, cache),
+        (read) => read,
+        bindings,
+        limit,
+      );
+      return page(document, root, records);
+    }).pipe(
+      Scope.provide(scope),
+      Effect.onExit((exit) => Scope.close(scope, exit)),
     );
-    const limit = yield* limitOf(options.closeWhen);
-    const { records } = yield* readDrawn(
-      Effect.provideService(Streaming.settledPatches, QueryCache, cache),
-      (read) => read,
-      bindings,
-      limit,
-    );
-    return page(document, root, records);
-  }).pipe(
-    Scope.provide(scope),
-    Effect.onExit((exit) => Scope.close(scope, exit)),
-  );
-});
+  },
+);
 
 const page = (
   document: Document,

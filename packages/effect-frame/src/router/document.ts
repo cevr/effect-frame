@@ -2,7 +2,13 @@ import type { View } from "effect-frame/view";
 import { Deferred, Effect, Exit, Option, Schema, Scope, Stream } from "effect";
 import type { ActorTransport } from "effect-frame/actor/client";
 import { QueryCache } from "effect-frame/actor/client";
-import type { CacheSource, Document, Drawing, HtmlNode } from "../view/hosts/html.js";
+import type {
+  CacheSource,
+  Document,
+  Drawing,
+  HtmlNode,
+  RecordsUnsettled,
+} from "../view/hosts/html.js";
 import { awaitAllDrawing, renderSeeded, requestCache, streamPrepared } from "../view/hosts/html.js";
 import { ResolveBeforeRender } from "./branch.js";
 import type { AnyRoute } from "./codec.js";
@@ -80,10 +86,21 @@ export type DocumentOutcome<R> = DocumentRedirect | RenderedDocument<R>;
  * The time limit completed before the document was prepared: a check, a
  * declaration, or the first drawing had not ended. Nothing was written, and
  * everything the render started is closed. `phase` says which step waited.
+ * `agree`: the drawing and the seed written beside it did not come to one
+ * instant, because a query kept moving (review round 2); a document whose
+ * seed the markup does not show is never written.
  */
 export class DocumentTimedOut extends Schema.TaggedError<DocumentTimedOut>()("DocumentTimedOut", {
-  phase: Schema.Literals(["settle", "draw"]),
+  phase: Schema.Literals(["settle", "draw", "agree"]),
 }) {}
+
+/** A drawing whose records did not agree at the limit fails as `DocumentTimedOut`. Internal. */
+export const agreedInTime = <A, R>(
+  effect: Effect.Effect<A, DocumentTimedOut | RecordsUnsettled, R>,
+): Effect.Effect<A, DocumentTimedOut, R> =>
+  Effect.catchTag(effect, "RecordsUnsettled", () =>
+    Effect.fail(DocumentTimedOut.make({ phase: "agree" })),
+  );
 
 /** What the router's mount needs once the request `Location` is provided. */
 type Mounted<R> = Exclude<
@@ -277,10 +294,16 @@ const prepareBody = <R, N>(
     );
   }
   if (mode === "SSR") {
-    return Effect.map(renderSeeded(resolvedFirst, document, { closeWhen }, shared), Stream.succeed);
+    return Effect.map(
+      agreedInTime(renderSeeded(resolvedFirst, document, { closeWhen }, shared)),
+      Stream.succeed,
+    );
   }
   if (mode === "AwaitAll") {
-    return Effect.map(awaitAllDrawing(routed, document, { closeWhen }, shared), Stream.succeed);
+    return Effect.map(
+      agreedInTime(awaitAllDrawing(routed, document, { closeWhen }, shared)),
+      Stream.succeed,
+    );
   }
-  return streamPrepared(routed, document, { closeWhen }, shared);
+  return agreedInTime(streamPrepared(routed, document, { closeWhen }, shared));
 };

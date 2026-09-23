@@ -47,6 +47,8 @@ import {
 import { describe, expect, it } from "effect-bun-test";
 import {
   Label,
+  Moving,
+  type Mover,
   type Side,
   collect,
   eventually,
@@ -761,6 +763,59 @@ const flatDefinition = {
   search: Route.search(Schema.Struct({})),
   view: () => Effect.succeed(<p>moded</p>),
 };
+
+/** A flat route of `Moving`, rendered in `mode`: its records move inside every catch-up. */
+const movingRoute = (mode: "SSR" | "Streamed" | "AwaitAll", mover: Mover) => {
+  const definition = {
+    path: "/moving",
+    params: Schema.Struct({}),
+    search: Route.search(Schema.Struct({})),
+    view: () => Moving({ mover }),
+  };
+  if (mode === "SSR") {
+    return Route.ssr("moving", definition);
+  }
+  if (mode === "Streamed") {
+    return Route.streamed("moving", definition);
+  }
+  return Route.awaitAll("moving", definition);
+};
+
+describe("a drawing whose seed never agrees with it by the limit (review round 2)", () => {
+  it.scopedLive(
+    'fails DocumentTimedOut { phase: "agree" } in SSR, Streamed and AwaitAll, and writes nothing',
+    () =>
+      Effect.gen(function* () {
+        const server = yield* sideOf(makeControl({ a: "Alpha" }, ["held"]));
+        const modes: ReadonlyArray<"SSR" | "Streamed" | "AwaitAll"> = [
+          "SSR",
+          "Streamed",
+          "AwaitAll",
+        ];
+        for (const mode of modes) {
+          // SSR and Streamed write once their first drawing agrees, so their
+          // moves run from the start. AwaitAll waits on `held`: its moves
+          // start at the limit, in the final pass.
+          const mover: Mover = { on: mode !== "AwaitAll", moves: 0 };
+          const failure = yield* Effect.flip(
+            documentOf(
+              [movingRoute(mode, mover)],
+              new URL(`${origin}/moving`),
+              Effect.andThen(
+                Effect.sleep("30 millis"),
+                Effect.sync(() => void (mover.on = true)),
+              ),
+            ).pipe(Effect.provideContext(server)),
+          );
+          expect({ mode, failure }).toEqual({
+            mode,
+            failure: DocumentTimedOut.make({ phase: "agree" }),
+          });
+        }
+      }),
+    10_000,
+  );
+});
 
 // ---------------------------------------------------------------------------
 // Inheritance, nesting, and release (#18 §2.2, §3.2, §4.3)

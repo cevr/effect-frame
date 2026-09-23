@@ -139,7 +139,9 @@ does, with no body.
    URL that renders another route with `PrerenderNotMatched`, and a page
    that is not complete at `timeLimit` with `PrerenderTimedOut`. The limit
    starts before `document(page)` runs, so a document that never answers
-   fails with `PrerenderTimedOut { phase: "document" }`.
+   fails with `PrerenderTimedOut { phase: "document" }`. A page whose
+   drawing and seed still disagree at the limit fails with
+   `PrerenderTimedOut { phase: "agree" }` (streaming review round 2).
 8. **`builtAt` is one value per build, from `Clock`.** Every patch the
    build writes carries it, and the manifest records it. A test clock gives
    a byte-identical rebuild.

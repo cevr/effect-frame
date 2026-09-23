@@ -15,11 +15,12 @@ import { zip } from "effect-frame/actor/client";
 import type { Node } from "effect-frame/view";
 import { Html, Loading, View, mount, ready, readyWithStale } from "effect-frame/view";
 import type { Scope } from "effect";
-import { Effect, Fiber, Option, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { renderSeeded, requestCache } from "../../src/view/hosts/html.js";
 import {
   Label,
+  Moving,
   frame,
   hydrateWith,
   idOf,
@@ -33,6 +34,7 @@ import {
   textOf,
   valueRecord,
 } from "./streaming-fixture.js";
+import type { Mover } from "./streaming-fixture.js";
 
 /**
  * A server drawing shows every value its seed carries (#22). A value goes
@@ -320,28 +322,104 @@ const Restless = (): Drawn =>
 
 describe("records that change on every pass", () => {
   it.scopedLive(
-    "end at the limit: AwaitAll, the streamed shell and SSR each write a document",
+    "end at the limit: AwaitAll and the streamed shell refuse, SSR writes its agreed seed",
     () =>
       Effect.gen(function* () {
         const server = yield* sideOf(makeControl({}));
         const limit = { closeWhen: Effect.sleep("100 millis") };
-        const awaited = yield* Effect.provideContext(
-          Html.renderAwaitAll(Restless, {}, frame, limit),
-          server,
+        const awaited = yield* Effect.flip(
+          Effect.provideContext(Html.renderAwaitAll(Restless, {}, frame, limit), server),
         );
-        expect(awaited).toContain("</html>");
-        const first = yield* Effect.map(
+        expect(awaited).toEqual(Html.RecordsUnsettled.make({}));
+        const first = yield* Effect.flip(
           Stream.runHead(
             Html.renderToStream(Restless, {}, frame, limit).pipe(Stream.provideContext(server)),
           ),
-          Option.getOrThrow,
         );
-        expect(first).toContain("<ul>");
+        expect(first).toEqual(Html.RecordsUnsettled.make({}));
+        // SSR's seed holds only settled values, and no row's query settles:
+        // its reads agree, and the document it writes is coherent.
         const seeded = yield* Effect.provideContext(
           renderSeeded((host, root) => mount(Restless, {}, host, root), frame, limit, requestCache),
           server,
         );
         expect(seeded).toContain("</html>");
+      }),
+    5_000,
+  );
+});
+
+/**
+ * A query that moves in the final pass, after the drawing caught up and
+ * before the records are read again (review round 2). Each pipeline either
+ * writes a document the client hydrates with no mismatch, or refuses with
+ * `RecordsUnsettled`. It never writes a seed its markup does not show.
+ */
+const coherentOrRefused = (written: Exit.Exit<string, Html.RecordsUnsettled>) =>
+  Effect.gen(function* () {
+    if (Exit.isFailure(written)) {
+      expect(Cause.squash(written.cause)).toEqual(Html.RecordsUnsettled.make({}));
+      return "refused";
+    }
+    const client = yield* sideOf(makeControl({ a: "Alpha" }, ["a", "held"]));
+    yield* install(written.value);
+    const { report } = yield* hydrateWith(client, (host, root) =>
+      mount(Moving, { mover: { on: false, moves: 0 } }, host, root),
+    );
+    expect(report.mismatches).toEqual([]);
+    return "coherent";
+  }).pipe(Effect.scoped);
+
+describe("a query that moves in the final pass", () => {
+  it.scopedLive(
+    "AwaitAll, the streamed shell and SSR never write a seed the markup does not show",
+    () =>
+      Effect.gen(function* () {
+        const server = yield* sideOf(makeControl({ a: "Alpha" }, ["held"]));
+
+        // AwaitAll waits on `held`; the limit starts the moves, then ends the wait.
+        const waiting: Mover = { on: false, moves: 0 };
+        const awaited = yield* Effect.exit(
+          Effect.provideContext(
+            Html.renderAwaitAll(Moving, { mover: waiting }, frame, {
+              closeWhen: Effect.andThen(
+                Effect.sleep("50 millis"),
+                Effect.sync(() => void (waiting.on = true)),
+              ),
+            }),
+            server,
+          ),
+        );
+        expect(waiting.moves).toBeGreaterThan(0);
+        expect(yield* coherentOrRefused(awaited)).toBe("refused");
+
+        // The streamed shell and SSR: the moves run from the first drawing.
+        const streaming: Mover = { on: true, moves: 0 };
+        const first = yield* Effect.exit(
+          Effect.map(
+            Stream.runHead(
+              Html.renderToStream(Moving, { mover: streaming }, frame, {
+                closeWhen: Effect.void,
+              }).pipe(Stream.provideContext(server)),
+            ),
+            Option.getOrThrow,
+          ),
+        );
+        expect(yield* coherentOrRefused(first)).toBe("refused");
+
+        const seeding: Mover = { on: true, moves: 0 };
+        const seeded = yield* Effect.exit(
+          Effect.provideContext(
+            renderSeeded(
+              (host, root) => mount(Moving, { mover: seeding }, host, root),
+              frame,
+              { closeWhen: Effect.void },
+              requestCache,
+            ),
+            server,
+          ),
+        );
+        expect(yield* coherentOrRefused(seeded)).toBe("refused");
       }),
     5_000,
   );

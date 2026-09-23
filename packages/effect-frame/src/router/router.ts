@@ -24,7 +24,11 @@ import * as Inspection from "../inspection.js";
 import type { NavigationKind } from "./check.js";
 import { CheckNavigation, RedirectCycle, read as readChecks, redirectLimit } from "./check.js";
 import type { NavigationResult } from "./receipt.js";
-import { Committed, Unchanged, register as registerReceipts } from "./receipt.js";
+import { Committed, Stayed, Unchanged, register as registerReceipts } from "./receipt.js";
+import type { LeaveKind, LeaveVerdict, Question } from "./leave-registry.js";
+import { Leave, read as readLeave } from "./leave-registry.js";
+import type { Traversal } from "./traversal.js";
+import { read as readTraversals } from "./traversal.js";
 
 /**
  * The router (#18 §7). The URL is the state: the router holds nothing about
@@ -168,9 +172,24 @@ type Request =
       readonly done: Outcome;
     }
   | {
+      /** The platform already moved: a committed Back or Forward. */
       readonly operation: "pop";
       readonly done: Outcome;
+    }
+  | {
+      /** The platform will move after the router answers: see `traversal.ts`. */
+      readonly operation: "traverse";
+      readonly traversal: Traversal;
+      readonly done: Outcome;
     };
+
+/** What a leave prompt ended with. `Superseded`: a newer request came first. */
+type Decision = LeaveVerdict | { readonly _tag: "Superseded" };
+
+const superseded: Decision = { _tag: "Superseded" };
+
+/** Why a traversal went unprotected, for the diagnostic. */
+type Unprotected = "committed" | "noncancelable";
 
 /** A candidate URL after its checks, with the route that will show it. */
 interface Settled<R> {
@@ -220,22 +239,51 @@ export const mount: <R, HostNode, N = R>(
   const pending = new Set<Request>();
   let closed = false;
   let mounted: Option.Option<Mounted<R | N>> = Option.none();
+  /** The leave prompt in progress. A newer request supersedes it. */
+  let prompt = Option.none<Deferred.Deferred<void>>();
   const registry = yield* Effect.serviceOption(Inspection.Registry);
   let routerOwner = Option.none<Inspection.OwnerToken>();
   if (Option.isSome(registry)) {
     routerOwner = Option.some(yield* Inspection.ownerFor(registry.value));
   }
 
-  const submit = (request: Request) =>
+  /** A request the router will never process lets its traversal through. */
+  const release = (request: Request): Effect.Effect<void> => {
+    if (request.operation === "traverse") {
+      return request.traversal.finish;
+    }
+    return Effect.void;
+  };
+
+  /**
+   * Queue a request. A leave prompt in progress is superseded: the newer
+   * request is the latest intent, so an earlier prompt's answer can never
+   * decide it. False when the router is closed.
+   */
+  const admit = (request: Request) =>
     Effect.gen(function* () {
       if (closed) {
-        return Option.none<NavigationResult>();
+        yield* release(request);
+        return false;
       }
       pending.add(request);
       const offered = yield* Queue.offer(requests, request);
       if (!offered) {
         pending.delete(request);
+        yield* release(request);
         yield* Deferred.succeed(request.done, Exit.succeed(Option.none()));
+        return false;
+      }
+      yield* Option.match(prompt, {
+        onNone: () => Effect.void,
+        onSome: (newer) => Effect.asVoid(Deferred.succeed(newer, void 0)),
+      });
+      return true;
+    });
+
+  const submit = (request: Request) =>
+    Effect.gen(function* () {
+      if (!(yield* admit(request))) {
         return Option.none<NavigationResult>();
       }
       const outcome = yield* Deferred.await(request.done);
@@ -255,10 +303,18 @@ export const mount: <R, HostNode, N = R>(
       return yield* submit({ operation, href, instance: Option.fromNullishOr(instance), done });
     });
 
+  // Platform moves are queued without waiting, so a later one can
+  // supersede an earlier one's leave prompt.
   const enqueuePop = () =>
     Effect.gen(function* () {
       const done = yield* Deferred.make<Exit.Exit<Option.Option<NavigationResult>, never>>();
-      yield* submit({ operation: "pop", done });
+      yield* admit({ operation: "pop", done });
+    });
+
+  const enqueueTraversal = (traversal: Traversal) =>
+    Effect.gen(function* () {
+      const done = yield* Deferred.make<Exit.Exit<Option.Option<NavigationResult>, never>>();
+      yield* admit({ operation: "traverse", traversal, done });
     });
 
   /** A request the router's close ended has no result: it is interrupted. */
@@ -474,11 +530,130 @@ export const mount: <R, HostNode, N = R>(
       yield* show(settled.url, settled.target);
     });
 
-  const process = (request: Request) =>
+  /**
+   * The leave checks the mounted route would ask for `url`, deepest first.
+   * Collecting them asks nothing.
+   */
+  const questionsFor = (url: URL, route: AnyRoute<R | N>, kind: LeaveKind) =>
+    Option.match(mounted, {
+      onNone: () => Effect.succeed<ReadonlyArray<Question>>([]),
+      onSome: (shown) =>
+        Option.match(readLeave(shown.entered), {
+          onNone: () => Effect.succeed<ReadonlyArray<Question>>([]),
+          onSome: (asker) => asker({ destination: url, kind, stays: shown.route === route }),
+        }),
+    });
+
+  /** Ask in order and stop at the first `Stay`. */
+  const ask = (questions: ReadonlyArray<Question>) =>
+    Effect.gen(function* () {
+      for (const question of questions) {
+        const verdict = yield* question(checkService);
+        if (verdict._tag === "Stay") {
+          return verdict;
+        }
+      }
+      return Leave;
+    });
+
+  /**
+   * Ask the old page whether it may leave for a settled candidate, before
+   * any destination data opens and before history moves. Each check runs in
+   * its own temporary Scope. A newer request, or the platform abandoning
+   * the traversal, interrupts the prompt: its Scope closes, and its answer,
+   * if it ever comes, decides nothing.
+   */
+  const decide = (settled: Settled<R | N>, kind: LeaveKind, abandoned: Effect.Effect<void>) =>
+    Effect.gen(function* () {
+      const questions = yield* questionsFor(settled.url, settled.target.route, kind);
+      if (questions.length === 0) {
+        const leave: Decision = Leave;
+        return leave;
+      }
+      const newer = yield* Deferred.make<void>();
+      prompt = Option.some(newer);
+      if (pending.size > 1) {
+        // A request is already waiting behind this one.
+        yield* Deferred.succeed(newer, void 0);
+      }
+      return yield* Effect.raceFirst(
+        Effect.map(ask(questions), (verdict): Decision => verdict),
+        Effect.as(Effect.raceFirst(Deferred.await(newer), abandoned), superseded),
+      ).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            prompt = Option.none();
+          }),
+        ),
+      );
+    });
+
+  /**
+   * The platform moved, or will move whatever the router answers: no check
+   * can keep the page. Follow it, and report when a registered check would
+   * have been asked. There is no `history.go` compensation.
+   */
+  const reportUnprotected = (settled: Settled<R | N>, reason: Unprotected) =>
+    Effect.gen(function* () {
+      const questions = yield* questionsFor(settled.url, settled.target.route, "pop");
+      if (questions.length > 0) {
+        yield* Effect.logWarning(
+          `route.leave.unprotected url=${settled.url.href} kind=pop checks=${String(questions.length)} reason=${reason}`,
+        );
+      }
+    });
+
+  const committedPop = (reason: Unprotected) =>
+    Effect.gen(function* () {
+      const url = yield* location.current;
+      const settled = yield* settle(url, "pop");
+      yield* reportUnprotected(settled, reason);
+      // A redirected pop has already moved, so its denied entry is replaced.
+      if (settled.url.href !== url.href) {
+        yield* location.replace(settled.url);
+      }
+      yield* move(settled, "pop");
+      return Committed(settled.url);
+    });
+
+  /**
+   * A traversal before commit. With protection, the checks settle and the
+   * page is asked first; `Stay` refuses the platform move. Without it, the
+   * platform commits and the router follows.
+   */
+  const traverse = (traversal: Traversal) =>
+    Effect.gen(function* () {
+      const committed = (yield* SubscriptionRef.get(navigations)).url;
+      if (traversal.protection === "none") {
+        if (!(yield* traversal.leave)) {
+          return Unchanged(committed);
+        }
+        return yield* committedPop("noncancelable");
+      }
+      const url = traversal.destination;
+      const settled = yield* settle(url, "pop");
+      const decision = yield* decide(settled, "pop", traversal.abandoned);
+      if (decision._tag !== "Leave") {
+        yield* traversal.stay;
+        if (decision._tag === "Stay") {
+          return Stayed(committed);
+        }
+        return Unchanged(committed);
+      }
+      if (!(yield* traversal.leave)) {
+        return Unchanged(committed);
+      }
+      if (settled.url.href !== url.href) {
+        yield* location.replace(settled.url);
+      }
+      yield* move(settled, "pop");
+      return Committed(settled.url);
+    }).pipe(Effect.ensuring(traversal.finish));
+
+  const controlled = (request: Extract<Request, { readonly operation: "push" | "replace" }>) =>
     Effect.gen(function* () {
       const base = yield* location.current;
       if (
-        request.operation !== "pop" &&
         Option.isSome(request.instance) &&
         (Option.isNone(mounted) || mounted.value.entered.instance !== request.instance.value)
       ) {
@@ -486,31 +661,49 @@ export const mount: <R, HostNode, N = R>(
       }
       const current = new URL(base.href);
       let href: string;
-      if (request.operation === "pop") {
-        href = current.href;
-      } else if (isUrlUpdater(request.href)) {
+      if (isUrlUpdater(request.href)) {
         href = request.href(current);
       } else {
         href = request.href;
       }
       const url = new URL(href, base);
-      if (request.operation !== "pop" && url.href === base.href) {
+      if (url.href === base.href) {
         return Unchanged(base);
       }
       const settled = yield* settle(url, request.operation);
-      if (request.operation !== "pop" && settled.url.href === base.href) {
+      if (settled.url.href === base.href) {
         return Unchanged(base);
       }
-      // History moves once, to the settled URL. A redirected pop has already
-      // moved, so its denied entry is replaced rather than kept.
+      const decision = yield* decide(settled, request.operation, Effect.never);
+      if (decision._tag === "Stay") {
+        return Stayed(base);
+      }
+      if (decision._tag === "Superseded") {
+        return Unchanged(base);
+      }
+      // History moves once, to the settled URL.
       if (request.operation === "push") {
         yield* location.push(settled.url);
-      } else if (request.operation === "replace" || settled.url.href !== url.href) {
+      } else {
         yield* location.replace(settled.url);
       }
       yield* move(settled, request.operation);
       return Committed(settled.url);
-    }).pipe(
+    });
+
+  type MountServices = Exclude<Exclude<Exclude<R | N, Router>, UrlStateRuntime>, Scope.Scope>;
+  const run = (request: Request): Effect.Effect<NavigationResult, never, MountServices> => {
+    if (request.operation === "pop") {
+      return committedPop("committed");
+    }
+    if (request.operation === "traverse") {
+      return traverse(request.traversal);
+    }
+    return controlled(request);
+  };
+
+  const process = (request: Request) =>
+    run(request).pipe(
       Effect.exit,
       Effect.flatMap((outcome) =>
         Effect.andThen(
@@ -541,7 +734,11 @@ export const mount: <R, HostNode, N = R>(
       pending.clear();
       yield* Effect.forEach(
         waiting,
-        (request) => Deferred.succeed(request.done, Exit.succeed(Option.none())),
+        (request) =>
+          Effect.andThen(
+            release(request),
+            Deferred.succeed(request.done, Exit.succeed(Option.none())),
+          ),
         {
           discard: true,
         },
@@ -553,6 +750,15 @@ export const mount: <R, HostNode, N = R>(
     Stream.runForEach(Stream.fromQueue(requests), (request) => process(request)),
   );
   yield* Effect.forkScoped(Stream.runForEach(location.pops, () => enqueuePop()));
+  yield* Option.match(readTraversals(location), {
+    onNone: () => Effect.void,
+    onSome: (traversals) =>
+      Effect.asVoid(
+        Effect.forkScoped(
+          Stream.runForEach(traversals, (traversal) => enqueueTraversal(traversal)),
+        ),
+      ),
+  });
   return service;
 });
 

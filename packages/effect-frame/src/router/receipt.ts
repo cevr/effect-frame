@@ -3,16 +3,17 @@ import type { RouteInstance, UrlUpdater } from "./route.js";
 import type { RouterService } from "./router.js";
 
 /**
- * PRIVATE (route slice 3). What one navigate or replace request did. The
- * public `navigate`/`replace` are this same path with the result dropped, so
- * there is one command path, not two. Not exported until the leave slice
- * makes `Stayed` reachable and the public surface can change once.
+ * PRIVATE (route slices 3 and 5). What one navigate or replace request did.
+ * The public `navigate`/`replace` are this same path with the result
+ * dropped, so there is one command path, not two. Not exported: the public
+ * surface changes once, when the route surface is chosen.
  *
  * - `Committed`: the final branch is installed at `url`, after any redirect.
  * - `Unchanged`: nothing moved; `url` is the current URL. A same-URL request,
- *   a redirect back to the current URL, and a stale route instance's request.
- * - `Stayed`: a leave check canceled the candidate before commit. Reserved:
- *   nothing produces it before slice 5.
+ *   a redirect back to the current URL, a stale route instance's request,
+ *   and a request whose leave prompt a newer navigation superseded.
+ * - `Stayed`: a leave check answered `Stay` before commit; `url` is the
+ *   current URL, which did not move.
  *
  * A request that the router's close ends is interrupted; it never reports a
  * result it did not reach.
@@ -24,6 +25,7 @@ export type NavigationResult =
 
 export const Committed = (url: URL): NavigationResult => ({ _tag: "Committed", url });
 export const Unchanged = (url: URL): NavigationResult => ({ _tag: "Unchanged", url });
+export const Stayed = (url: URL): NavigationResult => ({ _tag: "Stayed", url });
 
 /** The receipt-returning form of the router's commands. */
 export interface Receipts {

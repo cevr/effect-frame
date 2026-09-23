@@ -65,6 +65,10 @@ import {
 } from "./route.js";
 import { register as registerInspection } from "./route-inspection.js";
 import { Router } from "./router.js";
+import type { LeaveEntry, LeaveInput, MountedRouteService } from "./leave.js";
+import { MountedRoute } from "./leave.js";
+import type { Candidate, LeaveKind, Question } from "./leave-registry.js";
+import { register as registerLeave } from "./leave-registry.js";
 
 /**
  * PRIVATE proof (route slice 2, the #36 dependency). This module is not
@@ -118,6 +122,14 @@ import { Router } from "./router.js";
  *   attempt. The tree's first mount on the initial navigation waits for
  *   every entered import before it creates an instance, so the first frame
  *   holds imported views and never a pending fallback.
+ *
+ * Route slice 5 adds, still privately (see `docs/design/route-leave.md`):
+ *
+ * - Each instance provides `MountedRoute` to its own view setup, so the
+ *   view can register scoped leave checks with `Leave.onLeave`. The tree
+ *   answers the router's leave questions from its mounted instances,
+ *   deepest first: an exited instance, and a stayed one whose params or
+ *   search change. An unchanged stayed instance is not asked.
  */
 
 // ---------------------------------------------------------------------------
@@ -517,6 +529,23 @@ interface Instance<R> {
   readonly child: Effect.Effect<Option.Option<Instance<unknown>>>;
   /** It shows `errored`. A failed instance is entered again, never stayed. */
   readonly failed: () => boolean;
+  /**
+   * The leave checks this instance and its descendants would ask for a
+   * candidate whose matched outline at this slot is `next`, deepest first.
+   */
+  readonly questions: (
+    next: Option.Option<Outline>,
+    destination: URL,
+    kind: LeaveKind,
+  ) => Effect.Effect<ReadonlyArray<Question>>;
+}
+
+/** A candidate's matched branch, as values: what leave questions compare. */
+interface Outline {
+  readonly branch: BranchIdentity;
+  readonly values: Values<unknown, unknown>;
+  readonly signature: string;
+  readonly child: Option.Option<Outline>;
 }
 
 /** A tree mounted once: the Scope its declarations live under and its services. */
@@ -565,6 +594,8 @@ type ChildPlan<R> = Plan<R> | { readonly _tag: "None" };
 /** One matched segment and the matched remainder of its branch. */
 interface Match<R> {
   readonly branch: BranchIdentity;
+  /** The candidate's matched values from this segment down. */
+  readonly outline: Outline;
   /** Every matched segment's check for this candidate, parent first. */
   readonly check: (url: URL, kind: NavigationKind) => Check;
   enter(tree: Tree): Effect.Effect<Entering<R>, TransportReadError>;
@@ -595,6 +626,9 @@ export type AnyBranch<R> = Branch<AnySegment, R, unknown>;
 
 type ViewROf<B> = B extends Branch<AnySegment, infer R, unknown> ? R : never;
 type DataROf<B> = B extends Branch<AnySegment, unknown, infer R> ? R : never;
+/** What a view needs beyond what its instance provides: its Scope and `MountedRoute`. */
+type ViewServices<R> = Exclude<Exclude<R, MountedRoute>, Scope.Scope>;
+
 type OwnServices<Seg> =
   Seg extends Segment<string, unknown, unknown, infer Own, Declarations, infer CheckR>
     ? ServicesOf<Own[keyof Own]> | CheckR
@@ -617,7 +651,7 @@ export const leaf = <
   ...recovery: RecoveryFor<E>
 ): Branch<
   Segment<Name, Params, Search, Own, Data, CheckR>,
-  Exclude<R, Scope.Scope>,
+  ViewServices<R>,
   OwnServices<Segment<Name, Params, Search, Own, Data, CheckR>>
 > =>
   makeBranch<Name, Params, Search, Own, Data, CheckR, E, R, never>(
@@ -653,7 +687,7 @@ export const layout = <
   ...recovery: RecoveryFor<E>
 ): Branch<
   Segment<Name, Params, Search, Own, Data, CheckR>,
-  Exclude<R, Scope.Scope>,
+  ViewServices<R>,
   OwnServices<Segment<Name, Params, Search, Own, Data, CheckR>> | DataROf<Children[number]>
 > => {
   for (const branch of children) {
@@ -1238,6 +1272,8 @@ const failedEntering = <R>(
       values: Effect.succeed(values),
       child: Effect.succeed(Option.none()),
       failed: () => true,
+      // Its view never ran, so nothing registered a check.
+      questions: () => Effect.succeed([]),
     })),
 });
 
@@ -1297,7 +1333,7 @@ const makeBranch = <
   ) => Effect.Effect<Node, E, R>,
   boundary: Boundary<E>,
   lazy: Option.Option<LazyDefinition>,
-): Branch<Segment<Name, Params, Search, Own, Data, CheckR>, Exclude<R, Scope.Scope>, never> => {
+): Branch<Segment<Name, Params, Search, Own, Data, CheckR>, ViewServices<R>, never> => {
   // Typed memory of the instances this branch created. A match of this
   // branch reads it back, so no instance value is ever cast.
   const created = new WeakMap<Instance<unknown>, Internals<Params, Search, ChildR>>();
@@ -1437,6 +1473,67 @@ const makeBranch = <
       },
       data: routeData<Data>(data),
     };
+    // The leave checks this instance's view registered, oldest first.
+    const leaves: Array<LeaveEntry> = [];
+    const mountedRoute: MountedRouteService = {
+      owner: seg,
+      register: (entry) =>
+        Effect.acquireRelease(
+          Effect.sync(() => {
+            leaves.push(entry);
+          }),
+          () =>
+            Effect.sync(() => {
+              const at = leaves.indexOf(entry);
+              if (at >= 0) {
+                leaves.splice(at, 1);
+              }
+            }),
+        ),
+    };
+    const questions = (
+      next: Option.Option<Outline>,
+      destination: URL,
+      kind: LeaveKind,
+    ): Effect.Effect<ReadonlyArray<Question>> =>
+      Effect.gen(function* () {
+        // The candidate keeps this instance when the same branch matches here
+        // and the instance has not failed: exactly when `prepareSlot` stays.
+        const kept = Option.filter(
+          next,
+          (outline) => outline.branch === identity && !internals.failed,
+        );
+        const below = yield* Option.match(internals.child, {
+          onNone: () => Effect.succeed<ReadonlyArray<Question>>([]),
+          onSome: (current) =>
+            current.questions(
+              Option.flatMap(kept, (outline) => outline.child),
+              destination,
+              kind,
+            ),
+        });
+        const unchanged = Option.exists(
+          kept,
+          (outline) => outline.signature === internals.signature,
+        );
+        if (unchanged || leaves.length === 0) {
+          return below;
+        }
+        const current = yield* SubscriptionRef.get(state);
+        const input: LeaveInput<unknown, unknown> = {
+          previous: current.values,
+          next: Option.map(kept, (outline) => outline.values),
+          destination,
+          kind,
+        };
+        // Deepest first: descendants, then this instance's newest check.
+        const own = leaves.toReversed().map(
+          (entry): Question =>
+            (router) =>
+              entry.ask(input, router),
+        );
+        return [...below, ...own];
+      });
     const release: Effect.Effect<void> = Effect.suspend(() =>
       Effect.andThen(
         Option.match(internals.child, {
@@ -1446,7 +1543,7 @@ const makeBranch = <
         releaseAll(Array.from(internals.bindings.values(), (binding) => binding.current())),
       ),
     );
-    const instance: Instance<Exclude<R, Scope.Scope>> = {
+    const instance: Instance<ViewServices<R>> = {
       key: tree.nextKey(seg.name),
       branch: identity,
       // The view runs under an owned attempt in the instance's view Scope:
@@ -1458,7 +1555,16 @@ const makeBranch = <
           Option.filter(boundary.pending, () => presentable),
           settleOnDefect(
             attempt(
-              Effect.suspend(() => withTicket(ticket, view(props, slotSetup(internals)))),
+              Effect.suspend(() =>
+                withTicket(
+                  ticket,
+                  Effect.provideService(
+                    view(props, slotSetup(internals)),
+                    MountedRoute,
+                    mountedRoute,
+                  ),
+                ),
+              ),
               (error: E) => setupFailed(tree, internals, error),
             ),
           ),
@@ -1472,6 +1578,7 @@ const makeBranch = <
       values: Effect.map(SubscriptionRef.get(state), (current) => current.values),
       child: Effect.sync(() => internals.child),
       failed: () => internals.failed,
+      questions,
     };
     created.set(instance, internals);
     return instance;
@@ -1526,12 +1633,8 @@ const makeBranch = <
     );
     if (Result.isFailure(outcome)) {
       // A handled own failure replaces this instance with a failed one.
-      const entering = yield* declarationFailed<Exclude<R, Scope.Scope>>(
-        tree,
-        values,
-        outcome.failure,
-      );
-      const plan: Plan<Exclude<R, Scope.Scope>> = { _tag: "Enter", entering };
+      const entering = yield* declarationFailed<ViewServices<R>>(tree, values, outcome.failure);
+      const plan: Plan<ViewServices<R>> = { _tag: "Enter", entering };
       return plan;
     }
     const parts = outcome.success;
@@ -1573,7 +1676,7 @@ const makeBranch = <
         yield* releaseAll(replaced);
       }),
     };
-    const plan: Plan<Exclude<R, Scope.Scope>> = { _tag: "Stay", staying };
+    const plan: Plan<ViewServices<R>> = { _tag: "Stay", staying };
     return plan;
   });
 
@@ -1626,7 +1729,7 @@ const makeBranch = <
       ),
     );
     if (Result.isFailure(outcome)) {
-      return yield* declarationFailed<Exclude<R, Scope.Scope>>(tree, values, outcome.failure);
+      return yield* declarationFailed<ViewServices<R>>(tree, values, outcome.failure);
     }
     if (!tree.present && Option.isSome(ticket)) {
       // The first frame holds the imported view. The outcome is the setup's
@@ -1646,7 +1749,7 @@ const makeBranch = <
       ),
       (part) => part.entering,
     );
-    const entering: Entering<Exclude<R, Scope.Scope>> = {
+    const entering: Entering<ViewServices<R>> = {
       abort: Effect.andThen(
         releaseAll(acquired.map((part) => part.acquired)),
         Option.match(childEntering, {
@@ -1676,7 +1779,7 @@ const makeBranch = <
       onSome: (internals) => Effect.succeed(internals),
     });
 
-  const match = (input: MatchInput): Option.Option<Match<Exclude<R, Scope.Scope>>> =>
+  const match = (input: MatchInput): Option.Option<Match<ViewServices<R>>> =>
     Option.flatMap(matchPrefix(seg.parts, input.segments, input.index), (prefix) => {
       const record: PathRecord = { ...input.record, ...prefix.record };
       return Option.flatMap(seg.decode(record, input.search), (values) => {
@@ -1690,8 +1793,14 @@ const makeBranch = <
         if (Option.isNone(childMatch) && prefix.next !== input.segments.length) {
           return Option.none();
         }
-        const matched: Match<Exclude<R, Scope.Scope>> = {
+        const matched: Match<ViewServices<R>> = {
           branch: identity,
+          outline: {
+            branch: identity,
+            values,
+            signature,
+            child: Option.map(childMatch, (next) => next.outline),
+          },
           // Parent first: a child is asked only after this segment continued.
           check: (url, kind) =>
             Effect.flatMap(
@@ -1838,6 +1947,22 @@ export const route = <const Name extends string, Seg extends AnySegment, ViewR, 
                   ),
               }),
           };
+          // Leave questions for a candidate: the mounted root answers for the
+          // whole tree. A candidate of another route exits every instance.
+          registerLeave(entered, (candidate: Candidate) =>
+            Option.match(mounted, {
+              onNone: () => Effect.succeed<ReadonlyArray<Question>>([]),
+              onSome: (current) =>
+                current.root.questions(
+                  Option.map(
+                    Option.filter(matchUrl(root, candidate.destination), () => candidate.stays),
+                    (matched) => matched.outline,
+                  ),
+                  candidate.destination,
+                  candidate.kind,
+                ),
+            }),
+          );
           registerInspection(
             entered,
             Effect.suspend(() =>

@@ -3,12 +3,12 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import { QueryCache, useQuery } from "effect-frame/actor/client";
-import { Deferred, Effect, Schema } from "effect";
+import { Deferred, Effect, Fiber, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { TenantId } from "../src/contract.js";
 import { Revenue, TenantInfo } from "../src/queries.js";
 import { routes } from "../src/routes.js";
-import { click, keyText, mountApp, settle, tappedHost, textOf } from "./fixture.js";
+import { click, keyText, member, mountApp, settle, tappedHost, textOf } from "./fixture.js";
 
 /**
  * #17 and #18 on the dashboard's queries: a layout's declaration is one
@@ -20,6 +20,7 @@ import { click, keyText, mountApp, settle, tappedHost, textOf } from "./fixture.
 const origin = "http://dashboard.test";
 const overview = `${origin}/d/acme`;
 const acme = Schema.decodeSync(TenantId)("acme");
+const globex = Schema.decodeSync(TenantId)("globex");
 
 const tenantInfo = 'TenantInfo{"tenant":"acme"}';
 const revenue = 'Revenue{"tenant":"acme"}';
@@ -262,6 +263,45 @@ describe("an ack's override on the header (#17, #19 §4)", () => {
         "the ack's refresh",
       );
     }),
+  );
+
+  it.scopedLive(
+    "an ack during a tenant switch never writes one tenant's header into another's",
+    () =>
+      Effect.gen(function* () {
+        const { handlers, wire } = yield* tappedHost(member("acme", "globex"));
+        const app = yield* mountApp({ transport: wire.transport, href: overview, routes });
+        yield* painted(app.root);
+        const globexInfo = 'TenantInfo{"tenant":"globex"}';
+
+        // Globex's header read is held: the layout names Globex while the
+        // page still shows Acme's header and alerts.
+        const held = yield* handlers.hold("TenantInfo");
+        const moving = yield* Effect.forkChild(app.router.navigate("/d/globex"));
+        yield* settle(
+          Effect.sync(() => wire.reads.includes(globexInfo)),
+          "Globex's header read started",
+        );
+        expect(textOf(app.root, "#tenant-name")).toBe("Acme Co");
+
+        yield* click(app.root, '#alerts li[data-alert="a1"] .ack');
+        yield* settle(
+          Effect.sync(() => wire.sightingsOf("Ack a1").length > 0 || wire.failedSends.length > 0),
+          "the ack reached the host",
+        );
+        // Globex's entry has no value of its own yet, so the ack wrote nothing.
+        const entry = yield* app.run(useQuery(TenantInfo, { tenant: globex }));
+        expect(yield* entry.state.get).toEqual({ _tag: "Loading" });
+
+        yield* Deferred.succeed(held, void 0);
+        yield* Fiber.join(moving);
+        yield* settle(
+          Effect.sync(() => textOf(app.root, "#tenant-name") === "Globex"),
+          "Globex's header",
+        );
+        const landed = yield* entry.state.get;
+        expect(landed._tag === "Ready" && landed.value.name).toBe("Globex");
+      }),
   );
 
   it.scopedLive(

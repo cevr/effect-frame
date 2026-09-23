@@ -11,6 +11,7 @@ import {
   ActorTransport,
   Form,
   Generated,
+  Refused,
   Unreachable,
   contract,
   ref,
@@ -70,9 +71,23 @@ const reduce = (state: TasksSnapshot, message: TasksMessage): TasksSnapshot =>
     }),
   )(message);
 
+/** The one title the behavior refuses: the host answers it `Refused`. */
+export const refusedTitle = "reject-me";
+
 export const TasksLive = implementTransparent(
   Tasks,
-  Behavior.reducer<TasksSnapshot, TasksMessage>({ initial: { tasks: [], tags: [] }, reduce }),
+  Behavior.reducer<TasksSnapshot, TasksMessage, Refused>({
+    initial: { tasks: [], tags: [] },
+    reduce,
+    refuse: (message) =>
+      Option.as(
+        Option.liftPredicate(
+          message,
+          (sent) => sent._tag === "AddTask" && sent.title === refusedTitle,
+        ),
+        Refused.make({ reason: "that title is refused" }),
+      ),
+  }),
 );
 
 /**

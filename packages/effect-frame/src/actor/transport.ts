@@ -7,6 +7,7 @@ import type {
   CommandConflict,
   CommandId,
   DurableReceipt,
+  Refused,
   RemoteFailure,
   Uncertain,
 } from "./vocabulary.js";
@@ -42,7 +43,7 @@ export interface ProjectionWithRefresh {
   readonly refreshed: ReadonlyArray<Refreshed>;
 }
 
-export type TransportSendError = ActorStopped | CommandConflict | RemoteFailure;
+export type TransportSendError = ActorStopped | CommandConflict | Refused | RemoteFailure;
 export type TransportCallError = TransportSendError | Uncertain;
 export type TransportReadError = ActorStopped | RemoteFailure;
 /**

@@ -1,6 +1,7 @@
 import type { Schema, Scope } from "effect";
-import { Effect, Stream } from "effect";
+import { Effect, Option, Stream } from "effect";
 import { Machine } from "effect-machine";
+import type { Refused } from "./vocabulary.js";
 
 /**
  * One open behavior instance. `apply` runs one message against the current
@@ -22,8 +23,11 @@ export interface Turn<State, Message> {
  * The actor owns identity, mailbox, and lifetime. The behavior defines what
  * messages mean. `open` receives the state the actor starts from: the initial
  * state on first spawn, or the committed state on recovery.
+ *
+ * `Refusal` is `Refused` when the behavior has a `refuse` rule, and `never`
+ * when it has none: a reference to it can be `Rejected(Refused)` only then.
  */
-export interface Behavior<State, Message, R = never> {
+export interface Behavior<State, Message, R = never, Refusal extends Refused = never> {
   readonly initial: State;
   readonly open: (state: State) => Effect.Effect<Turn<State, Message>, never, R | Scope.Scope>;
   /**
@@ -33,7 +37,27 @@ export interface Behavior<State, Message, R = never> {
    * a message before the server commits it. There is no flag beside it.
    */
   readonly predict?: (state: State, message: Message) => State;
+  /**
+   * The messages this behavior refuses (#37, #25 §1). It reads the message
+   * alone, never the state, so the same bytes are refused every time and a
+   * refusal is conclusive for its command ID. A durable or hosted actor asks
+   * it before it admits a new command; a local actor asks it before the
+   * message's turn; a predicting reference asks it before it predicts. A
+   * refused message is never applied and commits no revision: its handle is
+   * `Rejected(Refused)`. Absent: every message is accepted.
+   */
+  readonly refuse?: (message: Message) => Option.Option<Refusal>;
 }
+
+/**
+ * The refusal of one message, if the behavior has a rule and it refuses.
+ * A behavior with no rule refuses nothing.
+ */
+export const refusalOf = <State, Message, R, Refusal extends Refused>(
+  behavior: Behavior<State, Message, R, Refusal>,
+  message: Message,
+): Option.Option<Refusal> =>
+  Option.flatMap(Option.fromNullishOr(behavior.refuse), (refuse) => refuse(message));
 
 export interface SetValue<A> {
   readonly _tag: "Set";
@@ -49,9 +73,21 @@ export const Value = {
  * helper lives on the local reference, not here, because an updater function
  * cannot cross the durable boundary.
  */
-export const value = <A>(initial: A): Behavior<A, SetValue<A>> => ({
+export interface ValueOptions<A, Refusal extends Refused> {
+  /** A value this actor refuses to hold. See `Behavior.refuse`. */
+  readonly refuse?: (value: A) => Option.Option<Refusal>;
+}
+
+export const value = <A, Refusal extends Refused = never>(
+  initial: A,
+  options: ValueOptions<A, Refusal> = {},
+): Behavior<A, SetValue<A>, never, Refusal> => ({
   initial,
   predict: (_state, message) => message.value,
+  ...Option.match(Option.fromNullishOr(options.refuse), {
+    onNone: () => ({}),
+    onSome: (refuse) => ({ refuse: (message: SetValue<A>) => refuse(message.value) }),
+  }),
   open: () =>
     Effect.succeed({
       apply: (_state, message) => Effect.succeed(message.value),
@@ -59,17 +95,24 @@ export const value = <A>(initial: A): Behavior<A, SetValue<A>> => ({
     }),
 });
 
-export interface ReducerOptions<State, Message> {
+export interface ReducerOptions<State, Message, Refusal extends Refused = never> {
   readonly initial: State;
+  /** Total: every message the behavior does not refuse reduces. */
   readonly reduce: (state: State, message: Message) => State;
+  /** The messages this behavior refuses. See `Behavior.refuse`. */
+  readonly refuse?: (message: Message) => Option.Option<Refusal>;
 }
 
 /** Event-to-state transitions with no state chart. */
-export const reducer = <State, Message>(
-  options: ReducerOptions<State, Message>,
-): Behavior<State, Message> => ({
+export const reducer = <State, Message, Refusal extends Refused = never>(
+  options: ReducerOptions<State, Message, Refusal>,
+): Behavior<State, Message, never, Refusal> => ({
   initial: options.initial,
   predict: options.reduce,
+  ...Option.match(Option.fromNullishOr(options.refuse), {
+    onNone: () => ({}),
+    onSome: (refuse) => ({ refuse }),
+  }),
   open: () =>
     Effect.succeed({
       apply: (state, message) => Effect.sync(() => options.reduce(state, message)),

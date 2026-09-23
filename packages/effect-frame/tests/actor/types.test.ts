@@ -1,7 +1,7 @@
 import { Context, Effect, Option, Schema, Stream } from "effect";
 import type { Scope } from "effect";
 import { describe, expect, test } from "bun:test";
-import { Cell, durable, spawn } from "effect-frame/actor";
+import { Behavior as Behaviors, Cell, Refused, durable, spawn } from "effect-frame/actor";
 import type {
   ActorRef,
   ActorStopped,
@@ -120,7 +120,13 @@ const remoteCallReportsALostReplyAsUncertain: Equals<
   ReturnType<typeof wireCall>,
   Effect.Effect<
     Applied<number>,
-    ActorStopped | CommandConflict | Unauthorized | ContractMismatch | UnknownContract | Uncertain
+    | ActorStopped
+    | CommandConflict
+    | Refused
+    | Unauthorized
+    | ContractMismatch
+    | UnknownContract
+    | Uncertain
   >
 > = true;
 
@@ -131,7 +137,44 @@ const remoteSendReturnsAnIdentifiedHandle: Equals<
 
 const remoteRejection: Equals<
   Rejection["remote"],
-  ActorStopped | CommandConflict | Unauthorized | ContractMismatch | UnknownContract
+  ActorStopped | CommandConflict | Refused | Unauthorized | ContractMismatch | UnknownContract
+> = true;
+
+// A refusal is in the type only when the behavior has a `refuse` rule. A
+// remote reference cannot see the host's behavior, so it always has one.
+const refusing = Behaviors.reducer({
+  initial: 0,
+  reduce: (_state: number, next: SetValue<number>) => next.value,
+  refuse: (next: SetValue<number>) =>
+    Option.as(
+      Option.liftPredicate(next, (sent) => sent.value < 0),
+      Refused.make({ reason: "negative" }),
+    ),
+});
+const spawnRefusing = () => spawn(refusing);
+declare const refusingLocal: Effect.Success<ReturnType<typeof spawnRefusing>>;
+const refusingLocalCall = () => refusingLocal.call(message);
+const refusingLocalCallCanBeRefused: Equals<
+  ReturnType<typeof refusingLocalCall>,
+  Effect.Effect<Applied<number>, ActorStopped | Refused>
+> = true;
+const refusingLocalState: Equals<
+  CommandState<number, "local", Refused>,
+  CommandAdmitted | CommandApplied<number> | CommandRejected<ActorStopped | Refused>
+> = true;
+const durableRefusing = () =>
+  durable({
+    behavior: refusing,
+    state: Schema.fromJsonString(Schema.Finite),
+    message: Schema.fromJsonString(
+      Schema.Struct({ _tag: Schema.tag("Set"), value: Schema.Finite }),
+    ),
+  });
+declare const refusingStore: Effect.Success<ReturnType<typeof durableRefusing>>;
+const refusingDurableCall = () => refusingStore.call(message, { commandId, timeout: "1 second" });
+const refusingDurableCallCanBeRefused: Equals<
+  ReturnType<typeof refusingDurableCall>,
+  Effect.Effect<Applied<number>, ActorStopped | CommandConflict | Refused | Uncertain>
 > = true;
 
 const appliedIsCommitted: Equals<Applied<number>["revision"], CommittedRevision> = true;
@@ -249,6 +292,9 @@ describe("reference types", () => {
     expect(remoteCallReportsALostReplyAsUncertain).toBe(true);
     expect(remoteSendReturnsAnIdentifiedHandle).toBe(true);
     expect(remoteRejection).toBe(true);
+    expect(refusingLocalCallCanBeRefused).toBe(true);
+    expect(refusingLocalState).toBe(true);
+    expect(refusingDurableCallCanBeRefused).toBe(true);
     expect(appliedIsCommitted).toBe(true);
     expect(localRequirementsAreExact).toBe(true);
     expect(localRefType).toBe(true);

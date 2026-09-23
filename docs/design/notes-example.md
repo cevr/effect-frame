@@ -49,7 +49,8 @@ reverted. The runner restores every file after each mutation.
 | A refetch never draws the fallback twice        | `readiness.test.tsx`: "a refetch holds the counts it has, and never draws the skeleton again"                              | `readiness.tsx`: a stale `Ready` does not settle its `Loading`                                  | Killed                                                                            |
 | (same row)                                      | (same test)                                                                                                                | `query.ts` `markStale` gives `Loading`; separately, `query-client.ts` `display` gives `Loading` | Survived both: see the note below                                                 |
 | `send` reads `Sent`; the add is on screen       | `command.test.tsx`: "a held add reads Sent, and its row is on screen before the reply"                                     | `ListBody` opens its reference with no `behavior`                                               | Killed (2 tests)                                                                  |
-| A rejection rolls the predicted row back        | `command.test.tsx`: "a rejected add rolls its predicted row back, and the list is as it was"                               | `provisional.ts` keeps every overlay when a command is released                                 | Killed                                                                            |
+| A reject-me add is refused by the real host     | `command.test.tsx`: "the host refuses a reject-me add, commits nothing, and the list is as it was"                         | `behavior.ts` without its `refuse` rule                                                         | Killed                                                                            |
+| (same row)                                      | (same test)                                                                                                                | `ref.ts` predicts a message its behavior refuses                                                | Killed                                                                            |
 | Dependents stay stale until the last add (HTTP) | `command.test.tsx`: "over HTTP, the counts stay stale from the first send until the last add settles"                      | `query-client.ts` `display` never marks a pending entry stale                                   | Killed                                                                            |
 | (same row)                                      | (same test)                                                                                                                | `query.ts` `markStale` returns the state unchanged                                              | Survived: this path is the refresh read, not command ownership                    |
 | A push lands at the top at shell commit         | `navigation.test.ts`: "a push lands at the top at shell commit even when the page is still tall" (WebKit, Chrome)          | `navigation.ts` `placeIntercepted` does not call `event.scroll()`                               | Killed (3 tests), after the tall-page test was added                              |
@@ -104,11 +105,18 @@ The two framework fixes this ticket made carry their own mutations:
 5. **The reducer is in `src/behavior.ts`.** The server hosts it and the
    client predicts with it. It is browser safe, so `notes.server.ts` imports
    it and not the reverse.
-6. **`reject-me` is refused on the wire.** #25 §1 says the behavior refuses
-   it. A reducer cannot refuse: in #19 a rejection comes only from the
-   framework (policy, admission, the transport). So the test wiretap refuses
-   the text with `Unauthorized` before the host sees it. That is a gap in
-   #19, not in Notes: an app cannot yet reject a command from its own rules.
+6. **The behavior refuses `reject-me`.** #25 §1 says the behavior refuses
+   it, and #19 had no way for an app to: a rejection came only from the
+   framework. #37 lands the surface (`command-engines.md`, "Application
+   refusal"): `Behavior.reducer` takes an optional pure
+   `refuse: (message) => Option<Refused>` beside a total `reduce`. The real
+   host refuses at admission (no append, no revision) and answers
+   `Rejected(Refused)`, over HTTP as a 422. The page predicts with the same
+   behavior, so it never draws the refused row: prediction and host agree,
+   and "the list is as it was" holds without a take-back. The wiretap no
+   longer fakes a rejection; it only records the host's own `Refused`. The
+   take-back of a predicted row that the host does reject is the package's
+   proof (`optimistic.md`), since a behavior-refused add is never predicted.
 7. **`returnTo` is the page's pathname.** The compose form reads it from the
    router's current location, so a plain post from `/lists/errands` or
    `/lists/errands/print` returns to that page.

@@ -11,13 +11,19 @@ import {
 import { select } from "./source.js";
 import type {
   ActorRef,
+  Refused,
   DurableCallOptions,
   DurableSendOptions,
   IdentifiedCommandHandle,
 } from "./vocabulary.js";
 
 /** The public durable actor options. The engine remains a private module. */
-export type DurableOptions<State, Message, R> = DurableEngineOptions<State, Message, R>;
+export type DurableOptions<
+  State,
+  Message,
+  R,
+  Refusal extends Refused = never,
+> = DurableEngineOptions<State, Message, R, Refusal>;
 
 export { DurableHostConfig };
 export type { DurableHostSettings };
@@ -30,9 +36,12 @@ export type { DurableHostSettings };
  * each unresolved command's ID and exact encoded bytes and runs the bounded
  * retry sequence on the construction context, not on the caller's fiber.
  */
-export const durable = Effect.fn("Actor.durable")(function* <State, Message, R>(
-  options: DurableOptions<State, Message, R>,
-) {
+export const durable = Effect.fn("Actor.durable")(function* <
+  State,
+  Message,
+  R,
+  Refusal extends Refused = never,
+>(options: DurableOptions<State, Message, R, Refusal>) {
   const engine = yield* openDurable(options);
   const owner = yield* Commands.make(durableCommands(engine));
   const encodeMessage = Schema.encodeEffect(options.message);
@@ -45,7 +54,7 @@ export const durable = Effect.fn("Actor.durable")(function* <State, Message, R>(
   ) {
     const identified = yield* Commands.identify(suppliedId(sendOptions));
     const owned = yield* owner.submit(identified, Effect.orDie(encodeMessage(message)), noKeys);
-    return identifiedHandle(owned) satisfies IdentifiedCommandHandle<State, "durable">;
+    return identifiedHandle(owned) satisfies IdentifiedCommandHandle<State, "durable", Refusal>;
   });
 
   const call = Effect.fn("Actor.durable.call")(function* (
@@ -61,7 +70,7 @@ export const durable = Effect.fn("Actor.durable")(function* <State, Message, R>(
     );
   });
 
-  const ref: ActorRef<State, Message, "durable"> = {
+  const ref: ActorRef<State, Message, "durable", Refusal> = {
     kind: "durable",
     applied,
     // Nothing here predicts: the displayed value is the committed one.

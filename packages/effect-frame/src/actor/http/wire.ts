@@ -12,6 +12,7 @@ import {
   CommandConflict,
   CommandId,
   ContractMismatch,
+  Refused,
   Unauthorized,
   Uncertain,
   UnknownContract,
@@ -150,6 +151,7 @@ export const WireApplied = Schema.Struct({
 export const WireError = Schema.Union([
   ActorStopped,
   CommandConflict,
+  Refused,
   Uncertain,
   Unauthorized,
   ContractMismatch,
@@ -162,6 +164,7 @@ export type WireError = Schema.Schema.Type<typeof WireError>;
 export const SendWireError = Schema.Union([
   ActorStopped,
   CommandConflict,
+  Refused,
   Unauthorized,
   ContractMismatch,
   UnknownContract,
@@ -170,6 +173,7 @@ export const SendWireError = Schema.Union([
 export const CallWireError = Schema.Union([
   ActorStopped,
   CommandConflict,
+  Refused,
   Uncertain,
   Unauthorized,
   ContractMismatch,
@@ -193,6 +197,10 @@ export const statusOf = (error: WireError): number => {
     case "CommandConflict":
     case "ContractMismatch":
       return 409;
+    // The behavior read the message and will never apply it: a typed,
+    // conclusive answer the client decodes, never a 5xx it would retry.
+    case "Refused":
+      return 422;
     case "Uncertain":
       return 504;
     case "ActorStopped":

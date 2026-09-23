@@ -21,11 +21,12 @@ import {
   CommandConflict,
   CommandId,
   MailboxStore,
+  Refused,
   Uncertain,
   committedRevision,
   durable,
 } from "effect-frame/actor";
-import type { DurableOptions } from "effect-frame/actor";
+import type { CommandSettled, DurableOptions } from "effect-frame/actor";
 
 const Add = Schema.TaggedStruct("Add", { amount: Schema.Finite });
 type Add = Schema.Schema.Type<typeof Add>;
@@ -40,6 +41,16 @@ const counterOptions: DurableOptions<number, Add, never> = {
   state: Schema.fromJsonString(Schema.Finite),
   message: Schema.fromJsonString(Add),
 };
+
+const refusingCounter = Behavior.reducer<number, Add, Refused>({
+  initial: 0,
+  reduce: (state, message) => state + message.amount,
+  refuse: (message) =>
+    Option.as(
+      Option.liftPredicate(message, (add) => add.amount < 0),
+      Refused.make({ reason: "negative" }),
+    ),
+});
 
 const slowBehavior: Behavior.Behavior<number, Add> = {
   initial: 0,
@@ -180,6 +191,47 @@ describe("durable actor", () => {
         reason: CommandConflict.make({ commandId: id("c1") }),
       });
       expect(yield* counter.state.get).toBe(3);
+    }),
+  );
+
+  withStore("a refused command is not admitted, and its retry is refused again", () =>
+    Effect.gen(function* () {
+      const store = yield* MailboxStore;
+      const counter = yield* durable({ ...counterOptions, behavior: refusingCounter });
+      const refused = yield* counter.send(add(-1), { commandId: id("c1") });
+      const expected = {
+        _tag: "Rejected",
+        reason: Refused.make({ reason: "negative" }),
+      } satisfies CommandSettled<number, "durable", Refused>;
+      expect(yield* refused.settled).toEqual(expected);
+      // Nothing was appended: no pending row, no receipt, no revision.
+      expect(yield* store.receipt(id("c1"))).toEqual(Option.none());
+      expect(yield* store.pending).not.toContain(id("c1"));
+      const retried = yield* counter.send(add(-1), { commandId: id("c1") });
+      expect(yield* retried.settled).toEqual(expected);
+      const failed = yield* Effect.flip(
+        counter.call(add(-1), { commandId: id("c1"), timeout: "1 second" }),
+      );
+      expect(failed).toEqual(Refused.make({ reason: "negative" }));
+      const accepted = yield* counter.call(add(2), { commandId: id("c2"), timeout: "1 second" });
+      expect(accepted).toEqual({ revision: committedRevision(1), state: 2 });
+    }),
+  );
+
+  withStore("a command the store already holds is answered from its record, not refused", () =>
+    Effect.gen(function* () {
+      const store = yield* MailboxStore;
+      const firstLife = yield* Scope.make();
+      const before = yield* durable(counterOptions).pipe(Scope.provide(firstLife));
+      const committed = yield* before.call(add(-1), { commandId: id("c1"), timeout: "1 second" });
+      yield* Effect.repeat(store.receipt(id("c1")), { until: Option.isSome });
+      yield* Scope.close(firstLife, Exit.void);
+
+      // The rule now refuses these bytes, but the command was admitted
+      // before it: a same-ID retry gets its receipt, never a refusal.
+      const after = yield* durable({ ...counterOptions, behavior: refusingCounter });
+      const retried = yield* after.call(add(-1), { commandId: id("c1"), timeout: "1 second" });
+      expect(retried).toEqual(committed);
     }),
   );
 

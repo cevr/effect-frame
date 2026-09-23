@@ -28,13 +28,45 @@ SQL store and recovery paths remain the existing adapter proof.
 source and a `settled` effect. A durable or remote handle also has its
 `commandId` and a `retry` effect.
 
-| Kind    | States                                       | `call` error                                                    |
-| ------- | -------------------------------------------- | --------------------------------------------------------------- |
-| local   | Admitted, Applied, Rejected(ActorStopped)    | ActorStopped                                                    |
-| durable | Sent, Admitted, Applied, Rejected, Uncertain | ActorStopped, CommandConflict, Uncertain                        |
-| remote  | Sent, Admitted, Applied, Rejected, Uncertain | durable errors, Unauthorized, ContractMismatch, UnknownContract |
+| Kind    | States                                       | `call` error                                                             |
+| ------- | -------------------------------------------- | ------------------------------------------------------------------------ |
+| local   | Admitted, Applied, Rejected                  | ActorStopped, the behavior's refusal                                     |
+| durable | Sent, Admitted, Applied, Rejected, Uncertain | ActorStopped, CommandConflict, the behavior's refusal, Uncertain         |
+| remote  | Sent, Admitted, Applied, Rejected, Uncertain | durable errors, Refused, Unauthorized, ContractMismatch, UnknownContract |
 
 A local handle cannot be Uncertain. The type says so.
+
+### Application refusal (#37)
+
+A behavior can refuse a message: `Behavior.reducer({initial, reduce, refuse})`
+and `Behavior.value(initial, {refuse})` take an optional pure rule
+`refuse: (message) => Option<Refused>`. `reduce` stays total. A refused
+message is never applied and commits no revision; its handle is
+`Rejected(Refused {reason})`.
+
+| Where            | When the rule runs                                 | Answer                                                       |
+| ---------------- | -------------------------------------------------- | ------------------------------------------------------------ |
+| local            | at the message's turn, before `apply`              | Rejected(Refused); `call` fails Refused                      |
+| durable / hosted | at admission, before the append, for a new ID only | Rejected(Refused); nothing appended, no receipt              |
+| HTTP wire        | the host's admission answer                        | 422 with the `Refused` body; the client decodes it           |
+| plain form post  | the host's admission answer                        | 422 page, the reason as the form's issue, a fresh `$command` |
+| predicting ref   | before `predict`, with the same behavior           | not predicted: no provisional row to take back               |
+
+- The rule reads the message alone, never the state. The same bytes are
+  therefore refused every time, so a refusal is conclusive in the owner (like
+  CommandConflict) and is never retried, and admission can answer it without
+  a turn, a pending row, or a store change.
+- A command the store already holds (pending or with a receipt) is answered
+  from its record, never refused: a same-ID retry cannot turn an admitted
+  command into a refused one, even if the rule changed between releases.
+- The type carries the refusal only where it can happen: a behavior without
+  `refuse` is `Behavior<S, M, R, never>`, so its local and durable references
+  keep `ActorStopped` (and `CommandConflict`) as their only rejections. A
+  remote reference cannot see the host's behavior, so `Refused` is always a
+  remote rejection.
+- A refusal that depends on state is not this rule: it is an ordinary message
+  the reducer answers with unchanged state (or a machine's guarded
+  transition), because only a turn sees the state.
 
 Public revisions are typed. `Applied.revision` is a `CommittedRevision`
 (`{_tag: "Committed", value}`). `ProvisionalRevision` carries its committed base
@@ -67,7 +99,7 @@ Adapters give it `identify`, `submit`, one healthy `pass`, and `own`.
   update. A retry that sees `Uncertain` can start the next sequence, and no
   finished sequence can clear the flag of a later one. Terminal settlement and
   owner closure end the record, so they never clear it.
-- Refusal. CommandConflict is always Rejected. Another refusal is Rejected only
+- Refusal. CommandConflict and Refused are always Rejected. Another refusal is Rejected only
   when no admission was possible. After a possible admission, ActorStopped is a
   lost pass, and Unauthorized, ContractMismatch, and UnknownContract hold the
   record Uncertain.

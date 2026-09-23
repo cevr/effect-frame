@@ -1,16 +1,18 @@
 import { Deferred, Effect, Equal, Option, Queue, Ref, Stream, SubscriptionRef } from "effect";
 import * as Inspection from "../inspection.js";
+import { refusalOf } from "./behavior.js";
 import type { Behavior } from "./behavior.js";
 import type { Committed } from "./engine-types.js";
 import { fromSubscriptionRef } from "./source.js";
 import type { Source } from "./source.js";
 import { ActorStopped } from "./vocabulary.js";
+import type { Refused } from "./vocabulary.js";
 
-interface MessageEnvelope<State, Message> {
+interface MessageEnvelope<State, Message, Refusal> {
   readonly _tag: "Message";
   /** Computes the message inside the turn, from the state the turn sees. */
   readonly derive: (state: State) => Message;
-  readonly reply: Deferred.Deferred<Committed<State>>;
+  readonly reply: Deferred.Deferred<Committed<State>, Refusal>;
 }
 
 interface AutonomousEnvelope<State> {
@@ -18,14 +20,17 @@ interface AutonomousEnvelope<State> {
   readonly state: State;
 }
 
-type Envelope<State, Message> = MessageEnvelope<State, Message> | AutonomousEnvelope<State>;
+type Envelope<State, Message, Refusal> =
+  | MessageEnvelope<State, Message, Refusal>
+  | AutonomousEnvelope<State>;
 
-export interface LocalAdmission<State> {
+export interface LocalAdmission<State, Refusal = never> {
   readonly admitted: number;
-  readonly reply: Deferred.Deferred<Committed<State>>;
+  /** Fails with the behavior's refusal: that message commits nothing. */
+  readonly reply: Deferred.Deferred<Committed<State>, Refusal>;
 }
 
-export interface LocalEngine<State, Message> {
+export interface LocalEngine<State, Message, Refusal = never> {
   readonly committed: Source<Committed<State>>;
   /**
    * True once the engine has stopped. The worker is interrupted before this
@@ -34,10 +39,10 @@ export interface LocalEngine<State, Message> {
   readonly isClosed: Effect.Effect<boolean>;
   readonly admit: (
     derive: (state: State) => Message,
-  ) => Effect.Effect<LocalAdmission<State>, ActorStopped>;
+  ) => Effect.Effect<LocalAdmission<State, Refusal>, ActorStopped>;
   readonly awaitReply: (
-    reply: Deferred.Deferred<Committed<State>>,
-  ) => Effect.Effect<Committed<State>, ActorStopped>;
+    reply: Deferred.Deferred<Committed<State>, Refusal>,
+  ) => Effect.Effect<Committed<State>, ActorStopped | Refusal>;
 }
 
 /**
@@ -47,9 +52,12 @@ export interface LocalEngine<State, Message> {
  * workers. The public actor module only supplies the stable facade and the
  * `modify` helper; no durable module is reachable from this browser-safe file.
  */
-export const openLocal = Effect.fn("Actor.local.open")(function* <State, Message, R>(
-  behavior: Behavior<State, Message, R>,
-) {
+export const openLocal = Effect.fn("Actor.local.open")(function* <
+  State,
+  Message,
+  R,
+  Refusal extends Refused = never,
+>(behavior: Behavior<State, Message, R, Refusal>) {
   const turn = yield* behavior.open(behavior.initial);
   const committed = yield* SubscriptionRef.make<Committed<State>>({
     revision: 0,
@@ -58,7 +66,7 @@ export const openLocal = Effect.fn("Actor.local.open")(function* <State, Message
   const admission = yield* Ref.make(0);
   const stopped = yield* Ref.make(false);
   const closed = yield* Deferred.make<never, ActorStopped>();
-  const mailbox = yield* Queue.unbounded<Envelope<State, Message>>();
+  const mailbox = yield* Queue.unbounded<Envelope<State, Message, Refusal>>();
 
   const commitState = (next: State) =>
     SubscriptionRef.modify(committed, (current): readonly [Committed<State>, Committed<State>] => {
@@ -75,7 +83,14 @@ export const openLocal = Effect.fn("Actor.local.open")(function* <State, Message
       }
       return;
     }
-    const next = yield* turn.apply(current.state, envelope.derive(current.state));
+    const message = envelope.derive(current.state);
+    // A refused message is never applied: no turn, no revision (#37).
+    const refusal = refusalOf(behavior, message);
+    if (Option.isSome(refusal)) {
+      yield* Deferred.fail(envelope.reply, refusal.value);
+      return;
+    }
+    const next = yield* turn.apply(current.state, message);
     const result = yield* commitState(next);
     yield* Deferred.succeed(envelope.reply, result);
   });
@@ -95,13 +110,13 @@ export const openLocal = Effect.fn("Actor.local.open")(function* <State, Message
     if (isStopped) {
       return yield* ActorStopped.make();
     }
-    const reply = yield* Deferred.make<Committed<State>>();
+    const reply = yield* Deferred.make<Committed<State>, Refusal>();
     const admitted = yield* Ref.updateAndGet(admission, (n) => n + 1);
     yield* Queue.offer(mailbox, { _tag: "Message", derive, reply });
     return { admitted, reply };
   });
 
-  const awaitReply = (reply: Deferred.Deferred<Committed<State>>) =>
+  const awaitReply = (reply: Deferred.Deferred<Committed<State>, Refusal>) =>
     Effect.raceFirst(Deferred.await(reply), Deferred.await(closed));
 
   const registry = yield* Effect.serviceOption(Inspection.Registry);
@@ -123,5 +138,5 @@ export const openLocal = Effect.fn("Actor.local.open")(function* <State, Message
     isClosed: Ref.get(stopped),
     admit,
     awaitReply,
-  } satisfies LocalEngine<State, Message>;
+  } satisfies LocalEngine<State, Message, Refusal>;
 });

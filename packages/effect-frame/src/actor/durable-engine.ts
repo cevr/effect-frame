@@ -15,16 +15,17 @@ import {
 } from "effect";
 import * as Inspection from "../inspection.js";
 import type { Behavior } from "./behavior.js";
+import { refusalOf } from "./behavior.js";
 import type { Committed } from "./engine-types.js";
 import type { PendingCommand, StoredReceipt } from "./mailbox-store.js";
 import { MailboxStore } from "./mailbox-store.js";
 import { fromSubscriptionRef } from "./source.js";
 import type { Source } from "./source.js";
-import type { CommandConflict, CommandId, DurableReceipt } from "./vocabulary.js";
+import type { CommandConflict, CommandId, DurableReceipt, Refused } from "./vocabulary.js";
 import { ActorStopped, Uncertain } from "./vocabulary.js";
 
-export interface DurableEngineOptions<State, Message, R> {
-  readonly behavior: Behavior<State, Message, R>;
+export interface DurableEngineOptions<State, Message, R, Refusal extends Refused = never> {
+  readonly behavior: Behavior<State, Message, R, Refusal>;
   /** Encodes the state to the string the mailbox stores. */
   readonly state: Schema.Codec<State, string>;
   /** Encodes a message at the durable boundary. */
@@ -32,7 +33,7 @@ export interface DurableEngineOptions<State, Message, R> {
 }
 
 /** The private durable engine surface shared by the public and hosted adapters. */
-export interface DurableEngine<State> {
+export interface DurableEngine<State, Refusal = never> {
   readonly committed: Source<Committed<State>>;
   /** True once the engine scope has begun to close. */
   readonly isClosed: Effect.Effect<boolean>;
@@ -40,25 +41,35 @@ export interface DurableEngine<State> {
   readonly sendPrepared: (
     commandId: CommandId,
     prepare: Effect.Effect<string>,
-  ) => Effect.Effect<DurableReceipt, ActorStopped | CommandConflict>;
+  ) => Effect.Effect<DurableReceipt, DurableAdmissionError<Refusal>>;
   /** Prepare and await one message inside the caller's timeout boundary. */
   readonly callPrepared: (
     commandId: CommandId,
     prepare: Effect.Effect<string>,
     timeout: Duration.Input,
-  ) => Effect.Effect<Committed<State>, ActorStopped | CommandConflict | Uncertain>;
-  /** Submit a validated, prepared payload without running its encoder again. */
+  ) => Effect.Effect<Committed<State>, DurableAdmissionError<Refusal> | Uncertain>;
+  /**
+   * Submit a validated, prepared payload without running its encoder again.
+   * A new command the behavior refuses is `Refused` and is not admitted; a
+   * command this store already holds is answered from its record.
+   */
   readonly sendEncoded: (
     commandId: CommandId,
     payload: string,
-  ) => Effect.Effect<DurableReceipt, ActorStopped | CommandConflict>;
+  ) => Effect.Effect<DurableReceipt, DurableAdmissionError<Refusal>>;
   /** Wait for the exact receipt of one prepared payload. */
   readonly callEncoded: (
     commandId: CommandId,
     payload: string,
     timeout: Duration.Input,
-  ) => Effect.Effect<Committed<State>, ActorStopped | CommandConflict | Uncertain>;
+  ) => Effect.Effect<Committed<State>, DurableAdmissionError<Refusal> | Uncertain>;
 }
+
+/**
+ * Why a durable engine does not admit one submission. `Refusal` is the
+ * behavior's own refusal: `never` when it has no `refuse` rule.
+ */
+export type DurableAdmissionError<Refusal = never> = ActorStopped | CommandConflict | Refusal;
 
 export interface DurableHostSettings {
   /** How long `call` sleeps between receipt polls when no early wake arrives. */
@@ -85,14 +96,19 @@ type Wake<State> =
  * The message codec is the prepared encoded boundary: an admitted payload is
  * stored once and can be decoded again after a restart without re-encoding it.
  */
-export const openDurable = Effect.fn("Actor.durable.engine")(function* <State, Message, R>(
-  options: DurableEngineOptions<State, Message, R>,
-) {
+export const openDurable = Effect.fn("Actor.durable.engine")(function* <
+  State,
+  Message,
+  R,
+  Refusal extends Refused = never,
+>(options: DurableEngineOptions<State, Message, R, Refusal>) {
   const store = yield* MailboxStore;
   const host = yield* DurableHostConfig;
   const encodeState = Schema.encodeEffect(options.state);
   const decodeState = Schema.decodeEffect(options.state);
   const decodeMessage = Schema.decodeEffect(options.message);
+  // Decode only for a behavior that has a rule: most refuse nothing.
+  const refuses = Option.isSome(Option.fromNullishOr(options.behavior.refuse));
 
   const restored = yield* Effect.flatMap(store.latest, (latest) =>
     Option.match(latest, {
@@ -174,6 +190,35 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <State, M
     return { revision: receipt.revision, state: decoded } satisfies Committed<State>;
   });
 
+  /** Whether this store already holds a command with this ID, pending or committed. */
+  const holds = (commandId: CommandId) =>
+    Effect.flatMap(store.receipt(commandId), (receipt) => {
+      if (Option.isSome(receipt)) {
+        return Effect.succeed(true);
+      }
+      return Effect.map(store.pending, (pending) => pending.includes(commandId));
+    });
+
+  /**
+   * Admission refusal (#37, #25 §1). The behavior's rule reads the message
+   * alone, so the same bytes are refused every time and nothing is appended:
+   * no admission, no revision. A command the store already holds is answered
+   * from its record instead, so a same-ID retry never turns an admitted
+   * command into a refused one.
+   */
+  const refuseNew = (commandId: CommandId, payload: string): Effect.Effect<void, Refusal> =>
+    Effect.gen(function* () {
+      if (!refuses) {
+        return;
+      }
+      const message = yield* Effect.orDie(decodeMessage(payload));
+      const refusal = refusalOf(options.behavior, message);
+      if (Option.isNone(refusal) || (yield* holds(commandId))) {
+        return;
+      }
+      return yield* refusal.value;
+    });
+
   const sendEncoded = Effect.fn("Actor.durable.sendEncoded")(function* (
     commandId: CommandId,
     payload: string,
@@ -182,6 +227,7 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <State, M
     if (isClosed) {
       return yield* ActorStopped.make();
     }
+    yield* refuseNew(commandId, payload);
     const appended = yield* store.append({
       commandId,
       payload,
@@ -310,5 +356,5 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <State, M
     callPrepared,
     sendEncoded,
     callEncoded,
-  } satisfies DurableEngine<State>;
+  } satisfies DurableEngine<State, Refusal>;
 });

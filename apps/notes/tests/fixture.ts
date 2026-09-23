@@ -5,20 +5,15 @@ import type {
   QueryFailure,
   QueryKey,
   Refreshed,
+  Refused,
   TransportService,
 } from "effect-frame/actor/client";
-import {
-  ActorTransport,
-  HttpTransport,
-  Unauthorized,
-  queryCacheLayer,
-} from "effect-frame/actor/client";
+import { ActorTransport, HttpTransport, queryCacheLayer } from "effect-frame/actor/client";
 import { Location, mount } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
 import { Dom, render } from "effect-frame/view";
 import { Context, Deferred, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
 import { hydrateApp } from "../src/app.js";
-import { Notes } from "../src/contract.js";
 import { NotFound } from "../src/views.js";
 import { inProcess } from "../src/notes.server.js";
 import type { NotesRuntime, RunningServer } from "../src/server.js";
@@ -196,9 +191,8 @@ export interface Sighting {
 /**
  * The real transport, watched and steered. Every verb reaches the real host
  * unless the test says otherwise: a held send or query waits for its gate,
- * a refused text fails its send with `Unauthorized` before the host sees
- * it (#19: a rejection is the framework's, never the behavior's), and a
- * failing query fails before the host sees it.
+ * and a failing query fails before the host sees it. A send the host
+ * refuses is recorded with the host's own `Refused`.
  */
 export const wiretap = (inner: TransportService) => {
   const reads: Array<string> = [];
@@ -206,7 +200,7 @@ export const wiretap = (inner: TransportService) => {
   const heldSends = new Map<string, Deferred.Deferred<void>>();
   const heldQueries = new Map<string, Deferred.Deferred<void>>();
   const failing = new Map<string, QueryFailure>();
-  const refused = new Set<string>();
+  const refusals: Array<{ readonly text: string; readonly reason: Refused }> = [];
   const pass = (gate: Option.Option<Deferred.Deferred<void>>) =>
     Option.match(gate, { onNone: () => Effect.void, onSome: Deferred.await });
   const read = (key: QueryKey) =>
@@ -227,16 +221,15 @@ export const wiretap = (inner: TransportService) => {
       Effect.gen(function* () {
         const text = textOf_(payload);
         yield* pass(Option.fromNullishOr(heldSends.get(text)));
-        if (refused.has(text)) {
-          commands.push({
-            verb: "send",
-            text,
-            active: active.map(keyText).toSorted(),
-            refreshed: [],
-          });
-          return yield* Unauthorized.make({ contract: Notes.name });
-        }
-        const reply = yield* inner.send(address, commandId, payload, active);
+        const reply = yield* inner.send(address, commandId, payload, active).pipe(
+          Effect.tapError((error) =>
+            Effect.sync(() => {
+              if (error._tag === "Refused") {
+                refusals.push({ text, reason: error });
+              }
+            }),
+          ),
+        );
         commands.push({
           verb: "send",
           text,
@@ -264,12 +257,13 @@ export const wiretap = (inner: TransportService) => {
     transport,
     reads,
     commands,
+    /** The sends the real host refused, with its reason, in order. */
+    refusals,
     /** Hold the send of a note with this text until the gate opens. */
     holdSend: (text: string) => gate(heldSends, text),
     /** Hold every read of this query until the gate opens. */
     holdQuery: (name: string) => gate(heldQueries, name),
     open: (held: Deferred.Deferred<void>) => Deferred.succeed(held, void 0),
-    refuse: (text: string) => Effect.sync(() => void refused.add(text)),
     fail: (name: string, failure: QueryFailure) =>
       Effect.sync(() => void failing.set(name, failure)),
     heal: (name: string) => Effect.sync(() => void failing.delete(name)),

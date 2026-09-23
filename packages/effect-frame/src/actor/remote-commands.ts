@@ -4,13 +4,20 @@ import { lost, ownNothing, refused } from "./command-owner.js";
 import type { Address } from "./contract.js";
 import type { Committed } from "./engine-types.js";
 import type { Projection, TransportCallError, TransportService } from "./transport.js";
-import type { CommandId, ContractMismatch, Unauthorized, UnknownContract } from "./vocabulary.js";
+import type {
+  CommandId,
+  ContractMismatch,
+  Refused,
+  Unauthorized,
+  UnknownContract,
+} from "./vocabulary.js";
 import { ActorStopped, CommandConflict } from "./vocabulary.js";
 
 /** Refusals a remote host can give one submission. `Unreachable` is not one. */
 export type RemoteRejection =
   | ActorStopped
   | CommandConflict
+  | Refused
   | Unauthorized
   | ContractMismatch
   | UnknownContract;

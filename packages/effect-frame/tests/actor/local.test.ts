@@ -5,6 +5,7 @@ import {
   ActorStopped,
   Behavior,
   Cell,
+  Refused,
   Source,
   Value,
   committedRevision,
@@ -61,6 +62,50 @@ const listBehavior = Behavior.reducer<ReadonlyArray<string>, Append>({
 });
 
 describe("local actor", () => {
+  it.scoped("a refused message is Rejected with its reason and commits no revision", () =>
+    Effect.gen(function* () {
+      const list = yield* spawn(
+        Behavior.reducer<ReadonlyArray<string>, Append, Refused>({
+          initial: [],
+          reduce: (state, message) => [...state, message.item],
+          refuse: (message) =>
+            Option.as(
+              Option.liftPredicate(message, (append) => append.item === ""),
+              Refused.make({ reason: "empty" }),
+            ),
+        }),
+      );
+      const handle = yield* list.send({ _tag: "Append", item: "" });
+      const settled = yield* handle.settled;
+      expect(settled._tag).toBe("Rejected");
+      expect(settled._tag === "Rejected" && settled.reason).toEqual(
+        Refused.make({ reason: "empty" }),
+      );
+      const failed = yield* Effect.flip(list.call({ _tag: "Append", item: "" }));
+      expect(failed).toEqual(Refused.make({ reason: "empty" }));
+      // Nothing was applied: the next accepted message is revision 1.
+      const applied = yield* list.call({ _tag: "Append", item: "a" });
+      expect(applied).toEqual({ revision: committedRevision(1), state: ["a"] });
+    }),
+  );
+
+  it.scoped("a value actor refuses by its rule, and modify reports the refusal", () =>
+    Effect.gen(function* () {
+      const count = yield* spawn(
+        Behavior.value(0, {
+          refuse: (value) =>
+            Option.as(
+              Option.liftPredicate(value, (n) => n < 0),
+              Refused.make({ reason: "negative" }),
+            ),
+        }),
+      );
+      const failed = yield* Effect.flip(modify(count, (n) => n - 1));
+      expect(failed).toEqual(Refused.make({ reason: "negative" }));
+      expect(yield* count.applied.get).toEqual({ revision: committedRevision(0), state: 0 });
+    }),
+  );
+
   it.scoped("simple state replaces its value through Set", () =>
     Effect.gen(function* () {
       const count = yield* spawn(Behavior.value(0));

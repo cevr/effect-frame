@@ -2,11 +2,11 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { ActorTransport, Generated, QueryCache, ref } from "effect-frame/actor/client";
+import { ActorTransport, Generated, QueryCache, Refused, ref } from "effect-frame/actor/client";
 import type { QueryState } from "effect-frame/actor/client";
 import { Effect, Layer, Option, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
-import { notesBehavior } from "../src/behavior.js";
+import { notesBehavior, refusedText } from "../src/behavior.js";
 import { Notes } from "../src/contract.js";
 import type { Counts } from "../src/queries.js";
 import { ListCounts, ListName, keyOf } from "../src/queries.js";
@@ -17,10 +17,11 @@ import { clientOf, elementOf, mountApp, serve, settle, tappedHost, textOf } from
 /**
  * #19 in the app: the compose form's send returns a handle before its reply
  * lands, the reference predicts the add in the same turn, and a rejection
- * takes the prediction back. The form mints its own command id on the
- * client, so its send is fresh (#67 §3). A rejection is the framework's
- * (#19): the wire refuses "reject-me" with `Unauthorized` before the host
- * sees it, because the reducer has no way to refuse.
+ * leaves the list as it was. The form mints its own command id on the
+ * client, so its send is fresh (#67 §3). The rejection is the behavior's
+ * own (#25 §1, #37): it refuses an add of "reject-me", the real host answers
+ * `Rejected(Refused)` and commits nothing, and the page predicts with the
+ * same rule, so it never shows the refused row.
  */
 
 const inbox = "http://notes.test/lists/inbox";
@@ -73,35 +74,47 @@ describe("the compose form's command", () => {
     }),
   );
 
-  it.scopedLive("a rejected add rolls its predicted row back, and the list is as it was", () =>
-    Effect.gen(function* () {
-      const wire = yield* tappedHost;
-      const app = yield* mountApp({ transport: wire.transport, href: inbox, routes });
-      yield* settle(Effect.sync(() => textOf(app.root, "#counts") === "0 of 0 done"));
-      yield* compose(app.root, "keep me");
-      yield* settle(
-        Effect.sync(() => textOf(app.root, "#status") === "Applied"),
-        "first add",
-      );
+  it.scopedLive(
+    "the host refuses a reject-me add, commits nothing, and the list is as it was",
+    () =>
+      Effect.gen(function* () {
+        const wire = yield* tappedHost;
+        const app = yield* mountApp({ transport: wire.transport, href: inbox, routes });
+        yield* settle(Effect.sync(() => textOf(app.root, "#counts") === "0 of 0 done"));
+        yield* compose(app.root, "keep me");
+        yield* settle(
+          Effect.sync(() => textOf(app.root, "#status") === "Applied"),
+          "first add",
+        );
+        const before = yield* app.run(ref(Notes, keyOf(inboxName), { resume: Option.none() }));
+        const committed = yield* before.applied.get;
 
-      yield* wire.refuse("reject-me");
-      const held = yield* wire.holdSend("reject-me");
-      yield* compose(app.root, "reject-me");
-      // Predicted while the refusal is still on the wire.
-      yield* settle(
-        Effect.sync(() => rows(app.root).join(",") === "keep me,reject-me"),
-        "the predicted row",
-      );
+        const held = yield* wire.holdSend(refusedText);
+        yield* compose(app.root, refusedText);
+        // Sent, and the page predicts with the host's rule: no row to take back.
+        yield* settle(
+          Effect.sync(() => textOf(app.root, "#status") === "Sent"),
+          "status Sent",
+        );
+        expect(rows(app.root)).toEqual(["keep me"]);
 
-      yield* wire.open(held);
-      yield* settle(
-        Effect.sync(() => textOf(app.root, "#status") === "Rejected"),
-        "Rejected",
-      );
-      expect(rows(app.root)).toEqual(["keep me"]);
-      expect(textOf(app.root, "#count")).toBe("1");
-      expect(textOf(app.root, "#counts")).toBe("0 of 1 done");
-    }),
+        yield* wire.open(held);
+        yield* settle(
+          Effect.sync(() => textOf(app.root, "#status") === "Rejected"),
+          "Rejected",
+        );
+        // The real host refused it: it reached the host, and no revision moved.
+        expect(wire.refusals).toEqual([
+          {
+            text: refusedText,
+            reason: Refused.make({ reason: `a note cannot say "${refusedText}"` }),
+          },
+        ]);
+        expect(yield* before.applied.get).toEqual(committed);
+        expect(rows(app.root)).toEqual(["keep me"]);
+        expect(textOf(app.root, "#count")).toBe("1");
+        expect(textOf(app.root, "#counts")).toBe("0 of 1 done");
+      }),
   );
 
   it.scopedLive(

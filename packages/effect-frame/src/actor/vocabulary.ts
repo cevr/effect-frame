@@ -18,6 +18,16 @@ export class CommandConflict extends Schema.TaggedError<CommandConflict>()("Comm
 }) {}
 
 /**
+ * The behavior refused this message (`Behavior.refuse`). Its rule reads the
+ * message alone, so the same bytes are refused every time: the refusal is
+ * conclusive, never retried, and no revision is committed for it. `reason`
+ * is the application's own words.
+ */
+export class Refused extends Schema.TaggedError<Refused>()("Refused", {
+  reason: Schema.String,
+}) {}
+
+/**
  * The wait ended before a receipt arrived. The command may still commit.
  * Retry with the same command ID.
  */
@@ -141,13 +151,17 @@ export interface CallOptions {
 /**
  * Why one submission will never apply. Every case is conclusive for that
  * submission. `Unreachable` is not here: a lost reply is uncertainty.
+ * `Refusal` is the local or durable behavior's own refusal (`Refused` when
+ * it has a `refuse` rule, `never` when it has none). A remote reference
+ * cannot know the host's behavior, so `Refused` is always a remote case.
  */
-export interface Rejection {
-  readonly local: ActorStopped;
-  readonly durable: ActorStopped | CommandConflict;
+export interface Rejection<Refusal = never> {
+  readonly local: ActorStopped | Refusal;
+  readonly durable: ActorStopped | CommandConflict | Refusal;
   readonly remote:
     | ActorStopped
     | CommandConflict
+    | Refused
     | Unauthorized
     | ContractMismatch
     | UnknownContract;
@@ -159,10 +173,10 @@ export interface Rejection {
  * uncertain. A remote call reports a lost reply as `Uncertain`, not as
  * `Unreachable`: the command may still commit.
  */
-export interface CallError {
-  readonly local: ActorStopped;
-  readonly durable: Rejection["durable"] | Uncertain;
-  readonly remote: Rejection["remote"] | Uncertain;
+export interface CallError<Refusal = never> {
+  readonly local: Rejection<Refusal>["local"];
+  readonly durable: Rejection<Refusal>["durable"] | Uncertain;
+  readonly remote: Rejection<Refusal>["remote"] | Uncertain;
 }
 
 // ---------------------------------------------------------------------------
@@ -205,37 +219,43 @@ export interface CommandUncertain {
 }
 
 /** The lifecycle each placement can reach. A local command is never uncertain. */
-export interface CommandStates<State> {
-  readonly local: CommandAdmitted | CommandApplied<State> | CommandRejected<Rejection["local"]>;
+export interface CommandStates<State, Refusal = never> {
+  readonly local:
+    | CommandAdmitted
+    | CommandApplied<State>
+    | CommandRejected<Rejection<Refusal>["local"]>;
   readonly durable:
     | CommandSent
     | CommandAdmitted
     | CommandApplied<State>
-    | CommandRejected<Rejection["durable"]>
+    | CommandRejected<Rejection<Refusal>["durable"]>
     | CommandUncertain;
   readonly remote:
     | CommandSent
     | CommandAdmitted
     | CommandApplied<State>
-    | CommandRejected<Rejection["remote"]>
+    | CommandRejected<Rejection<Refusal>["remote"]>
     | CommandUncertain;
 }
 
-export type CommandState<State, Kind extends ActorKind> = CommandStates<State>[Kind];
+export type CommandState<State, Kind extends ActorKind, Refusal = never> = CommandStates<
+  State,
+  Refusal
+>[Kind];
 
 /** The first terminal state. Rejection stays in the value. */
-export type CommandSettled<State, Kind extends ActorKind> =
+export type CommandSettled<State, Kind extends ActorKind, Refusal = never> =
   | CommandApplied<State>
-  | CommandRejected<Rejection[Kind]>;
+  | CommandRejected<Rejection<Refusal>[Kind]>;
 
 /**
  * One submitted command. `state` is available before any reply lands.
  * `settled` waits for the first terminal state; the caller owns that wait,
  * and an uncertain command may never settle.
  */
-export interface CommandHandle<State, Kind extends ActorKind> {
-  readonly state: Source<CommandState<State, Kind>>;
-  readonly settled: Effect.Effect<CommandSettled<State, Kind>>;
+export interface CommandHandle<State, Kind extends ActorKind, Refusal = never> {
+  readonly state: Source<CommandState<State, Kind, Refusal>>;
+  readonly settled: Effect.Effect<CommandSettled<State, Kind, Refusal>>;
 }
 
 /**
@@ -247,15 +267,16 @@ export interface CommandHandle<State, Kind extends ActorKind> {
 export interface IdentifiedCommandHandle<
   State,
   Kind extends "durable" | "remote",
-> extends CommandHandle<State, Kind> {
+  Refusal = never,
+> extends CommandHandle<State, Kind, Refusal> {
   readonly commandId: CommandId;
   readonly retry: Effect.Effect<void>;
 }
 
-export interface CommandHandles<State> {
-  readonly local: CommandHandle<State, "local">;
-  readonly durable: IdentifiedCommandHandle<State, "durable">;
-  readonly remote: IdentifiedCommandHandle<State, "remote">;
+export interface CommandHandles<State, Refusal = never> {
+  readonly local: CommandHandle<State, "local", Refusal>;
+  readonly durable: IdentifiedCommandHandle<State, "durable", Refusal>;
+  readonly remote: IdentifiedCommandHandle<State, "remote", Refusal>;
 }
 
 /**
@@ -264,7 +285,7 @@ export interface CommandHandles<State> {
  * `send` never fails: it returns a handle once the command is allocated
  * locally, and every refusal is a state of that handle.
  */
-export interface ActorRef<State, Message, Kind extends ActorKind> {
+export interface ActorRef<State, Message, Kind extends ActorKind, Refusal = never> {
   readonly kind: Kind;
   /** The latest committed revision this reference observed, with its state. */
   readonly applied: Source<Applied<State>>;
@@ -279,9 +300,9 @@ export interface ActorRef<State, Message, Kind extends ActorKind> {
   readonly send: (
     message: Message,
     options: SendOptions[Kind],
-  ) => Effect.Effect<CommandHandles<State>[Kind]>;
+  ) => Effect.Effect<CommandHandles<State, Refusal>[Kind]>;
   readonly call: (
     message: Message,
     options: CallOptions[Kind],
-  ) => Effect.Effect<Applied<State>, CallError[Kind]>;
+  ) => Effect.Effect<Applied<State>, CallError<Refusal>[Kind]>;
 }

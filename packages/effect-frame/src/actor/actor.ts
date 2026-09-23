@@ -13,26 +13,27 @@ import type {
   CommandHandle,
   CommandSettled,
   CommandState,
+  Refused,
 } from "./vocabulary.js";
 import { ActorStopped, committedRevision } from "./vocabulary.js";
 
-type LocalState<State> = CommandState<State, "local">;
-type LocalSettled<State> = CommandSettled<State, "local">;
+type LocalState<State, Refusal> = CommandState<State, "local", Refusal>;
+type LocalSettled<State, Refusal> = CommandSettled<State, "local", Refusal>;
 
 const appliedState = <State>(
   admitted: number,
   committed: Committed<State>,
-): LocalSettled<State> => ({
+): LocalSettled<State, never> => ({
   _tag: "Applied",
   admitted,
   revision: committedRevision(committed.revision),
   state: committed.state,
 });
 
-const stoppedState: LocalSettled<never> = { _tag: "Rejected", reason: ActorStopped.make() };
+const stoppedState: LocalSettled<never, never> = { _tag: "Rejected", reason: ActorStopped.make() };
 
 /** An actor that stopped before admission: the handle is already terminal. */
-const stoppedHandle = <State>(): CommandHandle<State, "local"> => ({
+const stoppedHandle = <State, Refusal>(): CommandHandle<State, "local", Refusal> => ({
   state: { get: Effect.succeed(stoppedState), changes: Stream.succeed(stoppedState) },
   settled: Effect.succeed(stoppedState),
 });
@@ -42,19 +43,27 @@ const stoppedHandle = <State>(): CommandHandle<State, "local"> => ({
  * never uncertain: its mailbox is in this process, so it either applies or
  * the actor stops before its turn.
  */
-const localHandle = <State, Message>(
-  engine: LocalEngine<State, Message>,
+const localHandle = <State, Message, Refusal>(
+  engine: LocalEngine<State, Message, Refusal>,
   admitted: number,
-  reply: Deferred.Deferred<Committed<State>>,
-): CommandHandle<State, "local"> => {
-  const final: Effect.Effect<LocalSettled<State>> = Effect.flatMap(Deferred.poll(reply), (done) =>
-    Option.match(done, {
-      onNone: () => Effect.succeed(stoppedState),
-      onSome: (value) => Effect.map(value, (committed) => appliedState(admitted, committed)),
-    }),
+  reply: Deferred.Deferred<Committed<State>, Refusal>,
+): CommandHandle<State, "local", Refusal> => {
+  const final: Effect.Effect<LocalSettled<State, Refusal>> = Effect.flatMap(
+    Deferred.poll(reply),
+    (done) =>
+      Option.match(done, {
+        onNone: () => Effect.succeed(stoppedState),
+        // A refused message's reply fails with the refusal: Rejected, with
+        // no revision.
+        onSome: (value) =>
+          Effect.match(value, {
+            onFailure: (reason): LocalSettled<State, Refusal> => ({ _tag: "Rejected", reason }),
+            onSuccess: (committed) => appliedState(admitted, committed),
+          }),
+      }),
   );
   // Read the stop flag first: once it is true, an empty reply stays empty.
-  const read: Effect.Effect<LocalState<State>> = Effect.gen(function* () {
+  const read: Effect.Effect<LocalState<State, Refusal>> = Effect.gen(function* () {
     const stopped = yield* engine.isClosed;
     const done = yield* Deferred.isDone(reply);
     if (stopped || done) {
@@ -66,7 +75,7 @@ const localHandle = <State, Message>(
     onSuccess: (committed) => Effect.succeed(appliedState(admitted, committed)),
     onFailure: () => final,
   });
-  const state: Source<LocalState<State>> = {
+  const state: Source<LocalState<State, Refusal>> = {
     get: read,
     // The current value, then the terminal value once, unless the current
     // value already is terminal.
@@ -87,10 +96,15 @@ const localHandle = <State, Message>(
  * inside the actor's turn, so read and send cannot interleave with another
  * message.
  */
-export interface LocalActorRef<State, Message> extends ActorRef<State, Message, "local"> {
+export interface LocalActorRef<State, Message, Refusal = never> extends ActorRef<
+  State,
+  Message,
+  "local",
+  Refusal
+> {
   readonly derive: (
     derive: (state: State) => Message,
-  ) => Effect.Effect<Applied<State>, ActorStopped>;
+  ) => Effect.Effect<Applied<State>, ActorStopped | Refusal>;
 }
 
 /**
@@ -98,9 +112,12 @@ export interface LocalActorRef<State, Message> extends ActorRef<State, Message, 
  * Closing the scope stops the actor; every waiting `call` fails with
  * `ActorStopped`.
  */
-export const spawn = Effect.fn("Actor.spawn")(function* <State, Message, R>(
-  behavior: Behavior<State, Message, R>,
-) {
+export const spawn = Effect.fn("Actor.spawn")(function* <
+  State,
+  Message,
+  R,
+  Refusal extends Refused = never,
+>(behavior: Behavior<State, Message, R, Refusal>) {
   const engine = yield* openLocal(behavior);
   const applied = select(engine.committed, toApplied);
   const send = Effect.fn("Actor.send")(function* (message: Message) {
@@ -108,7 +125,7 @@ export const spawn = Effect.fn("Actor.spawn")(function* <State, Message, R>(
       .admit(() => message)
       .pipe(
         Effect.match({
-          onFailure: () => stoppedHandle<State>(),
+          onFailure: () => stoppedHandle<State, Refusal>(),
           onSuccess: ({ admitted, reply }) => localHandle(engine, admitted, reply),
         }),
       );
@@ -121,7 +138,7 @@ export const spawn = Effect.fn("Actor.spawn")(function* <State, Message, R>(
     const { reply } = yield* engine.admit(compute);
     return yield* Effect.map(engine.awaitReply(reply), toApplied);
   });
-  const reference: LocalActorRef<State, Message> = {
+  const reference: LocalActorRef<State, Message, Refusal> = {
     kind: "local",
     applied,
     // Nothing here predicts: the displayed value is the committed one.
@@ -142,15 +159,18 @@ export const spawn = Effect.fn("Actor.spawn")(function* <State, Message, R>(
 export const modify: {
   <A>(
     update: (value: A) => A,
-  ): (ref: LocalActorRef<A, SetValue<A>>) => Effect.Effect<Applied<A>, ActorStopped>;
-  <A>(
-    ref: LocalActorRef<A, SetValue<A>>,
+  ): <Refusal>(
+    ref: LocalActorRef<A, SetValue<A>, Refusal>,
+  ) => Effect.Effect<Applied<A>, ActorStopped | Refusal>;
+  <A, Refusal>(
+    ref: LocalActorRef<A, SetValue<A>, Refusal>,
     update: (value: A) => A,
-  ): Effect.Effect<Applied<A>, ActorStopped>;
+  ): Effect.Effect<Applied<A>, ActorStopped | Refusal>;
 } = Function.dual(
   2,
-  <A>(
-    ref: LocalActorRef<A, SetValue<A>>,
+  <A, Refusal>(
+    ref: LocalActorRef<A, SetValue<A>, Refusal>,
     update: (value: A) => A,
-  ): Effect.Effect<Applied<A>, ActorStopped> => ref.derive((value) => Value.Set(update(value))),
+  ): Effect.Effect<Applied<A>, ActorStopped | Refusal> =>
+    ref.derive((value) => Value.Set(update(value))),
 );

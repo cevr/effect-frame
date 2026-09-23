@@ -1,4 +1,5 @@
 import { Effect, Option, Schema, Stream, SubscriptionRef } from "effect";
+import { refusalOf } from "./behavior.js";
 import type { Behavior } from "./behavior.js";
 import { callThrough, identifiedHandle, suppliedId, toApplied } from "./command-handle.js";
 import { isMinted } from "./command-id.js";
@@ -22,6 +23,7 @@ import type {
   CommandId,
   Displayed,
   IdentifiedCommandHandle,
+  Refused,
 } from "./vocabulary.js";
 
 export type RemoteActorRef<C extends AnyContract> = ActorRef<SnapshotOf<C>, MessageOf<C>, "remote">;
@@ -38,9 +40,10 @@ export interface RefOptions<C extends AnyContract> {
    * `predict` makes the reference optimistic: a send with a fresh command ID
    * shows its predicted state at once, as a provisional revision, until the
    * committed base holds it or it is rejected. A supplied ID never predicts;
-   * it waits for its receipt. A machine behavior never predicts.
+   * it waits for its receipt. A machine behavior never predicts. A message
+   * the behavior refuses is never predicted: the host refuses it too.
    */
-  readonly behavior?: Behavior<SnapshotOf<C>, MessageOf<C>, unknown>;
+  readonly behavior?: Behavior<SnapshotOf<C>, MessageOf<C>, unknown, Refused>;
 }
 
 const fetchInitial = <C extends AnyContract>(
@@ -108,6 +111,12 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
   const predict = Option.flatMap(Option.fromNullishOr(options.behavior), (behavior) =>
     Option.fromNullishOr(behavior.predict),
   );
+  const refuses = (message: MessageOf<C>): boolean =>
+    Option.isSome(
+      Option.flatMap(Option.fromNullishOr(options.behavior), (behavior) =>
+        refusalOf(behavior, message),
+      ),
+    );
   // Only a predicting reference keeps a display. Without one, `displayed`
   // and `state` derive from `applied`, so the three never disagree.
   const display = yield* Effect.transposeOption(
@@ -231,11 +240,13 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
    * One new record's own state. Its admission leaves with it. A fresh ID on
    * a predicting reference also shows its prediction until then: a rejected
    * record removes it, and an applied one leaves it for the base to absorb.
+   * A message the behavior refuses is not predicted: the host's answer is
+   * `Rejected(Refused)`, so showing it would only flash a state never held.
    */
   const enlist = (identified: Commands.Identified, message: MessageOf<C>): Commands.Enlist =>
     Effect.gen(function* () {
       yield* Effect.addFinalizer(() => Effect.sync(() => admissions.delete(identified.commandId)));
-      if (identified.identity === "fresh" && Option.isSome(display)) {
+      if (identified.identity === "fresh" && Option.isSome(display) && !refuses(message)) {
         yield* display.value.predict(identified.commandId, message);
       }
     });

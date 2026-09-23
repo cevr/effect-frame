@@ -16,6 +16,7 @@ import {
   CommandConflict,
   HttpTransport,
   Principal,
+  Refused,
   Unauthorized,
   Wire,
   committedRevision,
@@ -35,10 +36,18 @@ const Counter = contract("Counter", {
   message: Schema.Union([Add]),
 });
 
-const CounterLive = implementTransparent(
-  Counter,
-  Behavior.reducer<number, Add>({ initial: 0, reduce: (state, message) => state + message.amount }),
-);
+/** Refuses a negative amount: the host answers it `Refused`, conclusively. */
+const counterBehavior = Behavior.reducer<number, Add, Refused>({
+  initial: 0,
+  reduce: (state, message) => state + message.amount,
+  refuse: (message) =>
+    Option.as(
+      Option.liftPredicate(message, (sent) => sent.amount < 0),
+      Refused.make({ reason: "negative" }),
+    ),
+});
+
+const CounterLive = implementTransparent(Counter, counterBehavior);
 
 const id = Schema.decodeSync(CommandId);
 const add = (amount: number): Add => ({ _tag: "Add", amount });
@@ -58,6 +67,9 @@ const acmeOnly = Layer.succeed(Policies, Policies.of({ counter: acmeKeys }));
 
 const hostLayer = Layer.provide(ActorHost.layerMemory([CounterLive]), acmeOnly);
 
+/** Each in-process response's path and status, newest last. */
+const answered: Array<{ readonly path: string; readonly status: number }> = [];
+
 /**
  * The server handler and the client transport meet at a `fetch` function.
  * In process, that function is the handler itself: no socket, same wire.
@@ -67,7 +79,13 @@ const inProcess = Layer.unwrap(
     const server = yield* HttpServer.make({ principal: HttpServer.anonymous });
     const context = yield* Effect.context<never>();
     const run = Effect.runPromiseWith(context);
-    const fetch: HttpTransport.FetchLike = (input, init) => run(server(new Request(input, init)));
+    const fetch: HttpTransport.FetchLike = (input, init) => {
+      const request = new Request(input, init);
+      return run(server(request)).then((response) => {
+        answered.push({ path: new URL(request.url).pathname, status: response.status });
+        return response;
+      });
+    };
     return HttpTransport.layer({
       baseUrl: "http://actors.test/actors",
       reconnect: HttpTransport.defaultReconnect,
@@ -151,6 +169,43 @@ describe("http transport in process", () => {
       const stale = yield* Effect.flip(ref(Stale, alice));
       expect(stale._tag).toBe("ContractMismatch");
     }),
+  );
+
+  withInProcess(
+    "a refusal crosses the wire as 422 Refused, is conclusive, and is never predicted",
+    () =>
+      Effect.gen(function* () {
+        const counter = yield* ref(Counter, alice, {
+          resume: Option.none(),
+          behavior: counterBehavior,
+        });
+        const shown: Array<number> = [];
+        yield* Effect.forkScoped(
+          Stream.runForEach(counter.displayed.changes, (displayed) =>
+            Effect.sync(() => shown.push(displayed.state)),
+          ),
+        );
+        answered.length = 0;
+        const refused = yield* counter.send(add(-5));
+        const expected = {
+          _tag: "Rejected",
+          reason: Refused.make({ reason: "negative" }),
+        } satisfies CommandSettled<number, "remote">;
+        expect(yield* refused.settled).toEqual(expected);
+        const commands = () =>
+          answered.filter(({ path }) => path === "/actors/send" || path === "/actors/call");
+        // One request: a refusal is conclusive, so the owner never retries it.
+        expect(commands()).toEqual([{ path: "/actors/send", status: 422 }]);
+        // The same bytes under the same ID are refused again, never admitted.
+        const retried = yield* counter.send(add(-5), { commandId: refused.commandId });
+        expect(yield* retried.settled).toEqual(expected);
+        expect(commands().every(({ status }) => status === 422)).toBe(true);
+        expect(yield* counter.applied.get).toEqual({ revision: committedRevision(0), state: 0 });
+        // The predicting reference never showed the refused state.
+        expect(shown).not.toContain(-5);
+        const accepted = yield* counter.call(add(2), { timeout: "1 second" });
+        expect(accepted).toEqual({ revision: committedRevision(1), state: 2 });
+      }),
   );
 });
 

@@ -3,16 +3,11 @@ import { Effect, Layer, Schema, Scope, Stream } from "effect";
 import type { Behavior } from "./behavior.js";
 import type { AnyContract, MessageOf, SnapshotOf } from "./contract.js";
 import { openDurable } from "./durable-engine.js";
+import type { DurableAdmissionError } from "./durable-engine.js";
 import type { Committed } from "./engine-types.js";
 import type { MailboxStore } from "./mailbox-store.js";
 import type { Projection } from "./transport.js";
-import type {
-  ActorStopped,
-  CommandConflict,
-  CommandId,
-  DurableReceipt,
-  Uncertain,
-} from "./vocabulary.js";
+import type { CommandId, DurableReceipt, Refused, Uncertain } from "./vocabulary.js";
 
 /** Marker for the import-boundary test: this string must never reach a client bundle. */
 export const serverOnly = "effect-frame/actor:server-only";
@@ -24,7 +19,7 @@ export const serverOnly = "effect-frame/actor:server-only";
  */
 export interface ActorImplementation<C extends AnyContract, State, R> {
   readonly contract: C;
-  readonly behavior: Behavior<State, MessageOf<C>, R>;
+  readonly behavior: Behavior<State, MessageOf<C>, R, Refused>;
   readonly state: Schema.Codec<State, string>;
   readonly snapshot: (state: State) => SnapshotOf<C>;
   /** Opens one instance over the given store, owned by the given scope. Type-erased for hosts. */
@@ -44,12 +39,12 @@ export interface HostedInstance {
   readonly send: (
     commandId: CommandId,
     payload: string,
-  ) => Effect.Effect<DurableReceipt, ActorStopped | CommandConflict>;
+  ) => Effect.Effect<DurableReceipt, DurableAdmissionError<Refused>>;
   readonly call: (
     commandId: CommandId,
     payload: string,
     timeout: Duration.Input,
-  ) => Effect.Effect<Projection, ActorStopped | CommandConflict | Uncertain>;
+  ) => Effect.Effect<Projection, DurableAdmissionError<Refused> | Uncertain>;
   readonly snapshot: Effect.Effect<Projection>;
   readonly changes: (after: number) => Stream.Stream<Projection>;
 }
@@ -110,7 +105,7 @@ const openWith = <C extends AnyContract, State, R>(
   }).pipe(Effect.provideService(Scope.Scope, scope));
 
 export interface ImplementOptions<C extends AnyContract, State, R> {
-  readonly behavior: Behavior<State, MessageOf<C>, R>;
+  readonly behavior: Behavior<State, MessageOf<C>, R, Refused>;
   readonly state: Schema.Codec<State, string>;
   readonly snapshot: (state: State) => SnapshotOf<C>;
 }
@@ -131,6 +126,6 @@ export const implement = <C extends AnyContract, State, R = never>(
  */
 export const implementTransparent = <C extends AnyContract, R = never>(
   contract: C,
-  behavior: Behavior<SnapshotOf<C>, MessageOf<C>, R>,
+  behavior: Behavior<SnapshotOf<C>, MessageOf<C>, R, Refused>,
 ): ActorImplementation<C, SnapshotOf<C>, R> =>
   implement(contract, { behavior, state: contract.snapshot, snapshot: (state) => state });

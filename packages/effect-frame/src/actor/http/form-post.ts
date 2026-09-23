@@ -270,10 +270,13 @@ const encodeOnce = (
     );
   });
 
-const failureIssue = (error: TransportSendError): FormIssue => ({
-  field: "",
-  message: error._tag,
-});
+/** The behavior's own words for a refusal; the tag for every other failure. */
+const failureIssue = (error: TransportSendError): FormIssue => {
+  if (error._tag === "Refused") {
+    return { field: "", message: error.reason };
+  }
+  return { field: "", message: error._tag };
+};
 
 /**
  * A refusal redirects only when authenticating would change the answer:
@@ -317,6 +320,10 @@ const sendFailure = (
       return page(posted, 404, issues, "fresh");
     case "ActorStopped":
       return page(posted, 503, issues, "fresh");
+    // The same bytes are refused every time: the page draws the reason, and
+    // a corrected post is a new form with a new id.
+    case "Refused":
+      return page(posted, 422, issues, "fresh");
   }
 };
 

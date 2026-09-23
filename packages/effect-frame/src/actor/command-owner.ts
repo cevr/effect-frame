@@ -397,8 +397,9 @@ export const make = Effect.fn("Actor.commands.make")(function* <
     });
 
   /**
-   * Classifies one failed request. A conflict is always conclusive for these
-   * bytes. Any other refusal is conclusive only while no earlier request of
+   * Classifies one failed request. A conflict and a behavior's refusal are
+   * always conclusive for these bytes: the refusal rule reads the message
+   * alone, and a host never refuses a command it already holds. Any other refusal is conclusive only while no earlier request of
    * this ID may have reached admission. A stopped actor after a possible
    * admission is uncertainty: its pending row can still commit elsewhere.
    */
@@ -410,7 +411,11 @@ export const make = Effect.fn("Actor.commands.make")(function* <
       record.possibleAdmission = true;
       return { _tag: "Lost" };
     }
-    if (failure.reason._tag === "CommandConflict" || !record.possibleAdmission) {
+    if (
+      failure.reason._tag === "CommandConflict" ||
+      failure.reason._tag === "Refused" ||
+      !record.possibleAdmission
+    ) {
       return { _tag: "Reject", reason: failure.reason };
     }
     if (failure.reason._tag === "ActorStopped") {

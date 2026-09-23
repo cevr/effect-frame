@@ -17,6 +17,7 @@ import {
   hiddenValue,
   makeWire,
   recordedTransport,
+  refusedTitle,
 } from "../plain-form-fixture.js";
 
 /**
@@ -276,6 +277,29 @@ describe("plain-form posts", () => {
       expect(next).not.toBe(posted);
       expect(hiddenValue(reply.body, "add", "id")).toBe(next);
       expect(yield* sends(served)).toEqual([]);
+    }),
+  );
+
+  it.scopedLive("a post the behavior refuses answers 422 with its reason and applies nothing", () =>
+    Effect.gen(function* () {
+      const served = yield* serve;
+      const html = yield* getPage(served);
+      const posted = hiddenValue(html, "add", "$command");
+
+      const reply = yield* post(served, fill(html, [["title", refusedTitle]]));
+
+      expect(reply.status).toBe(422);
+      expect(reply.body).toContain("that title is refused");
+      // The same bytes are refused every time: the page carries a fresh id.
+      expect(hiddenValue(reply.body, "add", "$command")).not.toBe(posted);
+      const again = yield* post(served, fill(html, [["title", refusedTitle]]));
+      expect(again.status).toBe(422);
+      const corrected = yield* post(served, fill(reply.body, [["title", "short"]]));
+      expect(corrected.status).toBe(303);
+      // Only the corrected post committed: it is revision 1.
+      const applied = yield* snapshot(served, 1);
+      expect(applied.revision.value).toBe(1);
+      expect(applied.state.tasks.map((task) => task.title)).toEqual(["short"]);
     }),
   );
 

@@ -1,20 +1,20 @@
 import { Effect } from "effect";
 import type { CommandAdapter } from "./command-owner.js";
 import { lost, ownNothing, refused } from "./command-owner.js";
-import type { DurableEngine } from "./durable-engine.js";
-import type { CommandId } from "./vocabulary.js";
+import type { DurableAdmissionError, DurableEngine } from "./durable-engine.js";
+import type { CommandId, Refused } from "./vocabulary.js";
 import { ActorStopped, CommandConflict } from "./vocabulary.js";
 
 /** Refusals a durable engine can give one submission. */
-export type DurableRejection = ActorStopped | CommandConflict;
+export type DurableRejection<Refusal extends Refused = never> = DurableAdmissionError<Refusal>;
 
 /**
  * The durable engine as a command adapter. A pass admits the retained bytes
  * and then waits for their exact stored receipt. No encoder runs here.
  */
-export const durableCommands = <State>(
-  engine: DurableEngine<State>,
-): CommandAdapter<State, DurableRejection> => ({
+export const durableCommands = <State, Refusal extends Refused = never>(
+  engine: DurableEngine<State, Refusal>,
+): CommandAdapter<State, DurableRejection<Refusal>> => ({
   kind: "durable",
   own: ownNothing,
   closed: engine.isClosed,

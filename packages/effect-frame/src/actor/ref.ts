@@ -1,6 +1,7 @@
 import { Effect, Option, Schema, Stream, SubscriptionRef } from "effect";
 import type { Behavior } from "./behavior.js";
 import { callThrough, identifiedHandle, suppliedId, toApplied } from "./command-handle.js";
+import { isMinted } from "./command-id.js";
 import * as Commands from "./command-owner.js";
 import type { Committed } from "./engine-types.js";
 import { remoteCommands } from "./remote-commands.js";
@@ -251,7 +252,7 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
     message: MessageOf<C>,
     sendOptions: DurableSendOptions | void,
   ) {
-    const identified = yield* Commands.identify(suppliedId(sendOptions));
+    const identified = yield* Commands.identify(suppliedId(sendOptions), isMinted(sendOptions));
     const owned = yield* submit(message, identified);
     return identifiedHandle(owned) satisfies IdentifiedCommandHandle<SnapshotOf<C>, "remote">;
   });

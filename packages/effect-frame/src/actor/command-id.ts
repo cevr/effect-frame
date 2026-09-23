@@ -1,4 +1,5 @@
-import { Effect, Schema } from "effect";
+import { Effect, Predicate, Schema } from "effect";
+import type { DurableSendOptions } from "./vocabulary.js";
 import { CommandId } from "./vocabulary.js";
 
 const decodeCommandId = Schema.decodeSync(CommandId);
@@ -16,3 +17,30 @@ export const freshCommandId: Effect.Effect<CommandId> = Effect.sync(() =>
   // oxlint-disable-next-line effect/noGlobals -- native secure UUID source at the platform boundary
   decodeCommandId(crypto.randomUUID()),
 );
+
+/**
+ * Fresh-ID ownership (#67 §3, #37). Some framework sends must know their
+ * command ID before the send: a message with a field generated from it
+ * (`Generated.send`), and a form whose own ID was drawn into its markup
+ * (`View.form`). The framework minted that ID for this one send, so nothing
+ * else can hold it, and it is as fresh as one the reference mints itself: it
+ * predicts, and a first refusal is conclusive. The mark is a module symbol
+ * that no public entry exports, so an application cannot claim it: an ID an
+ * application supplies stays supplied, whatever its origin.
+ */
+const Minted: unique symbol = Symbol("effect-frame/actor/command-id/Minted");
+
+interface MintedSendOptions extends DurableSendOptions {
+  readonly commandId: CommandId;
+  readonly [Minted]: true;
+}
+
+/** Send options for an ID the framework minted for this send alone. Internal. */
+export const mintedFor = (commandId: CommandId): DurableSendOptions => {
+  const options: MintedSendOptions = { commandId, [Minted]: true };
+  return options;
+};
+
+/** Whether these options carry an ID the framework minted for this send. Internal. */
+export const isMinted = (options: DurableSendOptions | void): boolean =>
+  Predicate.hasProperty(options, Minted);

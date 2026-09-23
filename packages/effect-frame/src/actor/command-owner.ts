@@ -83,13 +83,23 @@ export interface Identified {
 /**
  * Omitted means the framework mints a secure fresh ID. Supplied means
  * supplied, whatever the string looks like: provenance is never inferred
- * from the ID itself.
+ * from the ID itself. `minted` is the one exception, and it is provenance,
+ * not inference: the framework minted the supplied ID for this send alone
+ * (see `mintedFor`), so it is fresh.
  */
-export const identify = (supplied: Option.Option<CommandId>): Effect.Effect<Identified> =>
+export const identify = (
+  supplied: Option.Option<CommandId>,
+  minted = false,
+): Effect.Effect<Identified> =>
   Option.match(supplied, {
     onNone: () =>
       Effect.map(freshCommandId, (commandId): Identified => ({ commandId, identity: "fresh" })),
-    onSome: (commandId) => Effect.succeed<Identified>({ commandId, identity: "supplied" }),
+    onSome: (commandId) => {
+      if (minted) {
+        return Effect.succeed<Identified>({ commandId, identity: "fresh" });
+      }
+      return Effect.succeed<Identified>({ commandId, identity: "supplied" });
+    },
   });
 
 /** The owner's numeric lifecycle. Public adapters project it. */

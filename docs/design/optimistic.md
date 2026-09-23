@@ -58,6 +58,18 @@ A send predicts when all of these are true:
 1. The reference is remote and its behavior has `predict`.
 2. The framework minted the command ID. A supplied ID can already be admitted
    or committed, so it waits for its receipt (#67, rule 3).
+
+   Two framework sends must know their ID before the send, so they pass it
+   in (#37): `Generated.send` derives fields from it, and `View.form` draws
+   it into the form's markup. The framework minted both IDs for one send
+   alone, so both are fresh. They reach the reference through `mintedFor`,
+   which marks the options with a module-private symbol that no public entry
+   exports. An application cannot make that mark, so an ID it supplies stays
+   supplied, whatever its origin. A form marks only an ID its own client
+   binding minted. An ID that the server drew into the markup stays
+   supplied, because a plain post that raced hydration can already have
+   admitted it. Each later send from the same form mints, so it predicts.
+
 3. The submission created a new command record. A join or a refusal before
    work does not predict.
 
@@ -167,16 +179,18 @@ The display changes before the handle turns terminal. A caller that waits on
 
 ## Evidence
 
-| Proof                                                   | What the test observes                                                                                                                                                                          |
-| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| An optimistic send shows the new state in the same turn | The send is held before the host. When `send` returns, the handle is `Sent` and `displayed` is `Provisional{base: 0, depth: 1}`. The change stream is down, and the receipt alone commits it.   |
-| A committed revision replaces a provisional one         | The server stamps each item. A's commit replaces its `pending` stamp while B stays provisional over base 1. No predicted field survives.                                                        |
-| A rejected command rolls back by leaving the log        | A is refused while B is held. The display becomes B alone over base 0.                                                                                                                          |
-| Provisional order converges on committed order          | A is sent first and admitted second. The view goes `[a?]`, `[a?, b?]`, `[b1, a?]`, `[b1, a2]`. The last value equals the server snapshot.                                                       |
-| A supplied command ID never predicts                    | A held send with a supplied ID leaves the display committed.                                                                                                                                    |
-| Uncertain keeps the provisional state                   | A lost call reply leaves `Uncertain{attempt: 1}` and the guess. One retry settles it: two sends, two calls, one application.                                                                    |
-| A prediction that throws leaves the log                 | The prediction of "a" throws over a base that holds "boom". "a" leaves the log and still settles at revision 2. Another client commits revision 3, and `applied` and `displayed` both reach it. |
-| A machine behavior is never applied optimistically      | `Behavior.machine` has no `predict`. At `Sent` and at `Admitted`, the display stays committed.                                                                                                  |
+| Proof                                                   | What the test observes                                                                                                                                                                           |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| An optimistic send shows the new state in the same turn | The send is held before the host. When `send` returns, the handle is `Sent` and `displayed` is `Provisional{base: 0, depth: 1}`. The change stream is down, and the receipt alone commits it.    |
+| A committed revision replaces a provisional one         | The server stamps each item. A's commit replaces its `pending` stamp while B stays provisional over base 1. No predicted field survives.                                                         |
+| A rejected command rolls back by leaving the log        | A is refused while B is held. The display becomes B alone over base 0.                                                                                                                           |
+| Provisional order converges on committed order          | A is sent first and admitted second. The view goes `[a?]`, `[a?, b?]`, `[b1, a?]`, `[b1, a2]`. The last value equals the server snapshot.                                                        |
+| A supplied command ID never predicts                    | A held send with a supplied ID leaves the display committed.                                                                                                                                     |
+| A framework-minted ID predicts                          | `Generated.send` with a held send shows `Provisional{base: 0, depth: 1}` (`optimistic.test.ts`). A client-drawn form's held send shows its text at once (`tests/view/form-prediction.test.tsx`). |
+| A server-drawn form ID and a forged mark stay supplied  | A hydrated form's first send carries the server's `$command` and shows nothing until its receipt; its second send predicts. Options with a look-alike symbol leave the display committed.        |
+| Uncertain keeps the provisional state                   | A lost call reply leaves `Uncertain{attempt: 1}` and the guess. One retry settles it: two sends, two calls, one application.                                                                     |
+| A prediction that throws leaves the log                 | The prediction of "a" throws over a base that holds "boom". "a" leaves the log and still settles at revision 2. Another client commits revision 3, and `applied` and `displayed` both reach it.  |
+| A machine behavior is never applied optimistically      | `Behavior.machine` has no `predict`. At `Sent` and at `Admitted`, the display stays committed.                                                                                                   |
 
 Ten mutations were checked. Each made at least one proof fail: no log entry
 on send, a rejected entry kept, included entries kept after a new base,
@@ -184,3 +198,10 @@ unknown membership read as excluded, a machine given an identity prediction,
 a supplied ID predicted, an `Uncertain` record that closes its scope, a
 refresh that keeps an override, an ignored receipt, and a replay that does
 not catch a throwing `predict` (the stream stops and the test times out).
+
+Five more mutations cover fresh-ID ownership (#37), and each was killed:
+the old `form.ts` (both form tests fail); a form that marks every adopted ID
+(the hydrated test fails); `Generated.send` passing a plain `{commandId}`
+(its test fails); `isMinted` true for any options with a `commandId` (the
+supplied, forged, and hydrated tests fail); and an owner that ignores the
+mark (three tests fail).

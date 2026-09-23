@@ -1,5 +1,5 @@
 import { Effect, Option, Random, Schema, SchemaAST } from "effect";
-import { freshCommandId } from "./command-id.js";
+import { freshCommandId, mintedFor } from "./command-id.js";
 import type { AnyContract, SnapshotOf } from "./contract.js";
 import type { RemoteActorRef } from "./ref.js";
 import type { CommandId, IdentifiedCommandHandle } from "./vocabulary.js";
@@ -208,5 +208,6 @@ export const send = <C extends AnyContract>(
         Object.assign({}, input, Object.fromEntries(minted)),
       ),
     );
-    return yield* ref.send(message, { commandId });
+    // Minted here for this send alone: as fresh as one the reference mints.
+    return yield* ref.send(message, mintedFor(commandId));
   });

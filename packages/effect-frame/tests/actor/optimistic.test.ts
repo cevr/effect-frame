@@ -5,6 +5,7 @@ import { ActorHost, Behavior, Policies, Policy, implement } from "effect-frame/a
 import {
   ActorTransport,
   CommandId,
+  Generated,
   Unauthorized,
   Unreachable,
   committedRevision,
@@ -415,6 +416,47 @@ describe("optimistic sends (#19, #67)", () => {
       );
       const commandId = yield* Schema.decodeEffect(CommandId)("chosen");
       const handle = yield* list.send(append("a"), { commandId });
+      expect(yield* list.displayed.get).toEqual({ revision: committedRevision(0), state: [] });
+      yield* wire.release(held);
+      yield* handle.settled;
+      expect(yield* list.state.get).toEqual([stamped("a", 1)]);
+    }),
+  );
+
+  it.scoped("Generated.send mints its ID, so it predicts at once like a fresh send (#67 §3)", () =>
+    Effect.gen(function* () {
+      const wire = yield* heldWire();
+      const held = yield* wire.holdSend("a");
+      const list = yield* Effect.provideService(
+        ref(List, "shelf", { resume: Option.none(), behavior: predicting }),
+        ActorTransport,
+        wire.transport,
+      );
+      const handle = yield* Generated.send(list, List, append("a"));
+      expect(yield* handle.state.get).toEqual({ _tag: "Sent" });
+      expect(yield* list.displayed.get).toEqual({
+        revision: { _tag: "Provisional", base: 0, depth: 1 },
+        state: [pending("a")],
+      });
+      yield* wire.release(held);
+      yield* handle.settled;
+      expect(yield* list.state.get).toEqual([stamped("a", 1)]);
+    }),
+  );
+
+  it.scoped("an application cannot mark its own ID as minted", () =>
+    Effect.gen(function* () {
+      const wire = yield* heldWire();
+      const held = yield* wire.holdSend("a");
+      const list = yield* Effect.provideService(
+        ref(List, "shelf", { resume: Option.none(), behavior: predicting }),
+        ActorTransport,
+        wire.transport,
+      );
+      const commandId = yield* Schema.decodeEffect(CommandId)("forged");
+      // The same description is not the same symbol: provenance is identity.
+      const forged = { commandId, [Symbol("effect-frame/actor/command-id/Minted")]: true };
+      const handle = yield* list.send(append("a"), forged);
       expect(yield* list.displayed.get).toEqual({ revision: committedRevision(0), state: [] });
       yield* wire.release(held);
       yield* handle.settled;

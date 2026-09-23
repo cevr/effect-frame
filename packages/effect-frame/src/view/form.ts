@@ -9,6 +9,10 @@ import type {
 } from "effect-frame/actor";
 import { CommandId as CommandIdSchema, Form, Generated, Wire } from "effect-frame/actor/client";
 import { Effect, Option, Predicate, Ref, Schema, Semaphore } from "effect";
+// Relative on purpose: the mark is module-private to the actor area and no
+// public entry exports it (#67 §3). With one module per source file, this
+// is the module the reference itself reads.
+import { mintedFor } from "../actor/command-id.js";
 import type { HostEvent } from "./host.js";
 import type { ElementNode, ElementProps, Node } from "./jsx-runtime.js";
 import type { PlainPost, Prepared } from "./view.js";
@@ -168,7 +172,14 @@ export const form = <C extends AnyContract, M extends Member<C>, const Typed ext
       invalid: issues.map((issue) => issue.field),
     };
 
-    const send = yield* scriptedSend(options, member);
+    // The id this binding minted itself, when no server context chose one.
+    // Only such an id can be fresh on the client: a server-drawn id may
+    // already have gone out in a plain post that raced hydration.
+    const own = Option.match(context, {
+      onNone: () => Option.some(commandId),
+      onSome: () => Option.none<CommandId>(),
+    });
+    const send = yield* scriptedSend(options, member, own);
     const handler = (event: HostEvent): Effect.Effect<void> =>
       Option.match(event.form, { onNone: () => Effect.void, onSome: send });
 
@@ -187,6 +198,7 @@ export const form = <C extends AnyContract, M extends Member<C>, const Typed ext
 const scriptedSend = <C extends AnyContract, M, Typed extends string>(
   options: CommandForm<C, M, Typed>,
   member: Generated.Member,
+  own: Option.Option<CommandId>,
 ) =>
   Effect.gen(function* () {
     const spent = yield* Ref.make<ReadonlySet<string>>(new Set());
@@ -208,11 +220,14 @@ const scriptedSend = <C extends AnyContract, M, Typed extends string>(
           (id) => !used.has(id),
         );
         if (Option.isSome(adopted)) {
-          return { commandId: adopted.value, fields };
+          // Fresh only when this binding minted it: an id the server drew
+          // is supplied, and waits for receipt evidence (#67 §3).
+          const minted = Option.contains(own, adopted.value);
+          return { commandId: adopted.value, fields, minted };
         }
         const commandId = yield* Form.freshCommandId;
-        const minted = yield* Generated.mintAll(member, commandId);
-        return { commandId, fields: Form.withValues(fields, minted) };
+        const values = yield* Generated.mintAll(member, commandId);
+        return { commandId, fields: Form.withValues(fields, values), minted: true };
       });
 
     /**
@@ -229,16 +244,14 @@ const scriptedSend = <C extends AnyContract, M, Typed extends string>(
           const decoded = yield* decodeTree(nested);
           const message = yield* asMessage(decoded);
           yield* Ref.update(spent, (used) => new Set([...used, identified.commandId]));
-          return { commandId: identified.commandId, message };
+          return { commandId: identified.commandId, message, minted: identified.minted };
         }),
       );
 
     return (fields: Form.FormFields): Effect.Effect<void> =>
       Effect.gen(function* () {
         const prepared = yield* prepare(fields);
-        const handle = yield* options.ref.send(prepared.message, {
-          commandId: prepared.commandId,
-        });
+        const handle = yield* options.ref.send(prepared.message, sendOptions(prepared));
         yield* Option.match(onSend, {
           onNone: () => Effect.void,
           onSome: (run) => Effect.asVoid(run(handle)),
@@ -247,6 +260,14 @@ const scriptedSend = <C extends AnyContract, M, Typed extends string>(
         Effect.catch((error) => Effect.logWarning("View.form: the form did not decode", error)),
       );
   });
+
+/** A minted id is marked fresh; any other stays supplied. */
+const sendOptions = (prepared: { readonly commandId: CommandId; readonly minted: boolean }) => {
+  if (prepared.minted) {
+    return mintedFor(prepared.commandId);
+  }
+  return { commandId: prepared.commandId };
+};
 
 // ---------------------------------------------------------------------------
 // Repopulation

@@ -10,6 +10,7 @@ import type { RemoteRejection } from "./remote-commands.js";
 import type { Address, AnyContract, KeyOf, MessageOf, SnapshotOf } from "./contract.js";
 import type { QueryKey } from "./query.js";
 import { QueryCache, internalsOf } from "./query-client.js";
+import type { QueryCacheService } from "./query-client.js";
 import * as Provisional from "./provisional.js";
 import { fromSubscriptionRef, select } from "./source.js";
 import type { Source } from "./source.js";
@@ -27,6 +28,13 @@ import type {
 } from "./vocabulary.js";
 
 export type RemoteActorRef<C extends AnyContract> = ActorRef<SnapshotOf<C>, MessageOf<C>, "remote">;
+
+/** The command half of a remote reference: `send` and `call`, and no state. */
+export interface RemoteCommandRef<C extends AnyContract> {
+  readonly kind: "remote";
+  readonly send: RemoteActorRef<C>["send"];
+  readonly call: RemoteActorRef<C>["call"];
+}
 
 export interface RefOptions<C extends AnyContract> {
   /**
@@ -82,63 +90,23 @@ const newest = <A>(current: Committed<A>, next: Committed<A>): Committed<A> => {
   return current;
 };
 
+/** What the command surface needs from the reference that owns it. */
+interface SurfaceHooks<C extends AnyContract> {
+  /** A committed revision a settlement carried. */
+  readonly observe: (next: Committed<SnapshotOf<C>>) => Effect.Effect<void>;
+  /** The predicting display, when there is one. */
+  readonly display: Option.Option<Provisional.Display<SnapshotOf<C>, MessageOf<C>>>;
+  /** Whether the behavior refuses the message, so it is never predicted. */
+  readonly refuses: (message: MessageOf<C>) => boolean;
+}
+
 /**
- * A client-side reference to an actor hosted elsewhere. The client holds the
- * contract, the key, and a transport, and the behavior only when it is given
- * one to predict with. `applied` is the latest committed snapshot the
- * transport delivered, so a later reference can resume without a gap.
- * `displayed` and `state` are what the reference shows: the committed base,
- * with this client's predicted commands applied over it (see `RefOptions`).
- *
- * Commands go through one private owner in this scope. `send` returns an
- * identified handle at once; the owner runs one send and one same-ID call per
- * pass, retries a lost pass within its bound, and keeps the exact bytes
- * while the command is unresolved.
+ * An `Unauthorized` tells the cache the principal may be gone (#30), and
+ * every query value this client read under it goes.
  */
-export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
-  contract: C,
-  key: KeyOf<C>,
-  options: RefOptions<C> = { resume: Option.none() },
-) {
-  const transport = yield* ActorTransport;
-  const cache = yield* Effect.serviceOption(QueryCache);
-  const encodedKey = yield* Effect.orDie(Schema.encodeEffect(contract.key)(key));
-  const address: Address = { contract: contract.name, version: contract.version, key: encodedKey };
-  const encodeMessage = Schema.encodeEffect(contract.message);
-
-  const initial = yield* fetchInitial(contract, address, options);
-  const applied = yield* SubscriptionRef.make(initial);
-  const predict = Option.flatMap(Option.fromNullishOr(options.behavior), (behavior) =>
-    Option.fromNullishOr(behavior.predict),
-  );
-  const refuses = (message: MessageOf<C>): boolean =>
-    Option.isSome(
-      Option.flatMap(Option.fromNullishOr(options.behavior), (behavior) =>
-        refusalOf(behavior, message),
-      ),
-    );
-  // Only a predicting reference keeps a display. Without one, `displayed`
-  // and `state` derive from `applied`, so the three never disagree.
-  const display = yield* Effect.transposeOption(
-    Option.map(predict, (fn) => Provisional.make<SnapshotOf<C>, MessageOf<C>>(initial, fn)),
-  );
-  const withDisplay = (
-    use: (found: Provisional.Display<SnapshotOf<C>, MessageOf<C>>) => Effect.Effect<void>,
-  ): Effect.Effect<void> => Option.match(display, { onNone: () => Effect.void, onSome: use });
-  const observe = (next: Committed<SnapshotOf<C>>) =>
-    Effect.andThen(
-      SubscriptionRef.update(applied, (current) => newest(current, next)),
-      withDisplay((found) => found.offer(next)),
-    );
-
-  // Every `Unauthorized` this reference receives tells the cache that the
-  // principal may be gone (#30), and every query value this client read
-  // under it goes. The snapshot above was authorized, so a change stream
-  // that ends with `Unauthorized` means the principal changed under it. A
-  // refused send or call cannot tell a changed principal from one that may
-  // read but not send, so it also costs one fresh read of each live entry.
-  // It never loops: nothing reads again on its own after a refused command.
-  const refused = (error: { readonly _tag: string }): Effect.Effect<void> => {
+const principalMayBeGone =
+  (cache: Option.Option<QueryCacheService>) =>
+  (error: { readonly _tag: string }): Effect.Effect<void> => {
     if (error._tag === "Unauthorized") {
       return Option.match(cache, {
         onNone: () => Effect.void,
@@ -147,18 +115,38 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
     }
     return Effect.void;
   };
+
+/**
+ * The commands of one remote address: one private owner in this scope,
+ * `send` and `call`. A reference and a command reference share it; only a
+ * reference has a snapshot to observe and a display to predict into.
+ */
+const commandSurface = Effect.fn("Actor.commandSurface")(function* <C extends AnyContract>(
+  contract: C,
+  address: Address,
+  hooks: SurfaceHooks<C>,
+) {
+  const transport = yield* ActorTransport;
+  const cache = yield* Effect.serviceOption(QueryCache);
+  const encodeMessage = Schema.encodeEffect(contract.message);
+  const { observe, display, refuses } = hooks;
+  const withDisplay = (
+    use: (found: Provisional.Display<SnapshotOf<C>, MessageOf<C>>) => Effect.Effect<void>,
+  ): Effect.Effect<void> => Option.match(display, { onNone: () => Effect.void, onSome: use });
+  // Every `Unauthorized` this reference receives tells the cache that the
+  // principal may be gone (#30), and every query value this client read
+  // under it goes. The snapshot above was authorized, so a change stream
+  // that ends with `Unauthorized` means the principal changed under it. A
+  // refused send or call cannot tell a changed principal from one that may
+  // read but not send, so it also costs one fresh read of each live entry.
+  // It never loops: nothing reads again on its own after a refused command.
+  const refused = principalMayBeGone(cache);
   const refusedPass = (failure: Commands.PassFailure<RemoteRejection>): Effect.Effect<void> => {
     if (failure._tag === "Refused") {
       return refused(failure.reason);
     }
     return Effect.void;
   };
-  yield* Effect.forkScoped(
-    Stream.runForEach(transport.changes(address, initial.revision), (projection) =>
-      Effect.flatMap(decodeProjection(contract, projection), observe),
-    ).pipe(Effect.tapError(refused)),
-  );
-
   /**
    * The caller's active query keys, read from the cache at command time.
    * A client with no cache declares none and the reply refreshes nothing:
@@ -280,6 +268,88 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
       owner.closed,
     );
   });
+
+  return { send, call };
+});
+
+/**
+ * A reference that only sends. It reads no snapshot and follows no change
+ * stream: a page that commands an actor it does not show holds one of these,
+ * so the page's only live streams are the actors it draws. Commands go
+ * through the same owner a full reference uses: the same identities,
+ * retries, receipts, and single-flight refreshes of the page's active
+ * queries. It never predicts; there is no state to predict into.
+ */
+export const commandRef = Effect.fn("Actor.commandRef")(function* <C extends AnyContract>(
+  contract: C,
+  key: KeyOf<C>,
+) {
+  const encodedKey = yield* Effect.orDie(Schema.encodeEffect(contract.key)(key));
+  const address: Address = { contract: contract.name, version: contract.version, key: encodedKey };
+  const surface = yield* commandSurface(contract, address, {
+    observe: () => Effect.void,
+    display: Option.none(),
+    refuses: () => false,
+  });
+  const commands: RemoteCommandRef<C> = { kind: "remote", ...surface };
+  return commands;
+});
+
+/**
+ * A client-side reference to an actor hosted elsewhere. The client holds the
+ * contract, the key, and a transport, and the behavior only when it is given
+ * one to predict with. `applied` is the latest committed snapshot the
+ * transport delivered, so a later reference can resume without a gap.
+ * `displayed` and `state` are what the reference shows: the committed base,
+ * with this client's predicted commands applied over it (see `RefOptions`).
+ *
+ * Commands go through one private owner in this scope. `send` returns an
+ * identified handle at once; the owner runs one send and one same-ID call per
+ * pass, retries a lost pass within its bound, and keeps the exact bytes
+ * while the command is unresolved.
+ */
+export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
+  contract: C,
+  key: KeyOf<C>,
+  options: RefOptions<C> = { resume: Option.none() },
+) {
+  const transport = yield* ActorTransport;
+  const cache = yield* Effect.serviceOption(QueryCache);
+  const encodedKey = yield* Effect.orDie(Schema.encodeEffect(contract.key)(key));
+  const address: Address = { contract: contract.name, version: contract.version, key: encodedKey };
+
+  const initial = yield* fetchInitial(contract, address, options);
+  const applied = yield* SubscriptionRef.make(initial);
+  const predict = Option.flatMap(Option.fromNullishOr(options.behavior), (behavior) =>
+    Option.fromNullishOr(behavior.predict),
+  );
+  const refuses = (message: MessageOf<C>): boolean =>
+    Option.isSome(
+      Option.flatMap(Option.fromNullishOr(options.behavior), (behavior) =>
+        refusalOf(behavior, message),
+      ),
+    );
+  // Only a predicting reference keeps a display. Without one, `displayed`
+  // and `state` derive from `applied`, so the three never disagree.
+  const display = yield* Effect.transposeOption(
+    Option.map(predict, (fn) => Provisional.make<SnapshotOf<C>, MessageOf<C>>(initial, fn)),
+  );
+  const withDisplay = (
+    use: (found: Provisional.Display<SnapshotOf<C>, MessageOf<C>>) => Effect.Effect<void>,
+  ): Effect.Effect<void> => Option.match(display, { onNone: () => Effect.void, onSome: use });
+  const observe = (next: Committed<SnapshotOf<C>>) =>
+    Effect.andThen(
+      SubscriptionRef.update(applied, (current) => newest(current, next)),
+      withDisplay((found) => found.offer(next)),
+    );
+
+  yield* Effect.forkScoped(
+    Stream.runForEach(transport.changes(address, initial.revision), (projection) =>
+      Effect.flatMap(decodeProjection(contract, projection), observe),
+    ).pipe(Effect.tapError(principalMayBeGone(cache))),
+  );
+
+  const { send, call } = yield* commandSurface(contract, address, { observe, display, refuses });
 
   const appliedSource = select(fromSubscriptionRef(applied), toApplied);
   const displayed: Source<Displayed<SnapshotOf<C>>> = Option.match(display, {

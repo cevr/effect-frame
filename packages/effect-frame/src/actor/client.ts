@@ -21,7 +21,13 @@ export {
   type Pure,
   type SnapshotOf,
 } from "./contract.js";
-export { ref, type RefOptions, type RemoteActorRef } from "./ref.js";
+export {
+  commandRef,
+  ref,
+  type RefOptions,
+  type RemoteActorRef,
+  type RemoteCommandRef,
+} from "./ref.js";
 // The Query primitive's client half (#17, #28).
 export {
   Failed,

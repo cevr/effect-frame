@@ -35,6 +35,7 @@ import {
   followQuery,
   keyOf,
   query,
+  commandRef,
   queryCacheLayer,
   ref,
   useQuery,
@@ -379,6 +380,9 @@ const hostLayer = ActorHost.layerMemory(
 ).pipe(Layer.provide(policies));
 
 let batchRequests = 0;
+/** Actor reads over the wire: snapshot requests and change streams opened. */
+let snapshotRequests = 0;
+let changeStreams = 0;
 
 /** One `/call` exchange as the wire carried it: the keys declared and the refreshes answered. */
 interface CallExchange {
@@ -415,6 +419,12 @@ const inProcess = Layer.unwrap(
     const fetch: HttpTransport.FetchLike = (input, init) => {
       if (input.endsWith("/query/batch")) {
         batchRequests += 1;
+      }
+      if (input.endsWith("/snapshot")) {
+        snapshotRequests += 1;
+      }
+      if (input.includes("/changes?")) {
+        changeStreams += 1;
       }
       const request = new Request(input, init);
       if (input.endsWith("/call")) {
@@ -651,6 +661,41 @@ describe("Query: the Dashboard shape", () => {
       const resettled = yield* again.settled;
       expect(resettled).toMatchObject({ _tag: "Applied", revision: applied.revision });
       expect(yield* book.state.get).toEqual(applied.state);
+    }),
+  );
+
+  withDashboard("a command reference sends with no snapshot and no change stream", () =>
+    Effect.gen(function* () {
+      const revenue = yield* useQuery(Revenue, acme);
+      yield* settledEntry(revenue);
+      const before = Option.getOrThrow(valueOf(yield* revenue.state.get)).total;
+      const actorReads = { snapshots: snapshotRequests, streams: changeStreams };
+
+      const book = yield* commandRef(OrderBook, acme);
+      const handle = yield* book.send(
+        { _tag: "PlaceOrder", sku: "command-only", amount: 7 },
+        { commandId: id("command-only-1") },
+      );
+      const settlement = yield* handle.settled;
+      expect(settlement._tag).toBe("Applied");
+
+      // The reply refreshed the dependent the page declared, as a full
+      // reference's would.
+      const last = calls.at(-1);
+      expect(last?.active).toEqual([
+        keyOf({ query: "Revenue", version: 1, args: '{"tenant":"acme"}' }),
+      ]);
+      expect(yield* revenue.state.get).toEqual({
+        _tag: "Ready",
+        value: { total: before + 7 },
+        stale: false,
+      });
+      // And it read nothing of the actor: no snapshot, no change stream.
+      expect({ snapshots: snapshotRequests, streams: changeStreams }).toEqual(actorReads);
+      // A full reference, for contrast, reads the snapshot and follows.
+      yield* ref(OrderBook, acme);
+      yield* Effect.yieldNow;
+      expect(snapshotRequests).toBe(actorReads.snapshots + 1);
     }),
   );
 

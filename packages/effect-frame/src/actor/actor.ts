@@ -124,6 +124,8 @@ export const spawn = Effect.fn("Actor.spawn")(function* <State, Message, R>(
   const reference: LocalActorRef<State, Message> = {
     kind: "local",
     applied,
+    // Nothing here predicts: the displayed value is the committed one.
+    displayed: applied,
     state: select(applied, (committed) => committed.state),
     send,
     call,

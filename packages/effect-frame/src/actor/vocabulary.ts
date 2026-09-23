@@ -66,6 +66,13 @@ export interface Provisional<State> {
 }
 
 /**
+ * What a reference shows: the committed state, or a provisional state that
+ * this client predicted over a committed base. Only a remote reference over
+ * a behavior with `predict` ever shows a provisional state.
+ */
+export type Displayed<State> = Applied<State> | Provisional<State>;
+
+/**
  * Acceptance of a durable command by a mailbox, as the protocol reports it.
  * `committed` is present when the mailbox already holds a receipt for this
  * command ID. Revisions on the protocol stay numeric and committed-only.
@@ -261,7 +268,13 @@ export interface ActorRef<State, Message, Kind extends ActorKind> {
   readonly kind: Kind;
   /** The latest committed revision this reference observed, with its state. */
   readonly applied: Source<Applied<State>>;
-  /** The latest observed state. A projection of `applied`. */
+  /**
+   * The state this reference shows, with its revision. It is committed, or
+   * provisional while a predicted command is not yet in the committed base.
+   * A committed revision replaces a provisional one; the two never merge.
+   */
+  readonly displayed: Source<Displayed<State>>;
+  /** The displayed state. A projection of `displayed`. */
   readonly state: Source<State>;
   readonly send: (
     message: Message,

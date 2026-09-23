@@ -184,6 +184,14 @@ export interface CommandAdapter<State, Rejection> {
 // Owner
 // ---------------------------------------------------------------------------
 
+/**
+ * What one submission registers in its new record's scope, before the first
+ * pass and in the same uninterruptible step as the insertion. It runs only
+ * when the submission creates the record, and what it registers is released
+ * when the record leaves. It must finish on its own.
+ */
+export type Enlist = Effect.Effect<void, never, Scope.Scope>;
+
 /** One command as its caller holds it. The view outlives record collection. */
 export interface OwnedCommand<State, Rejection> {
   readonly commandId: CommandId;
@@ -212,6 +220,7 @@ export interface CommandOwner<State, Rejection> {
     identified: Identified,
     prepare: Effect.Effect<string>,
     active: Effect.Effect<ReadonlyArray<QueryKey>>,
+    enlist?: Enlist,
   ) => Effect.Effect<OwnedCommand<State, Rejection>>;
   /** Completes when the owner scope begins to close. */
   readonly closed: Effect.Effect<void>;
@@ -540,8 +549,9 @@ export const make = Effect.fn("Actor.commands.make")(function* <
    * The adapter takes ownership, and inspection registers the record, in the
    * record scope. Both are released when the record leaves.
    */
-  const adopt = (record: CommandRecord<State, Rejection>) =>
+  const adopt = (record: CommandRecord<State, Rejection>, enlist: Enlist) =>
     Effect.gen(function* () {
+      yield* Scope.provide(enlist, record.scope);
       const hook = yield* Scope.provide(adapter.own(record.active), record.scope);
       record.settle = Option.some(hook);
       if (Option.isSome(inspection)) {
@@ -616,6 +626,7 @@ export const make = Effect.fn("Actor.commands.make")(function* <
     identified: Identified,
     prepare: Effect.Effect<string>,
     activeKeys: Effect.Effect<ReadonlyArray<QueryKey>>,
+    enlist: Enlist = Effect.void,
   ) {
     const { commandId, identity } = identified;
     if (yield* isStopped) {
@@ -669,9 +680,10 @@ export const make = Effect.fn("Actor.commands.make")(function* <
       if (placement.created) {
         // A defect while adopting leaves a record nothing would run: remove it
         // and release what it registered, so the same ID starts fresh later.
-        return Effect.andThen(adopt(placement.record), startSequence(placement.record)).pipe(
-          Effect.onError(() => discard(placement.record)),
-        );
+        return Effect.andThen(
+          adopt(placement.record, enlist),
+          startSequence(placement.record),
+        ).pipe(Effect.onError(() => discard(placement.record)));
       }
       return startSequence(placement.record);
     };

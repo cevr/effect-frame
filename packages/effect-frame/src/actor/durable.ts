@@ -64,6 +64,8 @@ export const durable = Effect.fn("Actor.durable")(function* <State, Message, R>(
   const ref: ActorRef<State, Message, "durable"> = {
     kind: "durable",
     applied,
+    // Nothing here predicts: the displayed value is the committed one.
+    displayed: applied,
     state: select(applied, (committed) => committed.state),
     send,
     call,

@@ -1,4 +1,5 @@
 import { Effect, Option, Schema, Stream, SubscriptionRef } from "effect";
+import type { Behavior } from "./behavior.js";
 import { callThrough, identifiedHandle, suppliedId, toApplied } from "./command-handle.js";
 import * as Commands from "./command-owner.js";
 import type { Committed } from "./engine-types.js";
@@ -7,6 +8,7 @@ import type { RemoteRejection } from "./remote-commands.js";
 import type { Address, AnyContract, KeyOf, MessageOf, SnapshotOf } from "./contract.js";
 import type { QueryKey } from "./query.js";
 import { QueryCache, ownershipOf } from "./query-client.js";
+import * as Provisional from "./provisional.js";
 import { fromSubscriptionRef, select } from "./source.js";
 import type { Projection, TransportReadError } from "./transport.js";
 import { ActorTransport } from "./transport.js";
@@ -15,6 +17,7 @@ import type {
   Applied,
   DurableCallOptions,
   DurableSendOptions,
+  CommandId,
   IdentifiedCommandHandle,
 } from "./vocabulary.js";
 
@@ -27,6 +30,14 @@ export interface RefOptions<C extends AnyContract> {
    * revisions after it. `None` fetches the latest snapshot first.
    */
   readonly resume: Option.Option<Applied<SnapshotOf<C>>>;
+  /**
+   * The actor's behavior, when the client can import it. A behavior with
+   * `predict` makes the reference optimistic: a send with a fresh command ID
+   * shows its predicted state at once, as a provisional revision, until the
+   * committed base holds it or it is rejected. A supplied ID never predicts;
+   * it waits for its receipt. A machine behavior never predicts.
+   */
+  readonly behavior?: Behavior<SnapshotOf<C>, MessageOf<C>, unknown>;
 }
 
 const fetchInitial = <C extends AnyContract>(
@@ -67,9 +78,11 @@ const newest = <A>(current: Committed<A>, next: Committed<A>): Committed<A> => {
 
 /**
  * A client-side reference to an actor hosted elsewhere. The client holds the
- * contract, the key, and a transport. It never holds the behavior. `state`
- * is the latest snapshot the transport delivered; `applied` carries its
- * committed revision so a later reference can resume without a gap.
+ * contract, the key, and a transport, and the behavior only when it is given
+ * one to predict with. `applied` is the latest committed snapshot the
+ * transport delivered, so a later reference can resume without a gap.
+ * `displayed` and `state` are what the reference shows: the committed base,
+ * with this client's predicted commands applied over it (see `RefOptions`).
  *
  * Commands go through one private owner in this scope. `send` returns an
  * identified handle at once; the owner runs one send and one same-ID call per
@@ -89,8 +102,20 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
 
   const initial = yield* fetchInitial(contract, address, options);
   const applied = yield* SubscriptionRef.make(initial);
+  const predict = Option.flatMap(Option.fromNullishOr(options.behavior), (behavior) =>
+    Option.fromNullishOr(behavior.predict),
+  );
+  // With no prediction the log stays empty and the display follows the
+  // newest committed state.
+  const display = yield* Provisional.make<SnapshotOf<C>, MessageOf<C>>(
+    initial,
+    Option.getOrElse(predict, () => (state: SnapshotOf<C>) => state),
+  );
   const observe = (next: Committed<SnapshotOf<C>>) =>
-    SubscriptionRef.update(applied, (current) => newest(current, next));
+    Effect.andThen(
+      SubscriptionRef.update(applied, (current) => newest(current, next)),
+      display.offer(next),
+    );
 
   yield* Effect.forkScoped(
     Stream.runForEach(transport.changes(address, initial.revision), (projection) =>
@@ -141,17 +166,58 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
   const adapter = remoteCommands(transport, address, (projection) =>
     decodeProjection(contract, projection),
   );
+  // The admission position each live record's last send reported. A receipt
+  // pairs it with the committed revision to order other admissions.
+  const admissions = new Map<CommandId, number>();
   const owner = yield* Commands.make<SnapshotOf<C>, RemoteRejection>({
     ...adapter,
     own,
+    send: (commandId, payload) =>
+      adapter.send(commandId, payload).pipe(
+        Effect.tap((admission) =>
+          Effect.andThen(
+            Effect.sync(() => admissions.set(commandId, admission.admitted)),
+            display.admit(commandId, admission.admitted),
+          ),
+        ),
+      ),
     call: (commandId, payload, deadline, active) =>
       adapter
         .call(commandId, payload, deadline, active)
-        .pipe(Effect.tap((settlement) => observe(settlement.committed))),
+        .pipe(
+          Effect.tap((settlement) =>
+            Effect.andThen(
+              display.receipt(
+                commandId,
+                Option.fromNullishOr(admissions.get(commandId)),
+                settlement.committed,
+              ),
+              observe(settlement.committed),
+            ),
+          ),
+        ),
   });
 
+  /**
+   * One new record's own state. Its admission leaves with it. A fresh ID on
+   * a predicting reference also shows its prediction until then: a rejected
+   * record removes it, and an applied one leaves it for the base to absorb.
+   */
+  const enlist = (identified: Commands.Identified, message: MessageOf<C>): Commands.Enlist =>
+    Effect.gen(function* () {
+      yield* Effect.addFinalizer(() => Effect.sync(() => admissions.delete(identified.commandId)));
+      if (identified.identity === "fresh" && Option.isSome(predict)) {
+        yield* display.predict(identified.commandId, message);
+      }
+    });
+
   const submit = (message: MessageOf<C>, identified: Commands.Identified) =>
-    owner.submit(identified, Effect.orDie(encodeMessage(message)), declareActive);
+    owner.submit(
+      identified,
+      Effect.orDie(encodeMessage(message)),
+      declareActive,
+      enlist(identified, message),
+    );
 
   const send = Effect.fn("Actor.ref.send")(function* (
     message: MessageOf<C>,
@@ -175,11 +241,11 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
     );
   });
 
-  const appliedSource = select(fromSubscriptionRef(applied), toApplied);
   const reference: RemoteActorRef<C> = {
     kind: "remote",
-    applied: appliedSource,
-    state: select(appliedSource, (committed) => committed.state),
+    applied: select(fromSubscriptionRef(applied), toApplied),
+    displayed: display.displayed,
+    state: select(display.displayed, (shown) => shown.state),
     send,
     call,
   };

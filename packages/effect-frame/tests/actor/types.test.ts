@@ -18,6 +18,7 @@ import type {
   CommandUncertain,
   CommittedRevision,
   ContractMismatch,
+  Displayed,
   IdentifiedCommandHandle,
   LocalActorRef,
   MailboxStore,
@@ -47,6 +48,8 @@ declare const commandId: CommandId;
 declare const localHandle: CommandHandle<number, "local">;
 declare const provisional: Provisional<number>;
 declare const applied: Applied<number>;
+
+type ValueOfSource<S> = S extends { readonly get: Effect.Effect<infer A> } ? A : never;
 
 type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
@@ -212,11 +215,29 @@ const _resumeProvisional = (): RefOptions<typeof Counter>["resume"] =>
   // @ts-expect-error resume data holds only a committed revision
   Option.some(provisional);
 
+// What a remote reference shows can be provisional, so it is none of these.
+const _displayedRevisionValue = (shown: Displayed<number>) =>
+  // @ts-expect-error a displayed revision has no number until it is committed
+  shown.revision.value > 1;
+
+const _displayedAsApplied = (shown: Displayed<number>): Applied<number> =>
+  // @ts-expect-error a displayed value is not an applied result
+  shown;
+
+const _resumeDisplayed = (shown: Displayed<number>): RefOptions<typeof Counter>["resume"] =>
+  // @ts-expect-error resume data never comes from a displayed value
+  Option.some(shown);
+
+const remoteDisplays: Equals<ValueOfSource<typeof wire.displayed>, Displayed<number>> = true;
+const remoteAppliedIsCommitted: Equals<ValueOfSource<typeof wire.applied>, Applied<number>> = true;
+
 const _provisionalRevision: ProvisionalRevision = { _tag: "Provisional", base: 1, depth: 1 };
 
 describe("reference types", () => {
   test("placement is visible in the type", () => {
     expect(localCallErrorIsStoppedOnly).toBe(true);
+    expect(remoteDisplays).toBe(true);
+    expect(remoteAppliedIsCommitted).toBe(true);
     expect(localSendNeverFails).toBe(true);
     expect(localStateCannotBeUncertain).toBe(true);
     expect(durableCallCanBeUncertain).toBe(true);

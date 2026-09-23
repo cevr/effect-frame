@@ -26,6 +26,13 @@ export interface Turn<State, Message> {
 export interface Behavior<State, Message, R = never> {
   readonly initial: State;
   readonly open: (state: State) => Effect.Effect<Turn<State, Message>, never, R | Scope.Scope>;
+  /**
+   * A pure, synchronous copy of `apply`, for a client's provisional state.
+   * `value` and `reducer` have it. `machine` does not: a machine's next state
+   * can depend on a task result. When it is absent, a client never applies
+   * a message before the server commits it. There is no flag beside it.
+   */
+  readonly predict?: (state: State, message: Message) => State;
 }
 
 export interface SetValue<A> {
@@ -44,6 +51,7 @@ export const Value = {
  */
 export const value = <A>(initial: A): Behavior<A, SetValue<A>> => ({
   initial,
+  predict: (_state, message) => message.value,
   open: () =>
     Effect.succeed({
       apply: (_state, message) => Effect.succeed(message.value),
@@ -61,6 +69,7 @@ export const reducer = <State, Message>(
   options: ReducerOptions<State, Message>,
 ): Behavior<State, Message> => ({
   initial: options.initial,
+  predict: options.reduce,
   open: () =>
     Effect.succeed({
       apply: (state, message) => Effect.sync(() => options.reduce(state, message)),
@@ -76,6 +85,10 @@ interface Tagged {
  * An Effect Machine as behavior. The machine actor is an implementation
  * detail: it is spawned inside `open`, hydrated from the given state, and
  * stopped with the owning scope. Its `ActorRef` is not exposed.
+ *
+ * A machine never predicts. A transition can run a task with server
+ * requirements and real effects, so its next state is not a pure function a
+ * client could run.
  */
 export const machine = <
   State extends Tagged,

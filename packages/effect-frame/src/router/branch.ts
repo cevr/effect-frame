@@ -25,6 +25,7 @@ import {
 import type { Node } from "effect-frame/view";
 import { LoadingScope, View, ready } from "effect-frame/view";
 import {
+  Cause,
   Clock,
   Deferred,
   Duration,
@@ -684,8 +685,21 @@ export const layout = <
 /** The options argument, read once: each part is present or absent. */
 interface Boundary<E> {
   readonly errored: Option.Option<(failure: Source<RouteFailure<E>>) => Node>;
-  readonly pending: Option.Option<Pending>;
+  readonly pending: Option.Option<Timed>;
 }
+
+/** `Pending` with its durations decoded once, where the branch is defined. */
+interface Timed {
+  readonly fallback: Node;
+  readonly after: Duration.Duration;
+  readonly atLeast: Duration.Duration;
+}
+
+const timed = (pending: Pending): Timed => ({
+  fallback: pending.fallback,
+  after: Duration.fromInputUnsafe(pending.after),
+  atLeast: Duration.fromInputUnsafe(pending.atLeast),
+});
 
 /**
  * The optional options argument as Options. `RecoveryFor` already made
@@ -702,7 +716,10 @@ const boundaryOf = <E>(recovery: ReadonlyArray<Recovery<E> | Presentation>): Bou
         (errored) => errored as (failure: Source<RouteFailure<E>>) => Node,
       ),
     ),
-    pending: Option.flatMap(given, (one) => Option.fromNullishOr(one.pending)),
+    pending: Option.map(
+      Option.flatMap(given, (one) => Option.fromNullishOr(one.pending)),
+      timed,
+    ),
   };
 };
 
@@ -1108,24 +1125,42 @@ const sleepUntil = (deadline: number): Effect.Effect<void> =>
   });
 
 /**
+ * A setup defect leaves nothing that will ever register with the nearest
+ * `Loading`, so the region settles it for as long as the view Scope lives.
+ * Otherwise that Loading would show its fallback forever. The defect itself
+ * still propagates. Interruption and typed failures are not defects.
+ */
+const settleOnDefect = <A, E, R>(work: Effect.Effect<A, E, R>) =>
+  Effect.onError(work, (cause) => {
+    if (Cause.hasDies(cause) && !Cause.hasInterrupts(cause)) {
+      return settleLoading;
+    }
+    return Effect.void;
+  });
+
+/**
  * Present one instance's preparation. With no `pending` the setup runs in
  * place, as before. With one, the setup runs on a fiber owned by the view
  * Scope and this returns at once:
  *
- * - The fallback shows at `startedAt + after`, unless the setup already
- *   finished. `startedAt` is when the transition entered the segment.
+ * - The fallback shows at `begin + after`, unless the setup already
+ *   finished. `begin` is the later of `startedAt` (when the transition
+ *   entered the segment) and the Clock when this presentation starts. It
+ *   can start much later: after a slow declared acquisition, or when a
+ *   slow or lazy parent finally draws the outlet.
  * - Once shown, a successful setup is drawn at `shown + atLeast` at the
- *   earliest. A typed failure's `errored` node is drawn at once.
+ *   earliest, where `shown` is the Clock read just after the fallback was
+ *   set. A typed failure's `errored` node is drawn at once.
  * - A defect removes the fallback at once and fails the presenting fiber.
  * - Closing the view Scope interrupts both fibers: nothing waits for
  *   `atLeast`, and nothing late is drawn.
  *
  * While it prepares, the region settles the nearest `Loading`, so that
- * Loading presents this fallback rather than its own. The view's own reads
- * register during its setup and take over when it is drawn.
+ * Loading presents this fallback rather than its own, unless a read the
+ * setup made before it suspended is still unsettled.
  */
 const presentWith = <R>(
-  pending: Option.Option<Pending>,
+  pending: Option.Option<Timed>,
   work: Effect.Effect<Node, never, R>,
   startedAt: number,
   failed: () => boolean,
@@ -1148,8 +1183,9 @@ const presentWith = <R>(
                 Effect.andThen(SubscriptionRef.set(shown, []), Effect.failCause(cause)),
             }),
           );
-        const showAt = startedAt + Duration.toMillis(Duration.fromInputUnsafe(options.after));
-        const holdUntil = showAt + Duration.toMillis(Duration.fromInputUnsafe(options.atLeast));
+        // Read here, in setup, so the deadline does not wait for the fiber.
+        const begin = Math.max(startedAt, yield* Clock.currentTimeMillis);
+        const showAt = begin + Duration.toMillis(options.after);
         yield* Effect.forkIn(
           Effect.gen(function* () {
             const early = yield* awaitUntil(fiber, showAt);
@@ -1157,6 +1193,7 @@ const presentWith = <R>(
               return yield* finish(early.value);
             }
             yield* SubscriptionRef.set(shown, [{ key: "fallback", node: options.fallback }]);
+            const holdUntil = (yield* Clock.currentTimeMillis) + Duration.toMillis(options.atLeast);
             const exit = yield* Fiber.await(fiber);
             if (Exit.isSuccess(exit) && !failed()) {
               yield* sleepUntil(holdUntil);
@@ -1419,9 +1456,11 @@ const makeBranch = <
       setup: Scope.provide(
         presentWith(
           Option.filter(boundary.pending, () => presentable),
-          attempt(
-            Effect.suspend(() => withTicket(ticket, view(props, slotSetup(internals)))),
-            (error: E) => setupFailed(tree, internals, error),
+          settleOnDefect(
+            attempt(
+              Effect.suspend(() => withTicket(ticket, view(props, slotSetup(internals)))),
+              (error: E) => setupFailed(tree, internals, error),
+            ),
           ),
           startedAt,
           () => internals.failed,

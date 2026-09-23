@@ -116,7 +116,13 @@ export const lazy = <P, E, R>(
     }
     const done = Deferred.makeUnsafe<void, LazyImportFailed>();
     state = { _tag: "Loading", done };
-    return Effect.as(Effect.forkDetach(Effect.ignore(run(done))), { token, done });
+    // Run with an empty context: the import outlives every waiter, so it
+    // must not keep the first waiter's services (its Frame, query cache, or
+    // router) alive.
+    return Effect.sync(() => {
+      Effect.runFork(Effect.ignore(run(done)));
+      return { token, done };
+    });
   });
 
   const loaded: Effect.Effect<View<P, E, R>> = Effect.suspend(() => {

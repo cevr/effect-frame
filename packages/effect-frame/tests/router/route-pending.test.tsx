@@ -15,6 +15,7 @@ import * as Check from "../../src/router/check.js";
 import * as Receipt from "../../src/router/receipt.js";
 import * as Lazy from "../../src/view/lazy.js";
 import {
+  Clock,
   Context,
   Deferred,
   Effect,
@@ -310,6 +311,12 @@ const makePostView = (probes: Probes) => (props: Branch.PropsOf<typeof postSegme
     if (first.postId.startsWith("slow")) {
       yield* Deferred.await(probes.slow);
     }
+    if (first.postId.endsWith("-bad")) {
+      return yield* PostFailed.make({ postId: first.postId });
+    }
+    if (first.postId.endsWith("-boom")) {
+      return yield* Effect.die("post setup defect");
+    }
     const tenant = yield* ready(props.data.tenant.state, "");
     yield* Queue.offer(probes.postBuilt, first.postId);
     return (
@@ -373,6 +380,138 @@ const makeApp = (probes: Probes, importer: Importer, events: Ref.Ref<ReadonlyArr
       }),
   );
   return Branch.route("app", tree);
+};
+
+/** The post view as a plain leaf with no `pending`, under the layout's Loading. */
+const makePlainApp = (probes: Probes, events: Ref.Ref<ReadonlyArray<string>>) => {
+  const tree = Branch.layout(
+    tenantSegment,
+    [
+      Branch.leaf(postSegment, makePostView(probes), {
+        errored: (failure) => {
+          probes.erroredBuilt.push("errored");
+          return <p id="post-errored">{View.bind(failure, describeFailure)}</p>;
+        },
+      }),
+    ],
+    (props) =>
+      Effect.gen(function* () {
+        yield* Ref.update(events, (all) => [...all, "layout"]);
+        const body = yield* Loading({
+          fallback: <p id="child-loading">loading child</p>,
+          children: Effect.map(props.outlet, (outlet) => <div id="outlet">{outlet}</div>),
+        });
+        return <section id="layout">{body}</section>;
+      }),
+  );
+  return Branch.route("app", tree);
+};
+
+/** Each time a nested fallback reached the document, by owner. */
+interface Shown {
+  readonly parent: Array<string>;
+  readonly child: Array<string>;
+}
+
+const recorded = (log: Array<string>, id: string, text: string) => (
+  <p
+    id={id}
+    attach={Dom.attach(() =>
+      Effect.sync(() => {
+        log.push("shown");
+      }),
+    )}
+  >
+    {text}
+  </p>
+);
+
+const pendingOf = (log: Array<string>, id: string): Branch.Pending => ({
+  fallback: recorded(log, id, id),
+  after: PendingAfter,
+  atLeast: PendingAtLeast,
+});
+
+/** A child that needs nothing: only its import prepares. */
+const ChildView = (props: Branch.PropsOf<typeof postSegment>) =>
+  Effect.succeed(<p id="child">{View.bind(props.params, (params) => params.postId)}</p>);
+
+const nestedChild = (shown: Shown, importer: Importer, events: Ref.Ref<ReadonlyArray<string>>) =>
+  Branch.leaf(postSegment, Lazy.lazy(loader(importer, events, { default: ChildView })), {
+    errored: () => <p id="child-errored">child errored</p>,
+    pending: pendingOf(shown.child, "child-pending"),
+  });
+
+/** A lazy layout with pending, and a lazy leaf with pending under it. */
+const makeLazyParentApp = (
+  shown: Shown,
+  parentImporter: Importer,
+  childImporter: Importer,
+  events: Ref.Ref<ReadonlyArray<string>>,
+) => {
+  const ParentView = (props: Branch.LayoutPropsOf<typeof tenantSegment, never>) =>
+    Effect.map(props.outlet, (outlet) => <section id="parent">{outlet}</section>);
+  return Branch.route(
+    "nested",
+    Branch.layout(
+      tenantSegment,
+      [nestedChild(shown, childImporter, events)],
+      Lazy.lazy(loader(parentImporter, events, { default: ParentView })),
+      {
+        errored: () => <p id="parent-errored">parent errored</p>,
+        pending: pendingOf(shown.parent, "parent-pending"),
+      },
+    ),
+  );
+};
+
+/** A layout whose own setup waits on `gate`, and a lazy leaf with pending. */
+const makeSlowParentApp = (
+  shown: Shown,
+  gate: Deferred.Deferred<void>,
+  childImporter: Importer,
+  events: Ref.Ref<ReadonlyArray<string>>,
+) =>
+  Branch.route(
+    "nested",
+    Branch.layout(
+      tenantSegment,
+      [nestedChild(shown, childImporter, events)],
+      (props) =>
+        Effect.gen(function* () {
+          yield* Deferred.await(gate);
+          const outlet = yield* props.outlet;
+          return <section id="parent">{outlet}</section>;
+        }),
+      { pending: pendingOf(shown.parent, "parent-pending") },
+    ),
+  );
+
+/** A first-frame tree: no `Loading`, and a lazy post whose setup never suspends. */
+const makeFirstFrameApp = (
+  probes: Probes,
+  importer: Importer,
+  events: Ref.Ref<ReadonlyArray<string>>,
+) => {
+  const FirstPost = (props: Branch.PropsOf<typeof postSegment>) =>
+    Effect.gen(function* () {
+      const first = yield* props.params.get;
+      yield* Ref.update(probes.postSetups, (all) => [...all, first.postId]);
+      return <p id="post-first">{`post ${first.postId}`}</p>;
+    });
+  return Branch.route(
+    "app",
+    Branch.layout(
+      tenantSegment,
+      [
+        Branch.leaf(postSegment, Lazy.lazy(loader(importer, events, { default: FirstPost })), {
+          errored: () => <p id="post-errored">errored</p>,
+          pending: pendingOf(probes.pendingShown, "post-pending"),
+        }),
+      ],
+      (props) => Effect.map(props.outlet, (outlet) => <section id="layout">{outlet}</section>),
+    ),
+  );
 };
 
 const NotFound = (props: { readonly url: Source<URL> }) =>
@@ -778,6 +917,25 @@ describe("private route pending and lazy views", () => {
         expect(hasAt(root, "#post-errored")).toBe(false);
         expect(yield* Ref.get(importer.calls)).toBe(2);
         expect(yield* setupsOf(probes)).toEqual(["2"]);
+
+        // The view's own typed failure while the fallback shows also draws
+        // `errored` at once.
+        yield* receipts.navigate("/app/t1");
+        yield* receipts.navigate("/app/t1/posts/slow-bad");
+        yield* regionLive(page);
+        const now = yield* Clock.currentTimeMillis;
+        yield* TestClock.adjust(PendingAfter);
+        yield* pendingVisible(page);
+        yield* Deferred.succeed(probes.slow, void 0);
+        yield* page.waitFor({
+          label: "the view's typed setup failure",
+          until: (actual) =>
+            textAt(actual, "#post-errored") === "Setup:PostFailed" &&
+            !hasAt(actual, "#post-pending"),
+        });
+        expect(yield* Clock.currentTimeMillis).toBe(now + 100);
+        expect(yield* Queue.take(probes.postClosed)).toBe("2");
+        expect(yield* Queue.take(probes.postClosed)).toBe("slow-bad");
       }),
   );
 
@@ -934,7 +1092,7 @@ describe("private route pending and lazy views", () => {
         const htmlRoot = Html.element("#root");
         const mounting = yield* Effect.forkChild(
           mountRouter({
-            routes: [makeApp(probes, importer, access.events)],
+            routes: [makeFirstFrameApp(probes, importer, access.events)],
             notFound: NotFound,
             host: Html.host,
             root: htmlRoot,
@@ -954,7 +1112,7 @@ describe("private route pending and lazy views", () => {
         const html = Html.serializeChildren(htmlRoot.children);
         yield* Scope.close(scope, Exit.void);
 
-        expect(html).toContain('<section id="layout">');
+        expect(html).toContain('<section id="layout"><p id="post-first">post 1</p></section>');
         expect(html).not.toContain("post-pending");
         expect(yield* Ref.get(importer.calls)).toBe(1);
         const closed = yield* Frame.inspect;
@@ -964,4 +1122,208 @@ describe("private route pending and lazy views", () => {
         expect(closed.routes).toHaveLength(0);
       }),
   );
+  it.scoped.layer(frameLayer("pending-defect"))(
+    "8. a setup defect removes the fallback at once and leaves the enclosing Loading settled",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* makeRoot;
+        const probes = yield* makeProbes;
+        const access = yield* Access;
+        const importer = yield* makeImporter;
+        yield* Queue.offer(importer.outcomes, "ok");
+        const { page, receipts } = yield* mountApp(
+          makeApp(probes, importer, access.events),
+          root,
+          "/app/t1",
+        );
+        yield* receipts.navigate("/app/t1/posts/slow-boom");
+        yield* regionLive(page);
+        yield* TestClock.adjust(PendingAfter);
+        yield* pendingVisible(page);
+        yield* Deferred.succeed(probes.slow, void 0);
+        // No clock movement: the fallback goes, and the layout's Loading
+        // does not fall back to its own fallback forever.
+        yield* page.waitFor({
+          label: "the settled region after a defect",
+          until: (actual) =>
+            !hasAt(actual, "#post-pending") &&
+            hasAt(actual, "#outlet") &&
+            !hasAt(actual, "#child-loading"),
+        });
+        expect(yield* Queue.take(probes.postClosed)).toBe("slow-boom");
+        expect(hasAt(root, "#post-errored")).toBe(false);
+        expect(probes.erroredBuilt).toEqual([]);
+
+        // The Frame and the layout stay alive: the next entry sets up.
+        yield* receipts.navigate("/app/t1");
+        yield* receipts.navigate("/app/t1/posts/3");
+        yield* postVisible(page, "3");
+      }),
+  );
+
+  it.scoped.layer(frameLayer("pending-defect-plain"))(
+    "8b. without pending, a setup defect still leaves the enclosing Loading settled",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* makeRoot;
+        const probes = yield* makeProbes;
+        const access = yield* Access;
+        const { page, receipts } = yield* mountApp(
+          makePlainApp(probes, access.events),
+          root,
+          "/app/t1",
+        );
+        yield* receipts.navigate("/app/t1/posts/slow-boom");
+        yield* page.waitFor({
+          label: "the layout's Loading fallback while the setup waits",
+          until: (actual) => hasAt(actual, "#child-loading"),
+        });
+        yield* Deferred.succeed(probes.slow, void 0);
+        yield* page.waitFor({
+          label: "the settled region after a defect",
+          until: (actual) => hasAt(actual, "#outlet") && !hasAt(actual, "#child-loading"),
+        });
+        expect(yield* Queue.take(probes.postClosed)).toBe("slow-boom");
+        expect(probes.erroredBuilt).toEqual([]);
+
+        yield* receipts.navigate("/app/t1");
+        yield* receipts.navigate("/app/t1/posts/3");
+        yield* postVisible(page, "3");
+      }),
+  );
+
+  const nestedScenario = <E,>(
+    page: Page,
+    root: HTMLElement,
+    shown: Shown,
+    childImporter: Importer,
+    parentDrawn: Effect.Effect<void, E>,
+    kind: "prompt" | "hold",
+  ) =>
+    Effect.gen(function* () {
+      yield* parentDrawn;
+      // The child's presentation starts only now, long after the
+      // transition entered it. Its fallback has not been drawn.
+      yield* render;
+      expect(shown.child).toEqual([]);
+      expect(hasAt(root, "#child-pending")).toBe(false);
+      if (kind === "prompt") {
+        // The import lands before `after`, counted from when the child's
+        // presentation started: no flash.
+        yield* Queue.offer(childImporter.outcomes, "ok");
+        yield* page.waitFor({
+          label: "the child view",
+          until: (actual) => hasAt(actual, "#child") && !hasAt(actual, "#child-pending"),
+        });
+        expect(shown.child).toEqual([]);
+        return;
+      }
+      // `after` counts from when the child's presentation started, and
+      // `atLeast` from when its fallback was drawn.
+      yield* TestClock.adjust("99 millis");
+      yield* render;
+      expect(shown.child).toEqual([]);
+      yield* TestClock.adjust("1 millis");
+      yield* page.waitFor({
+        label: "the child fallback",
+        until: (actual) => hasAt(actual, "#child-pending"),
+      });
+      expect(shown.child).toEqual(["shown"]);
+      yield* Queue.offer(childImporter.outcomes, "ok");
+      expect(yield* Queue.take(childImporter.settled)).toBe(1);
+      yield* TestClock.adjust("299 millis");
+      yield* render;
+      expect(hasAt(root, "#child-pending")).toBe(true);
+      expect(hasAt(root, "#child")).toBe(false);
+      yield* TestClock.adjust("1 millis");
+      yield* page.waitFor({
+        label: "the child view after atLeast",
+        until: (actual) => hasAt(actual, "#child") && !hasAt(actual, "#child-pending"),
+      });
+      expect(shown.child).toEqual(["shown"]);
+    });
+
+  const nestedCases: ReadonlyArray<{
+    readonly kind: "prompt" | "hold";
+    readonly letter: string;
+    readonly outcome: string;
+  }> = [
+    { kind: "prompt", letter: "a", outcome: "does not flash" },
+    { kind: "hold", letter: "b", outcome: "holds atLeast from when it showed" },
+  ];
+
+  for (const { kind, letter, outcome } of nestedCases) {
+    it.scoped.layer(frameLayer(`pending-lazy-parent-${kind}`))(
+      `9${letter}. under a lazy parent that lands late, the child ${outcome}`,
+      () =>
+        Effect.gen(function* () {
+          const root = yield* makeRoot;
+          const access = yield* Access;
+          const parentImporter = yield* makeImporter;
+          const childImporter = yield* makeImporter;
+          const shown: Shown = { parent: [], child: [] };
+          const { page, receipts } = yield* mountApp(
+            makeLazyParentApp(shown, parentImporter, childImporter, access.events),
+            root,
+            "/login",
+          );
+          yield* loginVisible(page);
+          yield* receipts.navigate("/app/t1/posts/1");
+          // Both imports start when the transition enters the branch.
+          yield* Queue.take(parentImporter.started);
+          yield* Queue.take(childImporter.started);
+          yield* TestClock.adjust(PendingAfter);
+          yield* page.waitFor({
+            label: "the parent fallback",
+            until: (actual) => hasAt(actual, "#parent-pending"),
+          });
+          yield* TestClock.adjust("400 millis");
+          const parentDrawn = Effect.gen(function* () {
+            yield* Queue.offer(parentImporter.outcomes, "ok");
+            yield* page.waitFor({
+              label: "the parent view",
+              until: (actual) => hasAt(actual, "#parent") && !hasAt(actual, "#parent-pending"),
+            });
+          });
+          yield* nestedScenario(page, root, shown, childImporter, parentDrawn, kind);
+          expect(shown.parent).toEqual(["shown"]);
+        }),
+    );
+
+    it.scoped.layer(frameLayer(`pending-slow-parent-${kind}`))(
+      `10${letter}. under a slow parent setup, the child ${outcome}`,
+      () =>
+        Effect.gen(function* () {
+          const root = yield* makeRoot;
+          const access = yield* Access;
+          const childImporter = yield* makeImporter;
+          const gate = yield* Deferred.make<void>();
+          const shown: Shown = { parent: [], child: [] };
+          const { page, receipts } = yield* mountApp(
+            makeSlowParentApp(shown, gate, childImporter, access.events),
+            root,
+            "/login",
+          );
+          yield* loginVisible(page);
+          yield* receipts.navigate("/app/t1/posts/1");
+          yield* Queue.take(childImporter.started);
+          yield* TestClock.adjust(PendingAfter);
+          yield* page.waitFor({
+            label: "the parent fallback",
+            until: (actual) => hasAt(actual, "#parent-pending"),
+          });
+          // The parent's setup ends at 100ms; its own fallback holds to 400ms.
+          yield* Deferred.succeed(gate, void 0);
+          const parentDrawn = Effect.gen(function* () {
+            yield* TestClock.adjust("300 millis");
+            yield* page.waitFor({
+              label: "the parent view",
+              until: (actual) => hasAt(actual, "#parent") && !hasAt(actual, "#parent-pending"),
+            });
+          });
+          yield* nestedScenario(page, root, shown, childImporter, parentDrawn, kind);
+          expect(shown.parent).toEqual(["shown"]);
+        }),
+    );
+  }
 });

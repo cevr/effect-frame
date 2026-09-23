@@ -33,6 +33,7 @@ export {
   QueryState,
   QueryVersionMismatch,
   Ready,
+  StreamEnded,
   UnknownQuery,
   canonicalize,
   isFailed,
@@ -42,7 +43,6 @@ export {
   keyOf,
   markStale,
   match,
-  publicPolicy,
   query,
   type AnyQuery,
   type ArgsOf,
@@ -58,6 +58,8 @@ export {
   type QueryStateCases,
   type ResultOf,
 } from "./query.js";
+// Streamed documents: the record channel and the cache's resume (#22).
+export * as Streaming from "./streaming.js";
 export {
   QueryCache,
   followQuery,
@@ -98,3 +100,14 @@ export * as Cell from "./cell.js";
 export * as Form from "./form.js";
 export * as Generated from "./generated.js";
 export { FormContext, type FormFields, type FormIssue, type FormIssues } from "./form.js";
+// Authorization (#20, #30): who is asking. The rules that judge a principal
+// are server-only (`policy.ts`) and never reach this entry.
+export {
+  Anonymous,
+  Authenticated,
+  Claims,
+  CurrentPrincipal,
+  Principal,
+  type PrincipalRevision,
+  type PrincipalSource,
+} from "./principal.js";

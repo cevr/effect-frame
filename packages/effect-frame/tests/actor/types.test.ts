@@ -57,7 +57,7 @@ type Equals<A, B> =
 // A custom cache implements exactly this surface; ownership is not on it.
 const queryCacheIsPublicOnly: Equals<
   keyof QueryCacheService,
-  "open" | "active" | "apply" | "invalidate"
+  "open" | "active" | "apply" | "invalidate" | "principalChanged"
 > = true;
 // Command ownership is private: no public entry exports it.
 // @ts-expect-error `CommandClaim` is not a public export.
@@ -206,6 +206,7 @@ const _provisionalAsApplied = (): Applied<number> =>
 
 const Counter = contract("TypesCounter", {
   version: 1,
+  policy: "public",
   key: Schema.String,
   snapshot: Schema.Finite,
   message: Schema.Finite,

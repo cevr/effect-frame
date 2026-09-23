@@ -36,6 +36,9 @@ export type NotesMessage = Schema.Schema.Type<typeof NotesMessage>;
 
 export const Notes = contract("Notes", {
   version: 1,
+  // A single-tenant demo: every caller may read and send. It says so here,
+  // by name, and the server registers `Policy.allowAll` under it.
+  policy: "public",
   key: NotesKey,
   snapshot: NotesSnapshot,
   message: NotesMessage,

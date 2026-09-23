@@ -1,4 +1,7 @@
 import { Context, Effect, Option, Result, Schema, Scope } from "effect";
+import type { PolicyTable } from "./policy.js";
+import { lookup } from "./policy.js";
+import { CurrentPrincipal } from "./principal.js";
 import type {
   AnyQuery,
   ArgsOf,
@@ -15,7 +18,6 @@ import {
   QueryVersionMismatch,
   UnknownQuery,
   canonicalize,
-  publicPolicy,
 } from "./query.js";
 import type { Refreshed, TransportService } from "./transport.js";
 import { ActorTransport } from "./transport.js";
@@ -23,7 +25,8 @@ import type { Unauthorized } from "./vocabulary.js";
 
 /**
  * The server half of the Query primitive (#17). This module is server-only:
- * it holds handlers and the policy table. It never reaches the client entry.
+ * it holds handlers and reads the policy table. It never reaches the client
+ * entry.
  */
 
 /** Marker for the import-boundary test: this string must never reach a client bundle. */
@@ -200,34 +203,6 @@ export const batched = <Q extends BatchedQuery, E, R>(
 export const Query = { batched };
 
 // ---------------------------------------------------------------------------
-// Policy
-// ---------------------------------------------------------------------------
-
-/** Decides whether the caller may read one query with these arguments. */
-export interface QueryPolicy {
-  readonly check: (key: QueryKey) => Effect.Effect<void, Unauthorized>;
-}
-
-/**
- * The policy table. `"public"` is resolved by every host and allows every
- * read; a table entry of that name replaces it. Every other name a query uses
- * must be in the table, or the host refuses the query.
- */
-export interface PolicyTable {
-  readonly [name: string]: QueryPolicy;
-}
-
-const noPolicies: PolicyTable = {};
-
-/** The built-in `"public"` policy: every read is allowed. */
-export const allowAll: QueryPolicy = { check: () => Effect.void };
-
-export const QueryPolicies = Context.Reference<PolicyTable>(
-  "effect-frame/src/actor/query-host/QueryPolicies",
-  { defaultValue: () => noPolicies },
-);
-
-// ---------------------------------------------------------------------------
 // The query host
 // ---------------------------------------------------------------------------
 
@@ -254,6 +229,8 @@ export interface QueryServing {
 
 export interface QueryHostOptions<R> {
   readonly queries: ReadonlyArray<AnyQueryImplementation<R>>;
+  /** The actor host's table, already validated against every query name. */
+  readonly policies: PolicyTable;
 }
 
 /**
@@ -308,7 +285,7 @@ export const make = <R>(
     const context = captured.pipe(Context.omit(Scope.Scope), Context.omit(ActorTransport));
     // oxlint-disable-next-line effect/noAs -- host keys were removed at this boundary.
     const applicationContext = context as Context.Context<R>;
-    const policies = yield* QueryPolicies;
+    const policies = options.policies;
     const byName = new Map(
       options.queries.map((implementation) => [implementation.contract.name, implementation]),
     );
@@ -316,16 +293,16 @@ export const make = <R>(
     const authorize = (
       implementation: AnyQueryImplementation<R>,
       key: QueryKey,
-    ): Effect.Effect<void, PolicyMissing | Unauthorized> => {
-      const named = implementation.contract.policy;
-      const found = Option.orElse(Option.fromNullishOr(policies[named]), () =>
-        Option.filter(Option.some(allowAll), () => named === publicPolicy),
-      );
-      return Option.match(found, {
-        onNone: () => Effect.fail(PolicyMissing.make({ query: key.query, policy: named })),
-        onSome: (policy) => policy.check(key),
+    ): Effect.Effect<void, PolicyMissing | Unauthorized> =>
+      Effect.gen(function* () {
+        const named = implementation.contract.policy;
+        const policy = lookup(policies, named);
+        if (Option.isNone(policy)) {
+          return yield* PolicyMissing.make({ query: key.query, policy: named });
+        }
+        const principal = yield* CurrentPrincipal;
+        return yield* policy.value.check(principal, { _tag: "Query", key }, "read");
       });
-    };
 
     const provide = <A, E extends QueryFailure>(
       effect: Effect.Effect<A, E, R | ActorTransport | Scope.Scope>,

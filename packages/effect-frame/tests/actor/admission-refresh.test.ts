@@ -4,6 +4,8 @@ import {
   ActorHost,
   CommandId,
   MailboxStore,
+  Policies,
+  Policy,
   implementQuery,
   implementTransparent,
 } from "effect-frame/actor";
@@ -20,12 +22,14 @@ import type { QueryEntry } from "effect-frame/actor/client";
 
 const HeldCounter = contract("AdmissionRefreshHeldCounter", {
   version: 1,
+  policy: "public",
   key: Schema.String,
   snapshot: Schema.Finite,
   message: Schema.Finite,
 });
 
 const CounterValue = query("AdmissionRefreshCounterValue", {
+  policy: "public",
   args: Schema.String,
   result: Schema.Finite,
   depends: [HeldCounter],
@@ -93,7 +97,10 @@ const appLayer = QueryCache.layerTest(
     store: () => MailboxStore.layerMemory,
     queries: [CounterValueLive],
   }),
-).pipe(Layer.provideMerge(admissionControlLayer));
+).pipe(
+  Layer.provide(Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }))),
+  Layer.provideMerge(admissionControlLayer),
+);
 
 const withHost = it.scoped.layer(appLayer);
 

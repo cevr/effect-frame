@@ -199,6 +199,56 @@ const program = Effect.gen(function* () {
 
 See [the public route design](docs/design/route-public.md).
 
+### Scroll and focus
+
+In the browser, provide `browserNavigation` as the `Location`. It uses the
+Navigation API, and the History API where that is absent. `followLinks`
+follows ordinary same-origin anchors.
+
+```tsx
+import {
+  Location,
+  NavigationBehavior,
+  Route,
+  browserNavigation,
+  followLinks,
+  mount,
+} from "effect-frame/router";
+
+const program = Effect.gen(function* () {
+  const location = yield* browserNavigation;
+  const router = yield* mount({ routes: [App, Login], notFound, host, root }).pipe(
+    Effect.provideService(Location, location),
+  );
+  yield* followLinks(document, router);
+});
+
+// A tab strip that keeps the reader where they are.
+Route.leaf(tab, TabView, { behavior: NavigationBehavior.Preserve });
+```
+
+- At shell commit (the new branch is in the document, fallbacks included),
+  `NavigationBehavior.Restore`, the default, puts the viewport at the top, at
+  the URL's fragment, or at the entry's saved position on Back and Forward.
+  It then focuses the entering leaf's root, or the first `autofocus` element
+  inside that leaf. It does not wait for queries.
+- `NavigationBehavior.Preserve` leaves scroll and focus alone. Set it on a
+  leaf (`Route.leaf(..., { behavior })`), on a flat route (`behavior` in
+  `Route.client(name, { ... })`), or for the whole router
+  (`mount({ ..., behavior })`). A layout takes no `behavior`: the destination
+  leaf decides.
+- A leaf's root element gets `tabindex="-1"`, unless the view wrote a tab
+  index (either spelling) or the element is focusable already, such as a
+  `<button>`.
+  Focus uses `preventScroll`. A stayed leaf (a search or param change on the
+  same leaf) keeps focus and the caret.
+- The router holds no scroll position and never sets
+  `history.scrollRestoration`. It adds no `aria-live` region.
+- `followLinks` leaves a link that only changes the current page's fragment
+  to the browser.
+
+See [the navigation behavior design](docs/design/navigation-behavior.md).
+
 ## Plain-form commands
 
 A command form works with no JavaScript. The server renders a real
@@ -210,7 +260,7 @@ import { HttpServer } from "effect-frame/actor";
 import { Form, Generated } from "effect-frame/actor/client";
 import type { RemoteActorRef } from "effect-frame/actor/client";
 import { View } from "effect-frame/view";
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 
 // The render mints `id` with the command id. Decoding never mints it.
 const Add = Schema.TaggedStruct("Add", {
@@ -242,7 +292,12 @@ const Compose = (props: { readonly notes: RemoteActorRef<typeof Notes> }) =>
   });
 
 // Server: mount beside the JSON handler, at `/actors/form`.
-const forms = HttpServer.form({ contracts: [Notes], render: (path) => renderPage(path) });
+const forms = HttpServer.form({
+  contracts: [Notes],
+  principal: HttpServer.anonymous,
+  login: Option.none(),
+  render: (path) => renderPage(path),
+});
 ```
 
 - `effect-frame/actor/client` exports `Generated` (`fromCommandId`,
@@ -254,7 +309,9 @@ const forms = HttpServer.form({ contracts: [Notes], render: (path) => renderPage
   `$key`, `$return`, `$form`, `_tag`, and generated inputs in every host.
 - `HttpServer.form` answers 303 to `$return` on success, 200 with the page
   and its `FormIssues` on a validation failure, 504 with the same id on a
-  lost reply, and 400 or 415 before any send.
+  lost reply, and 400 or 415 before any send. An `Unauthorized` anonymous
+  post answers 303 to `login` with `next`; every other refusal is a 403
+  with the page.
 - `Generated.send(ref, contract, input)` sends from code. The input omits
   every generated field.
 - A refused page must carry its issues to the client. On the server, embed
@@ -271,6 +328,159 @@ const forms = HttpServer.form({ contracts: [Notes], render: (path) => renderPage
   `Prepared.post` carries a form's plain post.
 
 See [the plain-form design](docs/design/plain-forms.md).
+
+## Streamed documents
+
+A page can send its shell at once and its query values as they settle.
+Nothing in the document runs: each value is a JSON record that the client
+reads and puts into its query cache.
+
+```tsx
+import { Streaming } from "effect-frame/actor/client";
+import { Dom, Html, mount, render } from "effect-frame/view";
+import { Effect, Stream } from "effect";
+
+// Server: the shell and its fallbacks first, then one patch per query.
+const page: Html.Document = {
+  head: '<!doctype html><html><head><meta charset="utf-8"></head><body><main id="app">',
+  tail: "</main>", // resume payloads and form issues go here
+  bootstrap: '<script type="module" src="/client.js"></script>',
+  end: "</body></html>",
+};
+const body = Html.renderToStream(App, props, page, { closeWhen: Effect.sleep("10 seconds") });
+new Response(Stream.toReadableStreamWith(Stream.encodeText(body), context), { headers });
+
+// Client: read the records, seed the cache, hydrate.
+const start = Effect.gen(function* () {
+  const resumed = yield* Streaming.resume(yield* Dom.readRecords);
+  const hydration = Dom.hydrate(root);
+  yield* mount(App, props, hydration.host, root);
+  yield* render;
+  const report = yield* hydration.finish; // report.resolvedAhead
+  yield* resumed.hydrated; // seeds no view took are dropped now
+});
+```
+
+- `Html.renderToStream(view, props, document, options)` renders over its
+  own query cache and returns `Stream<string>`. The first chunk holds the
+  shell, `tail`, a `Placeholder` for each declared query, the patches
+  already due, and `bootstrap`. Then one `Patch` per query as it settles,
+  then `Closed`.
+- `Html.renderAwaitAll(view, props, document, options)` keeps one drawing
+  live until every declared query has settled and no `Loading` boundary
+  shows its fallback, then writes one document with a seed script and no
+  record channel. `Html.renderToString` is unchanged.
+- `options.closeWhen` is the time limit, and both calls require it
+  (`Effect.never` waits for ever). A query still open at the limit has no
+  value in the document, and the client reads it again.
+- `Html.Document`, `Html.streamRecord(record)`.
+- `Dom.readRecords` reads the records present and follows the rest. It
+  also reads an `AwaitAll` seed. `Streaming.resume(records)` puts them into
+  the cache before `mount` and returns `Resumed`: `closed` completes once
+  the channel ended and every live entry shows its value or failure;
+  `hydrated` drops the seeds no view took.
+- `HydrationReport.resolvedAhead` counts boundaries that the client drew
+  with the other branch, because their query settled before hydration.
+  That is not a mismatch.
+- A query still open when the document ends fails with `StreamEnded` and
+  reads again over `POST /query`. `StreamEnded` is in `QueryFailure`. A
+  value in the document never replaces a newer read the client made. Only
+  `QueryFailed` in the document is final; any other failure reads again.
+- `effect-frame/actor/client` exports `Streaming`: `recordId`, `Placeholder`,
+  `Patch`, `Closed`, `StreamRecord`, `RecordJson`, `SeedJson`,
+  `containerId`, `recordClass`, `seedId`, `shell`, `declared`,
+  `awaitDeclared`, `settledPatches`, `resume`, `DocumentRecords`, `Resumed`,
+  `ShellRecords`, `ShellOptions`.
+- `Host` has three optional capabilities, `boundaryMarks`, `adoptBoundary`
+  and `setupStarted`. A custom host may omit them. The HTML host writes
+  `<!--frame-boundary:…-->` marks around each readiness boundary.
+
+See [the streaming design](docs/design/streaming.md).
+
+## Authorization
+
+Every contract and every query names a policy. The root host requires a
+policy table, and there is no default table and no default rule.
+
+```ts
+import { ActorHost, HttpServer, Policies, Policy } from "effect-frame/actor";
+import type { Subject } from "effect-frame/actor";
+import { Principal, contract, query } from "effect-frame/actor/client";
+import { Effect, Layer, Option, Schema } from "effect";
+
+const Ledger = contract("Ledger", {
+  version: 1,
+  policy: "tenantMember",
+  key: Schema.Struct({ tenant: Schema.String, id: Schema.String }),
+  snapshot: Schema.Finite,
+  message: Entry,
+});
+
+const Totals = query("Totals", {
+  args: Schema.Struct({ tenant: Schema.String }),
+  result: Schema.Finite,
+  policy: "tenantMember",
+});
+
+// One rule for actors and queries. `Policy.of` refuses Anonymous first.
+const tenantMember = Policy.of(
+  (subject: Subject) => tenantOf(subject), // Option<string>
+  (who, tenant) => Effect.succeed(tenantsOf(who.claims).includes(tenant)),
+);
+
+// Allow-all exists only by name.
+const policies = Layer.succeed(Policies, Policies.of({ tenantMember, public: Policy.allowAll }));
+
+const host = ActorHost.layer({ implementations, queries }).pipe(Layer.provide(policies));
+
+// The principal is derived once per request, and followed on a connection.
+// One subscription per session, shared by every connection on it.
+const principal = Effect.map(
+  HttpServer.shareSessions({
+    read: (sessionId: string) => readSession(sessionId), // Effect<Principal>
+    follow: (sessionId: string) => followSession(sessionId), // Stream<Principal>, current first
+  }),
+  (sessions): HttpServer.DerivePrincipal =>
+    (request) =>
+      Effect.succeed(
+        Option.match(sessionIdOf(request), { onNone: () => Principal.anonymous, onSome: sessions }),
+      ),
+);
+const handler = Effect.flatMap(principal, (derive) => HttpServer.make({ principal: derive }));
+```
+
+- `effect-frame/actor` exports `Policy` (`allowAll`, `authenticated`,
+  `of`, `all`, `any`, `byAction`), `Policies`, `PolicyNamesMissing`,
+  `MissingPolicy`, and the types `PolicyTable`, `Subject`, `Action`.
+- `effect-frame/actor/client` exports `Principal` (`anonymous`,
+  `constant`, `equals`, `isAuthenticated`), `Anonymous`, `Authenticated`,
+  `Claims`, `CurrentPrincipal`, and the type `PrincipalSource`. The client
+  entry holds no policy table.
+- A host whose table lacks a declared name fails to build with
+  `PolicyNamesMissing`, which lists every miss.
+- `HttpServer.make({ principal })` takes a derivation
+  `(request) => Effect<PrincipalSource>`. `HttpServer.anonymous` is the
+  derivation for a host with no sessions.
+- A changes stream reads its principal from the first value of one
+  subscription to the source, and watches the rest of that same
+  subscription. It ends with `Unauthorized` on the first value that is not
+  equal to the connected one. The HTTP client never retries `Unauthorized`.
+- `HttpServer.shareSessions({ read, follow })` keeps one subscription per
+  session key, shared by every connection on it and released when the last
+  one closes.
+- `HttpServer.toWebHandler(layer, { principal })` and celld's
+  `defineFrameHost` run the derivation in their own runtime, so a
+  derivation may need `ActorTransport` and any service the layer provides.
+- `QueryCache` has `principalChanged`: every live entry drops its value and
+  reads again. A reference whose change stream ends with `Unauthorized`
+  calls it, so a client never shows a value read under a principal that is
+  gone. Call it yourself after a sign-in or sign-out in a long-lived client.
+- `ActorHost.layer` also provides `ActorHost.Recovery`. Its `wake(address)`
+  opens an actor with no caller, so a durable host drains admitted commands
+  after a restart. It checks no policy, returns no state, and is never on
+  the wire.
+
+See [the authorization design](docs/design/authorization.md).
 
 ## Planning
 

@@ -13,19 +13,24 @@ import {
   query,
   ref,
   useQuery,
+  Policies,
+  Policy,
 } from "effect-frame/actor";
 import type { QueryEntry, QueryFailure, QueryState, Source } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import { Dom, Loading, Query, View, ViewTest, mount, readyWithStale } from "effect-frame/view";
-import type { Layer } from "effect";
-import { Deferred, Effect, Exit, Fiber, Option, Schema, Scope, Stream } from "effect";
+import { Deferred, Effect, Layer, Exit, Fiber, Option, Schema, Scope, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
+
+/** The one policy table: every contract and query here declares `public`. */
+const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
 
 const Increment = Schema.TaggedStruct("Increment", { amount: Schema.Finite });
 type Increment = Schema.Schema.Type<typeof Increment>;
 
 const Counter = contract("QueryTestCounter", {
   version: 1,
+  policy: "public",
   key: Schema.Struct({ id: Schema.String }),
   snapshot: Schema.Finite,
   message: Schema.Union([Increment]),
@@ -40,17 +45,20 @@ const CounterLive = implementTransparent(
 );
 
 const Count = query("QueryTestCount", {
+  policy: "public",
   args: Schema.Struct({ id: Schema.String }),
   result: Schema.Struct({ count: Schema.Finite }),
   depends: [Counter],
 });
 
 const Rows = query.batched("QueryTestRows", {
+  policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
   result: Schema.Struct({ id: Schema.Finite, value: Schema.String }),
 });
 
 const Failure = query("QueryTestFailure", {
+  policy: "public",
   args: Schema.Struct({}),
   result: Schema.String,
 });
@@ -89,7 +97,7 @@ const testLayer = QueryTest.layer({
     implementQuery(Failure, () => Effect.fail("expected failure")),
   ],
   implementations: [CounterLive],
-});
+}).pipe(Layer.provide(policies));
 
 type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;

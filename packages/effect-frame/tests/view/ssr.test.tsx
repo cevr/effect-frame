@@ -2,12 +2,22 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { ActorHost, Behavior, CommandId, implementTransparent } from "effect-frame/actor";
+import {
+  ActorHost,
+  Behavior,
+  CommandId,
+  implementTransparent,
+  Policies,
+  Policy,
+} from "effect-frame/actor";
 import { contract, ref, resumeCodec } from "effect-frame/actor/client";
 import type { Applied, KeyOf, SnapshotOf } from "effect-frame/actor/client";
 import { Dom, Html, View, ViewTest, mount } from "effect-frame/view";
-import { Deferred, Effect, Exit, Match, Option, Ref, Schema, Scope } from "effect";
+import { Deferred, Effect, Exit, Layer, Match, Option, Ref, Schema, Scope } from "effect";
 import { describe, expect, it } from "effect-bun-test";
+
+/** The one policy table: every contract and query here declares `public`. */
+const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
 
 /**
  * Server render, snapshot transfer, hydration, and live updates over one
@@ -26,6 +36,7 @@ type NoteSnapshot = Schema.Schema.Type<typeof NoteSnapshot>;
 
 const Note = contract("Note", {
   version: 1,
+  policy: "public",
   key: Schema.String,
   snapshot: NoteSnapshot,
   message: NoteMessage,
@@ -137,7 +148,7 @@ const hydrate = (main: HTMLElement, key: string, onClose: Effect.Effect<void> = 
     return { page, report };
   });
 
-const withHost = it.scoped.layer(ActorHost.layerMemory([NoteLive]));
+const withHost = it.scoped.layer(ActorHost.layerMemory([NoteLive]).pipe(Layer.provide(policies)));
 
 describe("server render and hydration", () => {
   it.scoped("the server host never runs a behaviour", () =>
@@ -207,7 +218,7 @@ describe("server render and hydration", () => {
       const heading = Option.fromNullishOr(main.querySelector("h1"));
 
       const { page, report } = yield* hydrate(main, "n3");
-      expect(report).toEqual({ mismatches: [], unclaimed: 0 });
+      expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
       expect(Option.fromNullishOr(main.querySelector("h1"))).toEqual(heading);
 
       const { note } = yield* server("n3");

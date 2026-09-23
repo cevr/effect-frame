@@ -1,6 +1,7 @@
 import { Effect, Option, Queue, Schema, Stream } from "effect";
 import type { Scope } from "effect";
 import type { LocationService } from "./router.js";
+import type { Landing } from "./landing.js";
 
 /**
  * PRIVATE (route slice 5). A platform traversal (Back or Forward) that the
@@ -33,6 +34,11 @@ export interface Traversal {
   readonly leave: Effect.Effect<boolean>;
   /** Completes when the platform abandoned the traversal before an answer. */
   readonly abandoned: Effect.Effect<void>;
+  /**
+   * Place the viewport and focus for the committed shell (#31), before
+   * `finish`. The router calls it once, only after it showed the entry.
+   */
+  readonly land: (landing: Landing) => Effect.Effect<void>;
   /**
    * The router is done with it: the shell is installed, or nothing moved.
    * An unanswered traversal is let through: only a check, or a router

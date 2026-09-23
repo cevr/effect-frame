@@ -98,10 +98,17 @@ export interface RunningServer {
  */
 export const makeServer = async (options: ServerOptions): Promise<RunningServer> => {
   const runtime = options.runtime;
-  const actors = await runtime.runPromise(HttpServer.make);
+  // Notes has no sessions: every request is anonymous, and that is a written line.
+  const actors = await runtime.runPromise(HttpServer.make({ principal: HttpServer.anonymous }));
   // A refused post re-renders this same document with its issues.
   const forms = await runtime.runPromise(
-    HttpServer.form({ contracts: [Notes], render: () => Effect.scoped(document()) }),
+    HttpServer.form({
+      contracts: [Notes],
+      principal: HttpServer.anonymous,
+      // No sign-in route: `public` never refuses, and a refusal would be a 403.
+      login: Option.none(),
+      render: () => Effect.scoped(document()),
+    }),
   );
   const client = await runtime.runPromise(buildClient());
 

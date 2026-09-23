@@ -2,7 +2,16 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Behavior, Value, implementQuery, query, spawn, useQuery } from "effect-frame/actor";
+import {
+  Behavior,
+  Value,
+  implementQuery,
+  query,
+  spawn,
+  useQuery,
+  Policies,
+  Policy,
+} from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import {
@@ -37,11 +46,15 @@ import {
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
 
+/** The one policy table: every contract and query here declares `public`. */
+const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
 const AttemptQuery = query("OwnedAttempt", {
+  policy: "public",
   args: Schema.Struct({ id: Schema.String }),
   result: Schema.String,
 });
@@ -87,6 +100,7 @@ const makeFixtures = Effect.gen(function* () {
 
 const frameLayer = (name: string) =>
   QueryTest.layer({ queries: [AttemptLive] }).pipe(
+    Layer.provide(policies),
     Layer.provideMerge(Layer.effect(Fixtures, makeFixtures)),
     Layer.provideMerge(TestClock.layer()),
     Layer.provideMerge(Frame.layer({ name })),

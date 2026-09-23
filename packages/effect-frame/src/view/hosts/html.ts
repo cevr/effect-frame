@@ -1,7 +1,11 @@
-import { Effect, Option, Scope } from "effect";
-import type { Cleanup, Host, PropertyValue, StaticProps } from "../host.js";
+import type { ActorTransport } from "effect-frame/actor/client";
+import { QueryCache, Streaming, queryCacheLayer } from "effect-frame/actor/client";
+import { Context, Deferred, Effect, Exit, Layer, Option, Schema, Scope, Stream } from "effect";
+import type { BoundaryMarks, Cleanup, Host, PropertyValue, StaticProps } from "../host.js";
+import type { BoundaryKind } from "../jsx-runtime.js";
 import { mount, render } from "../runtime.js";
 import type { View } from "../view.js";
+import { boundaryClose, boundaryFallback, boundaryOpen } from "../boundary-mark.js";
 
 /**
  * The server host. It builds an in-memory tree and serializes it to HTML.
@@ -22,7 +26,15 @@ export interface HtmlText {
   text: string;
 }
 
-export type HtmlNode = HtmlElement | HtmlText;
+/** A comment. Only a boundary mark is one (#22); its text is never user data. */
+export interface HtmlComment {
+  readonly _tag: "Comment";
+  text: string;
+  /** The open mark of a `Loading` boundary: its fallback waits for data. */
+  readonly waits: boolean;
+}
+
+export type HtmlNode = HtmlElement | HtmlText | HtmlComment;
 
 export const element = (tag: string): HtmlElement => ({
   _tag: "Element",
@@ -91,6 +103,7 @@ export const serializeChildren = (children: ReadonlyArray<HtmlNode>): string => 
       out += textSeparator;
     }
     out += serialize(child);
+    // A comment keeps the text nodes around it apart too.
     previousWasText = child._tag === "Text";
   }
   return out;
@@ -100,6 +113,9 @@ export const serialize = (node: HtmlNode): string => {
   if (node._tag === "Text") {
     return escapeText(node.text);
   }
+  if (node._tag === "Comment") {
+    return `<!--${node.text}-->`;
+  }
   const open = `<${node.tag}${serializeAttributes(node.attributes)}>`;
   if (voidElements.has(node.tag)) {
     return open;
@@ -108,7 +124,7 @@ export const serialize = (node: HtmlNode): string => {
 };
 
 const removeChild = (parent: HtmlNode, node: HtmlNode): void => {
-  if (parent._tag === "Text") {
+  if (parent._tag !== "Element") {
     return;
   }
   const index = parent.children.indexOf(node);
@@ -128,7 +144,49 @@ const attributeName = (name: string): string => {
   return name;
 };
 
-export const host: Host<HtmlNode> = {
+/**
+ * The comment pair around a readiness boundary (#22). The open mark names
+ * the branch the boundary shows when the tree is serialized.
+ */
+const boundaryMarks =
+  (changed: () => void) =>
+  (kind: BoundaryKind): BoundaryMarks<HtmlNode> => {
+    const open: HtmlComment = {
+      _tag: "Comment",
+      text: boundaryOpen(false),
+      waits: kind === "Loading",
+    };
+    const close: HtmlComment = { _tag: "Comment", text: boundaryClose, waits: false };
+    return {
+      open,
+      close,
+      show: (shown) => {
+        open.text = boundaryOpen(shown);
+        changed();
+      },
+    };
+  };
+
+/** Whether a `Loading` boundary under `node` shows its fallback now. */
+const waitsForData = (node: HtmlNode): boolean => {
+  if (node._tag === "Comment") {
+    return node.waits && node.text === boundaryFallback;
+  }
+  if (node._tag === "Text") {
+    return false;
+  }
+  return node.children.some(waitsForData);
+};
+
+/**
+ * The server host. `changed` runs when a boundary switches branch or a node
+ * leaves the tree: the two writes after which no `Loading` fallback may be
+ * left (#22).
+ */
+const makeHost = (
+  changed: () => void,
+  setupStarted: Option.Option<() => () => void> = Option.none(),
+): Host<HtmlNode> => ({
   createElement: (tag: string, staticProps: StaticProps) => {
     const node = element(tag);
     for (const [name, value] of Object.entries(staticProps)) {
@@ -151,7 +209,7 @@ export const host: Host<HtmlNode> = {
     }
   },
   insert: (parent, node, anchor) => {
-    if (parent._tag === "Text") {
+    if (parent._tag !== "Element") {
       return;
     }
     removeChild(parent, node);
@@ -167,7 +225,10 @@ export const host: Host<HtmlNode> = {
       },
     });
   },
-  remove: removeChild,
+  remove: (parent, node) => {
+    removeChild(parent, node);
+    changed();
+  },
   setText: (node, text) => {
     if (node._tag === "Text") {
       node.text = text;
@@ -177,7 +238,14 @@ export const host: Host<HtmlNode> = {
   addEventListener: (): Cleanup => () => {},
   // The server has no live node, so a behaviour never runs here.
   attach: () => {},
-};
+  boundaryMarks: boundaryMarks(changed),
+  ...Option.match(setupStarted, {
+    onNone: () => ({}),
+    onSome: (started) => ({ setupStarted: started }),
+  }),
+});
+
+export const host: Host<HtmlNode> = makeHost(() => {});
 
 /**
  * Render one view to HTML. The render owns its own scope: setup runs, one
@@ -199,6 +267,227 @@ export const renderToString = Effect.fn("Html.renderToString")(function* <Props,
   return html;
 });
 
+/**
+ * The close tag, built from parts, so no bundle of this module holds
+ * `</script`. A bundle that keeps this host may be written inline in a
+ * page's script.
+ */
+const scriptClose = ["<", "/script>"].join("");
+
 /** A JSON payload the client reads back by id. See `Dom.readJsonScript`. */
 export const jsonScript = (id: string, json: string): string =>
-  `<script type="application/json" id="${escapeAttribute(id)}">${escapeJsonScript(json)}</script>`;
+  `<script type="application/json" id="${escapeAttribute(id)}">${escapeJsonScript(json)}${scriptClose}`;
+
+// ---------------------------------------------------------------------------
+// Streamed documents (#22)
+// ---------------------------------------------------------------------------
+
+const encodeRecord = Schema.encodeSync(Streaming.RecordJson);
+const encodeSeed = Schema.encodeSync(Streaming.SeedJson);
+
+/**
+ * One record of a streamed document, as the script the client reads. It is
+ * JSON, never run: the same escaping as `jsonScript`, a class for an id.
+ *
+ * An empty comment follows it. A parser may append a large record's text in
+ * steps, and a browser tells no observer about text it appends, so the
+ * client reads a record once the node after it is there. The comment is
+ * that node, in the same write, so a record is read as soon as it is whole.
+ */
+export const streamRecord = (record: Streaming.StreamRecord): string =>
+  `<script type="application/json" class="${Streaming.recordClass}">${escapeJsonScript(encodeRecord(record))}${scriptClose}<!---->`;
+
+/**
+ * The document around one view. The view's markup goes between `head` and
+ * `tail`; the query records go after `tail`; `bootstrap` is the page's
+ * module script; `end` closes the document.
+ */
+export interface Document {
+  /** The doctype, the head, and the mount element's open tag. */
+  readonly head: string;
+  /** The mount element's close tag, then any settled payload: actor resume, form issues. */
+  readonly tail: string;
+  /** The module script. A streamed document writes it before the later patches. */
+  readonly bootstrap: string;
+  /** `</body></html>`. */
+  readonly end: string;
+}
+
+/**
+ * Each request renders over its own cache, released when its response ends
+ * (#28). The layer is fresh: a caller whose context was built from the same
+ * layer carries a memo map that would hand back the caller's own cache.
+ */
+const requestCache: Effect.Effect<QueryCache["Service"], never, Scope.Scope> = Effect.map(
+  Layer.build(Layer.fresh(queryCacheLayer)),
+  (context) => Context.get(context, QueryCache),
+);
+
+/** Mount a view over `root` in the current scope and draw one frame. */
+const draw = <Props, E, R>(
+  view: View<Props, E, R>,
+  props: Props,
+  cache: QueryCache["Service"],
+  root: HtmlElement,
+  over: Host<HtmlNode> = host,
+): Effect.Effect<void, E, Exclude<Exclude<R, Scope.Scope>, QueryCache> | Scope.Scope> =>
+  mount(view, props, over, root).pipe(
+    Effect.andThen(render),
+    Effect.provideService(QueryCache, cache),
+  );
+
+/**
+ * Render one view as a streamed document (#22): the shell and its
+ * fallbacks in the first chunk, then one patch per query as it settles,
+ * then `Closed`. The first chunk holds the view's markup, `tail`, the open
+ * record container, a placeholder for every query the shell declared, the
+ * patches already due, and `bootstrap`, in that order, so the page's script
+ * is fetched while the queries are still in flight.
+ *
+ * The render holds its own query cache and its own scope for as long as the
+ * stream runs: the queries the shell declared keep reading, and both are
+ * released when the stream ends. `Closed` is written on every exit path
+ * but a failed shell, which writes nothing. `options.closeWhen` is the
+ * time limit, and it is required: a query still open when it completes
+ * settles on the client as `StreamEnded`, and the client reads it again.
+ */
+export const renderToStream = <Props, E, R>(
+  view: View<Props, E, R>,
+  props: Props,
+  document: Document,
+  options: Streaming.ShellOptions,
+): Stream.Stream<string, E, Exclude<Exclude<R, Scope.Scope>, QueryCache> | ActorTransport> =>
+  Stream.unwrap(
+    Effect.gen(function* () {
+      const cache = yield* requestCache;
+      const root = element("#root");
+      yield* draw(view, props, cache, root);
+      const shell = serializeChildren(root.children);
+      const records = yield* Effect.provideService(Streaming.shell(options), QueryCache, cache);
+      const first = [
+        document.head,
+        shell,
+        document.tail,
+        `<div id="${Streaming.containerId}" hidden>`,
+        ...records.placeholders.map(streamRecord),
+        ...records.settled.map(streamRecord),
+        document.bootstrap,
+      ].join("");
+      return Stream.concat(
+        Stream.succeed(first),
+        Stream.concat(
+          Stream.map(records.later, streamRecord),
+          Stream.succeed(`</div>${document.end}`),
+        ),
+      );
+    }),
+  );
+
+/**
+ * Render one view once its drawing waits for nothing (#22, the `AwaitAll`
+ * mode): every query it declares has settled, and no `Loading` boundary in
+ * the tree shows its fallback. The drawing is live while it waits, so rows
+ * set up later and queries declared by content that appears later count
+ * too. No record channel is written: the settled values go in one seed
+ * script after `tail`, so the client's cache holds them before it mounts
+ * and hydration agrees node for node.
+ *
+ * A setup the runtime runs after the frame, such as a list row's, holds
+ * the render until it ends, inside a boundary or not: it may declare a
+ * query or draw nodes.
+ *
+ * `options.closeWhen` is the time limit, and it is required. When it
+ * completes first, the drawing is serialized as it is: a query still open
+ * has no seed, its boundary shows the fallback, and the client reads it. A
+ * `Loading` boundary that registers no query shows its fallback for ever,
+ * so such a page always waits for the limit.
+ */
+export const renderAwaitAll = Effect.fn("Html.renderAwaitAll")(function* <Props, E, R>(
+  view: View<Props, E, R>,
+  props: Props,
+  document: Document,
+  options: Streaming.ShellOptions,
+) {
+  const scope = yield* Scope.make();
+  const html = yield* Effect.gen(function* () {
+    const cache = yield* requestCache;
+    const withCache = <A, E2, R2>(effect: Effect.Effect<A, E2, R2>) =>
+      Effect.provideService(effect, QueryCache, cache);
+    // The limit runs once, from the drawing.
+    const limit = yield* Deferred.make<void>();
+    yield* Effect.forkIn(Effect.andThen(options.closeWhen, Deferred.succeed(limit, void 0)), scope);
+    // Completed by the host after a write that can clear the last fallback.
+    let changed = Deferred.makeUnsafe<void>();
+    const wake = (): void => void Deferred.doneUnsafe(changed, Exit.void);
+    // Setups the runtime ran after the frame, still running: a list row's
+    // setup may declare a query or draw nodes when it ends.
+    let setups = 0;
+    const watched = makeHost(
+      wake,
+      Option.some(() => {
+        setups += 1;
+        return () => {
+          setups -= 1;
+          wake();
+        };
+      }),
+    );
+    const root = element("#root");
+    yield* Scope.provide(draw(view, props, cache, root, watched), scope);
+    let waiting = true;
+    while (waiting) {
+      // A fresh signal before the check, so a write after it is never missed.
+      if (Deferred.isDoneUnsafe(changed)) {
+        changed = Deferred.makeUnsafe<void>();
+      }
+      const signal = changed;
+      // Read before the declarations: a setup that ends after this read
+      // wakes the next pass, which reads them again.
+      const settledSetups = setups === 0;
+      const ids = yield* withCache(Streaming.declared);
+      const seed = yield* withCache(Streaming.settledPatches);
+      const open = seed.length < ids.length;
+      // Flush, then read the tree at once: a branch switch the flush ran has
+      // taken its fallback away by now.
+      yield* render;
+      if (settledSetups && setups === 0 && !open && !root.children.some(waitsForData)) {
+        return page(document, root, seed);
+      }
+      const wakes: Array<Effect.Effect<boolean>> = [
+        Effect.as(Deferred.await(signal), true),
+        Effect.as(Deferred.await(limit), false),
+      ];
+      if (open) {
+        wakes.push(Effect.as(withCache(Streaming.awaitDeclared), true));
+      }
+      waiting = yield* Effect.raceAll(wakes);
+    }
+    yield* render;
+    return page(document, root, yield* withCache(Streaming.settledPatches));
+  }).pipe(
+    Scope.provide(scope),
+    Effect.onExit((exit) => Scope.close(scope, exit)),
+  );
+  return html;
+});
+
+const page = (
+  document: Document,
+  root: HtmlElement,
+  seed: ReadonlyArray<Streaming.Patch>,
+): string =>
+  [
+    document.head,
+    serializeChildren(root.children),
+    document.tail,
+    seedScript(seed),
+    document.bootstrap,
+    document.end,
+  ].join("");
+
+const seedScript = (seed: ReadonlyArray<Streaming.Patch>): string => {
+  if (seed.length === 0) {
+    return "";
+  }
+  return jsonScript(Streaming.seedId, encodeSeed(seed));
+};

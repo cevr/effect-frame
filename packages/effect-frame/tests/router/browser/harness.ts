@@ -2,7 +2,6 @@
 import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
-import type { LeaveConfig } from "./leave-app.js";
 
 /**
  * The real-browser harness for the leave proof. It follows
@@ -21,7 +20,9 @@ const chromePath = (): string | undefined => {
   return undefined;
 };
 
-const backendOf = (engine: Engine): Bun.WebView.ConstructorOptions["backend"] | undefined => {
+export const backendOf = (
+  engine: Engine,
+): Bun.WebView.ConstructorOptions["backend"] | undefined => {
   if (engine === "webkit") {
     if (process.platform === "darwin") return { type: "webkit", stderr: "ignore" };
     return undefined;
@@ -33,10 +34,10 @@ const backendOf = (engine: Engine): Bun.WebView.ConstructorOptions["backend"] | 
 
 export const hasEngine = (engine: Engine): boolean => backendOf(engine) !== undefined;
 
-/** Bundle the fixture entry for the browser. */
-export const bundle = async (): Promise<string> => {
+/** Bundle a fixture entry in this directory for the browser. */
+export const bundle = async (entry = "leave-app.tsx"): Promise<string> => {
   const result = await Bun.build({
-    entrypoints: [resolve(import.meta.dir, "leave-app.tsx")],
+    entrypoints: [resolve(import.meta.dir, entry)],
     target: "browser",
     format: "esm",
     minify: false,
@@ -44,14 +45,14 @@ export const bundle = async (): Promise<string> => {
   });
   if (!result.success) throw new Error(result.logs.map((log) => log.message).join("\n"));
   const output = result.outputs[0];
-  if (output === undefined) throw new Error("no bundle for leave-app.tsx");
+  if (output === undefined) throw new Error(`no bundle for ${entry}`);
   return output.text();
 };
 
-export interface PageServer {
+export interface PageServer<Config> {
   readonly origin: string;
   /** The config the next page load reads. */
-  config: LeaveConfig;
+  config: Config;
   readonly stop: () => void;
 }
 
@@ -59,16 +60,21 @@ export interface PageServer {
  * Serve the bundle at /app.js and the page at every other path. This uses
  * `node:http`, not `Bun.serve`: the router tests share a process with a
  * happy-dom registration, which replaces the global `Response` and `URL`.
+ * The page reads `config` as `window[global]` before the bundle runs.
  */
-export const serve = async (bundleText: string): Promise<PageServer> => {
-  let config: LeaveConfig = { precommit: "detect" };
+export const serve = async <Config>(
+  bundleText: string,
+  initial: Config,
+  global = "__leaveConfig",
+): Promise<PageServer<Config>> => {
+  let config: Config = initial;
   const server = createServer((request, response) => {
     if (request.url === "/app.js") {
       response.writeHead(200, { "content-type": "text/javascript" });
       response.end(bundleText);
       return;
     }
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>leave proof</title><script>window.__leaveConfig = ${JSON.stringify(config)};</script></head><body><main id="root"></main><script type="module" src="/app.js"></script></body></html>`;
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>leave proof</title><script>window[${JSON.stringify(global)}] = ${JSON.stringify(config)};</script></head><body><main id="root"></main><script type="module" src="/app.js"></script></body></html>`;
     response.writeHead(200, { "content-type": "text/html" });
     response.end(html);
   });
@@ -102,7 +108,7 @@ export interface Capabilities {
 /** Probe an engine once, so proofs can branch or skip on what it really has. */
 export const capabilities = async (engine: Engine): Promise<Capabilities | undefined> => {
   if (!hasEngine(engine)) return undefined;
-  const server = await serve("");
+  const server = await serve("", {});
   const view = await open(engine, `${server.origin}/probe`);
   try {
     return await view.evaluate<Capabilities>(

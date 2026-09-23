@@ -1,7 +1,14 @@
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
-import { ActorHost, Behavior, MailboxStore, implementTransparent } from "effect-frame/actor";
+import {
+  ActorHost,
+  Behavior,
+  MailboxStore,
+  Policies,
+  Policy,
+  implementTransparent,
+} from "effect-frame/actor";
 import {
   ActorTransport,
   Unreachable,
@@ -26,6 +33,7 @@ type Add = Schema.Schema.Type<typeof Add>;
 
 const Counter = contract("BoundCounter", {
   version: 1,
+  policy: "public",
   key: Schema.String,
   snapshot: Schema.Finite,
   message: Schema.Union([Add]),
@@ -35,6 +43,8 @@ const CounterLive = implementTransparent(
   Counter,
   Behavior.reducer<number, Add>({ initial: 0, reduce: (state, message) => state + message.amount }),
 );
+
+const policies = Policies.of({ public: Policy.allowAll });
 
 const memory: StoreFactory = Effect.map(Layer.build(MailboxStore.layerMemory), (built) =>
   Context.get(built, MailboxStore),
@@ -55,7 +65,7 @@ describe("a receipt outlives the retry bound", () => {
         const real = yield* ActorHost.make({
           implementations: [CounterLive],
           store: () => Layer.succeed(MailboxStore, store),
-        });
+        }).pipe(Effect.provideService(Policies, policies));
         // Every call reaches the host and commits; only its reply is lost.
         const lose = { replies: true };
         const wire: TransportService = {

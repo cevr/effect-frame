@@ -2,6 +2,8 @@ import {
   ActorHost,
   ActorTransport,
   Behavior,
+  Policies,
+  Policy,
   Query,
   contract,
   implementQuery,
@@ -25,6 +27,7 @@ type ProbeMessage = Schema.Schema.Type<typeof ProbeMessage>;
 
 const Probe = contract("ApplicationServiceProbe", {
   version: 1,
+  policy: "public",
   key: Schema.Struct({ id: Schema.Finite }),
   snapshot: Schema.Finite,
   message: Schema.Union([ProbeMessage]),
@@ -39,16 +42,19 @@ const ProbeLive = implementTransparent(
 );
 
 const Single = query("ApplicationServiceSingle", {
+  policy: "public",
   args: Schema.Struct({}),
   result: Schema.Struct({ value: Schema.Finite }),
 });
 
 const Batched = query.batched("ApplicationServiceBatch", {
+  policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
   result: Schema.Struct({ value: Schema.Finite }),
 });
 
 const ActorReading = query("ActorReading", {
+  policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
   result: Schema.Finite,
 });
@@ -91,15 +97,20 @@ implementQuery(Single, (args: { readonly wrong: string }) => Effect.succeed({ va
 // @ts-expect-error A handler returns the contract's declared result shape.
 implementQuery(Single, () => Effect.succeed({ value: "wrong" }));
 
+const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
+
 const testLayerWithApplicationRequirement = QueryTest.layer({
   queries: [TestLayerQuery],
-});
+}).pipe(Layer.provide(policies));
 
 const host = ActorHost.layerMemory([ProbeLive], [SingleLive, BatchedLive, ActorReadingLive]).pipe(
   Layer.provide(Layer.succeed(ApplicationValue, ApplicationValue.of({ value: 40 }))),
+  Layer.provide(policies),
 );
 
-const hostWithoutApplicationValue = ActorHost.layerMemory([], [SingleLive]);
+const hostWithoutApplicationValue = ActorHost.layerMemory([], [SingleLive]).pipe(
+  Layer.provide(policies),
+);
 type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 

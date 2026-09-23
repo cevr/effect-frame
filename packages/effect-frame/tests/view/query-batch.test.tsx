@@ -13,6 +13,8 @@ import {
   queryCacheLayer,
   spawn,
   useQuery,
+  Policies,
+  Policy,
 } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
 import { HttpTransport } from "effect-frame/actor/client";
@@ -20,8 +22,12 @@ import { Dom, View, ViewTest, mount } from "effect-frame/view";
 import { Deferred, Effect, Exit, Layer, Option, Ref, Schema, Sink, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
+/** The one policy table: every contract and query here declares `public`. */
+const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
+
 const RowQuery = query.batched("ViewListRow", {
   version: 1,
+  policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
   result: Schema.Struct({ id: Schema.Finite }),
 });
@@ -67,11 +73,11 @@ const RowLive = Query.batched(RowQuery, {
     }),
 });
 
-const hostLayer = ActorHost.layerMemory([], [RowLive]);
+const hostLayer = ActorHost.layerMemory([], [RowLive]).pipe(Layer.provide(policies));
 
 const inProcess = Layer.unwrap(
   Effect.gen(function* () {
-    const server = yield* HttpServer.make;
+    const server = yield* HttpServer.make({ principal: HttpServer.anonymous });
     const context = yield* Effect.context<never>();
     const run = Effect.runPromiseWith(context);
     const fetch: HttpTransport.FetchLike = (input, init) => {

@@ -99,8 +99,17 @@ export interface PortalNode {
  * fallback. The runtime owns this node; views only receive it through
  * `Loading` and `Errored`.
  */
+/** The two readiness boundaries. */
+export type BoundaryKind = "Loading" | "Errored";
+
 export interface RetainedNode {
   readonly _tag: "Retained";
+  /**
+   * Which boundary this is. A `Loading` fallback waits for data; an
+   * `Errored` fallback is a final drawing. An `AwaitAll` render (#22) waits
+   * for the first kind only.
+   */
+  readonly kind: BoundaryKind;
   readonly when: Source<boolean>;
   readonly fallback: Node;
   readonly content: Node;

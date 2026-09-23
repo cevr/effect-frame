@@ -4,6 +4,7 @@ import {
   PolicyMissing,
   QueryFailed,
   QueryVersionMismatch,
+  StreamEnded,
   UnknownQuery,
 } from "../query.js";
 import {
@@ -79,6 +80,8 @@ export const WireQueryError = Schema.Union([
   QueryFailed,
   Unauthorized,
   Unreachable,
+  // Client-written (#22). A host never sends it; the union matches `QueryFailure`.
+  StreamEnded,
 ]);
 export type WireQueryError = Schema.Schema.Type<typeof WireQueryError>;
 
@@ -215,6 +218,7 @@ export const queryStatusOf = (error: WireQueryError): number => {
     case "QueryFailed":
       return 422;
     case "Unreachable":
+    case "StreamEnded":
       return 502;
   }
 };
@@ -230,3 +234,6 @@ export const paths = {
 } satisfies Record<string, string>;
 
 export const eventPrefix = "data: ";
+
+/** The line that names a stream's terminal error event. Its `data:` line is a `WireError`. */
+export const errorEvent = "event: error";

@@ -1,32 +1,19 @@
 import type { Layer as LayerType, Scope } from "effect";
-import { Context, Effect, Option, Semaphore, Stream } from "effect";
+import { Context, Effect, Layer, Option, Semaphore, Stream } from "effect";
 import type { Address } from "./contract.js";
 import type { AnyImplementation, HostedInstance } from "./implement.js";
 import { MailboxStore } from "./mailbox-store.js";
+import type { Action, Declared, PolicyNamesMissing } from "./policy.js";
+import { Policies, lookup, validate } from "./policy.js";
+import { CurrentPrincipal } from "./principal.js";
 import type { QueryKey } from "./query.js";
 import { UnknownQuery } from "./query.js";
 import type { AnyQueryImplementation, QueryServing } from "./query-host.js";
 import { make as makeQueryServing } from "./query-host.js";
 import type { Refreshed, TransportService } from "./transport.js";
 import { ActorTransport } from "./transport.js";
-import type { RemoteFailure, Unauthorized } from "./vocabulary.js";
-import { ContractMismatch, UnknownContract } from "./vocabulary.js";
-
-export type Action = "read" | "send";
-
-/**
- * Decides whether the caller may read or send to one address. The key is
- * part of the address, so a tenant-scoped key is enough to scope access.
- * The default allows everything; a real host must replace it.
- */
-export interface AuthorizerService {
-  readonly authorize: (address: Address, action: Action) => Effect.Effect<void, Unauthorized>;
-}
-
-export const Authorizer = Context.Reference<AuthorizerService>(
-  "effect-frame/src/actor/host/Authorizer",
-  { defaultValue: () => ({ authorize: () => Effect.void }) },
-);
+import type { RemoteFailure } from "./vocabulary.js";
+import { ContractMismatch, Unauthorized, UnknownContract } from "./vocabulary.js";
 
 export interface HostOptions<R> {
   readonly implementations: ReadonlyArray<AnyImplementation<R>>;
@@ -37,10 +24,10 @@ export interface HostOptions<R> {
    */
   readonly store?: (address: Address) => LayerType.Layer<MailboxStore>;
   /**
-   * PROTOTYPE (ticket #17). The queries this host serves. They are built
-   * here and not in a layer beside this one, because a query handler reads
-   * actors through this host's own transport: a second host would open a
-   * second set of instances. Omit it and the host serves actors alone.
+   * The queries this host serves (#17). They are built here and not in a
+   * layer beside this one, because a query handler reads actors through
+   * this host's own transport: a second host would open a second set of
+   * instances. Omit it and the host serves actors alone.
    */
   readonly queries?: ReadonlyArray<AnyQueryImplementation<R>>;
 }
@@ -53,13 +40,75 @@ const unknownQueryRefresh = (key: QueryKey): Refreshed => ({
   error: UnknownQuery.make({ query: key.query }),
 });
 
+/**
+ * Every policy name this host's contracts and queries declare. The host
+ * validates them all before it becomes a transport (#20 §3).
+ */
+const declaredBy = <R>(
+  implementations: ReadonlyArray<AnyImplementation<R>>,
+  queries: ReadonlyArray<AnyQueryImplementation<R>>,
+): ReadonlyArray<Declared> => [
+  ...implementations.map((implementation): Declared => ({
+    subject: "actor",
+    name: implementation.contract.name,
+    policy: implementation.contract.policy,
+  })),
+  ...queries.map((implementation): Declared => ({
+    subject: "query",
+    name: implementation.contract.name,
+    policy: implementation.contract.policy,
+  })),
+];
+
+/** What `Recovery` does. */
+export interface RecoveryService {
+  /**
+   * Opens the actor at `address` if it is not open: that restores its
+   * committed state, drains the commands already admitted, and re-enters
+   * its machine work. It returns no state.
+   */
+  readonly wake: (address: Address) => Effect.Effect<void, UnknownContract | ContractMismatch>;
+}
+
+/**
+ * The host's own wake, with no caller (#85). A durable host that restarts
+ * must drain what it already admitted, and no principal is present to ask.
+ * It checks no policy, because it serves nothing: every command it drains
+ * was authorized when it was admitted, and it returns no state. It is
+ * server-only and never on the wire: `ActorHost.layer` provides it beside
+ * the transport, and only a host adapter (a celld alarm) reads it.
+ */
+export class Recovery extends Context.Service<Recovery, RecoveryService>()(
+  "effect-frame/src/actor/host/Recovery",
+) {}
+
+interface Built {
+  readonly transport: TransportService;
+  readonly recovery: RecoveryService;
+}
+
+/**
+ * Builds the host. It requires `Policies` and fails with
+ * `PolicyNamesMissing` before it serves anything when a contract or a query
+ * names a policy the table does not hold.
+ */
 export const make = <R>(
   options: HostOptions<R>,
-): Effect.Effect<TransportService, never, R | Scope.Scope> =>
+): Effect.Effect<TransportService, PolicyNamesMissing, R | Policies | Scope.Scope> =>
+  Effect.map(build(options), (built) => built.transport);
+
+const build = <R>(
+  options: HostOptions<R>,
+): Effect.Effect<Built, PolicyNamesMissing, R | Policies | Scope.Scope> =>
   Effect.gen(function* () {
     const hostScope = yield* Effect.scope;
     const context = yield* Effect.context<R>();
-    const authorizer = yield* Authorizer;
+    const policies = yield* Policies;
+    const queries = Option.getOrElse(
+      Option.fromNullishOr(options.queries),
+      (): ReadonlyArray<AnyQueryImplementation<R>> => [],
+    );
+    yield* validate(declaredBy(options.implementations, queries), policies);
     const lock = yield* Semaphore.make(1);
     const byName = new Map(
       options.implementations.map((implementation) => [
@@ -70,7 +119,9 @@ export const make = <R>(
     const instances = new Map<string, HostedInstance>();
     const store = options.store ?? (() => MailboxStore.layerMemory);
 
-    const lookup = (address: Address) =>
+    const find = (
+      address: Address,
+    ): Effect.Effect<AnyImplementation<R>, UnknownContract | ContractMismatch> =>
       Option.match(Option.fromNullishOr(byName.get(address.contract)), {
         onNone: () => Effect.fail(UnknownContract.make({ contract: address.contract })),
         onSome: (implementation) => {
@@ -109,13 +160,28 @@ export const make = <R>(
         }),
       );
 
+    /**
+     * Look up, then authorize, then open. A refused caller never causes an
+     * instance to be created, so a read cannot be used to spin up actors.
+     */
+    const authorize = (implementation: AnyImplementation<R>, address: Address, action: Action) =>
+      Effect.gen(function* () {
+        const principal = yield* CurrentPrincipal;
+        const policy = lookup(policies, implementation.contract.policy);
+        if (Option.isNone(policy)) {
+          // Unreachable: every name was validated above.
+          return yield* Unauthorized.make({ contract: address.contract });
+        }
+        return yield* policy.value.check(principal, { _tag: "Actor", address }, action);
+      });
+
     const resolve = (
       address: Address,
       action: Action,
     ): Effect.Effect<HostedInstance, RemoteFailure> =>
       Effect.gen(function* () {
-        const implementation = yield* lookup(address);
-        yield* authorizer.authorize(address, action);
+        const implementation = yield* find(address);
+        yield* authorize(implementation, address, action);
         return yield* open(address, implementation);
       });
 
@@ -188,14 +254,17 @@ export const make = <R>(
     };
 
     // Tie the knot: the handlers read actors through the transport above.
-    const queries = Option.getOrElse(
-      Option.fromNullishOr(options.queries),
-      (): ReadonlyArray<AnyQueryImplementation<R>> => [],
-    );
     if (queries.length > 0) {
-      serving = Option.some(yield* makeQueryServing({ queries }, transport));
+      serving = Option.some(yield* makeQueryServing({ queries, policies }, transport));
     }
-    return transport;
+    const recovery: RecoveryService = {
+      wake: (address) =>
+        Effect.asVoid(
+          Effect.flatMap(find(address), (implementation) => open(address, implementation)),
+        ),
+    };
+    const built: Built = { transport, recovery };
+    return built;
   });
 
 /**
@@ -203,10 +272,19 @@ export const make = <R>(
  * The same layer works for a server and for a test that keeps the client
  * and the server in one runtime.
  */
-export const layer = <R>(options: HostOptions<R>): LayerType.Layer<ActorTransport, never, R> =>
-  ActorTransport.layerLocal<R>(make(options));
+export const layer = <R>(
+  options: HostOptions<R>,
+): LayerType.Layer<ActorTransport | Recovery, PolicyNamesMissing, R | Policies> =>
+  Layer.effectContext(
+    Effect.map(build(options), (built) =>
+      Context.make(ActorTransport, built.transport).pipe(
+        Context.add(Recovery, Recovery.of(built.recovery)),
+      ),
+    ),
+  );
 
 export const layerMemory = <R>(
   implementations: ReadonlyArray<AnyImplementation<R>>,
   queries?: ReadonlyArray<AnyQueryImplementation<R>>,
-): LayerType.Layer<ActorTransport, never, R> => layer({ implementations, queries });
+): LayerType.Layer<ActorTransport | Recovery, PolicyNamesMissing, R | Policies> =>
+  layer({ implementations, queries });

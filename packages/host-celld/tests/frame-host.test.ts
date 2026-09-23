@@ -1,7 +1,15 @@
-import { Effect, Hash, Layer, Option, Schema } from "effect";
+import { Context, Effect, Hash, Layer, Option, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
-import { Behavior, CommandId, implementTransparent } from "effect-frame/actor";
-import { contract } from "effect-frame/actor/client";
+import {
+  Behavior,
+  CommandId,
+  HttpServer,
+  Policies,
+  Policy,
+  implementTransparent,
+} from "effect-frame/actor";
+import type { Principal as PrincipalValue } from "effect-frame/actor/client";
+import { Anonymous, Authenticated, Principal, contract } from "effect-frame/actor/client";
 import { defineFrameHost } from "../src/frame-host.js";
 import * as StorageStore from "../src/storage-store.js";
 import { scopedFake } from "./sqlite-storage.js";
@@ -18,6 +26,7 @@ type Add = Schema.Schema.Type<typeof Add>;
 
 const Counter = contract("Counter", {
   version: 1,
+  policy: "public",
   key: Schema.String,
   snapshot: Schema.Finite,
   message: Schema.Union([Add]),
@@ -30,7 +39,8 @@ const CounterLive = implementTransparent(
 
 const FrameHost = defineFrameHost({
   implementations: [CounterLive],
-  layer: Layer.empty,
+  layer: Layer.succeed(Policies, Policies.of({ public: Policy.allowAll })),
+  principal: HttpServer.anonymous,
   pollInterval: Option.some("5 millis"),
 });
 
@@ -38,12 +48,71 @@ const address = { contract: "Counter", version: 1, key: JSON.stringify("alice") 
 
 const id = Schema.decodeSync(CommandId);
 
-const post = (path: string, body: unknown): Request =>
-  new Request(`http://host.test${path}`, {
+const post = (
+  path: string,
+  body: unknown,
+  member: Option.Option<string> = Option.none(),
+): Request => {
+  const headers = new Headers({ "content-type": "application/json" });
+  Option.map(member, (name) => headers.set("x-member", name));
+  return new Request(`http://host.test${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
+};
+
+// A protected contract: only a member may read or send. The celld alarm
+// has no member to present, so it must recover without the public wire.
+const Guarded = contract("Guarded", {
+  version: 1,
+  policy: "members",
+  key: Schema.String,
+  snapshot: Schema.Finite,
+  message: Schema.Union([Add]),
+});
+
+const GuardedLive = implementTransparent(
+  Guarded,
+  Behavior.reducer<number, Add>({ initial: 0, reduce: (state, message) => state + message.amount }),
+);
+
+/** The members this object admits. Only the object's own layer provides it. */
+class Members extends Context.Service<Members, ReadonlySet<string>>()(
+  "@effect-frame/host-celld/tests/frame-host.test/Members",
+) {}
+
+/**
+ * Who is asking: a member the header names. Anyone else is anonymous. The
+ * derivation reads `Members`, so the object's runtime must supply it.
+ */
+const memberPrincipal: HttpServer.DerivePrincipal<Members> = (request) =>
+  Effect.gen(function* () {
+    const members = yield* Members;
+    return Principal.constant(
+      Option.match(
+        Option.filter(Option.fromNullishOr(request.headers.get("x-member")), (name) =>
+          members.has(name),
+        ),
+        {
+          onNone: (): PrincipalValue => Anonymous.make({}),
+          onSome: (subject) => Authenticated.make({ subject, claims: {} }),
+        },
+      ),
+    );
+  });
+
+const GuardedHost = defineFrameHost({
+  implementations: [GuardedLive],
+  layer: Layer.mergeAll(
+    Layer.succeed(Policies, Policies.of({ members: Policy.authenticated })),
+    Layer.succeed(Members, new Set(["alice"])),
+  ),
+  principal: memberPrincipal,
+  pollInterval: Option.some("5 millis"),
+});
+
+const guardedAddress = { contract: "Guarded", version: 1, key: JSON.stringify("vault") };
 
 /** The JSON a wire reply carries. The test reads the two fields it asserts. */
 const WireBody = Schema.Struct({ revision: Schema.Finite, snapshot: Schema.String });
@@ -126,6 +195,41 @@ describe("the generic frame host over durable-object storage", () => {
       expect(
         storage.sql.exec("SELECT command_id FROM commands WHERE revision IS NULL").toArray(),
       ).toEqual([]);
+    }),
+  );
+
+  it.scoped("a restart drains a protected actor's admitted command on the alarm alone", () =>
+    Effect.gen(function* () {
+      const storage = yield* scopedFake;
+      // The alarm has no caller. A protected actor must still recover: the
+      // wake opens the instance inside the host, not through the public wire.
+      const host = new GuardedHost({ storage }, {});
+      const store = yield* StorageStore.make(storage);
+      const payload = JSON.stringify({ _tag: "Add", amount: 5 });
+      yield* store.append({ commandId: id("g1"), payload, payloadHash: Hash.string(payload) });
+      storage.sql.exec(
+        "INSERT INTO hosted_address (id, contract, version, key) VALUES (1, ?, ?, ?)",
+        guardedAddress.contract,
+        guardedAddress.version,
+        guardedAddress.key,
+      );
+
+      yield* Effect.promise(() => host.alarm());
+
+      expect(
+        storage.sql.exec("SELECT command_id FROM commands WHERE revision IS NULL").toArray(),
+      ).toEqual([]);
+      // Public reads stay under the policy: a member reads, a stranger is refused.
+      const member = yield* read(
+        yield* Effect.promise(() =>
+          host.fetch(post("/snapshot", { address: guardedAddress }, Option.some("alice"))),
+        ),
+      );
+      expect(member).toEqual({ revision: 1, snapshot: "5" });
+      const stranger = yield* Effect.promise(() =>
+        host.fetch(post("/snapshot", { address: guardedAddress }, Option.none())),
+      );
+      expect(stranger.status).toBe(403);
     }),
   );
 });

@@ -1,6 +1,13 @@
 import { Clock, Effect, Layer, Option, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
-import { ActorHost, Behavior, HttpServer, implementTransparent } from "effect-frame/actor";
+import {
+  ActorHost,
+  Behavior,
+  HttpServer,
+  Policies,
+  Policy,
+  implementTransparent,
+} from "effect-frame/actor";
 import { HttpTransport, committedRevision, contract, ref } from "effect-frame/actor/client";
 import type { IdentifiedCommandHandle } from "effect-frame/actor/client";
 import type { CommandPolicySettings } from "../../src/actor/command-owner.js";
@@ -18,6 +25,7 @@ type Add = Schema.Schema.Type<typeof Add>;
 
 const Counter = contract("ImpairedCounter", {
   version: 1,
+  policy: "public",
   key: Schema.String,
   snapshot: Schema.Finite,
   message: Schema.Union([Add]),
@@ -85,7 +93,12 @@ const policy = (settings: Partial<CommandPolicySettings>): CommandPolicySettings
 });
 
 const serve = Effect.gen(function* () {
-  const app = HttpServer.toWebHandler(ActorHost.layerMemory([CounterLive]));
+  const app = HttpServer.toWebHandler(
+    ActorHost.layerMemory([CounterLive]).pipe(
+      Layer.provide(Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }))),
+    ),
+    { principal: HttpServer.anonymous },
+  );
   yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
   const run = Effect.runPromiseWith(yield* Effect.context<never>());
   const server = yield* Effect.acquireRelease(

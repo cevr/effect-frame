@@ -1,4 +1,4 @@
-/* oxlint-disable effect/noGlobals, effect/noNewError, effect/noThrowStatement, effect/noNullish -- this proof installs a fake `window.navigation` and hands the adapter fake navigate events. */
+/* oxlint-disable effect/noGlobals, effect/noNewError, effect/noThrowStatement, effect/noNullish, effect/noUnknownParameters, effect/noNewPromise -- this proof installs a fake `window.navigation`, replaces `history.pushState` with the platform signature, and hands the adapter fake navigate events whose handlers return promises. */
 import { registerDom } from "./dom-setup.js";
 
 registerDom();
@@ -14,6 +14,9 @@ import type { Scope } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { browserCommit } from "../../src/router/browser-commit.js";
 import * as Traversal from "../../src/router/traversal.js";
+import { readSurface } from "../../src/router/landing.js";
+import type { Landing } from "../../src/router/landing.js";
+import { Restore } from "../../src/router/navigation-behavior.js";
 
 interface FakeNavigation {
   readonly listeners: Array<(event: NavigateEvent) => void>;
@@ -118,7 +121,73 @@ const adapter = (precommit: boolean, consume: boolean) =>
         yield* Effect.yieldNow;
         yield* Effect.yieldNow;
       });
-    return { traversals, pops, dispatch, popTo };
+    return { fake, location, traversals, pops, dispatch, popTo };
+  });
+
+/** One push the fake platform dispatched, and what the adapter did with it. */
+interface PushEvent {
+  readonly url: string;
+  readonly abort: AbortController;
+  intercepted: boolean;
+  scrolled: number;
+  settled: boolean;
+}
+
+/**
+ * Replace `history.pushState` for the Scope, like the platform: it
+ * dispatches `navigate` synchronously, and a newer navigation aborts the
+ * ones still in progress. A listener may push again from inside a dispatch.
+ */
+const platformPush = (dispatch: (event: NavigateEvent) => Effect.Effect<void>) =>
+  Effect.gen(function* () {
+    const context = yield* Effect.context<never>();
+    const events: Array<PushEvent> = [];
+    const original = window.history.pushState.bind(window.history);
+    yield* Effect.acquireRelease(
+      Effect.sync(() => {
+        window.history.pushState = (data: unknown, unused: string, url?: string | URL | null) => {
+          original(data, unused, url);
+          for (const earlier of events) {
+            earlier.abort.abort();
+          }
+          const href = new URL(String(url), window.location.href).href;
+          const own: PushEvent = {
+            url: href,
+            abort: new AbortController(),
+            intercepted: false,
+            scrolled: 0,
+            settled: false,
+          };
+          events.push(own);
+          const event = {
+            navigationType: "push",
+            canIntercept: true,
+            hashChange: false,
+            cancelable: true,
+            info: undefined,
+            destination: { key: "", url: href },
+            signal: own.abort.signal,
+            intercept: (options: NavigationInterceptOptions) => {
+              own.intercepted = true;
+              void Promise.resolve(options.handler?.()).then(() => {
+                own.settled = true;
+              });
+            },
+            scroll: () => {
+              own.scrolled += 1;
+            },
+            preventDefault: () => {},
+          };
+          // oxlint-disable-next-line effect/noAs, effect/noChainedTypeAssertions, typescript/no-unsafe-type-assertion -- a fake event with the fields the adapter reads.
+          Effect.runSyncWith(context)(dispatch(event as unknown as NavigateEvent));
+        };
+      }),
+      () =>
+        Effect.sync(() => {
+          window.history.pushState = original;
+        }),
+    );
+    return events;
   });
 
 describe("private browser commit adapter", () => {
@@ -160,6 +229,81 @@ describe("private browser commit adapter", () => {
       yield* held.finish;
     }),
   );
+
+  it.scoped("each own write lands on its own event, once, and never on a newer one", () =>
+    Effect.gen(function* () {
+      const { location, dispatch } = yield* adapter(true, false);
+      const events = yield* platformPush(dispatch);
+      const surface = yield* Option.match(readSurface(location), {
+        onNone: () => Effect.die("no surface"),
+        onSome: Effect.succeed,
+      });
+      const flush = Effect.promise(() => Bun.sleep(5));
+      const landing: Landing = { behavior: Restore, focus: Option.none() };
+      const first = yield* surface.write("push", new URL("/first", window.location.href));
+      const second = yield* surface.write("push", new URL("/second", window.location.href));
+      yield* flush;
+      // The second push aborted the first, which is released; the second waits.
+      expect(events.map((one) => [one.settled, one.scrolled])).toEqual([
+        [true, 0],
+        [false, 0],
+      ]);
+      // The first write's landing places nothing and leaves the second alone.
+      yield* first.land(Option.some(landing));
+      yield* flush;
+      expect(events.map((one) => [one.settled, one.scrolled])).toEqual([
+        [true, 0],
+        [false, 0],
+      ]);
+      // The second lands on its own event, once.
+      yield* second.land(Option.some(landing));
+      yield* second.land(Option.some(landing));
+      yield* flush;
+      expect(events.map((one) => [one.settled, one.scrolled])).toEqual([
+        [true, 0],
+        [true, 1],
+      ]);
+    }),
+  );
+
+  for (const order of ["ours first", "another listener first"]) {
+    it.scoped(`a nested push from another listener is never the router's (${order})`, () =>
+      Effect.gen(function* () {
+        const { fake, location, dispatch } = yield* adapter(true, false);
+        const events = yield* platformPush(dispatch);
+        const outer = new URL("/outer", window.location.href);
+        const nested = new URL("/nested", window.location.href);
+        // Another listener pushes again while the router's own push dispatches.
+        const other = (event: NavigateEvent) => {
+          if (event.destination.url === outer.href) {
+            window.history.pushState({}, "", nested.href);
+          }
+        };
+        if (order === "ours first") {
+          fake.listeners.push(other);
+        } else {
+          fake.listeners.unshift(other);
+        }
+        const surface = yield* Option.match(readSurface(location), {
+          onNone: () => Effect.die("no surface"),
+          onSome: Effect.succeed,
+        });
+        const landing: Landing = { behavior: Restore, focus: Option.none() };
+        const written = yield* surface.write("push", outer);
+        yield* written.land(Option.some(landing));
+        yield* Effect.promise(() => Bun.sleep(5));
+        const byUrl = (href: string) => events.filter((one) => one.url === href);
+        // The nested push is left to the platform: not intercepted, never placed.
+        expect(byUrl(nested.href).map((one) => [one.intercepted, one.scrolled])).toEqual([
+          [false, 0],
+        ]);
+        // The outer push was superseded: it places nothing.
+        expect(byUrl(outer.href).map((one) => one.scrolled)).toEqual([0]);
+        // Nothing intercepted is left waiting.
+        expect(events.filter((one) => one.intercepted && !one.settled)).toEqual([]);
+      }),
+    );
+  }
 
   it.scoped("without a consumer the adapter holds nothing", () =>
     Effect.gen(function* () {

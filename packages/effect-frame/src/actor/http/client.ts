@@ -1,4 +1,15 @@
-import { Context, Duration, Effect, Layer, Option, Ref, Schedule, Schema, Stream } from "effect";
+import {
+  Context,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  Predicate,
+  Ref,
+  Schedule,
+  Schema,
+  Stream,
+} from "effect";
 import type { Address } from "../contract.js";
 import type { TransportService } from "../transport.js";
 import { ActorTransport } from "../transport.js";
@@ -18,6 +29,7 @@ import {
   WireQueryBatch,
   WireQueryValue,
   WireReceipt,
+  errorEvent,
   eventPrefix,
   paths,
 } from "./wire.js";
@@ -32,9 +44,43 @@ export const Fetch = Context.Reference<FetchLike>("effect-frame/src/actor/http/c
 export interface HttpClientOptions {
   /** For example `https://app.example.com/actors`. No trailing slash. */
   readonly baseUrl: string;
-  /** Delay between reconnect attempts of a `changes` stream. */
+  /**
+   * Delay between reconnect attempts of a `changes` stream. It is never
+   * entered on `Unauthorized`: a refusal is not a network failure (#30 §7).
+   */
   readonly reconnect: Schedule.Schedule<unknown>;
 }
+
+/** One `data:` line of the event stream, and whether an `event: error` line named it. */
+interface EventLine {
+  readonly error: boolean;
+  readonly data: string;
+}
+
+/**
+ * Pairs each `data:` line with the event name before it. The server ends a
+ * stream it refuses with `event: error` and one encoded `WireError`; every
+ * other `data:` line is a projection.
+ */
+const readEvents = (
+  lines: Stream.Stream<string, Unreachable>,
+): Stream.Stream<EventLine, Unreachable> =>
+  Stream.mapAccum(
+    lines,
+    () => false,
+    (named, line): readonly [boolean, ReadonlyArray<EventLine>] => {
+      if (line === errorEvent) {
+        return [true, []];
+      }
+      if (line.startsWith(eventPrefix)) {
+        return [false, [{ error: named, data: line.slice(eventPrefix.length) }]];
+      }
+      if (line === "") {
+        return [false, []];
+      }
+      return [named, []];
+    },
+  );
 
 const unreachable = (cause: unknown) => Unreachable.make({ reason: String(cause) });
 
@@ -154,11 +200,17 @@ const make = Effect.fn("ActorTransport.http")(function* (options: HttpClientOpti
         if (Option.isNone(body)) {
           return Stream.fail(unreachable("event stream without a body"));
         }
-        return Stream.fromReadableStream({ evaluate: () => body.value, onError: unreachable }).pipe(
-          Stream.decodeText,
-          Stream.splitLines,
-          Stream.filter((line) => line.startsWith(eventPrefix)),
-          Stream.mapEffect((line) => decodeProjection(line.slice(eventPrefix.length))),
+        const lines = Stream.fromReadableStream({
+          evaluate: () => body.value,
+          onError: unreachable,
+        }).pipe(Stream.decodeText, Stream.splitLines);
+        return readEvents(lines).pipe(
+          Stream.mapEffect((event) => {
+            if (event.error) {
+              return Effect.flatMap(decodeReadError(event.data), (error) => Effect.fail(error));
+            }
+            return decodeProjection(event.data);
+          }),
           // From the client's view the stream never ends. A server that closes
           // the connection is a disconnect, and the schedule decides the retry.
           Stream.concat(Stream.fail(unreachable("the event stream ended"))),
@@ -168,14 +220,22 @@ const make = Effect.fn("ActorTransport.http")(function* (options: HttpClientOpti
 
   /**
    * Reconnects after a network failure from the last revision it saw, so a
-   * dropped connection never loses or repeats a revision.
+   * dropped connection never loses or repeats a revision. `Unauthorized`
+   * fails at once: a revoked principal is refused again on every reconnect,
+   * and retrying it only adds load while the server handles a sign-out.
    */
   const changes: TransportService["changes"] = (address, after) =>
     Stream.unwrap(
       Effect.map(Ref.make(after), (last) =>
         Stream.unwrap(Effect.map(Ref.get(last), (from) => connect(address, from))).pipe(
           Stream.tap((projection) => Ref.set(last, projection.revision)),
-          Stream.retry(options.reconnect),
+          // A refusal ends the stream for good; only a network failure is retried.
+          Stream.retry(
+            Schedule.while(
+              options.reconnect,
+              (metadata) => !Predicate.isTagged(metadata.input, "Unauthorized"),
+            ),
+          ),
           Stream.filter((projection) => projection.revision > after),
         ),
       ),

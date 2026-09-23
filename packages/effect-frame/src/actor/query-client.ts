@@ -9,6 +9,7 @@ import {
   Hash,
   Layer,
   Option,
+  Predicate,
   Request,
   RequestResolver,
   RcMap,
@@ -19,7 +20,7 @@ import {
 } from "effect";
 import * as Inspection from "../inspection.js";
 import type { AnyQuery, ArgsOf, QueryFailure, QueryKey, QueryState, ResultOf } from "./query.js";
-import { Failed, Loading, Ready, canonicalize, keyOf, markStale } from "./query.js";
+import { Failed, Loading, Ready, StreamEnded, canonicalize, keyOf, markStale } from "./query.js";
 import type { Source } from "./source.js";
 import type { Refreshed, TransportService } from "./transport.js";
 import { ActorTransport } from "./transport.js";
@@ -116,6 +117,18 @@ export interface QueryEntry<A, E> {
 }
 
 /**
+ * One state and the principal generation it was written under. The cache
+ * counts its principals: each change of principal is the next generation.
+ * A state from an older generation was read for somebody else.
+ */
+interface Stamped<S> {
+  readonly state: S;
+  readonly principal: number;
+}
+
+type SlotState = Stamped<QueryState<string, QueryFailure>>;
+
+/**
  * One entry as the cache holds it: the value stays encoded, and each typed
  * `QueryEntry` decodes it through its own contract. Two declarations of one
  * key share this one state, so they can never diverge, and the cache needs
@@ -128,11 +141,20 @@ interface CacheSlot {
   /** Owns the read in flight. Closing it interrupts the read. */
   /** Scope owned by the RcMap entry. Closing the last declaration closes it. */
   readonly scope: Scope.Scope;
+  /** Completes when `scope` closes: the last declaration of the key is gone. */
+  readonly released: Effect.Effect<void>;
+  /**
+   * Begin a read that arrives by another path: a document seed still open
+   * when the slot opened (#22). The returned function publishes its result
+   * only when no read has started and no value has landed since, so a late
+   * seed never replaces a newer read's value.
+   */
+  readonly outsideRead: () => (publish: Effect.Effect<void>) => Effect.Effect<void>;
   /**
    * The state a view sees: the slot's own read state, shown stale while an
    * unresolved command owns a contract this entry depends on.
    */
-  readonly state: SubscriptionRef.SubscriptionRef<QueryState<string, QueryFailure>>;
+  readonly state: SubscriptionRef.SubscriptionRef<SlotState>;
   /** Changes the slot's own read state. The displayed state follows. */
   readonly write: (
     update: (own: QueryState<string, QueryFailure>) => QueryState<string, QueryFailure>,
@@ -150,6 +172,11 @@ interface CacheSlot {
   readonly readAfter: (sequence: number) => Effect.Effect<void>;
   /** Marks the entry stale in place. Used when a dependency commits. */
   readonly markStale: Effect.Effect<void>;
+  /**
+   * Drops the value and any read in flight, shows `Loading`, and reads
+   * again. Used when the principal the value was read under is gone.
+   */
+  readonly forget: Effect.Effect<void>;
   /** Replaces the entry from an encoded result a command reply delivered. */
   readonly accept: (encoded: string) => Effect.Effect<void>;
   /** Records a refresh that the server could not serve. */
@@ -220,14 +247,23 @@ export interface QueryCacheService {
    * stale content before the reply arrives rather than after it.
    */
   readonly invalidate: (contractName: string) => Effect.Effect<void>;
+  /**
+   * The principal every held value was read under is gone (#20, #30): a
+   * sign-out, a sign-in as someone else, or a revoked session. Every live
+   * entry drops its value and any read in flight, shows `Loading`, and reads
+   * again under the new principal. No entry keeps a value the new principal
+   * was not authorized to read. A reference whose change stream ends with
+   * `Unauthorized` calls this for the cache it reads.
+   */
+  readonly principalChanged: Effect.Effect<void>;
 }
 
 /**
- * Source-private: how a command owner holds the cache's entries. It is not
- * part of `QueryCacheService`, so a custom cache implements only the public
- * surface, and no public entry exports it.
+ * Source-private: what a reference and `followQuery` need from a cache built
+ * here and nowhere else. It is not part of `QueryCacheService`, so a custom
+ * cache implements only the public surface, and no public entry exports it.
  */
-export interface CommandOwnership {
+export interface CacheInternals {
   /**
    * Registers one command's ownership of a contract's dependents in the
    * current Scope. Every live entry that depends on the contract, and every
@@ -236,6 +272,20 @@ export interface CommandOwnership {
    * when the command's owner closes. Uncertain keeps the ownership.
    */
   readonly claim: (contractName: string) => Effect.Effect<CommandClaim, never, Scope.Scope>;
+  /**
+   * Opens one entry, and its states stamped with the principal generation
+   * each was written under. `followQuery` carries a value across a key
+   * change only within one generation.
+   */
+  readonly openStamped: <Q extends AnyQuery>(
+    contract: Q,
+    args: ArgsOf<Q>,
+  ) => Effect.Effect<StampedEntry<Q>, never, ActorTransport | Scope.Scope>;
+}
+
+interface StampedEntry<Q extends AnyQuery> {
+  readonly entry: QueryEntry<ResultOf<Q>, QueryFailure>;
+  readonly changes: Stream.Stream<Stamped<QueryState<ResultOf<Q>, QueryFailure>>>;
 }
 
 /** One command's ownership of cache entries. */
@@ -244,7 +294,9 @@ export interface CommandClaim {
    * Accepts the refreshes an Applied command's settlement carried, then
    * reads again every live dependent those refreshes did not cover and
    * whose last read started before this settlement. A failed refresh stays
-   * a Failed query; it never changes the command.
+   * a Failed query; it never changes the command. When the principal changed
+   * after the claim was made, the refreshes were read for the principal that
+   * is gone: nothing lands, and the entries read again on their own.
    */
   readonly settle: (refreshed: ReadonlyArray<Refreshed>) => Effect.Effect<void>;
 }
@@ -258,11 +310,11 @@ export class QueryCache extends Context.Service<QueryCache, QueryCacheService>()
  * service. A claim therefore always lands in the cache the reference reads,
  * and a cache built elsewhere has none: its commands own nothing.
  */
-const ownerships = new WeakMap<QueryCacheService, CommandOwnership>();
+const internals = new WeakMap<QueryCacheService, CacheInternals>();
 
-/** Source-private: the command ownership of a cache built by `layer`. */
-export const ownershipOf = (cache: QueryCacheService): Option.Option<CommandOwnership> =>
-  Option.fromNullishOr(ownerships.get(cache));
+/** Source-private: the internals of a cache built by `layer`. */
+export const internalsOf = (cache: QueryCacheService): Option.Option<CacheInternals> =>
+  Option.fromNullishOr(internals.get(cache));
 
 const encodeKey = <Q extends AnyQuery>(contract: Q, args: ArgsOf<Q>): Effect.Effect<QueryKey> =>
   Effect.map(Effect.orDie(Schema.encodeEffect(contract.args)(args)), (encoded) => ({
@@ -279,6 +331,10 @@ interface SlotOwnership {
   readonly next: () => number;
   /** Adds the slot to the live set and counts the claims that cover it. */
   readonly join: (slot: CacheSlot) => Effect.Effect<void, never, Scope.Scope>;
+  /** The cache's principal generation now. */
+  readonly principal: () => number;
+  /** The principal is gone: the next generation, and every live entry forgets. */
+  readonly principalGone: Effect.Effect<void>;
 }
 
 /** A Ready value shows stale while a dependent command is unresolved. */
@@ -301,9 +357,15 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
   registry: Option.Option<Inspection.RegistryService>,
   owner: Option.Option<Inspection.OwnerToken>,
   ownership: SlotOwnership,
+  seeds: Seeds,
 ) {
   const scope = yield* Effect.scope;
-  const state = yield* SubscriptionRef.make<QueryState<string, QueryFailure>>(Loading());
+  const ended = yield* Deferred.make<void>();
+  yield* Scope.addFinalizer(scope, Deferred.succeed(ended, void 0));
+  const state = yield* SubscriptionRef.make<SlotState>({
+    state: Loading(),
+    principal: ownership.principal(),
+  });
   // The slot's own read state and its dependent command count. Every change
   // to either recomputes the displayed state inside one serialized update,
   // so the last update to run always reflects both current values.
@@ -314,12 +376,12 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
   ) =>
     SubscriptionRef.update(state, () => {
       own = update(own);
-      return display(own, pending);
+      return { state: display(own, pending), principal: ownership.principal() };
     });
   const recount = (count: () => number) =>
     SubscriptionRef.update(state, () => {
       pending = count();
-      return display(own, pending);
+      return { state: display(own, pending), principal: ownership.principal() };
     });
   // The sequence number at which the latest read started.
   let readStarted = -1;
@@ -333,17 +395,31 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
   // Bumped by a value that arrived by another path. A read that started
   // before the bump is older than what the entry now holds, and is dropped.
   let generation = 0;
+  // The principal generation under which the server last granted this key.
+  // A refusal of a key the same principal was granted proves that the
+  // principal changed. A refusal of a key it was never granted proves
+  // nothing: it is the answer for that principal.
+  let granted = Option.none<number>();
 
   const land = (encoded: string, stale: boolean) =>
     Effect.suspend(() => {
       generation += 1;
+      granted = Option.some(ownership.principal());
       return write(() => Ready(encoded, stale));
     });
   const accept = (encoded: string) => land(encoded, false);
   const reject = (error: QueryFailure) =>
     Effect.suspend(() => {
       generation += 1;
-      return write(() => Failed(error));
+      const revoked =
+        Predicate.isTagged(error, "Unauthorized") &&
+        Option.contains(granted, ownership.principal());
+      granted = Option.none();
+      const failed = write(() => Failed(error));
+      if (revoked) {
+        return Effect.andThen(failed, ownership.principalGone);
+      }
+      return failed;
     });
 
   // The latch clears before the value is published, never after: a caller
@@ -354,6 +430,8 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
   });
 
   const read = Effect.suspend(() => {
+    // The read's stamp. A change of principal bumps it on every live entry
+    // (`forget`), so a result read for a principal that is gone never lands.
     const started = generation;
     const startedAt = ownership.next();
     readStarted = startedAt;
@@ -414,6 +492,25 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
       });
     });
 
+  // Reads once the read in flight, if any, has ended: a new read never joins
+  // one that started under the principal that is gone.
+  const reread: Effect.Effect<void> = Effect.suspend(() =>
+    Option.match(inflight, {
+      onNone: () => refresh,
+      onSome: (running) => Effect.andThen(Deferred.await(running), reread),
+    }),
+  );
+
+  // Bumping the generation drops whatever the read in flight brings back.
+  const forget = Effect.suspend(() => {
+    generation += 1;
+    granted = Option.none();
+    return Effect.andThen(
+      write(() => Loading()),
+      Effect.asVoid(Effect.forkIn(reread, scope)),
+    );
+  });
+
   const readAfter = (sequence: number): Effect.Effect<void> =>
     Effect.suspend(() => {
       if (readStarted > sequence) {
@@ -427,16 +524,31 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
       );
     });
 
+  const outsideRead = () => {
+    const started = generation;
+    const lastRead = readStarted;
+    return (publish: Effect.Effect<void>) =>
+      Effect.suspend(() => {
+        if (started === generation && lastRead === readStarted) {
+          return publish;
+        }
+        return Effect.void;
+      });
+  };
+
   const slot: CacheSlot = {
     key,
     depends: contract.depends,
     scope,
+    released: Deferred.await(ended),
+    outsideRead,
     state,
     write,
     recount,
     refresh,
     readAfter,
     markStale: write(markStale),
+    forget,
     accept,
     reject,
   };
@@ -444,7 +556,7 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
   if (Option.isSome(registry) && Option.isSome(owner)) {
     yield* Scope.provide(
       registry.value.register(owner.value, (id) =>
-        Effect.map(SubscriptionRef.get(state), (current) => {
+        Effect.map(SubscriptionRef.get(state), ({ state: current }) => {
           let stale = Option.none<boolean>();
           let value: Inspection.QueryValue = { _tag: "Absent" };
           let failure = Option.none<unknown>();
@@ -475,18 +587,211 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
   // Join the live set, then count the claims that exist now. A claim made
   // after the join updates this slot itself, so none is missed.
   yield* ownership.join(slot);
-  yield* Effect.forkIn(slot.refresh, scope);
+  yield* begin(slot, seeds.take(keyOf(key)));
   return slot;
 });
 
-/** The typed face of a slot. Decodes through the contract the caller holds. */
-const entryOf = <Q extends AnyQuery>(
-  contract: Q,
-  slot: CacheSlot,
-): QueryEntry<ResultOf<Q>, QueryFailure> => {
+/**
+ * Start a new slot. With no seed it reads, as it always has. A seed the
+ * document already settled lands before the slot is returned, so the first
+ * `get` a view makes sees it: that is what lets a hydrating client present
+ * content the server patched ahead of it. A seed still open is awaited in
+ * the slot's scope, as a read: a read the client starts meanwhile, or a
+ * value that lands by another path, supersedes it. `StreamEnded` lands, and
+ * the slot reads again at once. `published` completes once the seed has
+ * landed, was superseded, or the slot closed.
+ */
+const begin = (slot: CacheSlot, seed: Option.Option<Seed>): Effect.Effect<void> =>
+  Option.match(seed, {
+    onNone: () => Effect.asVoid(Effect.forkIn(slot.refresh, slot.scope)),
+    onSome: (found) => {
+      const published = Deferred.succeed(found.published, void 0);
+      return Option.match(found.current, {
+        onSome: (state) => Effect.andThen(landSeed(slot, state), published),
+        onNone: () => {
+          const commit = slot.outsideRead();
+          return Effect.andThen(
+            Scope.addFinalizer(slot.scope, published),
+            Effect.forkIn(
+              Effect.flatMap(Deferred.await(found.settled), (state) =>
+                commit(landSeed(slot, state)),
+              ).pipe(Effect.ensuring(published)),
+              slot.scope,
+            ),
+          );
+        },
+      });
+    },
+  });
+
+const landSeed = (slot: CacheSlot, state: SeedState): Effect.Effect<void> => {
+  if (state._tag === "Ready") {
+    return slot.accept(state.value);
+  }
+  if (state._tag === "Failed" && isFinalSeed(state.error)) {
+    return slot.reject(state.error);
+  }
+  if (state._tag === "Failed") {
+    return Effect.andThen(slot.reject(state.error), Effect.forkIn(slot.refresh, slot.scope));
+  }
+  return Effect.asVoid(Effect.forkIn(slot.refresh, slot.scope));
+};
+
+/**
+ * Only the query's own failure is final on the client. Every other failure
+ * in a seed is about the server's read (its transport, its caller, the
+ * document), not about the query, so the client reads again at once.
+ */
+const isFinalSeed = (error: QueryFailure): boolean => error._tag === "QueryFailed";
+
+// ---------------------------------------------------------------------------
+// Streamed documents (#22)
+// ---------------------------------------------------------------------------
+
+type SeedState = QueryState<string, QueryFailure>;
+
+/**
+ * What a streamed document holds for one key. `current` is set once, by the
+ * first patch or by the end of the document; `settled` wakes a slot that
+ * opened while the key was still open. `taken` is set when a slot consumes
+ * the seed, so a later declaration of the key reads fresh. `published`
+ * completes when the slot that took it has put its state in the slot, or
+ * closed first.
+ */
+interface Seed {
+  current: Option.Option<SeedState>;
+  readonly settled: Deferred.Deferred<SeedState>;
+  readonly published: Deferred.Deferred<void>;
+  taken: boolean;
+}
+
+interface Seeds {
+  /** The seed for a key, if the document holds one no slot has consumed. */
+  readonly take: (id: string) => Option.Option<Seed>;
+}
+
+/** One live entry as the server's streamed render reads it. */
+export interface DocumentEntry {
+  readonly key: QueryKey;
+  /** The entry's displayed state. `Loading` until its first read lands. */
+  readonly state: Source<QueryState<string, QueryFailure>>;
+  /** Completes when the render releases the entry: no view declares it now. */
+  readonly released: Effect.Effect<void>;
+}
+
+/**
+ * Source-private: how the streamed document reaches a cache built by
+ * `layer`. The server reads `entries`; the client writes the rest.
+ */
+export interface DocumentAccess {
+  /** Every entry declared now, in the order the entries opened. */
+  readonly entries: Effect.Effect<ReadonlyArray<DocumentEntry>>;
+  /** The document opened `id`. A second placeholder for one id changes nothing. */
+  readonly placeholder: (id: string) => Effect.Effect<void>;
+  /** The document settled `id`. The first settle wins; a duplicate changes nothing. */
+  readonly settle: (id: string, state: SeedState) => Effect.Effect<void>;
+  /**
+   * The document ended. Every id still open fails `StreamEnded`, and this
+   * returns once every slot that took a seed has published it or closed.
+   */
+  readonly end: Effect.Effect<void>;
+  /**
+   * Hydration is done. A seed no slot took is dropped: a key declared from
+   * now on reads over the query path, never from the document.
+   */
+  readonly expire: Effect.Effect<void>;
+}
+
+const documents = new WeakMap<QueryCacheService, DocumentAccess>();
+
+/** Source-private: the document access of a cache built by `layer`. */
+export const documentOf = (cache: QueryCacheService): Option.Option<DocumentAccess> =>
+  Option.fromNullishOr(documents.get(cache));
+
+/** One cache's document: what the streamed render reads, and what new slots take. */
+interface CacheDocument {
+  readonly access: DocumentAccess;
+  readonly seeds: Seeds;
+}
+
+const makeDocument = (live: ReadonlySet<CacheSlot>): CacheDocument => {
+  const table = new Map<string, Seed>();
+  let expired = false;
+  const seedFor = (id: string): Seed =>
+    Option.getOrElse(Option.fromNullishOr(table.get(id)), () => {
+      const created: Seed = {
+        current: Option.none(),
+        settled: Deferred.makeUnsafe(),
+        published: Deferred.makeUnsafe(),
+        taken: false,
+      };
+      table.set(id, created);
+      return created;
+    });
+  const settle = (id: string, state: SeedState) =>
+    Effect.suspend(() => {
+      const seed = seedFor(id);
+      if (Option.isSome(seed.current)) {
+        return Effect.void;
+      }
+      seed.current = Option.some(state);
+      return Effect.asVoid(Deferred.succeed(seed.settled, state));
+    });
+  const access: DocumentAccess = {
+    entries: Effect.sync(() =>
+      Array.from(live, (slot) => ({
+        key: slot.key,
+        // The render reads the displayed state. The principal stamp stays
+        // inside this cache: a seed is stamped again by the client that takes it.
+        state: {
+          get: Effect.map(SubscriptionRef.get(slot.state), (stamped) => stamped.state),
+          changes: Stream.map(SubscriptionRef.changes(slot.state), (stamped) => stamped.state),
+        },
+        released: slot.released,
+      })),
+    ),
+    placeholder: (id) => Effect.sync(() => void seedFor(id)),
+    settle,
+    // Every open seed fails, then every taken seed is waited for: when `end`
+    // returns, each live slot shows its seed's final state.
+    end: Effect.andThen(
+      Effect.suspend(() =>
+        Effect.forEach(
+          Array.from(table).filter(([, seed]) => Option.isNone(seed.current)),
+          ([id]) => settle(id, Failed(StreamEnded.make({ key: id }))),
+          { discard: true },
+        ),
+      ),
+      Effect.suspend(() =>
+        Effect.forEach(
+          Array.from(table.values()).filter((seed) => seed.taken),
+          (seed) => Deferred.await(seed.published),
+          { discard: true },
+        ),
+      ),
+    ),
+    expire: Effect.sync(() => {
+      expired = true;
+    }),
+  };
+  const seeds: Seeds = {
+    take: (id) =>
+      Option.filter(Option.fromNullishOr(table.get(id)), (seed) => {
+        if (seed.taken || expired) {
+          return false;
+        }
+        seed.taken = true;
+        return true;
+      }),
+  };
+  const document: CacheDocument = { access, seeds };
+  return document;
+};
+
+/** Decodes a slot's state through the contract the caller holds. */
+const decoderOf = <Q extends AnyQuery>(contract: Q) => {
   const decode = Schema.decodeEffect(contract.result);
-  const encode = Schema.encodeEffect(contract.result);
-  const decodeState = (
+  return (
     state: QueryState<string, QueryFailure>,
   ): Effect.Effect<QueryState<ResultOf<Q>, QueryFailure>> => {
     if (state._tag === "Ready") {
@@ -494,11 +799,33 @@ const entryOf = <Q extends AnyQuery>(
     }
     return Effect.succeed(state);
   };
+};
+
+/** A slot's states with their principal generation, decoded. */
+const stampedChanges = <Q extends AnyQuery>(
+  contract: Q,
+  slot: CacheSlot,
+): Stream.Stream<Stamped<QueryState<ResultOf<Q>, QueryFailure>>> => {
+  const decodeState = decoderOf(contract);
+  return Stream.mapEffect(SubscriptionRef.changes(slot.state), (stamped) =>
+    Effect.map(decodeState(stamped.state), (state) => ({ state, principal: stamped.principal })),
+  );
+};
+
+/** The typed face of a slot. Decodes through the contract the caller holds. */
+const entryOf = <Q extends AnyQuery>(
+  contract: Q,
+  slot: CacheSlot,
+): QueryEntry<ResultOf<Q>, QueryFailure> => {
+  const encode = Schema.encodeEffect(contract.result);
+  const decodeState = decoderOf(contract);
   return {
     key: slot.key,
     state: {
-      get: Effect.flatMap(SubscriptionRef.get(slot.state), decodeState),
-      changes: Stream.mapEffect(SubscriptionRef.changes(slot.state), decodeState),
+      get: Effect.flatMap(SubscriptionRef.get(slot.state), (stamped) => decodeState(stamped.state)),
+      changes: Stream.mapEffect(SubscriptionRef.changes(slot.state), (stamped) =>
+        decodeState(stamped.state),
+      ),
     },
     refresh: slot.refresh,
     override: (value) =>
@@ -520,11 +847,26 @@ const make = (): Effect.Effect<QueryCacheService, never, Scope.Scope> =>
     // the slots that exist now; a slot leaves it when its scope closes.
     const claims = new Map<symbol, string>();
     const live = new Set<CacheSlot>();
+    const document = makeDocument(live);
     let sequence = 0;
     const next = () => {
       sequence += 1;
       return sequence;
     };
+    // The principal generation. Every held value and every read in flight
+    // is stamped with the generation it started under.
+    let principal = 0;
+    // A streamed document was read for the principal of its request. A seed
+    // that no slot took yet is dropped, so a key declared later reads for the
+    // new principal; a seed a slot is still waiting for is dropped by that
+    // slot's `forget`, which bumps its read stamp.
+    const principalGone = Effect.suspend(() => {
+      principal += 1;
+      return Effect.andThen(
+        document.access.expire,
+        Effect.forEach(Array.from(live), (slot) => slot.forget, { discard: true }),
+      );
+    });
     const covering = (slot: CacheSlot) => {
       let count = 0;
       for (const contractName of claims.values()) {
@@ -541,6 +883,8 @@ const make = (): Effect.Effect<QueryCacheService, never, Scope.Scope> =>
       Array.from(live).filter((slot) => slot.depends.includes(contractName));
     const ownership: SlotOwnership = {
       next,
+      principal: () => principal,
+      principalGone,
       join: (slot) =>
         Effect.acquireRelease(
           Effect.sync(() => {
@@ -596,6 +940,7 @@ const make = (): Effect.Effect<QueryCacheService, never, Scope.Scope> =>
                   registry,
                   owner,
                   ownership,
+                  document.seeds,
                 ),
             }),
         }),
@@ -614,13 +959,21 @@ const make = (): Effect.Effect<QueryCacheService, never, Scope.Scope> =>
         ),
       );
 
-    const open = <Q extends AnyQuery>(contract: Q, args: ArgsOf<Q>) =>
+    const openSlot = <Q extends AnyQuery>(contract: Q, args: ArgsOf<Q>) =>
       Effect.gen(function* () {
         const key = yield* encodeKey(contract, args);
         const transport = yield* ActorTransport;
-        const slot = yield* RcMap.get(slots, QueryCacheKey.acquired(contract, key, transport));
-        return entryOf(contract, slot);
+        return yield* RcMap.get(slots, QueryCacheKey.acquired(contract, key, transport));
       });
+
+    const open = <Q extends AnyQuery>(contract: Q, args: ArgsOf<Q>) =>
+      Effect.map(openSlot(contract, args), (slot) => entryOf(contract, slot));
+
+    const openStamped = <Q extends AnyQuery>(contract: Q, args: ArgsOf<Q>) =>
+      Effect.map(openSlot(contract, args), (slot): StampedEntry<Q> => ({
+        entry: entryOf(contract, slot),
+        changes: stampedChanges(contract, slot),
+      }));
 
     const active = Effect.map(RcMap.keys(slots), (keys) =>
       Array.from(keys, (cacheKey) => cacheKey.key),
@@ -653,6 +1006,8 @@ const make = (): Effect.Effect<QueryCacheService, never, Scope.Scope> =>
     const claim = (contractName: string) =>
       Effect.gen(function* () {
         const token = Symbol(contractName);
+        // The principal the command runs under. Its reply was read for it.
+        const since = principal;
         yield* Effect.acquireRelease(
           Effect.andThen(
             Effect.sync(() => {
@@ -670,6 +1025,9 @@ const make = (): Effect.Effect<QueryCacheService, never, Scope.Scope> =>
         );
         const settle = (refreshed: ReadonlyArray<Refreshed>) =>
           Effect.gen(function* () {
+            if (principal !== since) {
+              return;
+            }
             const settledAt = next();
             yield* apply(refreshed);
             const covered = new Set(refreshed.map((one) => keyOf(one.key)));
@@ -686,8 +1044,15 @@ const make = (): Effect.Effect<QueryCacheService, never, Scope.Scope> =>
         return commandClaim;
       });
 
-    const service: QueryCacheService = { open, active, apply, invalidate };
-    ownerships.set(service, { claim });
+    const service: QueryCacheService = {
+      open,
+      active,
+      apply,
+      invalidate,
+      principalChanged: principalGone,
+    };
+    internals.set(service, { claim, openStamped });
+    documents.set(service, document.access);
     return service;
   });
 
@@ -698,9 +1063,9 @@ export namespace QueryCache {
    * Builds the real cache against an in-process host. The host owns all
    * handler behavior; this helper only composes the cache and transport.
    */
-  export const layerTest = <R>(
-    host: Effect.Effect<TransportService, never, R | Scope.Scope>,
-  ): LayerType.Layer<QueryCache | ActorTransport, never, R> =>
+  export const layerTest = <E, R>(
+    host: Effect.Effect<TransportService, E, R | Scope.Scope>,
+  ): LayerType.Layer<QueryCache | ActorTransport, E, R> =>
     Layer.merge(layer, ActorTransport.layerLocal(host));
 }
 
@@ -740,13 +1105,46 @@ interface Following {
  * A view that moved from one page of results to the next keeps the old page
  * dimmed instead of flashing its fallback; the fallback is for having
  * nothing, and it has something.
+ *
+ * Only within one principal generation. A `Loading` from a later generation
+ * is an entry that forgot a value read for somebody else, and the view shows
+ * it as it is. A state from an earlier generation is late, and is dropped.
  */
-const carry = <A, E>(shown: QueryState<A, E>, incoming: QueryState<A, E>): QueryState<A, E> => {
-  if (incoming._tag === "Loading" && shown._tag === "Ready") {
-    return Ready(shown.value, true);
+const carry = <A, E>(
+  shown: Stamped<QueryState<A, E>>,
+  incoming: Stamped<QueryState<A, E>>,
+): Stamped<QueryState<A, E>> => {
+  if (incoming.principal < shown.principal) {
+    return shown;
+  }
+  if (
+    incoming.state._tag === "Loading" &&
+    shown.state._tag === "Ready" &&
+    incoming.principal === shown.principal
+  ) {
+    return { state: Ready(shown.state.value, true), principal: shown.principal };
   }
   return incoming;
 };
+
+/**
+ * Opens one entry with its stamped states. A cache not built here has no
+ * generations: every state is stamped with the same one, and the carry
+ * rule is the plain one.
+ */
+const openStamped = <Q extends AnyQuery>(
+  cache: QueryCacheService,
+  contract: Q,
+  args: ArgsOf<Q>,
+): Effect.Effect<StampedEntry<Q>, never, ActorTransport | Scope.Scope> =>
+  Option.match(internalsOf(cache), {
+    onSome: (found) => found.openStamped(contract, args),
+    onNone: () =>
+      Effect.map(cache.open(contract, args), (entry): StampedEntry<Q> => ({
+        entry,
+        changes: Stream.map(entry.state.changes, (state) => ({ state, principal: 0 })),
+      })),
+  });
 
 /**
  * Declare a query whose arguments are a source. Each new argument value
@@ -762,7 +1160,10 @@ export const followQuery = Effect.fn("followQuery")(function* <Q extends AnyQuer
   const cache = yield* QueryCache;
   const transport = yield* ActorTransport;
   const scope = yield* Effect.scope;
-  const output = yield* SubscriptionRef.make<QueryState<ResultOf<Q>, QueryFailure>>(Loading());
+  const output = yield* SubscriptionRef.make<Stamped<QueryState<ResultOf<Q>, QueryFailure>>>({
+    state: Loading(),
+    principal: 0,
+  });
   let current: Option.Option<Following> = Option.none();
 
   const leave = Effect.suspend(() => {
@@ -782,13 +1183,13 @@ export const followQuery = Effect.fn("followQuery")(function* <Q extends AnyQuer
       }
       yield* leave;
       const child = yield* Scope.fork(scope);
-      const entry = yield* Scope.provide(cache.open(contract, next), child).pipe(
+      const opened = yield* Scope.provide(openStamped(cache, contract, next), child).pipe(
         Effect.provideService(ActorTransport, transport),
       );
-      current = Option.some({ key, scope: child, refresh: entry.refresh });
+      current = Option.some({ key, scope: child, refresh: opened.entry.refresh });
       yield* Effect.forkIn(
-        Stream.runForEach(entry.state.changes, (state) =>
-          SubscriptionRef.update(output, (shown) => carry(shown, state)),
+        Stream.runForEach(opened.changes, (stamped) =>
+          SubscriptionRef.update(output, (shown) => carry(shown, stamped)),
         ),
         child,
       );
@@ -796,7 +1197,17 @@ export const followQuery = Effect.fn("followQuery")(function* <Q extends AnyQuer
 
   const follow = (next: Option.Option<ArgsOf<Q>>) =>
     Option.match(next, {
-      onNone: () => Effect.andThen(leave, SubscriptionRef.set(output, Loading())),
+      onNone: () =>
+        Effect.andThen(
+          leave,
+          SubscriptionRef.update(
+            output,
+            (shown): Stamped<QueryState<ResultOf<Q>, QueryFailure>> => ({
+              state: Loading(),
+              principal: shown.principal,
+            }),
+          ),
+        ),
       onSome: enter,
     });
 
@@ -804,7 +1215,10 @@ export const followQuery = Effect.fn("followQuery")(function* <Q extends AnyQuer
   yield* Effect.forkScoped(Stream.runForEach(args.changes, follow));
 
   const followed: FollowedQuery<ResultOf<Q>, QueryFailure> = {
-    state: { get: SubscriptionRef.get(output), changes: SubscriptionRef.changes(output) },
+    state: {
+      get: Effect.map(SubscriptionRef.get(output), (shown) => shown.state),
+      changes: Stream.map(SubscriptionRef.changes(output), (shown) => shown.state),
+    },
     refresh: Effect.suspend(() =>
       Option.match(current, {
         onNone: () => Effect.void,

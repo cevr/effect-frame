@@ -7,7 +7,7 @@ import { remoteCommands } from "./remote-commands.js";
 import type { RemoteRejection } from "./remote-commands.js";
 import type { Address, AnyContract, KeyOf, MessageOf, SnapshotOf } from "./contract.js";
 import type { QueryKey } from "./query.js";
-import { QueryCache, ownershipOf } from "./query-client.js";
+import { QueryCache, internalsOf } from "./query-client.js";
 import * as Provisional from "./provisional.js";
 import { fromSubscriptionRef, select } from "./source.js";
 import type { Source } from "./source.js";
@@ -121,10 +121,32 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
       withDisplay((found) => found.offer(next)),
     );
 
+  // Every `Unauthorized` this reference receives tells the cache that the
+  // principal may be gone (#30), and every query value this client read
+  // under it goes. The snapshot above was authorized, so a change stream
+  // that ends with `Unauthorized` means the principal changed under it. A
+  // refused send or call cannot tell a changed principal from one that may
+  // read but not send, so it also costs one fresh read of each live entry.
+  // It never loops: nothing reads again on its own after a refused command.
+  const refused = (error: { readonly _tag: string }): Effect.Effect<void> => {
+    if (error._tag === "Unauthorized") {
+      return Option.match(cache, {
+        onNone: () => Effect.void,
+        onSome: (service) => service.principalChanged,
+      });
+    }
+    return Effect.void;
+  };
+  const refusedPass = (failure: Commands.PassFailure<RemoteRejection>): Effect.Effect<void> => {
+    if (failure._tag === "Refused") {
+      return refused(failure.reason);
+    }
+    return Effect.void;
+  };
   yield* Effect.forkScoped(
     Stream.runForEach(transport.changes(address, initial.revision), (projection) =>
       Effect.flatMap(decodeProjection(contract, projection), observe),
-    ),
+    ).pipe(Effect.tapError(refused)),
   );
 
   /**
@@ -150,7 +172,7 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
     Option.match(cache, {
       onNone: () => Commands.ownNothing<SnapshotOf<C>>(active),
       onSome: (service) =>
-        Option.match(ownershipOf(service), {
+        Option.match(internalsOf(service), {
           onNone: () =>
             Effect.as(
               service.invalidate(contract.name),
@@ -178,6 +200,7 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
     own,
     send: (commandId, payload) =>
       adapter.send(commandId, payload).pipe(
+        Effect.tapError(refusedPass),
         Effect.tap((admission) =>
           Effect.andThen(
             Effect.sync(() => admissions.set(commandId, admission.admitted)),
@@ -187,6 +210,7 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
       ),
     call: (commandId, payload, deadline, active) =>
       adapter.call(commandId, payload, deadline, active).pipe(
+        Effect.tapError(refusedPass),
         Effect.tap((settlement) =>
           Effect.andThen(
             withDisplay((found) =>

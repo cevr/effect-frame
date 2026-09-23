@@ -16,6 +16,7 @@ const Move = Schema.TaggedStruct("Move", {
 
 const Board = contract("Board", {
   version: 1,
+  policy: "public",
   key: Schema.Struct({ tenant: Schema.String, place: Schema.Struct({ room: Schema.String }) }),
   snapshot: Schema.Finite,
   message: Schema.Union([Move]),

@@ -16,12 +16,16 @@ import {
   Behavior,
   CommandId,
   HttpServer,
+  Policies,
+  Policy,
+  PolicyNamesMissing,
   Query,
-  QueryPolicies,
   implementQuery,
   implementTransparent,
 } from "effect-frame/actor";
 import {
+  Authenticated,
+  CurrentPrincipal,
   HttpTransport,
   ActorTransport,
   QueryCache,
@@ -35,7 +39,7 @@ import {
   ref,
   useQuery,
 } from "effect-frame/actor/client";
-import type { QueryPolicy } from "effect-frame/actor";
+import type { PolicyTable, Subject } from "effect-frame/actor";
 import type { Address, QueryEntry, QueryState, Source } from "effect-frame/actor/client";
 
 /**
@@ -64,6 +68,8 @@ type OrderBookState = Schema.Schema.Type<typeof OrderBookState>;
 
 const OrderBook = contract("OrderBook", {
   version: 1,
+  // The same name the tenant-scoped queries carry: one rule guards both.
+  policy: "tenant-member",
   key: Schema.Struct({ tenant: Schema.String }),
   snapshot: OrderBookState,
   message: Schema.Union([PlaceOrder]),
@@ -85,6 +91,7 @@ const OrderBookLive = implementTransparent(
 const Ping = Schema.TaggedStruct("Ping", {});
 const Heartbeat = contract("Heartbeat", {
   version: 1,
+  policy: "tenant-member",
   key: Schema.Struct({ tenant: Schema.String }),
   snapshot: Schema.Finite,
   message: Schema.Union([Ping]),
@@ -121,9 +128,11 @@ const TopSku = query("TopSku", {
 
 /**
  * Reads nothing an actor owns, so no commit refreshes it. It names no
- * version, policy or dependency: the defaults are 1, `"public"` and none.
+ * version or dependency: the defaults are 1 and none. Its policy has no
+ * default: `"public"` is written here, and the host's table registers it.
  */
 const ExchangeRate = query("ExchangeRate", {
+  policy: "public",
   args: Schema.Struct({ pair: Schema.String }),
   result: Schema.Struct({ rate: Schema.Finite }),
 });
@@ -325,27 +334,26 @@ const ChronologyLive = Query.batched(Chronology, {
     }),
 });
 
-/** Only the acme tenant may read a tenant-scoped query. */
-const tenantMember: QueryPolicy = {
-  check: (key) => {
-    if (key.args.includes('"acme"')) {
+/**
+ * Only the acme tenant, read from the subject alone: these rows are about
+ * queries, not principals, so every caller here is anonymous. One rule
+ * guards the actors and the queries alike.
+ */
+const acmeSubjects: Policy = {
+  check: (_principal, subject: Subject) => {
+    if (subject._tag === "Actor" && subject.address.key.includes('"acme"')) {
       return Effect.void;
     }
-    return Effect.fail(Unauthorized.make({ contract: key.query }));
+    if (subject._tag === "Query" && subject.key.args.includes('"acme"')) {
+      return Effect.void;
+    }
+    return Effect.fail(Unauthorized.make({ contract: "tenant-member" }));
   },
 };
 
-/** Names only the policy the host does not know. `"public"` is built in. */
-const policies = Layer.succeed(QueryPolicies, QueryPolicies.of({ "tenant-member": tenantMember }));
-
-const acmeOnly = Layer.succeed(ActorHost.Authorizer, {
-  authorize: (address: Address) => {
-    if (address.key.includes('"acme"')) {
-      return Effect.void;
-    }
-    return Effect.fail(Unauthorized.make({ contract: address.contract }));
-  },
-});
+/** One table for actors and queries. Allow-all is here by name, and only here. */
+const table: PolicyTable = { "tenant-member": acmeSubjects, public: Policy.allowAll };
+const policies = Layer.succeed(Policies, Policies.of(table));
 
 const id = Schema.decodeSync(CommandId);
 const acme = { tenant: "acme" };
@@ -362,14 +370,13 @@ const hostLayer = ActorHost.layerMemory(
     RevenueLive,
     TopSkuLive,
     ExchangeRateLive,
-    UnpolicedLive,
     CountedLive,
     BatchedLookupLive,
     ChronologyLive,
     FunnelLive,
     PairLive,
   ],
-).pipe(Layer.provide(acmeOnly), Layer.provide(policies));
+).pipe(Layer.provide(policies));
 
 let batchRequests = 0;
 
@@ -402,7 +409,7 @@ const recordCall = (request: Request, response: Response) =>
 
 const inProcess = Layer.unwrap(
   Effect.gen(function* () {
-    const server = yield* HttpServer.make;
+    const server = yield* HttpServer.make({ principal: HttpServer.anonymous });
     const context = yield* Effect.context<never>();
     const run = Effect.runPromiseWith(context);
     const fetch: HttpTransport.FetchLike = (input, init) => {
@@ -452,7 +459,7 @@ const valueOf = <A, E>(state: QueryState<A, E>): Option.Option<A> => {
 };
 
 describe("Query: the Dashboard shape", () => {
-  it.effect("a contract that names no version, policy or dependency gets the defaults", () =>
+  it.effect("a contract that names no version or dependency gets the defaults", () =>
     Effect.sync(() => {
       expect(ExchangeRate.version).toBe(1);
       expect(ExchangeRate.policy).toBe("public");
@@ -705,19 +712,25 @@ describe("Query: the Dashboard shape", () => {
     }),
   );
 
-  withDashboard("the host refuses a query whose policy it cannot resolve", () =>
+  it.effect("the host refuses a query whose policy it cannot resolve", () =>
     Effect.gen(function* () {
-      const refused = yield* useQuery(Unpoliced, acme);
-      yield* settledEntry(refused);
-      const state = yield* refused.state.get;
-      expect(state._tag).toBe("Failed");
-      if (state._tag === "Failed") {
-        expect(state.error._tag).toBe("PolicyMissing");
-      }
+      // Refused before it serves anything: the host does not build (#20 §3).
+      const refused = yield* Effect.flip(
+        Effect.scoped(
+          ActorHost.make({ implementations: [], queries: [UnpolicedLive] }).pipe(
+            Effect.provideService(Policies, table),
+          ),
+        ),
+      );
+      expect(refused).toEqual(
+        PolicyNamesMissing.make({
+          missing: [{ subject: "query", name: "Unpoliced", policy: "nobody-defines-this" }],
+        }),
+      );
     }),
   );
 
-  withDashboard("a policy denies a read the Authorizer would also deny", () =>
+  withDashboard("a policy denies a read from another tenant", () =>
     Effect.gen(function* () {
       const denied = yield* useQuery(Revenue, { tenant: "other" });
       yield* settledEntry(denied);
@@ -1122,6 +1135,79 @@ describe("Query: arguments the host cannot decode", () => {
           expect(state.error.detail).toContain("pair");
         }
       }
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// One policy for actors and queries (#20 §2)
+// ---------------------------------------------------------------------------
+
+const decodeBookKey = Schema.decodeUnknownOption(OrderBook.key);
+const decodeTenantArgs = Schema.decodeUnknownOption(Revenue.args);
+
+/** The tenant a subject names: an order book's key, or a tenant query's args. */
+const tenantOf = (subject: Subject): Option.Option<string> => {
+  if (subject._tag === "Actor") {
+    return Option.map(decodeBookKey(subject.address.key), (key) => key.tenant);
+  }
+  return Option.map(decodeTenantArgs(subject.key.args), (args) => args.tenant);
+};
+
+/** A member of the tenant a subject names, by the claims the principal carries. */
+const memberOfTenant = Policy.of(tenantOf, (who, tenant) =>
+  Effect.succeed(who.claims["tenant"] === tenant),
+);
+
+const memberOf = (tenant: string) =>
+  Authenticated.make({ subject: `${tenant}-member`, claims: { tenant } });
+
+describe("Query: one policy for actors and queries", () => {
+  it.scoped("one policy name refuses the same tenant through both a command and a query", () =>
+    Effect.gen(function* () {
+      const host = yield* ActorHost.make({
+        implementations: [OrderBookLive],
+        queries: [RevenueLive],
+      }).pipe(Effect.provideService(Policies, { "tenant-member": memberOfTenant }));
+      const order = yield* Effect.orDie(
+        Schema.encodeEffect(OrderBook.message)({ _tag: "PlaceOrder", sku: "bolt", amount: 3 }),
+      );
+      const outcome = <A, E extends { readonly _tag: string }>(effect: Effect.Effect<A, E>) =>
+        Effect.map(Effect.result(effect), (result) => {
+          if (result._tag === "Success") {
+            return "allowed";
+          }
+          return result.failure._tag;
+        });
+      /** A command to the tenant's book, then a read of the tenant's revenue. */
+      const attempt = (tenant: string, label: string) =>
+        Effect.gen(function* () {
+          const key = yield* Effect.orDie(Schema.encodeEffect(OrderBook.key)({ tenant }));
+          const address: Address = { contract: OrderBook.name, version: OrderBook.version, key };
+          const args = yield* Effect.orDie(Schema.encodeEffect(Revenue.args)({ tenant }));
+          const commandId = id(`order-${label}`);
+          const command = yield* outcome(host.call(address, commandId, order, "1 second", []));
+          const read = yield* outcome(
+            host.query({ query: Revenue.name, version: Revenue.version, args }),
+          );
+          return [command, read];
+        });
+
+      // A member of acme reaches acme's book both ways.
+      const own = yield* attempt("acme", "own").pipe(
+        Effect.provideService(CurrentPrincipal, memberOf("acme")),
+      );
+      expect(own).toEqual(["allowed", "allowed"]);
+
+      // The same member is refused on another tenant, both ways, by one rule.
+      const rival = yield* attempt("rival", "rival").pipe(
+        Effect.provideService(CurrentPrincipal, memberOf("acme")),
+      );
+      expect(rival).toEqual(["Unauthorized", "Unauthorized"]);
+
+      // Nobody in particular is refused both ways on acme's own book.
+      const anonymous = yield* attempt("acme", "anonymous");
+      expect(anonymous).toEqual(["Unauthorized", "Unauthorized"]);
     }),
   );
 });

@@ -1,6 +1,13 @@
 import { Duration, Effect, Layer, Option, Schema } from "effect";
 import { Event, Machine, State } from "effect-machine";
-import { Behavior, implement, implementTransparent } from "effect-frame/actor";
+import {
+  Behavior,
+  HttpServer,
+  Policies,
+  Policy,
+  implement,
+  implementTransparent,
+} from "effect-frame/actor";
 import { contract } from "effect-frame/actor/client";
 import { defineFrameHost } from "../src/frame-host.js";
 
@@ -31,6 +38,7 @@ type CounterMessage = CounterAdd | CounterReset;
 
 export const Counter = contract("Counter", {
   version: 1,
+  policy: "public",
   key: Schema.String,
   snapshot: Schema.Finite,
   message: Schema.Union([CounterAdd, CounterReset]),
@@ -87,6 +95,7 @@ const uploadMachine = Machine.make({
 
 export const Upload = contract("Upload", {
   version: 1,
+  policy: "public",
   key: Schema.String,
   snapshot: uploadMachine.stateSchema,
   message: uploadMachine.eventSchema,
@@ -104,7 +113,8 @@ const UploadLive = implement(Upload, {
 
 export const FrameHost = defineFrameHost({
   implementations: [CounterLive, UploadLive],
-  layer: Layer.empty,
+  layer: Layer.succeed(Policies, Policies.of({ public: Policy.allowAll })),
+  principal: HttpServer.anonymous,
   pollInterval: Option.some("20 millis"),
 });
 

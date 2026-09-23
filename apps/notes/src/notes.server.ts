@@ -1,8 +1,7 @@
-import type { Layer } from "effect";
-import { ActorHost, Behavior, implementTransparent } from "effect-frame/actor";
+import { ActorHost, Behavior, Policies, Policy, implementTransparent } from "effect-frame/actor";
 import type { ActorTransport } from "effect-frame/actor/client";
 import { HttpTransport } from "effect-frame/actor/client";
-import { Match } from "effect";
+import { Layer, Match } from "effect";
 import type { NotesMessage, NotesSnapshot } from "./contract.js";
 import { Notes } from "./contract.js";
 
@@ -34,8 +33,18 @@ export const NotesLive = implementTransparent(
   Behavior.reducer<NotesSnapshot, NotesMessage>({ initial: empty, reduce }),
 );
 
+/**
+ * The one policy table. Notes has no sessions and no tenants, so `public`
+ * is allow-all, and it is written here by name rather than assumed.
+ */
+const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
+
 /** The actors run in this process, over in-memory mailboxes. */
-export const inProcess: Layer.Layer<ActorTransport> = ActorHost.layerMemory([NotesLive]);
+export const inProcess: Layer.Layer<ActorTransport> = ActorHost.layerMemory([NotesLive]).pipe(
+  Layer.provide(policies),
+  // Every name `Notes` declares is in the table above; a miss is a bug in this file.
+  Layer.orDie,
+);
 
 /**
  * The actors run somewhere else, for example a celld node. This process

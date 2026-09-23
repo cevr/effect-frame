@@ -4,7 +4,7 @@ registerDom();
 
 // Public imports only: this file is the application's view of the route
 // surface. See `docs/design/route-public.md`.
-import { implementQuery, query as queryContract } from "effect-frame/actor";
+import { implementQuery, query as queryContract, Policies, Policy } from "effect-frame/actor";
 import type { ActorTransport, QueryCache, Source } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import * as Frame from "effect-frame/frame";
@@ -28,16 +28,21 @@ import type { Scope } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
 
+/** The one policy table: every contract and query here declares `public`. */
+const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
+
 // ---------------------------------------------------------------------------
 // Contracts and a real in-process host
 // ---------------------------------------------------------------------------
 
 const TenantInfo = queryContract("PublicTenantInfo", {
+  policy: "public",
   args: Schema.Struct({ tenant: Schema.String }),
   result: Schema.String,
 });
 
 const PostBody = queryContract("PublicPostBody", {
+  policy: "public",
   args: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
   result: Schema.String,
 });
@@ -77,6 +82,7 @@ const eventsOf = Effect.flatMap(Access, (access) => Ref.get(access.events));
 
 const frameLayer = (name: string) =>
   QueryTest.layer({ queries: [TenantLive, PostLive] }).pipe(
+    Layer.provide(policies),
     Layer.provideMerge(Layer.effect(Access, makeAccess)),
     Layer.provideMerge(TestClock.layer()),
     Layer.provideMerge(Frame.layer({ name })),

@@ -53,6 +53,7 @@ export type {
   Declarations,
   LayoutProps,
   LayoutPropsOf,
+  LeafOptions,
   Pending,
   Presentation,
   PropsOf,

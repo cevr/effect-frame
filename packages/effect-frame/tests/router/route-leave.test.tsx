@@ -10,6 +10,8 @@ import {
   implementQuery,
   implementTransparent,
   query as queryContract,
+  Policies,
+  Policy as AccessPolicy,
 } from "effect-frame/actor";
 import type { QueryCache, RemoteActorRef, Source, TransportService } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
@@ -41,16 +43,24 @@ import type { Scope } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
 
+/**
+ * The one policy table: every contract and query here declares `public`.
+ * The import is renamed because this file's own `Policy` is the leave policy.
+ */
+const policies = Layer.succeed(Policies, Policies.of({ public: AccessPolicy.allowAll }));
+
 // ---------------------------------------------------------------------------
 // Contracts and a real in-process host
 // ---------------------------------------------------------------------------
 
 const TenantInfo = queryContract("LeaveTenantInfo", {
+  policy: "public",
   args: Schema.Struct({ tenant: Schema.String }),
   result: Schema.String,
 });
 
 const PostBody = queryContract("LeavePostBody", {
+  policy: "public",
   args: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
   result: Schema.String,
 });
@@ -60,6 +70,7 @@ type SetText = Schema.Schema.Type<typeof SetText>;
 
 const Draft = contract("LeaveDraft", {
   version: 1,
+  policy: "public",
   key: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
   snapshot: Schema.String,
   message: Schema.Union([SetText]),
@@ -159,7 +170,10 @@ const makePolicy = Effect.gen(function* () {
   return Policy.of(policy);
 });
 
-const client = QueryTest.layer({ queries: [TenantLive, PostLive], implementations: [DraftLive] });
+const client = QueryTest.layer({
+  queries: [TenantLive, PostLive],
+  implementations: [DraftLive],
+}).pipe(Layer.provide(policies));
 
 const frameLayer = (name: string) =>
   Layer.mergeAll(client, wired.pipe(Layer.provide(client))).pipe(
@@ -444,6 +458,7 @@ const makeTraversal = (
       stay: Effect.asVoid(Deferred.succeed(answered, false)),
       leave: commit,
       abandoned: Deferred.await(abandon),
+      land: () => Effect.void,
       finish: Effect.andThen(Effect.asVoid(commit), Deferred.succeed(finished, void 0)),
     };
     const made: FixtureTraversal = { traversal, answered, finished, abandon };

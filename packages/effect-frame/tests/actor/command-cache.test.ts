@@ -1,7 +1,14 @@
 import { Context, Deferred, Effect, Exit, Layer, Option, Ref, Schema, Scope, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it, yieldFibers } from "effect-bun-test";
-import { ActorHost, MailboxStore, implementQuery, implementTransparent } from "effect-frame/actor";
+import {
+  ActorHost,
+  MailboxStore,
+  Policies,
+  Policy,
+  implementQuery,
+  implementTransparent,
+} from "effect-frame/actor";
 import {
   ActorTransport,
   QueryCache,
@@ -25,18 +32,21 @@ import * as Inspection from "../../src/inspection.js";
 
 const Counter = contract("CommandCacheCounter", {
   version: 1,
+  policy: "public",
   key: Schema.String,
   snapshot: Schema.Finite,
   message: Schema.Finite,
 });
 
 const CounterValue = query("CommandCacheCounterValue", {
+  policy: "public",
   args: Schema.String,
   result: Schema.Finite,
   depends: [Counter],
 });
 
 const Unrelated = query("CommandCacheUnrelated", {
+  policy: "public",
   args: Schema.String,
   result: Schema.String,
   depends: [],
@@ -143,6 +153,7 @@ const heldTransport = Effect.gen(function* () {
 });
 
 const appLayer = Layer.merge(queryCacheLayer, ActorTransport.layerLocal(heldTransport)).pipe(
+  Layer.provide(Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }))),
   Layer.provideMerge(Frame.layer({ name: "command-cache" })),
   Layer.provideMerge(controlLayer),
 );
@@ -348,6 +359,7 @@ describe("cache command ownership", () => {
               Effect.sync(() => invalidated.push(contractName)),
               real.invalidate(contractName),
             ),
+          principalChanged: real.principalChanged,
         };
         const value = yield* useQuery(CounterValue, "one");
         yield* until(value, isReady(0, false));

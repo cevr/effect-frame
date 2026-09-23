@@ -1,7 +1,7 @@
 import { Deferred, Effect, Fiber, Option, Predicate, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { Event, Machine, State } from "effect-machine";
-import { ActorHost, Behavior, implement } from "effect-frame/actor";
+import { ActorHost, Behavior, Policies, Policy, implement } from "effect-frame/actor";
 import {
   ActorTransport,
   CommandId,
@@ -32,6 +32,7 @@ type Append = Schema.Schema.Type<typeof Append>;
 
 const List = contract("OptimisticList", {
   version: 1,
+  policy: "public",
   key: Schema.String,
   snapshot: Schema.Array(Item),
   message: Schema.Union([Append]),
@@ -88,8 +89,12 @@ const pass = (held: Option.Option<Gate>) =>
  * text fails its send with `Unauthorized` before the host sees it. A lost
  * call reaches the host and loses its reply.
  */
+const policies = { public: Policy.allowAll };
+
 const heldWire = Effect.fn("OptimisticTest.heldWire")(function* () {
-  const real = yield* ActorHost.make({ implementations: [ListLive] });
+  const real = yield* ActorHost.make({ implementations: [ListLive] }).pipe(
+    Effect.provideService(Policies, policies),
+  );
   const sendGates = new Map<string, Gate>();
   const callGates = new Map<string, Gate>();
   const refused = new Set<string>();
@@ -474,6 +479,7 @@ const counterMachine = Machine.make({
 
 const Counter = contract("OptimisticMachine", {
   version: 1,
+  policy: "public",
   key: Schema.String,
   snapshot: counterMachine.stateSchema,
   message: counterMachine.eventSchema,
@@ -503,7 +509,9 @@ describe("a machine behavior (#19)", () => {
       expect(Predicate.hasProperty(counterBehavior, "predict")).toBe(false);
       expect(Predicate.hasProperty(predicting, "predict")).toBe(true);
       expect(reducerPredicts).toBe(true);
-      const real = yield* ActorHost.make({ implementations: [CounterLive] });
+      const real = yield* ActorHost.make({ implementations: [CounterLive] }).pipe(
+        Effect.provideService(Policies, policies),
+      );
       const held = yield* gate;
       const heldCall = yield* gate;
       const transport: TransportService = {

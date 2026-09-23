@@ -96,7 +96,7 @@ refused post never writes it back into the page.
 
 ## The route
 
-`HttpServer.form({ contracts, render })` answers `POST {base}/form`
+`HttpServer.form({ contracts, principal, login, render })` answers `POST {base}/form`
 (`Wire.paths.form`). The checks run in this order, and each refusal happens
 before a send.
 
@@ -126,7 +126,8 @@ accepted.
 | `Unreachable` (the outcome is `Uncertain`)                  | 504, the page with the same id and values |
 | `CommandConflict`, `ContractMismatch`                       | 409, the page with a fresh id             |
 | `UnknownContract`                                           | 404, the page with a fresh id             |
-| `Unauthorized`                                              | 403, the page with a fresh id             |
+| `Unauthorized`, principal `Anonymous`, `login` is set       | 303 to `login?next=<$return>`             |
+| `Unauthorized`, any other case                              | 403, the page with a fresh id             |
 | `ActorStopped`                                              | 503, the page with a fresh id             |
 
 `render(path)` draws the page for the posted `$return`. The route provides
@@ -194,8 +195,16 @@ const Compose = (props: { readonly notes: NotesRef }) =>
   merge.
 - The scripted path uses `Generated.send` semantics. The type of `ref.send`
   does not change.
-- An anonymous post that is `Unauthorized` gets 403, not a 303 to a login
-  page. #20 has no login redirect yet.
+- The route derives the principal from the request with the same
+  `principal` derivation as the JSON handler, and runs the send under
+  `CurrentPrincipal`. The same policy authorizes a plain post and a
+  scripted send. There is no second authorization path (#20 §5).
+- An anonymous post that is `Unauthorized` gets a 303 to `login`, with
+  `next` set to `$return`, when `login` is `Option.some(path)`. Signing in
+  can change the answer. The posted body is not kept.
+- An authenticated post that is `Unauthorized` gets 403 with the page.
+  Signing in again changes nothing, so a login redirect would be wrong.
+  With `login: Option.none()`, every refusal is a 403.
 - A 400 answer is plain text, not a rendered page. The request is not a
   form this server rendered.
 - `FormIssues` carries `contract`, `key`, and `form`, so that each binding
@@ -216,8 +225,10 @@ const Compose = (props: { readonly notes: NotesRef }) =>
   a refusal on the client, mints a new id and new generated values. Only a
   plain post re-sent by the browser reuses an id.
 - There is no CSRF protection, and no claim of it. The route accepts any
-  urlencoded post that names a served contract. #20 adds authorization and
-  the origin check.
+  urlencoded post that names a served contract. #20 added authorization but
+  decided nothing about CSRF, so no origin check is built. With a
+  cookie-derived principal, set the cookie `SameSite=Lax` or stricter. See
+  [authorization](authorization.md#gaps).
 - A hydrating client runs the same setup, so `View.form` draws an id there
   too. The hydrating host keeps the server's hidden inputs and does not
   write the client's values, and the first send reads the markup. So the

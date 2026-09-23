@@ -2,7 +2,15 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Behavior, Value, implementQuery, query as queryContract, spawn } from "effect-frame/actor";
+import {
+  Behavior,
+  Value,
+  implementQuery,
+  query as queryContract,
+  spawn,
+  Policies,
+  Policy,
+} from "effect-frame/actor";
 import type { ActorTransport, QueryCache, Source } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import { Location, Route, mount as mountRouter } from "effect-frame/router";
@@ -30,16 +38,21 @@ import type { Scope as ScopeType } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
 
+/** The one policy table: every contract and query here declares `public`. */
+const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
+
 // ---------------------------------------------------------------------------
 // Contracts and a real in-process host
 // ---------------------------------------------------------------------------
 
 const TenantInfo = queryContract("PendingTenantInfo", {
+  policy: "public",
   args: Schema.Struct({ tenant: Schema.String }),
   result: Schema.String,
 });
 
 const PostBody = queryContract("PendingPostBody", {
+  policy: "public",
   args: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
   result: Schema.String,
 });
@@ -105,7 +118,7 @@ const makeFixtures = Effect.gen(function* () {
   });
 });
 
-const client = QueryTest.layer({ queries: [TenantLive, PostLive] });
+const client = QueryTest.layer({ queries: [TenantLive, PostLive] }).pipe(Layer.provide(policies));
 
 const frameLayer = (name: string) =>
   client.pipe(
@@ -1109,7 +1122,10 @@ describe("private route pending and lazy views", () => {
         const html = Html.serializeChildren(htmlRoot.children);
         yield* Scope.close(scope, Exit.void);
 
-        expect(html).toContain('<section id="layout"><p id="post-first">post 1</p></section>');
+        // The leaf's root is focusable by the router, not by Tab (#31).
+        expect(html).toContain(
+          '<section id="layout"><p id="post-first" tabindex="-1">post 1</p></section>',
+        );
         expect(html).not.toContain("post-pending");
         expect(yield* Ref.get(importer.calls)).toBe(1);
         const closed = yield* Frame.inspect;

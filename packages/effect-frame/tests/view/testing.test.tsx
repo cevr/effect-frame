@@ -11,6 +11,8 @@ import {
   query,
   spawn,
   useQuery,
+  Policies,
+  Policy,
 } from "effect-frame/actor";
 import type { QueryState, Source as SourceType } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
@@ -34,6 +36,9 @@ import {
 import { TestClock } from "effect/testing";
 import type { Host } from "effect-frame/view";
 import { describe, expect, it, test } from "effect-bun-test";
+
+/** The one policy table: every contract and query here declares `public`. */
+const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
 
 interface CountProps {
   readonly count: SourceType<number>;
@@ -59,6 +64,7 @@ const hasText = (root: Node, selector: string, expected: string): boolean =>
   });
 
 const Search = query("ViewTestingSearch", {
+  policy: "public",
   args: Schema.Struct({}),
   result: Schema.String,
 });
@@ -79,7 +85,7 @@ const SearchLive = implementQuery(Search, () =>
   }),
 );
 
-const searchLayer = QueryTest.layer({ queries: [SearchLive] });
+const searchLayer = QueryTest.layer({ queries: [SearchLive] }).pipe(Layer.provide(policies));
 
 class SetupService extends Context.Service<SetupService, { readonly value: number }>()(
   "effect-frame/tests/view/testing.test/SetupService",

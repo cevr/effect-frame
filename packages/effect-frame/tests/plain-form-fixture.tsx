@@ -1,4 +1,11 @@
-import { ActorHost, Behavior, MailboxStore, implementTransparent } from "effect-frame/actor";
+import {
+  ActorHost,
+  Behavior,
+  MailboxStore,
+  Policies,
+  Policy,
+  implementTransparent,
+} from "effect-frame/actor";
 import {
   ActorTransport,
   Form,
@@ -43,6 +50,7 @@ export type TasksSnapshot = Schema.Schema.Type<typeof TasksSnapshot>;
 
 export const Tasks = contract("Tasks", {
   version: 1,
+  policy: "public",
   key: Schema.Struct({ tenant: Schema.String, board: Schema.String }),
   snapshot: TasksSnapshot,
   message: TasksMessage,
@@ -85,6 +93,9 @@ export const makeWire = Effect.gen(function* () {
   return wire;
 });
 
+/** The one policy table: `Tasks` declares `public`, and it allows everything. */
+export const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
+
 /** The real in-process host, recording each send and able to lose one reply. */
 export const recordedTransport = (wire: Wire) =>
   Layer.effect(
@@ -109,6 +120,10 @@ export const recordedTransport = (wire: Wire) =>
       };
       return transport;
     }),
+  ).pipe(
+    Layer.provide(policies),
+    // Every name `Tasks` declares is in the table above; a miss is a bug in this file.
+    Layer.orDie,
   );
 
 export interface NoProps {

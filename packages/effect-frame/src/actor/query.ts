@@ -38,10 +38,9 @@ export interface QueryContract<
   readonly args: Schema.fromJsonString<Args>;
   readonly result: Schema.fromJsonString<Result>;
   /**
-   * The policy the host resolves before serving this query. `"public"` is
-   * built into every host and allows every read; any other name must be
-   * found in the host's `QueryPolicies` table, or the host refuses the
-   * query. A contract that names no policy is public.
+   * The policy the host resolves before serving this query. The host's
+   * `Policies` table must hold this name, or the host refuses to build.
+   * No name is built in: allow-all is registered by name, on purpose.
    */
   readonly policy: Policy;
   /** Actor contract names. A commit to any of them marks this query stale. */
@@ -50,11 +49,7 @@ export interface QueryContract<
   readonly raw: { readonly args: Args; readonly result: Result };
 }
 
-export interface QueryOptions<
-  Args extends Pure,
-  Result extends Pure,
-  Policy extends string = "public",
-> {
+export interface QueryOptions<Args extends Pure, Result extends Pure, Policy extends string> {
   /** Defaults to 1. */
   readonly version?: number;
   /** Selects one cached value. Include the tenant so a policy can read it. */
@@ -62,9 +57,10 @@ export interface QueryOptions<
   readonly result: Result;
   /**
    * Named, never inline: the host owns the rule, the contract owns the name.
-   * Defaults to `"public"`, the one policy every host resolves.
+   * Required: a query with no policy cannot be declared, and allow-all is a
+   * name written on purpose (#20).
    */
-  readonly policy?: Policy;
+  readonly policy: Policy;
   /**
    * The actor contracts this query reads from, as contracts rather than
    * strings, so a rename cannot silently break the dependency edge. Defaults
@@ -72,9 +68,6 @@ export interface QueryOptions<
    */
   readonly depends?: ReadonlyArray<{ readonly name: string }>;
 }
-
-/** The policy name every host resolves: it allows every read. */
-export const publicPolicy = "public";
 
 export type QueryMode = "single" | "batched";
 
@@ -85,35 +78,27 @@ export type AnyQuery = QueryContract<string, Pure, Pure, string, QueryMode>;
 export type ArgsOf<Q extends AnyQuery> = Q["args"]["Type"];
 export type ResultOf<Q extends AnyQuery> = Q["result"]["Type"];
 
-/**
- * Two signatures, so the contract's `Policy` is exactly what was written:
- * `"public"` when nothing was, and the given name otherwise. One signature
- * with a default type parameter would need a cast to say the same thing.
- */
 const makeQuery = <
   const Name extends string,
   Args extends Pure,
   Result extends Pure,
+  const Policy extends string,
   const Mode extends QueryMode,
 >(
   name: Name,
-  options: QueryOptions<Args, Result, string>,
+  options: QueryOptions<Args, Result, Policy>,
   mode: Mode,
-): QueryContract<Name, Args, Result, string, Mode> => ({
+): QueryContract<Name, Args, Result, Policy, Mode> => ({
   name,
   version: options.version ?? 1,
   mode,
   args: Schema.fromJsonString(options.args),
   result: Schema.fromJsonString(options.result),
-  policy: options.policy ?? publicPolicy,
+  policy: options.policy,
   depends: (options.depends ?? []).map((dependency) => dependency.name),
   raw: { args: options.args, result: options.result },
 });
 
-export function query<const Name extends string, Args extends Pure, Result extends Pure>(
-  name: Name,
-  options: Omit<QueryOptions<Args, Result, never>, "policy">,
-): QueryContract<Name, Args, Result, "public", "single">;
 export function query<
   const Name extends string,
   Args extends Pure,
@@ -121,12 +106,8 @@ export function query<
   const Policy extends string,
 >(
   name: Name,
-  options: QueryOptions<Args, Result, Policy> & { readonly policy: Policy },
-): QueryContract<Name, Args, Result, Policy, "single">;
-export function query<const Name extends string, Args extends Pure, Result extends Pure>(
-  name: Name,
-  options: QueryOptions<Args, Result, string>,
-): QueryContract<Name, Args, Result, string, "single"> {
+  options: QueryOptions<Args, Result, Policy>,
+): QueryContract<Name, Args, Result, Policy, "single"> {
   return makeQuery(name, options, "single");
 }
 
@@ -137,10 +118,6 @@ export function query<const Name extends string, Args extends Pure, Result exten
  * transport choice visible to a reader and to the cache.
  */
 export namespace query {
-  export function batched<const Name extends string, Args extends Pure, Result extends Pure>(
-    name: Name,
-    options: Omit<QueryOptions<Args, Result, never>, "policy">,
-  ): QueryContract<Name, Args, Result, "public", "batched">;
   export function batched<
     const Name extends string,
     Args extends Pure,
@@ -148,12 +125,8 @@ export namespace query {
     const Policy extends string,
   >(
     name: Name,
-    options: QueryOptions<Args, Result, Policy> & { readonly policy: Policy },
-  ): QueryContract<Name, Args, Result, Policy, "batched">;
-  export function batched<const Name extends string, Args extends Pure, Result extends Pure>(
-    name: Name,
-    options: QueryOptions<Args, Result, string>,
-  ): QueryContract<Name, Args, Result, string, "batched"> {
+    options: QueryOptions<Args, Result, Policy>,
+  ): QueryContract<Name, Args, Result, Policy, "batched"> {
     return makeQuery(name, options, "batched");
   }
 }
@@ -288,8 +261,10 @@ export class QueryVersionMismatch extends Schema.TaggedError<QueryVersionMismatc
 ) {}
 
 /**
- * The query names a policy the host cannot resolve. The host refuses to
- * serve it. This is the removed allow-all default, made visible.
+ * The query names a policy the host cannot resolve. A host built by
+ * `ActorHost.layer` never raises it: that host refuses to build instead
+ * (`PolicyNamesMissing`). It stays as wire vocabulary a client must decode,
+ * and as the refusal of a table assembled some other way.
  */
 export class PolicyMissing extends Schema.TaggedError<PolicyMissing>()("PolicyMissing", {
   query: Schema.String,
@@ -314,6 +289,16 @@ export class InvalidQueryArgs extends Schema.TaggedError<InvalidQueryArgs>()("In
 }) {}
 
 /**
+ * A streamed document ended before it settled this query (#22). The client
+ * writes it, never a server: the record channel closed, or the response was
+ * cut, while the query's placeholder was still open. The entry is refreshed
+ * over the ordinary query path at once, so it is a moment, not a verdict.
+ */
+export class StreamEnded extends Schema.TaggedError<StreamEnded>()("StreamEnded", {
+  key: Schema.String,
+}) {}
+
+/**
  * Everything a query read can fail with, including the two failures a
  * transport raises. A query has no address, so `ContractMismatch` and
  * `UnknownContract` cannot apply: a query's own version mismatch is
@@ -326,7 +311,8 @@ export type QueryFailure =
   | InvalidQueryArgs
   | QueryFailed
   | Unauthorized
-  | Unreachable;
+  | Unreachable
+  | StreamEnded;
 
 /** The same union as a Schema, so a value from an untyped place can be narrowed. */
 export const QueryFailure = Schema.Union([
@@ -337,6 +323,7 @@ export const QueryFailure = Schema.Union([
   QueryFailed,
   Unauthorized,
   Unreachable,
+  StreamEnded,
 ]);
 
 export const isQueryFailure = Schema.is(QueryFailure);

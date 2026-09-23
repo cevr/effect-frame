@@ -2,7 +2,13 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { ActorHost, MailboxStore, implementTransparent } from "effect-frame/actor";
+import {
+  ActorHost,
+  MailboxStore,
+  implementTransparent,
+  Policies,
+  Policy,
+} from "effect-frame/actor";
 import { ActorTransport, contract, ref, select } from "effect-frame/actor/client";
 import type { TransportService } from "effect-frame/actor/client";
 import { Dom, View, ViewTest, mount } from "effect-frame/view";
@@ -10,8 +16,12 @@ import { Effect, Layer, Option, Ref, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import * as Frame from "../../src/frame.js";
 
+/** The one policy table: every contract and query here declares `public`. */
+const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
+
 const Counter = contract("CommandEventCounter", {
   version: 1,
+  policy: "public",
   key: Schema.String,
   snapshot: Schema.Finite,
   message: Schema.Finite,
@@ -57,7 +67,8 @@ const delayedTransport = Effect.gen(function* () {
   return transport;
 });
 
-const appLayer = ActorTransport.layerLocal<never>(delayedTransport).pipe(
+const appLayer = ActorTransport.layerLocal(delayedTransport).pipe(
+  Layer.provide(policies),
   Layer.provideMerge(Frame.layer({ name: "command-event" })),
 );
 

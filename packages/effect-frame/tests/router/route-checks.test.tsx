@@ -13,6 +13,8 @@ import {
   implementTransparent,
   query as queryContract,
   spawn,
+  Policies,
+  Policy,
 } from "effect-frame/actor";
 import type { QueryCache, RemoteActorRef, Source, TransportService } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
@@ -40,21 +42,27 @@ import {
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
 
+/** The one policy table: every contract and query here declares `public`. */
+const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
+
 // ---------------------------------------------------------------------------
 // Contracts and a real in-process host
 // ---------------------------------------------------------------------------
 
 const TenantInfo = queryContract("CheckedTenantInfo", {
+  policy: "public",
   args: Schema.Struct({ tenant: Schema.String }),
   result: Schema.String,
 });
 
 const PostBody = queryContract("CheckedPostBody", {
+  policy: "public",
   args: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
   result: Schema.String,
 });
 
 const Comments = queryContract("CheckedComments", {
+  policy: "public",
   args: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
   result: Schema.String,
 });
@@ -64,6 +72,7 @@ type SetText = Schema.Schema.Type<typeof SetText>;
 
 const Draft = contract("CheckedDraft", {
   version: 1,
+  policy: "public",
   key: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
   snapshot: Schema.String,
   message: Schema.Union([SetText]),
@@ -227,7 +236,7 @@ const makeWire = Effect.gen(function* () {
 const client = QueryTest.layer({
   queries: [TenantLive, PostLive, CommentsLive],
   implementations: [DraftLive],
-});
+}).pipe(Layer.provide(policies));
 
 const frameLayer = (name: string) =>
   Layer.mergeAll(client, wired.pipe(Layer.provide(client))).pipe(

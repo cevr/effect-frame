@@ -6,7 +6,15 @@
  * seams are on `window.__fixture`: a gate that holds the query resolver, a
  * direct read of the same Frame service, and root close.
  */
-import { Behavior, implementQuery, query, spawn, useQuery } from "effect-frame/actor";
+import {
+  Behavior,
+  Policies,
+  Policy,
+  implementQuery,
+  query,
+  spawn,
+  useQuery,
+} from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import * as Frame from "effect-frame/frame";
 import { Location, Route, browserLocation, mount } from "effect-frame/router";
@@ -18,6 +26,7 @@ import type { Scope } from "effect";
 import { scopeFinalizerCountUnsafe } from "../../../../node_modules/effect/dist/internal/effect.js";
 
 export const HeldQuery = query("InspectionGatewayHeld", {
+  policy: "public",
   args: Schema.Struct({ id: Schema.String }),
   result: Schema.String,
 });
@@ -137,6 +146,7 @@ export const start = (
 
   const services = Layer.mergeAll(
     QueryTest.layer({ queries: [HeldLive] }).pipe(
+      Layer.provide(Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }))),
       Layer.provideMerge(Frame.layer({ name: config.name })),
     ),
     Layer.succeed(Location, browserLocation),

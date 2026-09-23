@@ -15,7 +15,15 @@ export {
   type Tagged,
 } from "./control.js";
 export { mount, render } from "./runtime.js";
-export type { Cleanup, EventHandler, Host, HostEvent, PropertyValue, StaticProps } from "./host.js";
+export type {
+  BoundaryMarks,
+  Cleanup,
+  EventHandler,
+  Host,
+  HostEvent,
+  PropertyValue,
+  StaticProps,
+} from "./host.js";
 export {
   attach,
   bind,
@@ -27,6 +35,7 @@ export {
   type Prepared,
 } from "./view.js";
 export type {
+  BoundaryKind,
   Child,
   Component,
   ControlNode,

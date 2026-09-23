@@ -1,5 +1,7 @@
 import type { Context } from "effect";
 import { Effect, Match, Option, Schema } from "effect";
+import type { Principal } from "../principal.js";
+import { CurrentPrincipal } from "../principal.js";
 import { freshCommandId } from "../command-id.js";
 import type { Address, AnyContract } from "../contract.js";
 import type { FormFields, FormIssue, FormIssues, FormMalformed } from "../form.js";
@@ -20,7 +22,7 @@ import { membersOf } from "../generated.js";
 import { ActorTransport } from "../transport.js";
 import type { TransportSendError } from "../transport.js";
 import { CommandId } from "../vocabulary.js";
-import type { WebHandler } from "./server.js";
+import type { DerivePrincipal, WebHandler } from "./server.js";
 
 /**
  * `POST {base}/form`: the plain-form route (#21 §2). Its client is the
@@ -30,15 +32,38 @@ import type { WebHandler } from "./server.js";
  * same command id and the same JSON payload, so there is no second send
  * path and no second idempotency rule.
  */
-export interface FormPostOptions<E, R> {
+export interface FormPostOptions<E, R, P = never> {
   /** The contracts a form may post to, found by `$contract`. */
   readonly contracts: ReadonlyArray<AnyContract>;
+  /**
+   * Derives who is posting, exactly as the JSON handler does (#20 §5): the
+   * same cookie, the same derivation, the same policy check at
+   * `transport.send`. There is no second authorization path.
+   */
+  readonly principal: DerivePrincipal<P>;
+  /**
+   * Where an anonymous caller goes when a policy refuses the post: a
+   * root-relative path, answered as 303 with the form's `$return` as the
+   * `next` search parameter. Signing in could change that answer, so the
+   * caller has somewhere to go. A signed-in caller who is refused gets 403
+   * and the page: signing in again changes nothing. `Option.none()` answers
+   * 403 to both, for an app with no sign-in route.
+   */
+  readonly login: Option.Option<string>;
   /**
    * Draw the page at `path` again. `FormContext` is in context: the view
    * reads the issues, the submitted values, and the id the form carries.
    */
   readonly render: (path: string) => Effect.Effect<string, E, R>;
 }
+
+/** Where a refused anonymous post goes: the login path, with `next` set to `$return`. */
+const loginLocation = (login: string, returnTo: string): string => {
+  const base = "http://effect-frame.invalid";
+  const url = new URL(login, base);
+  url.searchParams.set("next", returnTo);
+  return `${url.pathname}${url.search}`;
+};
 
 /** A plain-form reply: a redirect, a drawn page, or a plain refusal. */
 type Reply =
@@ -195,8 +220,35 @@ const failureIssue = (error: TransportSendError): FormIssue => ({
   message: error._tag,
 });
 
+/**
+ * A refusal redirects only when authenticating would change the answer:
+ * the caller is anonymous and the app named a login route (#20 §5).
+ */
+const unauthorized = (
+  posted: Posted,
+  issues: ReadonlyArray<FormIssue>,
+  principal: Principal,
+  login: Option.Option<string>,
+): Effect.Effect<Reply> =>
+  Option.match(
+    Option.filter(login, () => principal._tag === "Anonymous"),
+    {
+      onNone: () => page(posted, 403, issues, "fresh"),
+      onSome: (path) =>
+        Effect.succeed<Reply>({
+          _tag: "SeeOther",
+          location: loginLocation(path, posted.returnTo),
+        }),
+    },
+  );
+
 /** A send failure as the page it draws. Only a lost reply keeps the id. */
-const sendFailure = (posted: Posted, error: TransportSendError): Effect.Effect<Reply> => {
+const sendFailure = (
+  posted: Posted,
+  error: TransportSendError,
+  principal: Principal,
+  login: Option.Option<string>,
+): Effect.Effect<Reply> => {
   const issues = [failureIssue(error)];
   switch (error._tag) {
     case "Unreachable":
@@ -205,7 +257,7 @@ const sendFailure = (posted: Posted, error: TransportSendError): Effect.Effect<R
     case "ContractMismatch":
       return page(posted, 409, issues, "fresh");
     case "Unauthorized":
-      return page(posted, 403, issues, "fresh");
+      return unauthorized(posted, issues, principal, login);
     case "UnknownContract":
       return page(posted, 404, issues, "fresh");
     case "ActorStopped":
@@ -219,6 +271,7 @@ const malformed = (error: FormMalformed): Reply => refused(400, error.reason);
 const post = (
   request: Request,
   contracts: ReadonlyMap<string, AnyContract>,
+  login: Option.Option<string>,
 ): Effect.Effect<Reply, never, ActorTransport> =>
   Effect.gen(function* () {
     const fields = yield* readBody(request);
@@ -240,9 +293,10 @@ const post = (
       key: wireKey,
     };
     const transport = yield* ActorTransport;
+    const principal = yield* CurrentPrincipal;
     return yield* transport.send(address, posted.commandId, payload, []).pipe(
       Effect.as<Reply>({ _tag: "SeeOther", location: posted.returnTo }),
-      Effect.catch((error) => sendFailure(posted, error)),
+      Effect.catch((error) => sendFailure(posted, error, principal, login)),
     );
   }).pipe(Effect.catch((reply) => Effect.succeed(reply)));
 
@@ -252,14 +306,15 @@ const html = (status: number, body: string): Response =>
 /**
  * The form route's handler. Mount it at `{base}/form`, beside the JSON
  * handler at `{base}`. `render` runs with the context this Effect was
- * built in, plus `FormContext`.
+ * built in, plus `FormContext` and the posting principal.
  */
-export const form = <E, R>(
-  options: FormPostOptions<E, R>,
-): Effect.Effect<WebHandler, never, ActorTransport | Exclude<R, FormContext>> =>
+export const form = <E, R, P = never>(
+  options: FormPostOptions<E, R, P>,
+): Effect.Effect<WebHandler, never, ActorTransport | P | Exclude<R, FormContext>> =>
   Effect.gen(function* () {
     const context: Context.Context<ActorTransport | Exclude<R, FormContext>> =
       yield* Effect.context<ActorTransport | Exclude<R, FormContext>>();
+    const derivation: Context.Context<P> = yield* Effect.context<P>();
     const contracts = new Map(options.contracts.map((contract) => [contract.name, contract]));
     const draw = (path: string, status: number, issues: FormIssues): Effect.Effect<Response> =>
       options.render(path).pipe(
@@ -277,7 +332,10 @@ export const form = <E, R>(
       if (request.method !== "POST") {
         return Effect.succeed(new Response("method not allowed", { status: 405 }));
       }
-      return post(request, contracts).pipe(
+      // The route is the boundary: the derivation runs with the context `form` was built in.
+      // oxlint-disable-next-line effect/noInlineProvide
+      const derived = Effect.provideContext(options.principal(request), derivation);
+      const answer = post(request, contracts, options.login).pipe(
         Effect.provideContext(context),
         Effect.flatMap(
           Match.type<Reply>().pipe(
@@ -292,6 +350,11 @@ export const form = <E, R>(
             }),
           ),
         ),
+      );
+      // A post is one request: it runs under the one principal it read.
+      return Effect.flatMap(
+        Effect.flatMap(derived, (who) => who.get),
+        (principal) => Effect.provideService(answer, CurrentPrincipal, principal),
       );
     };
     return handler;

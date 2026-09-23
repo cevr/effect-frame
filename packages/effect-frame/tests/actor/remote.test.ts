@@ -4,17 +4,20 @@ import {
   ActorHost,
   Behavior,
   CommandId,
+  Policies,
+  Policy,
   implement,
   implementTransparent,
 } from "effect-frame/actor";
+import type { PolicyTable, Subject } from "effect-frame/actor";
 import {
+  Authenticated,
   CommandConflict,
-  Unauthorized,
+  CurrentPrincipal,
   committedRevision,
   contract,
   ref,
 } from "effect-frame/actor/client";
-import type { Address } from "effect-frame/actor/client";
 
 const CounterKey = Schema.Struct({ tenant: Schema.String, id: Schema.String });
 const Add = Schema.TaggedStruct("Add", { amount: Schema.Finite });
@@ -24,6 +27,8 @@ type CounterMessage = Schema.Schema.Type<typeof CounterMessage>;
 
 const Counter = contract("Counter", {
   version: 1,
+  // The name guards every counter. Which rule it resolves to is the host's table.
+  policy: "counter",
   key: CounterKey,
   snapshot: Schema.Finite,
   message: CounterMessage,
@@ -45,6 +50,7 @@ const CounterLive = implementTransparent(Counter, counterBehavior);
 // A contract whose snapshot hides part of the state.
 const Secret = contract("Secret", {
   version: 1,
+  policy: "counter",
   key: Schema.String,
   snapshot: Schema.Struct({ count: Schema.Finite }),
   message: Schema.Union([Add]),
@@ -66,7 +72,9 @@ const add = (amount: number): CounterMessage => ({ _tag: "Add", amount });
 const alice = { tenant: "acme", id: "alice" };
 
 const host = ActorHost.layerMemory([CounterLive, SecretLive]);
-const withHost = it.scoped.layer(host);
+/** These rows are not about authorization: every caller may use a counter, by name. */
+const openTable: PolicyTable = { counter: Policy.allowAll };
+const withHost = it.scoped.layer(Layer.provide(host, Layer.succeed(Policies, openTable)));
 
 describe("remote reference", () => {
   withHost("call applies through the transport and updates the snapshot", () =>
@@ -137,6 +145,7 @@ describe("remote reference", () => {
     Effect.gen(function* () {
       const CounterV2 = contract("Counter", {
         version: 2,
+        policy: "counter",
         key: CounterKey,
         snapshot: Schema.Finite,
         message: CounterMessage,
@@ -167,30 +176,45 @@ describe("remote reference", () => {
   );
 });
 
-const tenantOnly = (tenant: string) =>
-  Layer.succeed(ActorHost.Authorizer, {
-    authorize: (address: Address) =>
-      Effect.flatMap(Schema.decodeEffect(Counter.key)(address.key), (key) => {
-        if (key.tenant === tenant) {
-          return Effect.void;
-        }
-        return Effect.fail(Unauthorized.make({ contract: address.contract }));
-      }).pipe(
-        Effect.catchTag("SchemaError", () =>
-          Effect.fail(Unauthorized.make({ contract: address.contract })),
-        ),
-      ),
-  });
+const decodeCounterKey = Schema.decodeUnknownOption(Counter.key);
+
+/** The tenant a counter's key names. Any other subject names none. */
+const tenantOf = (subject: Subject): Option.Option<string> => {
+  if (subject._tag === "Actor") {
+    return Option.map(decodeCounterKey(subject.address.key), (key) => key.tenant);
+  }
+  return Option.none();
+};
+
+/** A member of the key's tenant, by the claims the principal carries. */
+const tenantMember = Policy.of(tenantOf, (who, tenant) =>
+  Effect.succeed(who.claims["tenant"] === tenant),
+);
+
+const member = (subject: string, tenant: string) =>
+  Authenticated.make({ subject, claims: { tenant } });
 
 describe("authorization", () => {
-  const withAcme = it.scoped.layer(Layer.provide(host, tenantOnly("acme")));
+  const withMembers = it.scoped.layer(
+    Layer.provide(host, Layer.succeed(Policies, Policies.of({ counter: tenantMember }))),
+  );
 
-  withAcme("the authorizer sees the key and can refuse another tenant", () =>
+  withMembers("the policy sees the principal and can refuse another tenant", () =>
     Effect.gen(function* () {
-      const mine = yield* ref(Counter, alice);
+      const mine = yield* ref(Counter, alice).pipe(
+        Effect.provideService(CurrentPrincipal, member("alice", "acme")),
+      );
       expect(yield* mine.state.get).toBe(0);
-      const failure = yield* Effect.flip(ref(Counter, { tenant: "other", id: "x" }));
-      expect(failure._tag).toBe("Unauthorized");
+
+      // Another tenant's member is refused on the same key.
+      const other = yield* Effect.flip(
+        ref(Counter, alice).pipe(Effect.provideService(CurrentPrincipal, member("eve", "rival"))),
+      );
+      expect(other._tag).toBe("Unauthorized");
+
+      // Nobody in particular is refused on a key a member is granted.
+      const anonymous = yield* Effect.flip(ref(Counter, alice));
+      expect(anonymous._tag).toBe("Unauthorized");
     }),
   );
 });

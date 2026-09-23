@@ -35,6 +35,7 @@ import {
   Function,
   Option,
   Predicate,
+  Ref,
   Result,
   Schema,
   Scope,
@@ -73,6 +74,10 @@ import type { LeaveEntry, LeaveInput, MountedRouteService } from "./leave.js";
 import { MountedRoute } from "./leave.js";
 import type { Candidate, LeaveKind, Question } from "./leave-registry.js";
 import { register as registerLeave } from "./leave-registry.js";
+import type { Shell } from "./landing.js";
+import { registerShell } from "./landing.js";
+import * as LeafRoot from "./leaf-root.js";
+import type { NavigationBehavior } from "./navigation-behavior.js";
 
 /**
  * The nested route model: segments, branches, and the client mode. The
@@ -630,6 +635,24 @@ export type RecoveryFor<E> = [E] extends [never]
   : readonly [options: Recovery<E>];
 
 /**
+ * What only a leaf may say (#31): how a navigation to it lands. Absent, the
+ * router's default applies. A layout has no such option, so
+ * `Route.layout(..., { behavior })` does not compile.
+ */
+export interface LeafOptions {
+  readonly behavior?: NavigationBehavior;
+}
+
+/** A leaf's options argument: `RecoveryFor<E>` plus `LeafOptions`. */
+export type LeafOptionsFor<E> = [E] extends [never]
+  ? readonly [] | readonly [options: Presentation & LeafOptions]
+  : readonly [options: Recovery<E> & LeafOptions];
+
+/** The leaf's own behavior, when its options name one. */
+const behaviorOf = (options: ReadonlyArray<LeafOptions>): Option.Option<NavigationBehavior> =>
+  Option.flatMap(Option.fromNullishOr(options[0]), (one) => Option.fromNullishOr(one.behavior));
+
+/**
  * A mounted segment. `R` is its view's requirements. It appears only in
  * output positions, so a child branch widens into its layout's union.
  */
@@ -653,6 +676,16 @@ interface Instance<R> {
   readonly child: Effect.Effect<Option.Option<Instance<unknown>>>;
   /** It shows `errored`. A failed instance is entered again, never stayed. */
   readonly failed: () => boolean;
+  /** The leaf's own navigation behavior. None: a layout, or the router's default. */
+  readonly behavior: Option.Option<NavigationBehavior>;
+  /** The host node at this leaf's root while it is drawn. Always None for a layout. */
+  readonly root: Effect.Effect<Option.Option<unknown>>;
+  /**
+   * Completes when this instance's own part of the shell is drawn: true
+   * when its view drew (its outlet can draw below it), false when a pending
+   * fallback stands for it or its setup ended without a view.
+   */
+  readonly drawn: Effect.Effect<boolean>;
   /**
    * The leave checks this instance and its descendants would ask for a
    * candidate whose matched outline at this slot is `next`, deepest first.
@@ -829,7 +862,7 @@ export const buildLeaf = <
 >(
   seg: Segment<Name, Params, Search, Own, Data, CheckR, Root>,
   view: (props: SegmentProps<Params, Search, Data>) => Effect.Effect<Node, E, R>,
-  recovery: ReadonlyArray<Recovery<E> | Presentation>,
+  options: ReadonlyArray<(Recovery<E> | Presentation) & LeafOptions>,
 ): Branch<
   Segment<Name, Params, Search, Own, Data, CheckR, Root>,
   ViewR,
@@ -839,8 +872,9 @@ export const buildLeaf = <
     seg,
     [],
     (props) => view(props),
-    boundaryOf<E>(recovery),
+    boundaryOf<E>(options),
     lazyDefinitionOf(view),
+    behaviorOf(options),
   );
 
 /** A leaf segment: it has no outlet. */
@@ -858,7 +892,7 @@ export const leaf = <
 >(
   seg: Segment<Name, Params, Search, Own, Data, CheckR, Root>,
   view: (props: SegmentProps<Params, Search, Data>) => Effect.Effect<Node, E, R>,
-  ...recovery: RecoveryFor<E>
+  ...options: LeafOptionsFor<E>
 ): Branch<
   Segment<Name, Params, Search, Own, Data, CheckR, Root>,
   Exclude<R, Scope.Scope>,
@@ -867,7 +901,7 @@ export const leaf = <
   buildLeaf<Exclude<R, Scope.Scope>, Name, Params, Search, Own, Data, R, CheckR, E, Root>(
     seg,
     view,
-    recovery,
+    options,
   );
 
 /** Build a layout whose phantom view services are `ViewR`. See `buildLeaf`. */
@@ -930,6 +964,7 @@ export const buildLayout = <
     (props, outlet) => view({ ...props, outlet }),
     boundaryOf<E>(recovery),
     lazyDefinitionOf(view),
+    Option.none(),
   );
 };
 
@@ -1458,9 +1493,11 @@ const presentWith = <R>(
   work: Effect.Effect<Node, never, R>,
   startedAt: number,
   failed: () => boolean,
+  drawn: Deferred.Deferred<boolean>,
 ): Effect.Effect<Node, never, R | Scope.Scope> =>
   Option.match(pending, {
-    onNone: () => work,
+    onNone: () =>
+      Effect.onExit(work, (exit) => Deferred.succeed(drawn, Exit.isSuccess(exit) && !failed())),
     onSome: (options): Effect.Effect<Node, never, R | Scope.Scope> =>
       Effect.gen(function* () {
         const owner = yield* Effect.scope;
@@ -1472,7 +1509,11 @@ const presentWith = <R>(
           Effect.andThen(
             Scope.close(preparing, Exit.void),
             Exit.match(exit, {
-              onSuccess: (node) => SubscriptionRef.set(shown, [{ key: "view", node }]),
+              onSuccess: (node) =>
+                Effect.andThen(
+                  SubscriptionRef.set(shown, [{ key: "view", node }]),
+                  Deferred.succeed(drawn, !failed()),
+                ),
               onFailure: (cause) =>
                 Effect.andThen(SubscriptionRef.set(shown, []), Effect.failCause(cause)),
             }),
@@ -1487,13 +1528,18 @@ const presentWith = <R>(
               return yield* finish(early.value);
             }
             yield* SubscriptionRef.set(shown, [{ key: "fallback", node: options.fallback }]);
+            // The fallback is this instance's shell: nothing below it draws yet.
+            yield* Deferred.succeed(drawn, false);
             const holdUntil = (yield* Clock.currentTimeMillis) + Duration.toMillis(options.atLeast);
             const exit = yield* Fiber.await(fiber);
             if (Exit.isSuccess(exit) && !failed()) {
               yield* sleepUntil(holdUntil);
             }
             return yield* finish(exit);
-          }),
+          }).pipe(
+            // A defect or a close never leaves the shell waiting.
+            Effect.onExit(() => Deferred.succeed(drawn, false)),
+          ),
           owner,
         );
         return yield* View.list({
@@ -1514,6 +1560,7 @@ const failedEntering = <R>(
   identity: BranchIdentity,
   values: Values<unknown, unknown>,
   node: () => Node,
+  behavior: Option.Option<NavigationBehavior>,
 ): Entering<R> => ({
   abort: Effect.void,
   create: (_inherited, parentScope) =>
@@ -1532,6 +1579,11 @@ const failedEntering = <R>(
       values: Effect.succeed(values),
       child: Effect.succeed(Option.none()),
       failed: () => true,
+      behavior,
+      // Its errored node is not the leaf's view: focus has no root to reach.
+      root: Effect.succeed(Option.none()),
+      // It has no outlet: nothing below it draws.
+      drawn: Effect.succeed(false),
       // Its view never ran, so nothing registered a check.
       questions: () => Effect.succeed([]),
     })),
@@ -1604,7 +1656,10 @@ const makeBranch = <
   ) => Effect.Effect<Node, E, R>,
   boundary: Boundary<E>,
   lazy: Option.Option<LazyDefinition>,
+  behavior: Option.Option<NavigationBehavior>,
 ): Branch<Segment<Name, Params, Search, Own, Data, CheckR, Root>, ViewR, never> => {
+  // A leaf's own view has the root focus moves to; a layout never claims it.
+  const isLeaf = children.length === 0;
   // Typed memory of the instances this branch created. A match of this
   // branch reads it back, so no instance value is ever cast.
   const created = new WeakMap<Instance<unknown>, Internals<Params, Search, ChildR>>();
@@ -1676,8 +1731,13 @@ const makeBranch = <
     ) {
       const errored = boundary.errored.value;
       return Effect.succeed(
-        failedEntering<A>(tree, seg.name, identity, values, () =>
-          errored(constant<RouteFailure<E>>({ _tag: "Declaration", error })),
+        failedEntering<A>(
+          tree,
+          seg.name,
+          identity,
+          values,
+          () => errored(constant<RouteFailure<E>>({ _tag: "Declaration", error })),
+          behavior,
         ),
       );
     }
@@ -1845,6 +1905,14 @@ const makeBranch = <
         releaseAll(Array.from(internals.bindings.values(), (binding) => binding.current())),
       ),
     );
+    const rootCell = LeafRoot.makeCell();
+    const drawnSignal = Deferred.makeUnsafe<boolean>();
+    const drawn = (node: Node): Node => {
+      if (isLeaf) {
+        return LeafRoot.mark(node, rootCell);
+      }
+      return node;
+    };
     const instance: Instance<ViewServices<R>> = {
       key: tree.nextKey(seg.name),
       branch: identity,
@@ -1860,10 +1928,13 @@ const makeBranch = <
               Effect.suspend(() =>
                 withTicket(
                   ticket,
-                  Effect.provideService(
-                    view(props, slotSetup(internals)),
-                    MountedRoute,
-                    mountedRoute,
+                  Effect.map(
+                    Effect.provideService(
+                      view(props, slotSetup(internals)),
+                      MountedRoute,
+                      mountedRoute,
+                    ),
+                    drawn,
                   ),
                 ),
               ),
@@ -1872,6 +1943,7 @@ const makeBranch = <
           ),
           startedAt,
           () => internals.failed,
+          drawnSignal,
         ),
         viewScope,
       ),
@@ -1880,6 +1952,9 @@ const makeBranch = <
       values: Effect.map(SubscriptionRef.get(state), (current) => current.values),
       child: Effect.sync(() => internals.child),
       failed: () => internals.failed,
+      behavior,
+      root: Ref.get(rootCell),
+      drawn: Deferred.await(drawnSignal),
       questions,
     };
     created.set(instance, internals);
@@ -2163,6 +2238,41 @@ const matchUrl = <R>(root: BranchRuntime<R>, url: URL): Option.Option<Match<R>> 
     search: readSearch(url.searchParams),
   });
 
+/** The deepest instance of a mounted branch: the leaf the URL ends at. */
+const deepestInstance = (instance: Instance<unknown>): Effect.Effect<Instance<unknown>> =>
+  Effect.flatMap(instance.child, (next) =>
+    Option.match(next, {
+      onNone: () => Effect.succeed(instance),
+      onSome: deepestInstance,
+    }),
+  );
+
+/**
+ * The branch's shell is drawn: each instance from the root down drew its
+ * view, until the deepest, or until a pending fallback stands for the rest.
+ */
+const drawnFrom = (instance: Instance<unknown>): Effect.Effect<void> =>
+  Effect.flatMap(instance.drawn, (drew) => {
+    if (!drew) {
+      return Effect.void;
+    }
+    return Effect.flatMap(instance.child, (next) =>
+      Option.match(next, { onNone: () => Effect.void, onSome: drawnFrom }),
+    );
+  });
+
+/** What the last commit offers the router: see `landing.ts`. */
+const shellOf = (
+  rootInstance: Instance<unknown>,
+  deepestNow: Instance<unknown>,
+  entered: boolean,
+): Shell => ({
+  entered,
+  behavior: deepestNow.behavior,
+  root: deepestNow.root,
+  drawn: drawnFrom(rootInstance),
+});
+
 /** The deepest instance's values, for the router's inspection record. */
 const deepest = (instance: Instance<unknown>): Effect.Effect<Values<unknown, unknown>> =>
   Effect.flatMap(instance.child, (next) =>
@@ -2227,6 +2337,8 @@ const mountTree = <Name extends string, ViewR, DataR, Extra extends object>(
       Option.map(matchUrl(root, url), (first) =>
         Effect.sync((): Entered<ViewR | DataR> => {
           let mounted = Option.none<MountedTree<ViewR>>();
+          /** The last commit's shell. The first mount enters every segment. */
+          let shell = Option.none<Shell>();
           let counter = 0;
           const routeInstance: RouteInstance = { _tag: "RouteInstance" };
           const entered: Entered<ViewR | DataR> = {
@@ -2255,6 +2367,7 @@ const mountTree = <Name extends string, ViewR, DataR, Extra extends object>(
               // Every instance of the first mount exists now. Later ones present.
               tree.present = true;
               mounted = Option.some({ tree, root: instance });
+              shell = Option.some(shellOf(instance, yield* deepestInstance(instance), true));
               // Yielded directly, not through a list, so a host's first
               // frame holds the root's setup.
               return yield* instance.setup;
@@ -2279,7 +2392,11 @@ const mountTree = <Name extends string, ViewR, DataR, Extra extends object>(
                         yield* abortPlan(plan);
                         return false;
                       }
+                      // The leaf entered when the deepest instance is another one.
+                      const before = yield* deepestInstance(current.root);
                       yield* plan.staying.commit;
+                      const after = yield* deepestInstance(current.root);
+                      shell = Option.some(shellOf(current.root, after, after !== before));
                       return true;
                     }),
                   ),
@@ -2300,6 +2417,15 @@ const mountTree = <Name extends string, ViewR, DataR, Extra extends object>(
                   candidate.kind,
                 ),
             }),
+          );
+          registerShell(
+            entered,
+            Effect.suspend(() =>
+              Option.match(shell, {
+                onNone: () => Effect.die("the tree reported a shell before its first mount"),
+                onSome: Effect.succeed,
+              }),
+            ),
           );
           registerInspection(
             entered,
@@ -2345,6 +2471,13 @@ const treeSearchKeys = (all: ReadonlyArray<SearchKeyInfo>): SearchKeyInfo => {
   }
   return { known: true, keys: [...new Set(all.flatMap((info) => info.keys))] };
 };
+
+/** A flat definition's `behavior` as the leaf's options argument. */
+const flatOptions = (behavior: Option.Option<NavigationBehavior>): LeafOptionsFor<never> =>
+  Option.match(behavior, {
+    onNone: (): LeafOptionsFor<never> => [],
+    onSome: (one): LeafOptionsFor<never> => [{ behavior: one }],
+  });
 
 /** The two inputs of `client`: a branch has a `_tag`, a definition has none. */
 const isBranch = <Params extends ParamsCodec, Search extends SearchCodec, R>(
@@ -2401,7 +2534,7 @@ export function client<
     Exclude<R, Scope.Scope>,
     never,
     Omit<Route<Name, Params, Search, R>, keyof Tree<Name, R>>
-  >(name, leaf(one, input.view), {
+  >(name, leaf(one, input.view, ...flatOptions(Option.fromNullishOr(input.behavior))), {
     params: input.params,
     search: input.search,
     href: one.href,

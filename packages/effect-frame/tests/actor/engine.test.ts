@@ -15,6 +15,8 @@ import { describe, expect, it } from "effect-bun-test";
 import {
   ActorHost,
   MailboxStore,
+  Policies,
+  Policy,
   contract,
   CommandId,
   committedRevision,
@@ -38,6 +40,7 @@ class HostValue extends Context.Service<HostValue, { readonly amount: number }>(
 
 const Counter = contract("EngineCounter", {
   version: 1,
+  policy: "public",
   key: Schema.String,
   snapshot: Schema.Finite,
   message: Add,
@@ -79,10 +82,12 @@ const concurrentBehavior: Behavior<number, Add> = {
 
 const Hosted = implementTransparent(Counter, hostedBehavior);
 const Concurrent = implementTransparent(Counter, concurrentBehavior);
+const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
 const hostedLayer = ActorHost.layerMemory([Hosted]).pipe(
   Layer.provide(Layer.succeed(HostValue, HostValue.of({ amount: 10 }))),
+  Layer.provide(policies),
 );
-const concurrentLayer = ActorHost.layerMemory([Concurrent]);
+const concurrentLayer = ActorHost.layerMemory([Concurrent]).pipe(Layer.provide(policies));
 const id = Schema.decodeSync(CommandId);
 const localSpawnEffect = spawn(localBehavior);
 const localSpawnRequirements: Equals<
@@ -103,6 +108,7 @@ const hostedNumberImplementation = (message: Schema.Codec<number, string>) =>
   implementTransparent(
     contract("HostedEncodingProof", {
       version: 1,
+      policy: "public",
       key: Schema.String,
       snapshot: Schema.Finite,
       message,

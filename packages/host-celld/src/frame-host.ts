@@ -1,6 +1,11 @@
 import type { Duration } from "effect";
-import { Effect, Layer, ManagedRuntime, Option, Schema } from "effect";
-import type { ActorTransport, AnyImplementation } from "effect-frame/actor";
+import { Effect, Layer, ManagedRuntime, Option, Result, Schema } from "effect";
+import type {
+  ActorTransport,
+  AnyImplementation,
+  Policies,
+  PolicyNamesMissing,
+} from "effect-frame/actor";
 import { ActorHost, DurableHostConfig, HttpServer } from "effect-frame/actor";
 import type { Address } from "effect-frame/actor/client";
 import * as Interop from "./interop.js";
@@ -101,10 +106,20 @@ const addressOf = (body: unknown, url: URL): Option.Option<Address> =>
 export interface FrameHostOptions<R> {
   readonly implementations: ReadonlyArray<AnyImplementation<R>>;
   /**
-   * The services the implementations need. Implementations that need none
-   * take `Layer.empty`, whose `R` is `never`.
+   * The services the implementations need, and the `Policies` table every
+   * host requires (#20). There is no default table: an object whose
+   * contracts name a policy this table does not hold fails its first
+   * request with `PolicyNamesMissing`, because a Durable Object constructor
+   * cannot fail asynchronously.
    */
-  readonly layer: Layer.Layer<R>;
+  readonly layer: Layer.Layer<R | Policies>;
+  /**
+   * Derives who is asking from each request, as `HttpServer.make` does. An
+   * object with no sessions writes `principal: HttpServer.anonymous`. It
+   * runs in the object's runtime, so it may read the host's
+   * `ActorTransport` and any service `layer` provides.
+   */
+  readonly principal: HttpServer.DerivePrincipal<ActorTransport | R | Policies>;
   /** How long `call` sleeps between receipt polls. A durable store polls fast. */
   readonly pollInterval: Option.Option<Duration.Input>;
 }
@@ -140,7 +155,10 @@ export const defineFrameHost = <R>(options: FrameHostOptions<R>): FrameHostClass
 
   return class FrameHost implements FrameHostInstance {
     readonly #storage: DurableStorage;
-    readonly #runtime: ManagedRuntime.ManagedRuntime<ActorTransport, never>;
+    readonly #runtime: ManagedRuntime.ManagedRuntime<
+      ActorTransport | ActorHost.Recovery | R | Policies,
+      PolicyNamesMissing
+    >;
     #handler: Option.Option<Promise<HttpServer.WebHandler>> = Option.none();
 
     constructor(context: DurableObjectContext, _env: unknown) {
@@ -151,9 +169,11 @@ export const defineFrameHost = <R>(options: FrameHostOptions<R>): FrameHostClass
         store: () => StorageStore.layer(context.storage),
       });
       // The Durable Object constructor is the boundary: it builds the one
-      // runtime that every request of this object runs inside.
-      // oxlint-disable-next-line effect/noInlineProvide
-      this.#runtime = ManagedRuntime.make(Layer.provide(host, [requirements, settings]));
+      // runtime that every request of this object runs inside. The
+      // requirements stay in it, so the principal derivation can read them.
+      this.#runtime = ManagedRuntime.make(
+        Layer.provideMerge(host, Layer.merge(requirements, settings)),
+      );
     }
 
     /** The one web handler this object serves. Concurrent requests share it. */
@@ -161,7 +181,9 @@ export const defineFrameHost = <R>(options: FrameHostOptions<R>): FrameHostClass
       return Option.match(this.#handler, {
         onSome: (running) => running,
         onNone: () => {
-          const starting = this.#runtime.runPromise(HttpServer.make);
+          const starting = this.#runtime.runPromise(
+            HttpServer.make({ principal: options.principal }),
+          );
           this.#handler = Option.some(starting);
           return starting;
         },
@@ -180,8 +202,7 @@ export const defineFrameHost = <R>(options: FrameHostOptions<R>): FrameHostClass
       if (Option.isNone(address)) {
         return;
       }
-      const handler = await this.#ensureHandler();
-      await this.#runtime.runPromise(wakeAndDrain(handler, address.value, this.#storage));
+      await this.#runtime.runPromise(wakeAndDrain(address.value, this.#storage));
     }
 
     async fetch(request: Request): Promise<Response> {
@@ -203,17 +224,26 @@ export const defineFrameHost = <R>(options: FrameHostOptions<R>): FrameHostClass
 /**
  * Opens the instance and waits until the mailbox drains.
  *
- * `snapshot` is the cheapest read that opens an instance, so the wake uses
- * it. The drain bound keeps one alarm well inside the transaction limit.
- * Machine work the restart re-entered runs on its own fibers after this
- * returns; the drain only covers the commands that were already admitted.
+ * The wake has no caller, so it does not go through the public wire, where
+ * every read is checked against a policy and a protected actor would refuse
+ * it. It asks the host's own `Recovery`, which opens the instance and
+ * returns nothing (#85). The drain bound keeps one alarm well inside the
+ * transaction limit. Machine work the restart re-entered runs on its own
+ * fibers after this returns; the drain only covers the commands that were
+ * already admitted.
  */
 const wakeAndDrain = Effect.fn("FrameHost.wake")(function* (
-  handler: HttpServer.WebHandler,
   address: Address,
   storage: DurableStorage,
 ) {
-  yield* handler(snapshotRequest(address));
+  const recovery = yield* ActorHost.Recovery;
+  const woken = yield* Effect.result(recovery.wake(address));
+  if (Result.isFailure(woken)) {
+    // The recorded address names no hosted contract: there is nothing to drain.
+    return yield* Effect.logWarning("FrameHost.wake refused").pipe(
+      Effect.annotateLogs({ contract: address.contract, reason: woken.failure._tag }),
+    );
+  }
   const step = Effect.fn("FrameHost.wake.step")(function* () {
     const rows = Interop.exec(
       storage.sql,
@@ -227,11 +257,3 @@ const wakeAndDrain = Effect.fn("FrameHost.wake")(function* (
   });
   yield* Effect.repeat(step(), { until: (empty) => empty, times: 1000 });
 });
-
-/** The request the wake sends itself. It names the address the row held. */
-const snapshotRequest = (address: Address): Request =>
-  new Request("http://frame-host.internal/snapshot", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ address }),
-  });

@@ -133,7 +133,7 @@ describe("notes end to end", () => {
       expect(bundle.length).toBeGreaterThan(0);
       expect(bundle).not.toContain(serverOnly);
       expect(bundle).not.toContain("effect-frame/src/actor/mailbox-store/MailboxStore");
-      expect(bundle).not.toContain("effect-frame/src/actor/host/Authorizer");
+      expect(bundle).not.toContain("effect-frame/src/actor/policy/Policies");
     }),
   );
 

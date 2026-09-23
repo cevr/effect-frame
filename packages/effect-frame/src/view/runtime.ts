@@ -593,11 +593,30 @@ const presentationHost = <HostNode>(
       runs.push(run);
       attachments.set(node, runs);
     },
+    boundaryMarks: host.boundaryMarks,
+    // Hidden content was not drawn by the server, so it adopts no marks (#22).
+    adoptBoundary: (shown) => visible && adoptBoundaryOf(host)(shown),
     show,
     hide,
     dispose,
   };
 };
+
+const neverAdopted = (): boolean => false;
+
+/** The host's boundary adoption, or none: only a hydrating host adopts (#22). */
+const adoptBoundaryOf = <HostNode>(host: Host<HostNode>) => host.adoptBoundary ?? neverAdopted;
+
+/**
+ * The host a boundary builds through when the server drew its other branch:
+ * every node is new, so nothing below claims a server node.
+ */
+const detachedHost = <HostNode>(host: Host<HostNode>): Host<HostNode> => ({
+  ...host,
+  createElement: host.createDetachedElement ?? host.createElement,
+  createText: host.createDetachedText ?? host.createText,
+  adoptBoundary: neverAdopted,
+});
 
 /**
  * Keep every node this mount hands to the host. A slot is a logical view
@@ -692,6 +711,9 @@ const trackHostWrites = <HostNode>(host: Host<HostNode>): TrackedHost<HostNode> 
     createText: host.createText,
     createDetachedElement: host.createDetachedElement,
     createDetachedText: host.createDetachedText,
+    boundaryMarks: host.boundaryMarks,
+    adoptBoundary: host.adoptBoundary,
+    setupStarted: host.setupStarted,
     setProperty: host.setProperty,
     insert: (parent, node, anchor) => {
       remember(parent, node);
@@ -714,7 +736,9 @@ const trackHostWrites = <HostNode>(host: Host<HostNode>): TrackedHost<HostNode> 
   };
 };
 
-const makeTracker = Effect.fn("View.makeTracker")(function* () {
+const makeTracker = Effect.fn("View.makeTracker")(function* (
+  setupStarted: Option.Option<() => () => void>,
+) {
   const context = yield* Effect.context<Scope.Scope>();
   const mountScope = yield* Effect.scope;
   const mountScheduler = yield* Scheduler.Scheduler;
@@ -757,9 +781,32 @@ const makeTracker = Effect.fn("View.makeTracker")(function* () {
     // `runSync` supplies a temporary synchronous scheduler to its parent
     // fiber. Restore the mount scheduler in the child before its work yields.
     void runSync(
-      Effect.forkIn(Effect.provideService(effect, Scheduler.Scheduler, mountScheduler), scope),
+      Effect.forkIn(
+        Effect.provideService(counted(effect, scope), Scheduler.Scheduler, mountScheduler),
+        scope,
+      ),
     );
   };
+
+  // A host that counts late setups (#22) hears when each one ends: when it
+  // exits, or when its scope closes first, since a fiber forked into a
+  // closed scope never runs. A host that does not count pays nothing.
+  const counted = (effect: Effect.Effect<unknown>, scope: Scope.Scope): Effect.Effect<unknown> =>
+    Option.match(setupStarted, {
+      onNone: () => effect,
+      onSome: (started) => {
+        const ended = started();
+        let done = false;
+        const end = Effect.sync(() => {
+          if (!done) {
+            done = true;
+            ended();
+          }
+        });
+        void runSync(Scope.addFinalizer(scope, end));
+        return Effect.ensuring(effect, end);
+      },
+    });
 
   let pending: Array<() => void> = [];
   let depth = 0;
@@ -937,7 +984,14 @@ const planRetained = <HostNode>(
   const visible = renderer.tracker.track(node.when);
   return (parent, slot, changed) => {
     const contentSlot: Slot<HostNode> = { nodes: [] };
-    const presentation = presentationHost(renderer.host, visible(), parent);
+    // Hydrating a streamed document (#22): the server may have drawn the
+    // other branch here. Then both branches build fresh nodes.
+    let branchHost = renderer.host;
+    if (adoptBoundaryOf(renderer.host)(visible())) {
+      branchHost = detachedHost(renderer.host);
+    }
+    const branchRenderer: Renderer<HostNode> = { host: branchHost, tracker: renderer.tracker };
+    const presentation = presentationHost(branchHost, visible(), parent);
     const contentRenderer: Renderer<HostNode> = {
       host: presentation,
       tracker: renderer.tracker,
@@ -946,34 +1000,59 @@ const planRetained = <HostNode>(
     const [fallbackVisible, setFallbackVisible] = createSignal(!presented);
     let hideAfterFallback = false;
 
+    // Server HTML (#22): a comment pair around the boundary's nodes, so a
+    // hydrating client finds this boundary by its own pair.
+    const marks = Option.map(Option.fromNullishOr(renderer.host.boundaryMarks), (make) =>
+      make(node.kind),
+    );
+    let closeAnchor = Option.none<HostNode>();
+    const wrap = (nodes: ReadonlyArray<HostNode>): ReadonlyArray<HostNode> =>
+      Option.match(marks, {
+        onNone: () => nodes,
+        onSome: (pair) => [pair.open, ...nodes, pair.close],
+      });
+    const shownNodes = (): ReadonlyArray<HostNode> => {
+      if (presented) {
+        return wrap(contentSlot.nodes);
+      }
+      return wrap(fallbackSlot.nodes);
+    };
+    Option.map(marks, (pair) => {
+      pair.show(presented);
+      renderer.host.insert(parent, pair.open, Option.none());
+    });
+
     const fallbackSlot: Slot<HostNode> = { nodes: [] };
     const fallback = show(
       renderer.tracker,
-      renderer.host,
+      branchHost,
       fallbackVisible,
-      () => plan(renderer, node.fallback),
+      () => plan(branchRenderer, node.fallback),
       () => nothing(),
-      () => Option.fromNullishOr(contentSlot.nodes[0]),
+      () => Option.orElse(Option.fromNullishOr(contentSlot.nodes[0]), () => closeAnchor),
       () => {
         if (!hideAfterFallback) {
           return;
         }
         hideAfterFallback = false;
         presentation.hide();
-        slot.nodes = fallbackSlot.nodes;
+        slot.nodes = shownNodes();
         changed();
       },
     );
     fallback(parent, fallbackSlot, () => {
+      // The fallback was drawn or taken away: the switch is complete, so the
+      // marks name the branch that stands between them now.
+      Option.map(marks, (pair) => pair.show(!untrack(fallbackVisible)));
       if (!presented) {
-        slot.nodes = fallbackSlot.nodes;
+        slot.nodes = shownNodes();
         changed();
       }
     });
 
     const contentChanged = (): void => {
       if (presented) {
-        slot.nodes = contentSlot.nodes;
+        slot.nodes = shownNodes();
         changed();
       }
     };
@@ -986,6 +1065,11 @@ const planRetained = <HostNode>(
       }),
     );
     renderer.tracker.register(() => contentOwner.close);
+    Option.map(marks, (pair) => {
+      renderer.host.insert(parent, pair.close, Option.none());
+      closeAnchor = Option.some(pair.close);
+    });
+    slot.nodes = shownNodes();
 
     const apply = (next: boolean): void => {
       if (next === presented) {
@@ -993,13 +1077,15 @@ const planRetained = <HostNode>(
       }
       presented = next;
       if (presented) {
-        presentation.show(Option.fromNullishOr(fallbackSlot.nodes[0]));
+        presentation.show(
+          Option.orElse(Option.fromNullishOr(fallbackSlot.nodes[0]), () => closeAnchor),
+        );
         setFallbackVisible(false);
-        slot.nodes = contentSlot.nodes;
+        slot.nodes = shownNodes();
       } else {
         hideAfterFallback = true;
         setFallbackVisible(true);
-        slot.nodes = fallbackSlot.nodes;
+        slot.nodes = shownNodes();
       }
       changed();
     };
@@ -1561,7 +1647,7 @@ export const mount = Effect.fn("View.mount")(function* <Props, E, R, HostNode>(
     }
 
     const tree: Node = yield* view(props);
-    const tracker = yield* makeTracker();
+    const tracker = yield* makeTracker(Option.fromNullishOr(trackedHost.setupStarted));
     const slot: Slot<HostNode> = { nodes: [] };
     const removeNodes = (): void => {
       trackedHost.cleanup();

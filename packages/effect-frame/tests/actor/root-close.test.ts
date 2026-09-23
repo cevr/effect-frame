@@ -4,9 +4,11 @@ import * as QueryTest from "../../src/actor/testing/query.js";
 import { query } from "../../src/actor/query.js";
 import { implementQuery } from "../../src/actor/query-host.js";
 import { useQuery } from "../../src/actor/query-client.js";
+import { Policies, Policy } from "../../src/actor/policy.js";
 import { describe, expect, it } from "effect-bun-test";
 
 const RootCloseQuery = query("InspectionRootCloseProbe", {
+  policy: "public",
   args: Schema.String,
   result: Schema.String,
 });
@@ -30,7 +32,10 @@ describe("QueryTest root ownership", () => {
             }),
           ),
         ],
-      }).pipe(Layer.provideMerge(Frame.layer({ name: "root-close" })));
+      }).pipe(
+        Layer.provide(Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }))),
+        Layer.provideMerge(Frame.layer({ name: "root-close" })),
+      );
       const root = yield* Scope.make();
       const consumer = yield* Scope.make();
       const context = yield* Scope.provide(Layer.build(layer), root);

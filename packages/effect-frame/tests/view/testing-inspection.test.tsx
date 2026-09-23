@@ -10,6 +10,8 @@ import {
   useQuery,
   type LocalActorRef,
   type SetValue,
+  Policies,
+  Policy,
 } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import {
@@ -41,7 +43,11 @@ import {
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
 
+/** The one policy table: every contract and query here declares `public`. */
+const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
+
 const BlockedQuery = query("ViewTestInspectionBlocked", {
+  policy: "public",
   args: Schema.Struct({}),
   result: Schema.String,
 });
@@ -103,6 +109,7 @@ const makeControl = Effect.gen(function* () {
 
 const makeQueryRoot = (name: string, control: BlockControl["Service"]) =>
   QueryTest.layer({ queries: [BlockedLive] }).pipe(
+    Layer.provide(policies),
     Layer.provideMerge(Layer.succeed(BlockControl, control)),
     Layer.provideMerge(TestClock.layer()),
     Layer.provideMerge(Frame.layer({ name })),
@@ -151,6 +158,7 @@ const conditionFailure = (exit: Exit.Exit<unknown, unknown>): ViewTest.Condition
 describe("ViewTest Frame inspection", () => {
   it.scoped.layer(
     QueryTest.layer({ queries: [BlockedLive] }).pipe(
+      Layer.provide(policies),
       Layer.provideMerge(Layer.effect(BlockControl, makeControl)),
       Layer.provideMerge(TestClock.layer()),
       Layer.provideMerge(Frame.layer({ name: "view-test-inspection" })),
@@ -533,6 +541,7 @@ describe("ViewTest Frame inspection", () => {
 
   it.scoped.layer(
     QueryTest.layer({ queries: [BlockedLive] }).pipe(
+      Layer.provide(policies),
       Layer.provideMerge(Layer.effect(BlockControl, makeControl)),
       Layer.provideMerge(TestClock.layer()),
       Layer.provideMerge(Frame.layer({ name: "view-test-routed-inspection" })),

@@ -19,6 +19,8 @@ import {
   Cell,
   CommandId,
   MailboxStore,
+  Policies,
+  Policy,
   contract,
   durable,
   implementQuery,
@@ -29,6 +31,8 @@ import {
 import { QueryCache, Uncertain } from "effect-frame/actor/client";
 import { QueryTest } from "effect-frame/actor/testing";
 import * as Frame from "../../src/frame.js";
+
+const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
 
 class InspectionControl extends Context.Service<
   InspectionControl,
@@ -80,34 +84,40 @@ const durableOptions = {
 };
 
 const Blocked = query("InspectionBlocked", {
+  policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
   result: Schema.Struct({ value: Schema.String }),
 });
 
 const Concurrent = query("InspectionConcurrent", {
+  policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
   result: Schema.Finite,
 });
 
 const Failed = query("InspectionFailed", {
+  policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
   result: Schema.Finite,
 });
 
 const InspectionSource = contract("InspectionSource", {
   version: 1,
+  policy: "public",
   key: Schema.Struct({ id: Schema.Finite }),
   snapshot: Schema.Finite,
   message: Schema.Struct({}),
 });
 
 const Lifecycle = query("InspectionLifecycle", {
+  policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
   result: Schema.Struct({ value: Schema.Finite }),
   depends: [InspectionSource],
 });
 
 const SameRootQuery = query("SameRootQuery", {
+  policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
   result: Schema.Finite,
 });
@@ -342,7 +352,7 @@ describe("Frame.inspect actor and query records", () => {
     Effect.gen(function* () {
       const rootLayer = QueryTest.layer({
         queries: [implementQuery(SameRootQuery, () => Effect.succeed(1))],
-      }).pipe(Layer.provideMerge(makeFrame("same-root")));
+      }).pipe(Layer.provide(policies), Layer.provideMerge(makeFrame("same-root")));
       const openRoot = Effect.gen(function* () {
         const rootScope = yield* Scope.make();
         const context = yield* Scope.provide(Layer.build(rootLayer), rootScope);
@@ -407,6 +417,7 @@ describe("Frame.inspect actor and query records", () => {
         ),
       ],
     }).pipe(
+      Layer.provide(policies),
       Layer.provideMerge(makeFrame("queries")),
       Layer.provideMerge(
         Layer.effect(
@@ -457,7 +468,7 @@ describe("Frame.inspect actor and query records", () => {
           }).pipe(Effect.flatten),
         ),
       ],
-    }).pipe(Layer.provideMerge(makeFrame("query-failure"))),
+    }).pipe(Layer.provide(policies), Layer.provideMerge(makeFrame("query-failure"))),
   )("samples failure, removes the owner, and reacquires a fresh slot", () =>
     Effect.gen(function* () {
       failedReads = 0;
@@ -490,6 +501,7 @@ describe("Frame.inspect actor and query records", () => {
     QueryTest.layer({
       queries: [implementQuery(Lifecycle, () => Effect.succeed({ value: lifecycleValue }))],
     }).pipe(
+      Layer.provide(policies),
       Layer.provideMerge(TestClock.layer()),
       Layer.provideMerge(makeFrame("query-lifecycle")),
     ),
@@ -562,7 +574,7 @@ describe("Frame.inspect actor and query records", () => {
           }),
         ),
       ],
-    }).pipe(Layer.provideMerge(makeFrame("query-ownership"))),
+    }).pipe(Layer.provide(policies), Layer.provideMerge(makeFrame("query-ownership"))),
   )("deduplicates concurrent first declarations and releases the RcMap entry", () =>
     Effect.gen(function* () {
       concurrentReads = 0;

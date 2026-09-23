@@ -147,7 +147,8 @@ reaches the router.
 | Event                                                           | `protection` | What happens                                                                                                                                                                                                |
 | --------------------------------------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cancelable`, and `NavigationPrecommitController` exists        | `precommit`  | Intercepted with a precommit handler that waits for the router. Stay rejects it: the entry never commits. Leave resolves it.                                                                                |
-| `cancelable`, no precommit handler (or `precommit: "off"`)      | `cancel`     | `preventDefault()` at once. Leave calls `traverseTo(key)` once with a private `info` marker; the listener lets that event through without asking again. History never moved. Stay does nothing more.        |
+| `cancelable`, precommit engine with `precommit: "off"`          | `cancel`     | `preventDefault()` at once. Leave calls `traverseTo(key)` once with a private `info` marker; the listener lets that event through without asking again. History never moved. Stay does nothing more.        |
+| `cancelable`, no precommit handler in the engine (WebKit)       | `none`       | As the row below, with `reason=noncancelable`. A canceled traversal is not safe there (see "WebKit and a canceled traversal").                                                                              |
 | not `cancelable` (browser UI without history-action activation) | `none`       | Intercepted so the router can install the shell, but not asked: it follows the platform and logs `route.leave.unprotected url=… kind=pop checks=N reason=noncancelable` when a check would have been asked. |
 | no Navigation API                                               | —            | `browserLocation`: the router follows `popstate` after commit and logs the same line with `reason=committed`.                                                                                               |
 
@@ -162,14 +163,35 @@ There is no `history.go` compensation and no `beforeunload` substitute. The
 report is a log line, not a Snapshot field, because the public inspection
 types must not change in a private slice.
 
-### Scroll and focus (#31, small form)
+### WebKit and a canceled traversal
 
-An intercepted traversal uses `focusReset: "manual"`, so focus stays where it
-is (a stayed segment keeps its caret). The handler's promise resolves when the
-router calls `finish`, after it installed the destination shell, so the
-browser restores the entry's saved scroll position at that moment (the
-default `scroll: "after-transition"`). The router writes and reads no scroll
-position. Everything else in #31 is a limit below.
+Observed on macOS 27 (Darwin 27.0.0), where `Bun.WebView` WebKit has the
+Navigation API but no `NavigationPrecommitController`. On a bare page with
+no router, after `preventDefault()` on a cancelable Back:
+
+- The document stays on entry 1, and `navigation.currentEntry.index` is 1.
+- WebKit's own back-forward list moved to entry 0.
+- `navigation.traverseTo(key)` (with or without `info`, at once, in a
+  microtask, or after 50 ms) and `navigation.back()` reject with
+  `AbortError` and start a `reload` navigation of the current URL.
+- `history.back()` then does nothing, and `history.forward()` reloads.
+
+So the `cancel` path lost the page's state on Leave, and the proof "a wholly
+stayed traversal keeps the caret" timed out waiting for a traversal that
+became a reload. This is a platform fact, not a race. A longer timeout would
+not help. The adapter now cancels only on an engine that has precommit
+handlers (Chrome with `precommit: "off"`). Elsewhere a cancelable traversal
+is `none`: followed, not asked, and reported with `reason=noncancelable`.
+The WebKit suite is skipped on Linux CI (no `Bun.WebView` WebKit backend), so
+CI never saw the failure.
+
+### Scroll and focus (#31)
+
+See `docs/design/navigation-behavior.md`. Every intercept uses
+`scroll: "manual"` and `focusReset: "manual"`; the router lands at shell
+commit through `Traversal.land`, before `finish`. A stayed segment keeps its
+caret because focus moves only when the deepest segment entered. The router
+writes and reads no scroll position.
 
 ## Evidence
 
@@ -209,15 +231,15 @@ asserted.
 | "an accepted intercept claims its key: that popstate is dropped"            | A `none` traversal; the entry's `popstate` is dropped.                                                        |
 | "without a consumer the adapter holds nothing"                              | No `intercept`, no `preventDefault`; `popstate` reaches `pops`.                                               |
 
-| Proof (`route-leave-browser.test.ts`)                                                      | Engine | What it shows                                                                                                                                                                                                                           |
-| ------------------------------------------------------------------------------------------ | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| "records the engine's capabilities"                                                        | both   | Each engine is probed once before the proofs are declared; the fixture page must see the same values. Chrome must have `navigation`. The Chrome precommit proof skips (not fails) without `NavigationPrecommitController`.              |
-| "Back and Forward: a precommit Stay keeps everything; Leave commits once"                  | Chrome | A held `history.back()`: path, entry index, the same `#post` element, the draft text, focus, and the caret `[1, 3]` unchanged while held and after Stay. Leave moves one entry. Forward is refused, then permitted. No unprotected log. |
-| "without a precommit handler: the canceled event is re-issued once on Leave"               | Chrome | `precommit: "off"`: Stay keeps everything; Leave asks exactly once more and moves one entry; the entry count is unchanged.                                                                                                              |
-| "a noncancelable browser-UI Back is followed and reported, never stayed"                   | Chrome | DevTools `Page.navigateToHistoryEntry` without activation: the page moves, the check is not asked, one `reason=noncancelable` log. After a real click, the same UI Forward is cancelable and a Stay keeps the page.                     |
-| "Back and Forward restore each entry's scroll once the router is done"                     | Chrome | Scroll 1200 on post 1, 300 on post 2: Back and Forward restore each; Back from the short not-found page restores 300 on post 2.                                                                                                         |
-| "a wholly stayed traversal keeps the caret"                                                | both   | Back from `?tab=b` to `?tab=read`: the same post element, draft, focus, and caret.                                                                                                                                                      |
-| "Back is stayed where the engine can cancel it, and followed and reported where it cannot" | WebKit | Branches on the probe before Back. With the API: Stay keeps the page, one more question, no log. Without it (this host): the check is not asked; one `reason=committed` log.                                                            |
+| Proof (`route-leave-browser.test.ts`)                                                      | Engine | What it shows                                                                                                                                                                                                                                                                      |
+| ------------------------------------------------------------------------------------------ | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "records the engine's capabilities"                                                        | both   | Each engine is probed once before the proofs are declared; the fixture page must see the same values. Chrome must have `navigation`. The Chrome precommit proof skips (not fails) without `NavigationPrecommitController`.                                                         |
+| "Back and Forward: a precommit Stay keeps everything; Leave commits once"                  | Chrome | A held `history.back()`: path, entry index, the same `#post` element, the draft text, focus, and the caret `[1, 3]` unchanged while held and after Stay. Leave moves one entry. Forward is refused, then permitted. No unprotected log.                                            |
+| "without a precommit handler: the canceled event is re-issued once on Leave"               | Chrome | `precommit: "off"`: Stay keeps everything; Leave asks exactly once more and moves one entry; the entry count is unchanged.                                                                                                                                                         |
+| "a noncancelable browser-UI Back is followed and reported, never stayed"                   | Chrome | DevTools `Page.navigateToHistoryEntry` without activation: the page moves, the check is not asked, one `reason=noncancelable` log. After a real click, the same UI Forward is cancelable and a Stay keeps the page.                                                                |
+| "Back and Forward restore each entry's scroll once the router is done"                     | Chrome | Scroll 1200 on post 1, 300 on post 2: Back and Forward restore each; Back from the short not-found page restores 300 on post 2.                                                                                                                                                    |
+| "a wholly stayed traversal keeps the caret"                                                | both   | Back from `?tab=b` to `?tab=read`: the same post element, draft, focus, and caret.                                                                                                                                                                                                 |
+| "Back is stayed where the engine can cancel it, and followed and reported where it cannot" | WebKit | Branches on the probe before Back. With a precommit handler: Stay keeps the page, one more question, no log. Without one: the check is not asked; one log, `reason=noncancelable` with the Navigation API and `reason=committed` without it; Forward and Back still move after it. |
 
 ### Engine support observed
 
@@ -227,6 +249,7 @@ Host: macOS 15 (Darwin 24.6.0), Bun 1.4.2.
 | -------------------------------------- | -------------- | ----------------- | ----------------------------- | ----------------------------------------------------------- |
 | HeadlessChrome 153 (`Bun.WebView`)     | yes            | yes               | cancelable                    | not cancelable without activation; cancelable after a click |
 | WebKit 605.1.15 (`Bun.WebView`, macOS) | no             | no                | `popstate` after commit       | not driven (WebView has no toolbar path)                    |
+| WebKit (`Bun.WebView`, macOS 27)       | yes            | no                | cancelable, not safely        | not driven                                                  |
 
 Also observed in Chrome 153, on a bare page with no router: after a
 precommit rejection of a Forward, `history.forward()` fires no `navigate`
@@ -291,19 +314,17 @@ proof here makes the shell slow. It is recorded, not claimed.
   `history.go`.
 - The report is a log line (`Effect.logWarning`), not an inspection record.
   A Snapshot field for it needs a public inspection change.
-- #31 in its small form only. Not implemented: scroll to the top or fragment
-  on a controlled push or replace (the router still uses `pushState`, so the
-  scroll position is kept), `event.scroll()` at shell commit for push, leaf
-  root `tabindex`/`autofocus`, the no-Navigation-API focus fallback, and
-  `Preserve`. B6 above is the timing gap in the proof.
+- #31 is built; see `docs/design/navigation-behavior.md`. B6 above is the
+  timing gap in the proof.
 - On root close, a `cancel` traversal that was already canceled stays
   canceled; the platform is not asked to redo it.
 - A held precommit Back is aborted when a push commits meanwhile: the
   router's `pushState` for that push aborts the pending traversal in the
   browser (probe 2 of the slice 5 review). The traversal is refused, not
   committed later.
-- The WebKit proof's Navigation-API branch did not run: this host's WebKit
-  has no Navigation API.
+- The WebKit proof's precommit branch did not run: no WebKit here has a
+  precommit handler. On macOS 27 its Navigation-API branch runs, and a
+  cancelable Back there is followed and reported, not stayed.
 - A check sees `kind: "pop"` for both Back and Forward; the direction is not
   exposed.
 - Firefox, Safari with the Navigation API (26.2+), and a headed Chrome

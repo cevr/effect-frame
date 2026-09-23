@@ -15,10 +15,18 @@ export interface ActorContract<
   Key extends Pure,
   Snapshot extends Pure,
   Message extends Pure,
+  Policy extends string = string,
 > {
   readonly name: Name;
   /** Bumped when `key`, `snapshot`, or `message` changes incompatibly. */
   readonly version: number;
+  /**
+   * The policy the host resolves before it opens, reads, or sends to an
+   * instance. A name, never a rule: the contract stays browser-safe and the
+   * rule stays on the server. The host refuses to build when its table does
+   * not hold this name.
+   */
+  readonly policy: Policy;
   readonly key: Schema.fromJsonString<Key>;
   readonly snapshot: Schema.fromJsonString<Snapshot>;
   readonly message: Schema.fromJsonString<Message>;
@@ -26,14 +34,25 @@ export interface ActorContract<
   readonly raw: { readonly key: Key; readonly snapshot: Snapshot; readonly message: Message };
 }
 
-export interface ContractOptions<Key extends Pure, Snapshot extends Pure, Message extends Pure> {
+export interface ContractOptions<
+  Key extends Pure,
+  Snapshot extends Pure,
+  Message extends Pure,
+  Policy extends string = string,
+> {
   readonly version: number;
-  /** Selects one instance. Include the tenant so authorization can read it. */
+  /** Selects one instance. Include the tenant so a policy can read it. */
   readonly key: Key;
   /** The public projection of the actor state. Often the state itself. */
   readonly snapshot: Snapshot;
   /** A `Schema.Union` of `Schema.TaggedStruct` members. */
   readonly message: Message;
+  /**
+   * The name of the policy that guards every instance. Required: an actor
+   * with no policy cannot be declared. Allow-all is a name too, written on
+   * purpose and registered as `Policy.allowAll`.
+   */
+  readonly policy: Policy;
 }
 
 export type AnyContract = ActorContract<string, Pure, Pure, Pure>;
@@ -47,12 +66,14 @@ export const contract = <
   Key extends Pure,
   Snapshot extends Pure,
   Message extends Pure,
+  const Policy extends string,
 >(
   name: Name,
-  options: ContractOptions<Key, Snapshot, Message>,
-): ActorContract<Name, Key, Snapshot, Message> => ({
+  options: ContractOptions<Key, Snapshot, Message, Policy>,
+): ActorContract<Name, Key, Snapshot, Message, Policy> => ({
   name,
   version: options.version,
+  policy: options.policy,
   key: Schema.fromJsonString(options.key),
   snapshot: Schema.fromJsonString(options.snapshot),
   message: Schema.fromJsonString(options.message),

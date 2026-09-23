@@ -3,6 +3,10 @@ import { describe, expect, it } from "effect-bun-test";
 import { serverOnly } from "effect-frame/actor";
 import * as Frame from "effect-frame/frame";
 
+/** The service keys: each is a string literal in any bundle that carries the module. */
+const policyTable = "effect-frame/src/actor/policy/Policies";
+const currentPrincipal = "effect-frame/src/actor/principal/CurrentPrincipal";
+
 const bundle = (entry: string) =>
   Effect.gen(function* () {
     const result = yield* Effect.promise(() =>
@@ -31,7 +35,7 @@ describe("import boundary", () => {
       const text = yield* bundle("../../src/frame.ts");
       expect(text).not.toContain(serverOnly);
       expect(text).not.toContain("effect-frame/src/actor/mailbox-store/MailboxStore");
-      expect(text).not.toContain("effect-frame/src/actor/host/Authorizer");
+      expect(text).not.toContain(policyTable);
       expect(text).not.toContain("effect-frame/src/actor/durable/DurableHostConfig");
       expect(text).not.toContain("effect-frame/actor:query-server-only");
       expect(text).not.toContain("method not allowed");
@@ -43,13 +47,23 @@ describe("import boundary", () => {
       const text = yield* bundle("../../src/actor/client.ts");
       expect(text).not.toContain(serverOnly);
       expect(text).not.toContain("effect-frame/src/actor/mailbox-store/MailboxStore");
-      expect(text).not.toContain("effect-frame/src/actor/host/Authorizer");
+      expect(text).not.toContain(policyTable);
       expect(text).not.toContain("effect-frame/src/actor/durable/DurableHostConfig");
       expect(text).not.toContain("method not allowed");
-      // PROTOTYPE (ticket #17): the query host, its handlers, and its policy
-      // table are server code. The query contract and cache are not.
+      // The query host and its handlers are server code. The query contract
+      // and cache are not.
       expect(text).not.toContain("effect-frame/actor:query-server-only");
-      expect(text).not.toContain("effect-frame/src/actor/query-host/QueryPolicies");
+    }),
+  );
+
+  it.effect("the client entry carries the principal type but no policy table", () =>
+    Effect.gen(function* () {
+      const text = yield* bundle("../../src/actor/client.ts");
+      // A browser may know who is asking: the principal is a value.
+      expect(text).toContain(currentPrincipal);
+      // It never holds the rules that judge one.
+      expect(text).not.toContain(policyTable);
+      expect(text).not.toContain("PolicyNamesMissing");
     }),
   );
 
@@ -57,6 +71,8 @@ describe("import boundary", () => {
     Effect.gen(function* () {
       const text = yield* bundle("../../src/actor/index.ts");
       expect(text).toContain(serverOnly);
+      // The markers above are real: the full entry does carry the policy table.
+      expect(text).toContain(policyTable);
     }),
   );
 });

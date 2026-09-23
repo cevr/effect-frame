@@ -23,15 +23,22 @@ import {
   ActorTransport,
   CommandId,
   MailboxStore,
+  Policies,
+  Policy,
   contract,
   implement,
   ref,
 } from "effect-frame/actor";
-import type { ActorRef, Applied, IdentifiedCommandHandle } from "effect-frame/actor";
+import type {
+  Action,
+  ActorRef,
+  Applied,
+  IdentifiedCommandHandle,
+  PolicyTable,
+} from "effect-frame/actor";
 import type { Address, Projection, TransportService } from "effect-frame/actor/client";
 import { Unauthorized, Unreachable } from "effect-frame/actor/client";
 import type { Behavior } from "../../src/actor/behavior.js";
-import type { AuthorizerService } from "../../src/actor/host.js";
 import {
   anchoredMembership,
   classifyRefusalAfterPossibleAdmission,
@@ -55,6 +62,7 @@ type PublicState = Schema.Schema.Type<typeof PublicSnapshot>;
 
 const Counter = contract("ReconciliationCounter", {
   version: 1,
+  policy: "guarded",
   key: Schema.String,
   snapshot: PublicSnapshot,
   message: Schema.Union([Add]),
@@ -144,9 +152,26 @@ const gatedBehavior = (
     }),
 });
 
+/** The table a host gets when a test does not refuse anything. */
+const allowGuarded: PolicyTable = { guarded: Policy.allowAll };
+
+/** An address rule registered as the counter's policy. A query subject is refused. */
+const guardedBy = (
+  authorize: (address: Address, action: Action) => Effect.Effect<void, Unauthorized>,
+): PolicyTable => ({
+  guarded: {
+    check: (_principal, subject, action) => {
+      if (subject._tag === "Actor") {
+        return authorize(subject.address, action);
+      }
+      return Effect.fail(Unauthorized.make({ contract: subject.key.query }));
+    },
+  },
+});
+
 const makeHarness = Effect.fn("ReconciliationTest.makeHarness")(function* (
   behavior: Behavior<ServerState, Add, Crypto.Crypto>,
-  authorizer: AuthorizerService | undefined = undefined,
+  policies: PolicyTable = allowGuarded,
 ) {
   const store = yield* MailboxStore;
   const controls: Controls = {
@@ -164,16 +189,10 @@ const makeHarness = Effect.fn("ReconciliationTest.makeHarness")(function* (
     state: stateCodec,
     snapshot: (state) => ({ count: state.count, publicToken: state.publicToken }),
   });
-  const host = ActorHost.make({
+  const real = yield* ActorHost.make({
     implementations: [implementation],
     store: () => Layer.succeed(MailboxStore, store),
-  });
-  let real: TransportService;
-  if (authorizer === undefined) {
-    real = yield* host;
-  } else {
-    real = yield* host.pipe(Effect.provideService(ActorHost.Authorizer, authorizer));
-  }
+  }).pipe(Effect.provideService(Policies, policies));
   const wrapped: TransportService = {
     send: (address, commandId, payload, active) =>
       Effect.gen(function* () {
@@ -442,13 +461,12 @@ describe("issue 67 reconciliation prototype", () => {
 
   withStore("a conclusive first-send refusal removes generated prediction", () =>
     Effect.gen(function* () {
-      const authorizer: AuthorizerService = {
-        authorize: (address, action) => {
-          if (action === "send") return Unauthorized.make({ contract: address.contract });
-          return Effect.void;
-        },
-      };
-      const harness = yield* makeHarness(gatedBehavior(undefined, undefined), authorizer);
+      const policies = guardedBy((address, action) => {
+        if (action === "send")
+          return Effect.fail(Unauthorized.make({ contract: address.contract }));
+        return Effect.void;
+      });
+      const harness = yield* makeHarness(gatedBehavior(undefined, undefined), policies);
       const coordinator = yield* makeClient(harness);
       const submitted = yield* coordinator.submitGenerated(add("A"), (state) => ({
         ...state,
@@ -946,7 +964,7 @@ describe("issue 67 reconciliation prototype", () => {
       const real = yield* ActorHost.make({
         implementations: [implementation],
         store: () => Layer.succeed(MailboxStore, store),
-      }).pipe(Scope.provide(serverScope));
+      }).pipe(Effect.provideService(Policies, allowGuarded), Scope.provide(serverScope));
       const harness: Harness = {
         store,
         real,
@@ -995,14 +1013,13 @@ describe("issue 67 reconciliation prototype", () => {
     Effect.gen(function* () {
       const allowed = yield* Ref.make(true);
       const lostReply = yield* Deferred.make<void>();
-      const authorizer: AuthorizerService = {
-        authorize: (address) =>
-          Effect.flatMap(Ref.get(allowed), (isAllowed) => {
-            if (isAllowed) return Effect.void;
-            return Unauthorized.make({ contract: address.contract });
-          }),
-      };
-      const harness = yield* makeHarness(gatedBehavior(undefined, undefined), authorizer);
+      const policies = guardedBy((address) =>
+        Effect.flatMap(Ref.get(allowed), (isAllowed) => {
+          if (isAllowed) return Effect.void;
+          return Effect.fail(Unauthorized.make({ contract: address.contract }));
+        }),
+      );
+      const harness = yield* makeHarness(gatedBehavior(undefined, undefined), policies);
       harness.controls.sends.set("A", {
         drop: true,
         afterCommit: Effect.gen(function* () {

@@ -2,7 +2,15 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { QueryCache, QueryFailure, implementQuery, query, useQuery } from "effect-frame/actor";
+import {
+  QueryCache,
+  QueryFailure,
+  implementQuery,
+  query,
+  useQuery,
+  Policies,
+  Policy,
+} from "effect-frame/actor";
 import type { QueryEntry, Source } from "effect-frame/actor";
 import { select as selectSource } from "effect-frame/actor/client";
 import { QueryTest } from "effect-frame/actor/testing";
@@ -36,6 +44,9 @@ import {
   Stream,
 } from "effect";
 import { describe, expect, it } from "effect-bun-test";
+
+/** The one policy table: every contract and query here declares `public`. */
+const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
 
 /**
  * PROTOTYPE (ticket #16). Readiness through context, in a real document.
@@ -97,6 +108,7 @@ const mountScoped = <E, R>(view: View.View<Record<string, never>, E, R>, root: H
  * failed without replacing the cache or transport.
  */
 const ReadinessQuery = query("ReadinessView", {
+  policy: "public",
   args: Schema.Struct({ id: Schema.String }),
   result: Schema.String,
 });
@@ -140,6 +152,7 @@ const ReadinessLive = implementQuery(ReadinessQuery, ({ id }) =>
 );
 
 const readinessLayer = QueryTest.layer({ queries: [ReadinessLive] }).pipe(
+  Layer.provide(policies),
   Layer.provideMerge(
     Layer.effect(
       ReadinessFixtures,

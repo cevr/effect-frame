@@ -20,7 +20,7 @@ const bundleOnce = (): Promise<string> => {
 };
 
 /** Each page owns its server, so `closePage` stops both. */
-const servers = new WeakMap<Bun.WebView, H.PageServer>();
+const servers = new WeakMap<Bun.WebView, H.PageServer<{ readonly precommit: "detect" | "off" }>>();
 
 /** Serve and open the fixture at `path`, and wait until the router shows it. */
 const openAt = async (
@@ -28,8 +28,7 @@ const openAt = async (
   path: string,
   precommit: "detect" | "off" = "detect",
 ): Promise<Bun.WebView> => {
-  const server = await H.serve(await bundleOnce());
-  server.config = { precommit };
+  const server = await H.serve(await bundleOnce(), { precommit });
   const view = await H.open(engine, `${server.origin}${path}`);
   servers.set(view, server);
   await H.waitFor(view, "window.__leave && window.__leave.ready", "the router mounted");
@@ -314,8 +313,8 @@ describe.skipIf(webkit === undefined)("leave checks in WebKit", () => {
       await shows(view, "2");
       await setMode(view, "stay");
       // Branch on the probed capability before Back, not on what Back did.
-      if (webkit?.navigation === true) {
-        // A programmatic Back is cancelable where the API exists: Stay holds.
+      if (webkit?.precommit === true) {
+        // A precommit handler holds the entry: Stay keeps the page.
         await read(view, "(history.back(), true)");
         await askedCount(view, 2);
         await settleMargin();
@@ -324,12 +323,27 @@ describe.skipIf(webkit === undefined)("leave checks in WebKit", () => {
         expect(await logs(view)).toEqual([]);
         return;
       }
+      // Without a precommit handler the adapter does not cancel: WebKit moves
+      // its back-forward list on a canceled traversal while the page stays,
+      // so a later Back does nothing and a re-issued one reloads the page.
+      // With the Navigation API the traversal is followed as noncancelable;
+      // without it, `popstate` reports it after commit.
+      let reason = "committed";
+      if (webkit?.navigation === true) {
+        reason = "noncancelable";
+      }
       await read(view, "(history.back(), true)");
       await shows(view, "1");
       expect(await asked(view)).toEqual(["1?read->2?read:push"]);
       const reported = await logs(view);
       expect(reported).toHaveLength(1);
-      expect(reported[0]).toContain("/app/t1/posts/1 kind=pop checks=1 reason=committed");
+      expect(reported[0]).toContain(`/app/t1/posts/1 kind=pop checks=1 reason=${reason}`);
+      // History is whole: Forward and Back still move.
+      await setMode(view, "leave");
+      await read(view, "(history.forward(), true)");
+      await shows(view, "2");
+      await read(view, "(history.back(), true)");
+      await shows(view, "1");
     } finally {
       closePage(view);
     }

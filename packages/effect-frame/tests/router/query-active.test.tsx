@@ -7,6 +7,8 @@ import {
   implementTransparent,
   keyOf,
   query as queryContract,
+  Policies,
+  Policy,
 } from "effect-frame/actor";
 import type { QueryKey, TransportService } from "effect-frame/actor";
 import { canonicalize } from "effect-frame/actor/client";
@@ -16,6 +18,9 @@ import type { LocationService } from "effect-frame/router";
 import { Html, View } from "effect-frame/view";
 import { Context, Deferred, Effect, Fiber, Layer, Option, Ref, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
+
+/** The one policy table: every contract and query here declares `public`. */
+const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
 
 /**
  * #28: `active` is the set a command declares, so it must be what the
@@ -29,16 +34,19 @@ import { describe, expect, it } from "effect-bun-test";
 // ---------------------------------------------------------------------------
 
 const Tenant = queryContract("ActiveTenant", {
+  policy: "public",
   args: Schema.Struct({ tenant: Schema.String }),
   result: Schema.String,
 });
 
 const Post = queryContract("ActivePost", {
+  policy: "public",
   args: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
   result: Schema.String,
 });
 
 const Comments = queryContract("ActiveComments", {
+  policy: "public",
   args: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
   result: Schema.String,
 });
@@ -48,6 +56,7 @@ type SetText = Schema.Schema.Type<typeof SetText>;
 
 const Draft = contract("ActiveDraft", {
   version: 1,
+  policy: "public",
   key: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
   snapshot: Schema.String,
   message: Schema.Union([SetText]),
@@ -121,7 +130,7 @@ const held = Layer.effect(
 const client = QueryTest.layer({
   queries: [TenantLive, PostLive, CommentsLive],
   implementations: [DraftLive],
-});
+}).pipe(Layer.provide(policies));
 
 const testLayer = Layer.mergeAll(client, held.pipe(Layer.provide(client))).pipe(
   Layer.provideMerge(Layer.effect(Holds, Ref.make<ReadonlyMap<string, Held>>(new Map()))),

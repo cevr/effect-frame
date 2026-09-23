@@ -18,10 +18,13 @@ import {
   ActorHost,
   CommandId,
   MailboxStore,
+  Policies,
+  Policy,
   Unauthorized,
   contract,
   implementTransparent,
 } from "effect-frame/actor";
+import type { PolicyTable } from "effect-frame/actor";
 import { Unreachable } from "effect-frame/actor/client";
 import type { Address, Projection, TransportService } from "effect-frame/actor/client";
 import type { Behavior } from "../../src/actor/behavior.js";
@@ -38,6 +41,7 @@ const encodeAdd = Schema.encodeEffect(MessageCodec);
 
 const Counter = contract("OwnerCounter", {
   version: 1,
+  policy: "guarded",
   key: Schema.String,
   snapshot: Schema.Finite,
   message: Add,
@@ -200,17 +204,16 @@ const onePass: Commands.CommandPolicySettings = {
   maxDelay: "1 millis",
 };
 
+/** The table a host gets when a test does not refuse anything. */
+const allowGuarded: PolicyTable = { guarded: Policy.allowAll };
+
 const remoteOwner = Effect.fn("CommandOwnerTest.remoteOwner")(function* (
   behavior: Behavior<number, Add>,
-  authorizer: Option.Option<ActorHost.AuthorizerService> = Option.none(),
+  policies: PolicyTable = allowGuarded,
 ) {
-  let host = ActorHost.make({
+  const real = yield* ActorHost.make({
     implementations: [implementTransparent(Counter, behavior)],
-  });
-  if (Option.isSome(authorizer)) {
-    host = Effect.provideService(host, ActorHost.Authorizer, authorizer.value);
-  }
-  const real = yield* host;
+  }).pipe(Effect.provideService(Policies, policies));
   const wire = impaired(real);
   const owner = yield* Commands.make(remoteCommands(wire.transport, address, decode));
   return { owner, wire };
@@ -293,13 +296,16 @@ describe("private command owner", () => {
   it.scoped("a first refusal rejects a fresh ID but a supplied ID stays Uncertain", () =>
     Effect.gen(function* () {
       const counter = heldCounter();
-      const { owner, wire } = yield* remoteOwner(
-        counter.behavior,
-        Option.some({
-          authorize: (target: Address) =>
-            Effect.fail(Unauthorized.make({ contract: target.contract })),
-        }),
-      );
+      const { owner, wire } = yield* remoteOwner(counter.behavior, {
+        guarded: {
+          check: (_principal, subject) => {
+            if (subject._tag === "Actor") {
+              return Effect.fail(Unauthorized.make({ contract: subject.address.contract }));
+            }
+            return Effect.fail(Unauthorized.make({ contract: subject.key.query }));
+          },
+        },
+      });
       const fresh = yield* owner.submit(
         yield* Commands.identify(Option.none()),
         counted(add(1)).prepare,
@@ -542,7 +548,7 @@ describe("private command owner", () => {
       const lifetime = yield* Scope.make();
       const host = yield* ActorHost.make({
         implementations: [implementTransparent(Counter, counter.behavior)],
-      });
+      }).pipe(Effect.provideService(Policies, allowGuarded));
       const wire = impaired(host);
       let interrupted = 0;
       const adapter = remoteCommands(wire.transport, address, decode);
@@ -608,7 +614,7 @@ describe("private command owner", () => {
       const lifetime = yield* Scope.make();
       const host = yield* ActorHost.make({
         implementations: [implementTransparent(Counter, counter.behavior)],
-      });
+      }).pipe(Effect.provideService(Policies, allowGuarded));
       const wire = impaired(host);
       const owner = yield* Commands.make(remoteCommands(wire.transport, address, decode)).pipe(
         Scope.provide(lifetime),

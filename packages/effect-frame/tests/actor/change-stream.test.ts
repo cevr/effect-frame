@@ -1,7 +1,7 @@
 import { Context, Effect, Option, Queue, Schema, Stream, SubscriptionRef } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
-import { ActorHost, CommandId, implementTransparent } from "effect-frame/actor";
+import { ActorHost, CommandId, Policies, Policy, implementTransparent } from "effect-frame/actor";
 import {
   ActorTransport,
   Unreachable,
@@ -50,6 +50,7 @@ type Add = Schema.Schema.Type<typeof Add>;
 
 const Clocked = contract("StreamClocked", {
   version: 1,
+  policy: "public",
   key: Schema.String,
   snapshot: Schema.Finite,
   message: Schema.Union([Add]),
@@ -72,11 +73,13 @@ const ClockedLive = implementTransparent(Clocked, {
     }),
 });
 
+const policies = { public: Policy.allowAll };
+
 const host = Effect.provideServiceEffect(
   ActorHost.make({ implementations: [ClockedLive] }),
   Ticks,
   Queue.unbounded<number>(),
-);
+).pipe(Effect.provideService(Policies, policies));
 
 const id = Schema.decodeSync(CommandId);
 const encodeAdd = Schema.encodeSync(Clocked.message);
@@ -140,7 +143,7 @@ describe("the change stream (#29)", () => {
         ActorHost.make({ implementations: [ClockedLive] }),
         Ticks,
         ticks,
-      );
+      ).pipe(Effect.provideService(Policies, policies));
       const address = addressOf("origin");
       yield* transport.call(
         address,

@@ -3,9 +3,9 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import { CommandId } from "effect-frame/actor";
-import { Form } from "effect-frame/actor/client";
+import { Form, Streaming, queryCacheLayer } from "effect-frame/actor/client";
 import { Dom, Html, mount, render } from "effect-frame/view";
-import { Effect, Option, Random, Ref, Schedule, Schema } from "effect";
+import { Effect, Option, Random, Ref, Schedule, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import type { Wire } from "../plain-form-fixture.js";
 import {
@@ -31,6 +31,11 @@ const withWire = <A, E, R>(body: (wire: Wire) => Effect.Effect<A, E, R>) =>
     // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(body(wire), recordedTransport(wire)),
   );
+
+/** The client's own cache, the one a streamed document's records seed. */
+const withClientCache = <A, E, R>(body: Effect.Effect<A, E, R>) =>
+  // @effect-diagnostics-next-line strictEffectProvide:off
+  Effect.provide(body, queryCacheLayer);
 
 const renderServer = Effect.scoped(Html.renderToString(TasksPage, noProps));
 
@@ -220,7 +225,7 @@ describe("the command form binding", () => {
           yield* render;
           const report = yield* hydration.finish;
 
-          expect(report).toEqual({ mismatches: [], unclaimed: 0 });
+          expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
           expect(root.querySelectorAll("#issues li")).toHaveLength(1);
           const title = element(root, "#title", HTMLInputElement);
           expect(title.value).toBe("far too long a title");
@@ -236,6 +241,71 @@ describe("the command form binding", () => {
       ),
   );
 
+  it.scopedLive(
+    "a refused page streams with its issues and hydrates under them with no mismatch",
+    () =>
+      withWire(() =>
+        Effect.gen(function* () {
+          const commandId = yield* Form.freshCommandId;
+          const refusal: Form.FormIssues = {
+            contract: "Tasks",
+            key: "tenant=acme&board=main",
+            form: "AddTask",
+            commandId,
+            issues: [{ field: "title", message: "too long" }],
+            submitted: Form.submitted(
+              Form.fromEntries([
+                ["_tag", "AddTask"],
+                ["title", "far too long a title"],
+              ]),
+            ),
+          };
+          // The streamed re-render (#22) carries the refusal in its tail, as
+          // `renderToString` does, and the record channel after it.
+          const issues = yield* Form.encodeIssues(refusal);
+          const chunks = yield* Stream.runCollect(
+            Html.renderToStream(
+              TasksPage,
+              noProps,
+              {
+                head: '<main id="app">',
+                tail: `</main>${Html.jsonScript(Form.issuesScriptId, issues)}`,
+                bootstrap: "",
+                end: "",
+              },
+              { closeWhen: Effect.never },
+            ),
+          ).pipe(Effect.provideService(Form.FormContext, refusal));
+          const html = chunks.join("");
+          expect(html).toContain('<li data-field="title">too long</li>');
+          expect(html).toContain('"Closed"');
+          const root = yield* installDocument(html);
+
+          const carried = yield* Option.match(Dom.readJsonScript(Form.issuesScriptId), {
+            onNone: () => Effect.succeed(Option.none<Form.FormIssues>()),
+            onSome: (json) => Effect.map(Form.decodeIssues(json), Option.some),
+          });
+          expect(Option.isSome(carried)).toBe(true);
+          const records = yield* Dom.readRecords;
+          const hydrate = Effect.gen(function* () {
+            const resumed = yield* Streaming.resume(records);
+            const hydration = Dom.hydrate(root);
+            yield* Form.provideIssues(carried)(mount(TasksPage, noProps, hydration.host, root));
+            yield* render;
+            yield* resumed.closed;
+            return yield* hydration.finish;
+          });
+          const report = yield* withClientCache(hydrate);
+
+          expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
+          expect(root.querySelectorAll("#issues li")).toHaveLength(1);
+          const title = element(root, "#title", HTMLInputElement);
+          expect(title.value).toBe("far too long a title");
+          expect(title.getAttribute("aria-invalid")).toBe("true");
+        }),
+      ),
+  );
+
   it.scopedLive("the hydrated binding sends the adopted `id`, not a fresh one", () =>
     withWire((wire) =>
       Effect.gen(function* () {
@@ -247,7 +317,7 @@ describe("the command form binding", () => {
         yield* mount(TasksPage, noProps, hydration.host, main);
         yield* render;
         const report = yield* hydration.finish;
-        expect(report).toEqual({ mismatches: [], unclaimed: 0 });
+        expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
 
         const form = element(main, "#add", HTMLFormElement);
         const hidden = element(form, 'input[name="$command"]', HTMLInputElement);

@@ -5,13 +5,19 @@ import {
   Behavior,
   CommandId,
   HttpServer,
+  Policies,
+  Policy,
   implementTransparent,
 } from "effect-frame/actor";
+import type { Subject } from "effect-frame/actor";
 import {
   ActorTransport,
+  Authenticated,
   CommandConflict,
   HttpTransport,
+  Principal,
   Unauthorized,
+  Wire,
   committedRevision,
   contract,
   ref,
@@ -23,6 +29,7 @@ type Add = Schema.Schema.Type<typeof Add>;
 
 const Counter = contract("Counter", {
   version: 1,
+  policy: "counter",
   key: Schema.Struct({ tenant: Schema.String, id: Schema.String }),
   snapshot: Schema.Finite,
   message: Schema.Union([Add]),
@@ -37,14 +44,17 @@ const id = Schema.decodeSync(CommandId);
 const add = (amount: number): Add => ({ _tag: "Add", amount });
 const alice = { tenant: "acme", id: "alice" };
 
-const acmeOnly = Layer.succeed(ActorHost.Authorizer, {
-  authorize: (address: Address) => {
-    if (address.key.includes('"acme"')) {
+/** Reads the key alone: the rows in process are about the wire, not the principal. */
+const acmeKeys: Policy = {
+  check: (_principal, subject: Subject) => {
+    if (subject._tag === "Actor" && subject.address.key.includes('"acme"')) {
       return Effect.void;
     }
-    return Effect.fail(Unauthorized.make({ contract: address.contract }));
+    return Effect.fail(Unauthorized.make({ contract: Counter.name }));
   },
-});
+};
+
+const acmeOnly = Layer.succeed(Policies, Policies.of({ counter: acmeKeys }));
 
 const hostLayer = Layer.provide(ActorHost.layerMemory([CounterLive]), acmeOnly);
 
@@ -54,7 +64,7 @@ const hostLayer = Layer.provide(ActorHost.layerMemory([CounterLive]), acmeOnly);
  */
 const inProcess = Layer.unwrap(
   Effect.gen(function* () {
-    const server = yield* HttpServer.make;
+    const server = yield* HttpServer.make({ principal: HttpServer.anonymous });
     const context = yield* Effect.context<never>();
     const run = Effect.runPromiseWith(context);
     const fetch: HttpTransport.FetchLike = (input, init) => run(server(new Request(input, init)));
@@ -133,6 +143,7 @@ describe("http transport in process", () => {
       const Stale = contract("Counter", {
         ...Counter,
         version: 2,
+        policy: "counter",
         key: Counter.key,
         snapshot: Schema.Finite,
         message: Schema.Union([Add]),
@@ -160,7 +171,7 @@ const asClientOf =
 describe("http transport over a real socket", () => {
   it.scopedLive("a dropped connection reconnects from the last revision", () =>
     Effect.gen(function* () {
-      const app = HttpServer.toWebHandler(hostLayer);
+      const app = HttpServer.toWebHandler(hostLayer, { principal: HttpServer.anonymous });
       yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
       // Bun.serve is the platform boundary of this test; the handler under
       // test is web-standard and does not know about it.
@@ -194,6 +205,81 @@ describe("http transport over a real socket", () => {
         Stream.filter(reader.applied.changes, (committed) => committed.revision.value === 2),
       );
       expect(two).toEqual(Option.some({ revision: committedRevision(2), state: 2 }));
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The principal over the wire (#20 §1): derived once, where the request enters
+// ---------------------------------------------------------------------------
+
+/** The test's session: a header naming a subject and its tenant. No header is nobody. */
+const fromHeader: HttpServer.DerivePrincipal = (request) =>
+  Effect.succeed(
+    Option.match(Option.fromNullishOr(request.headers.get("x-tenant")), {
+      onNone: () => Principal.anonymous,
+      onSome: (tenant) =>
+        Principal.constant(Authenticated.make({ subject: "caller", claims: { tenant } })),
+    }),
+  );
+
+const decodeCounterKey = Schema.decodeUnknownOption(Counter.key);
+
+/** A member of the key's tenant, by the claims the principal carries. */
+const tenantMember = Policy.of(
+  (subject: Subject) => {
+    if (subject._tag === "Actor") {
+      return Option.map(decodeCounterKey(subject.address.key), (key) => key.tenant);
+    }
+    return Option.none();
+  },
+  (who, tenant) => Effect.succeed(who.claims["tenant"] === tenant),
+);
+
+const decodeReadError = Schema.decodeEffect(Schema.fromJsonString(Wire.ReadWireError));
+
+describe("the principal over a real socket", () => {
+  it.scopedLive("an anonymous request to a protected actor is 403", () =>
+    Effect.gen(function* () {
+      const app = HttpServer.toWebHandler(
+        Layer.provide(
+          ActorHost.layerMemory([CounterLive]),
+          Layer.succeed(Policies, Policies.of({ counter: tenantMember })),
+        ),
+        { principal: fromHeader },
+      );
+      yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
+      const server = yield* Effect.acquireRelease(
+        // oxlint-disable-next-line effect/noGlobals -- Bun.serve is this test's platform boundary.
+        Effect.sync(() => Bun.serve({ port: 0, fetch: app.fetch })),
+        (running) => Effect.promise(() => running.stop(true)),
+      );
+      const port = Option.getOrElse(Option.fromNullishOr(server.port), () => 0);
+      const key = yield* Schema.encodeEffect(Counter.key)(alice);
+      const body = yield* Schema.encodeEffect(Schema.fromJsonString(Wire.AddressBody))({
+        address: { contract: Counter.name, version: Counter.version, key },
+      });
+      const snapshot = (headers: Record<string, string>) =>
+        Effect.promise(() =>
+          // oxlint-disable-next-line effect/noGlobals -- the test is the browser.
+          fetch(`http://127.0.0.1:${String(port)}/snapshot`, {
+            method: "POST",
+            headers: { "content-type": "application/json", ...headers },
+            body,
+          }).then((response) => response.text().then((text) => ({ response, text }))),
+        );
+
+      const anonymous = yield* snapshot({});
+      expect(anonymous.response.status).toBe(403);
+      expect(yield* decodeReadError(anonymous.text)).toEqual(
+        Unauthorized.make({ contract: Counter.name }),
+      );
+
+      const member = yield* snapshot({ "x-tenant": "acme" });
+      expect(member.response.status).toBe(200);
+
+      const outsider = yield* snapshot({ "x-tenant": "rival" });
+      expect(outsider.response.status).toBe(403);
     }),
   );
 });

@@ -59,6 +59,9 @@ export const counter: Behavior.Behavior<CounterState, Add> = {
 
 const CounterContract = contract("FrameActorCounter", {
   version: 1,
+  // The crash harness opens this actor directly, not through a host, so no
+  // table resolves the name. It is still written, as every contract's is.
+  policy: "public",
   key: Schema.String,
   snapshot: CounterState,
   message: Add,

@@ -316,8 +316,14 @@ const derive = <A,>(
 // The scope views
 // ---------------------------------------------------------------------------
 
-const retained = (when: Source<boolean>, fallback: Node, content: Node): RetainedNode => ({
+const retained = (
+  kind: RetainedNode["kind"],
+  when: Source<boolean>,
+  fallback: Node,
+  content: Node,
+): RetainedNode => ({
   _tag: "Retained",
+  kind,
   when,
   fallback,
   content,
@@ -343,6 +349,7 @@ export const Loading = <E, R>(
     // retained runtime node and still drive this source after mount.
     const pending = yield* pendingOf(registry);
     return retained(
+      "Loading",
       select(pending, (value) => !value),
       props.fallback,
       content,
@@ -381,6 +388,7 @@ export const Errored = <E, R>(
     const failure = yield* derive(registry, firstFailure);
     const failed = select(failure, Option.isSome);
     return retained(
+      "Errored",
       select(failed, (value) => !value),
       props.fallback(failure),
       content,

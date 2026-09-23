@@ -1,6 +1,12 @@
 import { Context, Effect, Exit, Layer, Option, Ref, Schema, Scope, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
-import { ActorHost, MailboxStore, implementTransparent } from "effect-frame/actor";
+import {
+  ActorHost,
+  MailboxStore,
+  Policies,
+  Policy,
+  implementTransparent,
+} from "effect-frame/actor";
 import { ActorTransport, committedRevision, contract, ref } from "effect-frame/actor/client";
 import type { TransportService } from "effect-frame/actor/client";
 import { CommandPolicy } from "../../src/actor/command-owner.js";
@@ -13,6 +19,7 @@ import { CommandPolicy } from "../../src/actor/command-owner.js";
  */
 const Counter = contract("RecoveredCounter", {
   version: 1,
+  policy: "public",
   key: Schema.String,
   snapshot: Schema.Finite,
   message: Schema.Finite,
@@ -42,7 +49,7 @@ const hostOver = (store: Context.Context<MailboxStore>) =>
   ActorHost.make({
     implementations: [CounterLive],
     store: () => Layer.succeedContext(store),
-  });
+  }).pipe(Effect.provideService(Policies, { public: Policy.allowAll }));
 
 describe("process recovery", () => {
   it.scopedLive("a pending command survives its host and settles once on the next host", () =>

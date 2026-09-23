@@ -13,6 +13,8 @@ import {
   implementTransparent,
   query as queryContract,
   spawn,
+  Policies,
+  Policy,
 } from "effect-frame/actor";
 import type {
   FollowedQuery,
@@ -45,21 +47,27 @@ import {
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
 
+/** The one policy table: every contract and query here declares `public`. */
+const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
+
 // ---------------------------------------------------------------------------
 // Contracts and a real in-process host
 // ---------------------------------------------------------------------------
 
 const TenantInfo = queryContract("NestedTenantInfo", {
+  policy: "public",
   args: Schema.Struct({ tenant: Schema.String }),
   result: Schema.String,
 });
 
 const PostBody = queryContract("NestedPostBody", {
+  policy: "public",
   args: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
   result: Schema.String,
 });
 
 const Comments = queryContract("NestedComments", {
+  policy: "public",
   args: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
   result: Schema.String,
 });
@@ -69,6 +77,7 @@ type SetText = Schema.Schema.Type<typeof SetText>;
 
 const Draft = contract("NestedDraft", {
   version: 1,
+  policy: "public",
   key: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
   snapshot: Schema.String,
   message: Schema.Union([SetText]),
@@ -183,7 +192,7 @@ const wired = Layer.effect(
 const client = QueryTest.layer({
   queries: [TenantLive, PostLive, CommentsLive],
   implementations: [DraftLive],
-});
+}).pipe(Layer.provide(policies));
 
 const makeFixtures = Effect.gen(function* () {
   return Fixtures.of({

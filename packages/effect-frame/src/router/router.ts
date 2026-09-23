@@ -1,6 +1,6 @@
 import type { Source } from "effect-frame/actor";
 import type { Host, View } from "effect-frame/view";
-import { mount as mountView } from "effect-frame/view";
+import { mount as mountView, render } from "effect-frame/view";
 import { read as readInspection, register as registerInspection } from "./route-inspection.js";
 import {
   Cause,
@@ -30,6 +30,11 @@ import type { LeaveKind, LeaveVerdict, Question } from "./leave-registry.js";
 import { Leave, read as readLeave } from "./leave-registry.js";
 import type { Traversal } from "./traversal.js";
 import { read as readTraversals } from "./traversal.js";
+import type { Landing, Shell, WriteKind, Written } from "./landing.js";
+import { readShell, readSurface, registerShell } from "./landing.js";
+import * as LeafRoot from "./leaf-root.js";
+import type { NavigationBehavior } from "./navigation-behavior.js";
+import { Restore } from "./navigation-behavior.js";
 
 /**
  * The router (#18 §7). The URL is the state: the router holds nothing about
@@ -105,6 +110,11 @@ export interface MountOptions<R, HostNode, N = R> {
   readonly notFound: View.View<NotFoundProps, never, N>;
   readonly host: Host<HostNode>;
   readonly root: HostNode;
+  /**
+   * What a navigation does to scroll and focus at shell commit (#31), unless
+   * the destination leaf names its own. Absent: `NavigationBehavior.Restore`.
+   */
+  readonly behavior?: NavigationBehavior;
 }
 
 interface Mounted<R> {
@@ -123,14 +133,36 @@ const notFoundRoute = <R>(view: View.View<NotFoundProps, never, R>): AnyRoute<R>
   enter: (url) =>
     Option.some(
       Effect.map(SubscriptionRef.make(url), (current): Entered<R> => {
+        // Not-found is a page: its root takes focus when it enters, as a leaf's does.
+        const cell = LeafRoot.makeCell();
+        let entering = true;
         const entered: Entered<R> = {
           instance: { _tag: "RouteInstance" },
-          setup: view({
-            url: { get: SubscriptionRef.get(current), changes: SubscriptionRef.changes(current) },
-          }),
-          update: (next) => Effect.as(SubscriptionRef.set(current, next), true),
+          setup: Effect.map(
+            view({
+              url: { get: SubscriptionRef.get(current), changes: SubscriptionRef.changes(current) },
+            }),
+            (node) => LeafRoot.mark(node, cell),
+          ),
+          update: (next) =>
+            Effect.andThen(
+              Effect.sync(() => {
+                entering = false;
+              }),
+              Effect.as(SubscriptionRef.set(current, next), true),
+            ),
         };
         registerInspection(entered, Effect.succeed({ params: {}, search: {} }));
+        registerShell(
+          entered,
+          Effect.sync(() => ({
+            entered: entering,
+            behavior: Option.none(),
+            root: Ref.get(cell),
+            // Its view is mounted in place, not through an outlet: drawn once shown.
+            drawn: Effect.void,
+          })),
+        );
         return entered;
       }),
     ),
@@ -237,6 +269,8 @@ export const mount: <R, HostNode, N = R>(
     routeName: fallback.name,
   });
   const requests = yield* Queue.unbounded<Request>();
+  const surface = readSurface(location);
+  const defaultBehavior = Option.getOrElse(Option.fromNullishOr(options.behavior), () => Restore);
   const pending = new Set<Request>();
   let closed = false;
   let mounted: Option.Option<Mounted<R | N>> = Option.none();
@@ -244,6 +278,12 @@ export const mount: <R, HostNode, N = R>(
   let prompt = Option.none<Deferred.Deferred<void>>();
   /** Admitted requests that would really move: only these supersede a prompt. */
   const movers = new Set<Request>();
+  /** Landings waiting for their shell to draw. A newer request that moves supersedes each. */
+  const drawings = new Set<Deferred.Deferred<void>>();
+  /** How many requests that move were admitted: a landing places only if none came after it. */
+  let admittedMovers = 0;
+  /** The count each request saw at its admission, its own included. */
+  const admittedAt = new WeakMap<Request, number>();
   const registry = yield* Effect.serviceOption(Inspection.Registry);
   let routerOwner = Option.none<Inspection.OwnerToken>();
   if (Option.isSome(registry)) {
@@ -309,13 +349,19 @@ export const mount: <R, HostNode, N = R>(
         return false;
       }
       if (!(yield* moves(request))) {
+        admittedAt.set(request, admittedMovers);
         return true;
       }
       movers.add(request);
+      admittedMovers += 1;
+      admittedAt.set(request, admittedMovers);
       yield* Option.match(prompt, {
         onNone: () => Effect.void,
         onSome: (newer) => Effect.asVoid(Deferred.succeed(newer, void 0)),
       });
+      for (const waiting of drawings) {
+        yield* Deferred.succeed(waiting, void 0);
+      }
       return true;
     });
 
@@ -460,9 +506,10 @@ export const mount: <R, HostNode, N = R>(
       // A stayed route publishes the URL into its instance. An instance that
       // answers false cannot stay, so the route is entered again below.
       if (Option.isSome(mounted) && mounted.value.route === target.route) {
-        const kept = yield* mounted.value.entered.update(url);
+        const stayed = mounted.value.entered;
+        const kept = yield* stayed.update(url);
         if (kept) {
-          return;
+          return yield* shellOf(stayed, false);
         }
       }
       const child = yield* Scope.fork(scope);
@@ -545,19 +592,23 @@ export const mount: <R, HostNode, N = R>(
           ),
         ),
       );
-      yield* Exit.match(outcome, {
+      return yield* Exit.match(outcome, {
         onFailure: (cause) => Effect.failCause(cause),
         onSuccess: (next) => {
           const previous = mounted;
           mounted = Option.some({ ...next, scope: child });
-          return Option.match(previous, {
-            onNone: () => Effect.void,
-            onSome: (shown) => Scope.close(shown.scope, Exit.void),
-          });
+          return Effect.andThen(
+            Option.match(previous, {
+              onNone: () => Effect.void,
+              onSome: (shown) => Scope.close(shown.scope, Exit.void),
+            }),
+            shellOf(next.entered, true),
+          );
         },
       });
     });
 
+  /** Publish the move and show it. The result is the committed shell. */
   const move = (settled: Settled<R | N>, kind: Navigation["kind"]) =>
     Effect.gen(function* () {
       yield* SubscriptionRef.set(navigations, {
@@ -565,7 +616,114 @@ export const mount: <R, HostNode, N = R>(
         kind,
         routeName: settled.target.route.name,
       });
-      yield* show(settled.url, settled.target);
+      return yield* show(settled.url, settled.target);
+    });
+
+  /**
+   * Wait for the shell to be drawn (shell commit), then resolve it against
+   * the router's default. Focus is offered only when the deepest segment
+   * entered: a stayed leaf keeps focus. None: a newer request that moves
+   * arrived first, and this move places nothing.
+   */
+  const landingOf = (shell: Shell, self: Request) =>
+    Effect.gen(function* () {
+      // Any request that moves admitted after this one, whether it is still
+      // queued, already done, or admitted after the shell drew, changes the
+      // count this one saw at its admission.
+      const seen = Option.getOrElse(
+        Option.fromNullishOr(admittedAt.get(self)),
+        () => admittedMovers,
+      );
+      const newer = yield* Deferred.make<void>();
+      drawings.add(newer);
+      if (admittedMovers !== seen) {
+        yield* Deferred.succeed(newer, void 0);
+      }
+      const drew = yield* Effect.raceFirst(
+        Effect.as(shell.drawn, true),
+        Effect.as(Deferred.await(newer), false),
+      ).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            drawings.delete(newer);
+          }),
+        ),
+      );
+      if (!drew) {
+        return Option.none<Landing>();
+      }
+      // The row that drew the last view builds its nodes on its own fiber
+      // right after its setup returned: let it finish, then flush.
+      yield* Effect.yieldNow;
+      yield* render;
+      let focus = Effect.succeed(Option.none<unknown>());
+      if (shell.entered) {
+        focus = shell.root;
+      }
+      const landing: Landing = {
+        behavior: Option.getOrElse(shell.behavior, () => defaultBehavior),
+        focus: yield* focus,
+      };
+      // Checked at placement: a request admitted while this one drew,
+      // yielded, or flushed is the latest navigation, and this one places
+      // nothing. No yield separates this check from the placement.
+      if (admittedMovers !== seen) {
+        return Option.none<Landing>();
+      }
+      return Option.some(landing);
+    });
+
+  /**
+   * At shell commit, place the landing and release the move. It runs beside
+   * the queue, on the router's Scope: the next request never waits for a
+   * view to draw, and a move that never draws is released when a newer one
+   * arrives, or when the router closes.
+   */
+  const landAfter = (
+    shell: Shell,
+    self: Request,
+    landOn: (landing: Option.Option<Landing>) => Effect.Effect<void>,
+  ) =>
+    Effect.asVoid(
+      Effect.forkIn(
+        Effect.flatMap(landingOf(shell, self), landOn).pipe(
+          Effect.onExit((exit) => {
+            if (Exit.isSuccess(exit)) {
+              return Effect.void;
+            }
+            return landOn(Option.none());
+          }),
+        ),
+        scope,
+      ),
+    );
+
+  /** Write history for the router's own move, and get that write's handle. */
+  const write = (kind: WriteKind, url: URL): Effect.Effect<Written> =>
+    Option.match(surface, {
+      onNone: () => Effect.as(location[kind](url), unplaced),
+      onSome: (one) => one.write(kind, url),
+    });
+
+  /**
+   * A redirect replaces the entry another move already committed. It places
+   * nothing itself (the move it serves lands), and is released once that
+   * move's view is shown or failed.
+   */
+  const redirected = (from: URL, settled: Settled<R | N>): Effect.Effect<Written> => {
+    if (settled.url.href === from.href) {
+      return Effect.succeed(unplaced);
+    }
+    return write("replace", settled.url);
+  };
+
+  const released = (written: Written) => written.land(Option.none());
+
+  /** Place a followed pop. A Location without a surface places nothing. */
+  const landPop = (landing: Option.Option<Landing>) =>
+    Option.match(surface, {
+      onNone: () => Effect.void,
+      onSome: (one) => one.pop(landing),
     });
 
   /**
@@ -646,16 +804,19 @@ export const mount: <R, HostNode, N = R>(
       }
     });
 
-  const committedPop = (reason: Unprotected) =>
+  const committedPop = (
+    self: Request,
+    reason: Unprotected,
+    landOn: (landing: Option.Option<Landing>) => Effect.Effect<void>,
+  ) =>
     Effect.gen(function* () {
       const url = yield* location.current;
       const settled = yield* settle(url, "pop");
       yield* reportUnprotected(settled, reason);
       // A redirected pop has already moved, so its denied entry is replaced.
-      if (settled.url.href !== url.href) {
-        yield* location.replace(settled.url);
-      }
-      yield* move(settled, "pop");
+      const redirect = yield* redirected(url, settled);
+      const shell = yield* move(settled, "pop").pipe(Effect.ensuring(released(redirect)));
+      yield* landAfter(shell, self, landOn);
       return Committed(settled.url);
     });
 
@@ -664,15 +825,32 @@ export const mount: <R, HostNode, N = R>(
    * page is asked first; `Stay` refuses the platform move. Without it, the
    * platform commits and the router follows.
    */
-  const traverse = (request: Extract<Request, { readonly operation: "traverse" }>) =>
-    Effect.gen(function* () {
-      const traversal = request.traversal;
+  const traverse = (request: Extract<Request, { readonly operation: "traverse" }>) => {
+    const traversal = request.traversal;
+    /** True once a committed shell's landing owns `finish`. */
+    let handed = false;
+    /** Place the landing, then let the platform finish: its handler fulfills. */
+    const landThenFinish = (landing: Option.Option<Landing>) =>
+      Effect.andThen(
+        Option.match(landing, { onNone: () => Effect.void, onSome: traversal.land }),
+        traversal.finish,
+      );
+    const handOver = (shell: Shell) =>
+      Effect.andThen(
+        Effect.sync(() => {
+          handed = true;
+        }),
+        landAfter(shell, request, landThenFinish),
+      );
+    return Effect.gen(function* () {
       const committed = (yield* SubscriptionRef.get(navigations)).url;
       if (traversal.protection === "none") {
         if (!(yield* traversal.leave)) {
           return Unchanged(committed);
         }
-        return yield* committedPop("noncancelable");
+        const followed = yield* committedPop(request, "noncancelable", landThenFinish);
+        handed = true;
+        return followed;
       }
       const url = traversal.destination;
       const settled = yield* settle(url, "pop");
@@ -687,10 +865,8 @@ export const mount: <R, HostNode, N = R>(
       if (!(yield* traversal.leave)) {
         return Unchanged(committed);
       }
-      if (settled.url.href !== url.href) {
-        yield* location.replace(settled.url);
-      }
-      yield* move(settled, "pop");
+      const redirect = yield* redirected(url, settled);
+      yield* handOver(yield* move(settled, "pop").pipe(Effect.ensuring(released(redirect))));
       return Committed(settled.url);
     }).pipe(
       // A failure or a defect refuses a protected move before it is let
@@ -698,16 +874,21 @@ export const mount: <R, HostNode, N = R>(
       // `stay` after a `leave` changes nothing, so an unprotected traversal,
       // let through first, is unaffected. Interruption is root close:
       // the traversal source's consumer, which closes first, lets it through.
+      // A committed shell's landing finishes it instead, after placing.
       Effect.onExit((exit) => {
         if (Exit.isSuccess(exit)) {
-          return request.traversal.finish;
+          if (handed) {
+            return Effect.void;
+          }
+          return traversal.finish;
         }
         if (Cause.hasInterruptsOnly(exit.cause)) {
           return Effect.void;
         }
-        return Effect.andThen(request.traversal.stay, request.traversal.finish);
+        return Effect.andThen(traversal.stay, traversal.finish);
       }),
     );
+  };
 
   const controlled = (request: Extract<Request, { readonly operation: "push" | "replace" }>) =>
     Effect.gen(function* () {
@@ -730,20 +911,21 @@ export const mount: <R, HostNode, N = R>(
       if (decision._tag === "Superseded") {
         return Unchanged(base);
       }
-      // History moves once, to the settled URL.
-      if (request.operation === "push") {
-        yield* location.push(settled.url);
-      } else {
-        yield* location.replace(settled.url);
-      }
-      yield* move(settled, request.operation);
+      // History moves once, to the settled URL. This write, and no other,
+      // lands this move.
+      const written = yield* write(request.operation, settled.url);
+      // A failed show still releases the move: the Location places nothing.
+      const shell = yield* Effect.onError(move(settled, request.operation), () =>
+        released(written),
+      );
+      yield* landAfter(shell, request, written.land);
       return Committed(settled.url);
     });
 
   type MountServices = Exclude<Exclude<Exclude<R | N, Router>, UrlStateRuntime>, Scope.Scope>;
   const run = (request: Request): Effect.Effect<NavigationResult, never, MountServices> => {
     if (request.operation === "pop") {
-      return committedPop("committed");
+      return committedPop(request, "committed", landPop);
     }
     if (request.operation === "traverse") {
       return traverse(request);
@@ -766,17 +948,19 @@ export const mount: <R, HostNode, N = R>(
     );
 
   const initialSettled = yield* settle(initial, "initial");
-  if (initialSettled.url.href !== initial.href) {
-    // The document already holds the initial entry: a redirect replaces it.
-    yield* location.replace(initialSettled.url);
-  }
+  // The document already holds the initial entry: a redirect replaces it.
+  // A first load places nothing (the browser's own load did), so the
+  // replace is released once the view is shown or failed.
+  const initialRedirect = yield* redirected(initial, initialSettled);
   const initialNavigation: NavigationSample = {
     url: initialSettled.url,
     kind: "initial",
     routeName: initialSettled.target.route.name,
   };
   yield* SubscriptionRef.set(navigations, initialNavigation);
-  yield* show(initialSettled.url, initialSettled.target);
+  yield* show(initialSettled.url, initialSettled.target).pipe(
+    Effect.ensuring(released(initialRedirect)),
+  );
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
       closed = true;
@@ -813,102 +997,20 @@ export const mount: <R, HostNode, N = R>(
   return service;
 });
 
+/** A write nothing waits on: landing it places nothing. */
+const unplaced: Written = { land: () => Effect.void };
+
 const isUrlUpdater = (href: string | UrlUpdater): href is UrlUpdater => Predicate.isFunction(href);
 
+/** What a mounted route reports; a route the framework did not build reports only whether it is new. */
+const shellOf = <R>(entered: Entered<R>, fresh: boolean): Effect.Effect<Shell> =>
+  Option.getOrElse(readShell(entered), () =>
+    Effect.succeed<Shell>({
+      entered: fresh,
+      behavior: Option.none(),
+      root: Effect.succeed(Option.none()),
+      drawn: Effect.void,
+    }),
+  );
+
 const navigationOf = ({ url, kind }: NavigationSample): Navigation => ({ url, kind });
-
-// ---------------------------------------------------------------------------
-// The browser
-// ---------------------------------------------------------------------------
-
-/** The document's own location and history. */
-export const browserLocation: LocationService = {
-  current: Effect.sync(() => new URL(window.location.href)),
-  push: (url) =>
-    Effect.sync(() => {
-      window.history.pushState({}, "", url.href);
-    }),
-  replace: (url) =>
-    Effect.sync(() => {
-      window.history.replaceState({}, "", url.href);
-    }),
-  // Suspended so that importing the module needs no window.
-  pops: Stream.suspend(() =>
-    Stream.map(Stream.fromEventListener(window, "popstate"), () => new URL(window.location.href)),
-  ),
-};
-
-/** The anchor a click landed on, when it is one the router should follow. */
-const followable = (event: MouseEvent): Option.Option<HTMLAnchorElement> => {
-  if (event.defaultPrevented || event.button !== 0) {
-    return Option.none();
-  }
-  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-    return Option.none();
-  }
-  const target = event.target;
-  if (!(target instanceof Element)) {
-    return Option.none();
-  }
-  const anchor = target.closest("a[href]");
-  if (!(anchor instanceof HTMLAnchorElement)) {
-    return Option.none();
-  }
-  if (anchor.target === "_blank" || anchor.hasAttribute("download")) {
-    return Option.none();
-  }
-  if (anchor.origin !== window.location.origin) {
-    return Option.none();
-  }
-  return Option.some(anchor);
-};
-
-/**
- * One delegated click handler at the root. It intercepts a click only when
- * the browser would have followed a same-origin link in this tab; a middle
- * click, a modifier, `target="_blank"`, a download, and another origin are
- * all left to the browser. A typed Link attaches its queued action to the
- * anchor; this listener handles ordinary anchors and keeps that same policy.
- *
- * The decision and `preventDefault` happen inside the listener, on the
- * browser's own call: a stream would deliver the event after the browser
- * had already followed the link. Only the navigation itself is queued.
- */
-export const followLinks = Effect.fn("Router.followLinks")(function* (
-  root: EventTarget,
-  router: RouterService,
-) {
-  const hrefs = yield* Queue.unbounded<{ readonly href: string; readonly replace: boolean }>();
-  const listener = (event: Event) => {
-    if (!(event instanceof MouseEvent)) {
-      return;
-    }
-    Option.match(followable(event), {
-      onNone: () => {},
-      onSome: (anchor) => {
-        event.preventDefault();
-        Queue.offerUnsafe(hrefs, {
-          href: anchor.href,
-          replace: anchor.getAttribute("data-frame-replace") === "true",
-        });
-      },
-    });
-  };
-  yield* Effect.acquireRelease(
-    Effect.sync(() => {
-      root.addEventListener("click", listener);
-    }),
-    () =>
-      Effect.sync(() => {
-        root.removeEventListener("click", listener);
-      }),
-  );
-  yield* Effect.forkScoped(
-    Stream.runForEach(Stream.fromQueue(hrefs), (request) => {
-      if (request.replace) {
-        return router.replace(request.href);
-      }
-      return router.navigate(request.href);
-    }),
-  );
-});

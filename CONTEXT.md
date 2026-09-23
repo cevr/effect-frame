@@ -84,6 +84,10 @@ _Avoid_: Scroll restoration, scroll behavior.
 The moment a navigation's new route branch is in the document, with every readiness scope showing a fallback or content. It is when scroll and focus move, and it is before any pending query has settled.
 _Avoid_: First paint, transition end, ready.
 
+**Leaf root**:
+The element a leaf's view returns at its top. The router marks it `tabindex="-1"` and moves focus to it, or to the first `autofocus` element inside it, when the leaf enters.
+_Avoid_: Route root, page root.
+
 **Active query**:
 A query entry some mounted route segment or view scope currently declares. Only active entries are named in a command and refreshed in its reply.
 _Avoid_: Cached query, subscribed query.
@@ -127,6 +131,14 @@ _Avoid_: User, session, current user, auth context.
 **Policy**:
 A named rule that decides whether a principal may read or command one subject. Every contract, query, and protected route names one; the host holds the rules and refuses a name it does not know.
 _Avoid_: Authorizer, guard, permission check, ACL.
+
+**Policy table**:
+The host's map from policy name to rule. It has no default: a host that is given no table does not build, and a host whose table lacks a name that a contract or query declares fails before it serves anything. Allow-all is one entry in it, written by name.
+_Avoid_: Authorizer, permission registry, default policy.
+
+**Principal source**:
+Who is asking, over time. A request reads it once. A live connection follows it and ends on the first value that differs from the one the connection was authorized under, so a sign-out, an expiry, and a change of subject all end the connection the same way.
+_Avoid_: Session listener, revocation hook, token refresh.
 
 **Session**:
 An actor whose state is what one sign-in established about a caller, and whose revisions are the authority on whether that caller is still who they were. Signing out and expiring are both revisions of it, not events beside it.

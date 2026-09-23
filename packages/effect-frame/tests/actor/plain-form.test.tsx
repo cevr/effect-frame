@@ -35,9 +35,17 @@ const page = TasksDocument;
 const serve = Effect.gen(function* () {
   const wire = yield* makeWire;
   const context = yield* Layer.build(recordedTransport(wire));
-  const actors = yield* Effect.provideContext(HttpServer.make, context);
+  const actors = yield* Effect.provideContext(
+    HttpServer.make({ principal: HttpServer.anonymous }),
+    context,
+  );
   const forms = yield* Effect.provideContext(
-    HttpServer.form({ contracts: [Tasks], render: () => page }),
+    HttpServer.form({
+      contracts: [Tasks],
+      principal: HttpServer.anonymous,
+      login: Option.none(),
+      render: () => page,
+    }),
     context,
   );
   const run = Effect.runPromiseWith(context);

@@ -2,7 +2,16 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Behavior, Value, implementQuery, query, spawn, useQuery } from "effect-frame/actor";
+import {
+  Behavior,
+  Value,
+  implementQuery,
+  query,
+  spawn,
+  useQuery,
+  Policies,
+  Policy,
+} from "effect-frame/actor";
 import type { QueryEntry, QueryFailure, QueryState, Source } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import {
@@ -40,7 +49,11 @@ import {
 } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
+/** The one policy table: every contract and query here declares `public`. */
+const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
+
 const OwnershipQuery = query("ReadinessOwnership", {
+  policy: "public",
   args: Schema.Struct({ id: Schema.String }),
   result: Schema.String,
 });
@@ -97,6 +110,7 @@ const OwnershipLive = implementQuery(OwnershipQuery, ({ id }) =>
 );
 
 const ownershipLayer = QueryTest.layer({ queries: [OwnershipLive] }).pipe(
+  Layer.provide(policies),
   Layer.provideMerge(
     Layer.effect(
       Fixtures,
@@ -500,7 +514,10 @@ describe("readiness ownership", () => {
           }),
         });
       const html = yield* Html.renderToString(Page, {});
-      expect(html).toBe('<p id="fallback">loading</p>');
+      // The marks name the boundary and the branch it drew, for hydration (#22).
+      expect(html).toBe(
+        '<!--frame-boundary:fallback--><p id="fallback">loading</p><!--/frame-boundary-->',
+      );
       expect(setups).toBe(1);
     }),
   );
@@ -546,10 +563,11 @@ describe("readiness ownership", () => {
           });
           const report = yield* hydration.finish;
 
-          expect(report).toEqual({ mismatches: [], unclaimed: 0 });
+          expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
           expect(root.querySelector("#fallback")).toBe(fallback);
           expect(root.querySelector("#following")).toBe(following);
           expect(root.querySelector("#hidden")).toBeNull();
+          // Hydration took the boundary's marks away (#22).
           expect(root.innerHTML).toBe(
             '<p id="fallback">loading</p><p id="following">following</p>',
           );
@@ -593,7 +611,9 @@ describe("readiness ownership", () => {
           );
         });
       const html = yield* Html.renderToString(Page, {});
-      expect(html).toBe('<section id="visible">visible</section><p id="following">following</p>');
+      expect(html).toBe(
+        '<!--frame-boundary:content--><section id="visible">visible</section><!--/frame-boundary--><p id="following">following</p>',
+      );
 
       const root = yield* makeRoot;
       root.innerHTML = html;
@@ -607,7 +627,7 @@ describe("readiness ownership", () => {
       });
       const report = yield* hydration.finish;
 
-      expect(report).toEqual({ mismatches: [], unclaimed: 0 });
+      expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
       expect(root.querySelector("#visible")).toBe(visible);
       expect(root.querySelector("#following")).toBe(following);
       expect(root.querySelector("#fallback")).toBeNull();

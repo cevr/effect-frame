@@ -1,5 +1,6 @@
 import type { Form } from "effect-frame/actor/client";
 import type { Option } from "effect";
+import type { BoundaryKind } from "./jsx-runtime.js";
 
 /**
  * What a renderer must provide. The runtime knows nothing about the DOM or a
@@ -36,6 +37,37 @@ export interface Host<Node> {
    * HTML string.
    */
   readonly attach: (node: Node, run: (node: Node) => void) => void;
+  /**
+   * Streamed documents (#22), server side. A new comment pair for one
+   * readiness boundary. The runtime puts the open mark before the boundary's
+   * nodes and the close mark after them, and tells the pair which branch is
+   * shown. Only the HTML host writes marks.
+   */
+  readonly boundaryMarks?: (kind: BoundaryKind) => BoundaryMarks<Node>;
+  /**
+   * Streamed documents (#22), hydration side. A readiness boundary starts,
+   * showing its content when `shown` is true. The host reads the next
+   * boundary mark pair the server wrote. Returns `true` when the server drew
+   * the other branch: the host has removed that branch's nodes, and the
+   * boundary builds its shown branch fresh rather than claiming nodes.
+   */
+  readonly adoptBoundary?: (shown: boolean) => boolean;
+  /**
+   * Streamed documents (#22), server side. The runtime started a setup that
+   * may finish after the frame is drawn: a list row's setup, for one. Call
+   * the returned function when it ends or its scope closes. An `AwaitAll`
+   * render waits for every one, since a late setup may declare a query or
+   * draw nodes. Only that render's host counts them.
+   */
+  readonly setupStarted?: () => () => void;
+}
+
+/** The comment pair around one readiness boundary in server HTML (#22). */
+export interface BoundaryMarks<Node> {
+  readonly open: Node;
+  readonly close: Node;
+  /** Record the branch the boundary shows now. */
+  readonly show: (shown: boolean) => void;
 }
 
 /**

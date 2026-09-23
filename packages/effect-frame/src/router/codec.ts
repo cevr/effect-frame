@@ -3,6 +3,7 @@ import type { Node, View } from "effect-frame/view";
 import type { SchemaAST, Scope } from "effect";
 import { Effect, Option, Predicate, Result, Schema, SchemaGetter } from "effect";
 import { matchPrefix, segmentsOf } from "./path.js";
+import type { NavigationBehavior } from "./navigation-behavior.js";
 import type { Match } from "./router.js";
 
 /**
@@ -481,6 +482,8 @@ export interface RouteDefinition<Params extends ParamsCodec, Search extends Sear
   /** Search keys to carry when this route is entered without a caller value. */
   readonly retain?: ReadonlyArray<Extract<keyof Search["Type"], string>>;
   readonly view: View.View<RouteProps<Params["Type"], Search["Type"]>, never, R>;
+  /** How a navigation to this route lands (#31). Absent: the router's default. */
+  readonly behavior?: NavigationBehavior;
 }
 
 /**

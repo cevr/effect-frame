@@ -98,7 +98,7 @@ export class ActorTransport extends Context.Service<ActorTransport, TransportSer
 
 export namespace ActorTransport {
   /** Installs an in-process host as the transport used by a client runtime. */
-  export const layerLocal = <R>(
-    host: Effect.Effect<TransportService, never, R | Scope.Scope>,
-  ): Layer.Layer<ActorTransport, never, R> => Layer.effect(ActorTransport, host);
+  export const layerLocal = <E, R>(
+    host: Effect.Effect<TransportService, E, R | Scope.Scope>,
+  ): Layer.Layer<ActorTransport, E, R> => Layer.effect(ActorTransport, host);
 }

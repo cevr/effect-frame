@@ -53,6 +53,9 @@ const platform = it.scopedLive.layer(BunServices.layer);
 /** The blog after an edit: a build over it writes other bytes. */
 const changedLabels = { ...blogLabels, "post-first": "changed body" };
 
+/** A generation's directory name. */
+const nameOf = (directory: string) => directory.slice(directory.lastIndexOf("/") + 1);
+
 const request = (path: string, init: RequestInit = {}) => new Request(`${origin}${path}`, init);
 
 const injected = (method: string, path: string) =>
@@ -126,18 +129,19 @@ describe("publishing a generation (#86)", () => {
         expect(yield* generationOf(out)).toBe(first);
         expect(yield* servedTree(out)).toEqual(firstTree);
         expect(yield* namesIn(`${out}/generations`)).toHaveLength(1);
-        expect(yield* namesIn(out)).toEqual(["current.json", "generations", "staging"]);
+        expect(yield* namesIn(out)).toEqual(["current.json", "generations", "leases", "staging"]);
 
-        // Before clean-up: the pointer moved, and removing the oldest generation fails.
+        // Before clean-up: the pointer moved, and removing the older generation fails.
         yield* buildInto(yield* sideOf(makeControl(blogLabels)), blogRoutes, out);
-        expect(yield* namesIn(`${out}/generations`)).toHaveLength(2);
+        // No site holds the first generation: the build removed it.
+        expect(yield* namesIn(`${out}/generations`)).toHaveLength(1);
         const cleaned = yield* buildWith({ remove: (path) => path.includes("/generations/") });
         expect(Exit.isSuccess(cleaned)).toBe(true);
         const next = yield* generationOf(out);
         expect(next).not.toBe(first);
         expect(yield* readText(`${next}/blog/first/index.html`)).toContain("changed body");
-        // The oldest generation is still there: clean-up waits for the next build.
-        expect(yield* namesIn(`${out}/generations`)).toHaveLength(3);
+        // The older generation is still there: clean-up waits for the next build.
+        expect(yield* namesIn(`${out}/generations`)).toHaveLength(2);
       }),
     15_000,
   );
@@ -186,7 +190,7 @@ describe("publishing a generation (#86)", () => {
         // The next build publishes, and removes what the crash left.
         yield* buildInto(yield* sideOf(makeControl(changedLabels)), blogRoutes, out);
         expect(yield* namesIn(`${out}/staging`)).toEqual([]);
-        expect(yield* namesIn(out)).toEqual(["current.json", "generations", "staging"]);
+        expect(yield* namesIn(out)).toEqual(["current.json", "generations", "leases", "staging"]);
         expect(yield* namesIn(`${out}/generations`)).toHaveLength(1);
       }),
     15_000,
@@ -248,7 +252,7 @@ describe("publishing a generation (#86)", () => {
       yield* Fiber.join(first);
       // The lock went with the build that held it.
       yield* buildInto(yield* sideOf(makeControl(blogLabels)), blogRoutes, out);
-      expect(yield* namesIn(out)).toEqual(["current.json", "generations", "staging"]);
+      expect(yield* namesIn(out)).toEqual(["current.json", "generations", "leases", "staging"]);
     }),
   );
 });
@@ -280,6 +284,44 @@ describe("serving a loaded generation (#86)", () => {
       expect(fresh.headers.get("etag")).toBe(yield* etagOfText(freshBody));
       expect(routed).toEqual([]);
     }),
+  );
+
+  platform(
+    "a loaded site keeps its generation across two rebuilds, and releases it when its scope closes",
+    () =>
+      Effect.gen(function* () {
+        const directory = yield* tempDirectory;
+        const out = `${directory}/out`;
+        const server = yield* sideOf(makeControl(blogLabels));
+        yield* buildInto(server, blogRoutes, out);
+        const loadedFrom = yield* generationOf(out);
+        const routed: Array<string> = [];
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const handler = yield* Prerender.serve(
+              yield* Prerender.load(out),
+              routerFallback(server, blogRoutes, routed),
+            );
+            // Two rebuilds: the loaded generation is two behind the pointer.
+            for (const labels of [changedLabels, blogLabels]) {
+              yield* buildInto(yield* sideOf(makeControl(labels)), blogRoutes, out);
+            }
+            expect(yield* generationOf(out)).not.toBe(loadedFrom);
+            const answer = yield* handler(request("/blog/first"));
+            const body = yield* textOfResponse(answer);
+            expect(body).toContain("body of first");
+            expect(answer.headers.get("etag")).toBe(yield* etagOfText(body));
+            // A hit from the file it loaded, not a render through the router.
+            expect(routed).toEqual([]);
+            expect(yield* namesIn(`${out}/generations`)).toContain(nameOf(loadedFrom));
+          }),
+        );
+        // Released: the next build removes it, and keeps only what it published.
+        yield* buildInto(yield* sideOf(makeControl(changedLabels)), blogRoutes, out);
+        expect(yield* namesIn(`${out}/generations`)).toEqual([nameOf(yield* generationOf(out))]);
+        expect(yield* namesIn(`${out}/leases`)).toEqual([]);
+      }),
+    15_000,
   );
 
   platform("a matching If-None-Match for a file that is gone renders through the router", () =>

@@ -50,7 +50,8 @@ const buildSite = Effect.gen(function* () {
   });
 });
 
-// The server: a built page answers before the router runs.
+// The server: a built page answers before the router runs. `load` holds the
+// generation for the calling scope: run it in the scope the server lives in.
 const handler = Effect.gen(function* () {
   const site = yield* Prerender.load("dist/prerender");
   return yield* Prerender.serve(site, routerHandler);
@@ -186,15 +187,27 @@ does, with no body.
     a generation without a manifest, the newest generation with a manifest
     wins, by `builtAt` and then by name. A generation without a manifest
     is never served, and `staging` is never read. The next build removes
-    what a crash left: staging directories, temporary pointers, and older
-    generations.
-12. **One previous generation is kept (N=1).** Clean-up runs after the
-    pointer moved, and keeps the new generation and the one the pointer
-    named before. So a server that loaded a site keeps its bytes across
-    one rebuild. After a second rebuild its files are gone, and its pages
-    answer through the router until it loads again. Clean-up is best
-    effort: when it fails, the build still succeeds, and the next build
-    removes what is left.
+    what a crash left: staging directories, temporary pointers, and
+    generations no loaded site holds.
+12. **A loaded site holds its generation (leases).** `load` runs in a
+    scope and takes a lease on the generation it reads: a directory
+    `leases/<generation>.<random>`, made whole by one `mkdtemp` and removed
+    when the scope closes. Clean-up runs after the pointer moved, and keeps
+    the new generation and every generation a lease names. So a server
+    that loaded a site keeps its bytes across any number of rebuilds, and
+    the first build after it stops removes them. The first design kept one
+    previous generation (N=1); counsel round 1 on #38 (M5) found that a
+    server lost its files after a second rebuild, and its pages fell
+    through to the router. A larger N only moves that edge, so the holder
+    now says what it holds. `load` writes its lease before it resolves the
+    published generation again: clean-up runs only after the pointer
+    moved, so a generation still published once its lease exists is one
+    clean-up sees held; otherwise the lease goes and `load` holds the new
+    one. A lease a crashed process left keeps its generation until it is
+    removed by hand, as `build.lock` is. When no lease can be written, as
+    on a read-only output, `load` serves the generation unheld: no build
+    can write there either. Clean-up is best effort: when it fails, the
+    build still succeeds, and the next build removes what is left.
 13. **One build writes one output.** A build creates `build.lock` with the
     exclusive `wx` flag and removes it when its scope closes. A second
     build fails at once with `PrerenderBuildLocked { out, lock }`; it does
@@ -250,37 +263,38 @@ does, with no body.
 
 All tests are in `packages/effect-frame/tests/router/`.
 
-| Claim                                                     | Test                                                                                                                                                                                                                                                                   |
-| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Prerender without inputs does not compile                 | `prerender-definition.test.tsx` — "prerender without inputs does not compile, and a child's inputs see its parent's"                                                                                                                                                   |
-| The refusal names the ancestor and the param              | `prerender-definition.test.tsx` — "a prerender leaf under a layout that adds a param with no inputs is refused, naming the ancestor and the param", "a leaf that adds a param itself must …"                                                                           |
-| A param-free layout is allowed                            | `prerender-definition.test.tsx` — "a prerender leaf under a layout that adds no param is allowed"; `prerender-build.test.tsx` — "a prerender leaf under a plain layout … builds"                                                                                       |
-| Every input renders at the URL `href` prints              | `prerender-build.test.tsx` — "prerender renders every input through the SSR pipeline, at the URL href prints"                                                                                                                                                          |
-| Every link points at a built page                         | `prerender-build.test.tsx` — "every link a prerendered page renders points at a page that was built"                                                                                                                                                                   |
-| The nested product                                        | `prerender-build.test.tsx` — "nested prerender routes enumerate the product of parent and child inputs"                                                                                                                                                                |
-| Duplicates collapse, pages are listed by href             | `prerender-build.test.tsx` — "two inputs that print one href are one page, and pages are listed by href"                                                                                                                                                               |
-| A prerendered document is `AwaitAll`                      | `prerender-build.test.tsx` — "a prerendered document is AwaitAll: only a seed of patches, stamped builtAt"                                                                                                                                                             |
-| One read for a shared query                               | `prerender-build.test.tsx` — "the build issues one read for a query two routes share"                                                                                                                                                                                  |
-| A rebuild is the same content, apart from build metadata  | `prerender-build.test.tsx` — "a rebuild over an unchanged store produces the same content, apart from builtAt and the ETags it changes"                                                                                                                                |
-| A crashed build leaves the previous generation            | `prerender-build.test.tsx` — "a crashed build leaves the previous tree serving, and leaves no staging behind"                                                                                                                                                          |
-| An interruption after the pointer rename keeps the commit | `prerender-publish.test.tsx` — "an interruption after the pointer rename leaves the new generation published"                                                                                                                                                          |
-| A fault at each publishing step leaves a whole generation | `prerender-publish.test.tsx` — "a fault at each publishing step leaves a whole generation served"                                                                                                                                                                      |
-| Recovery after a crash                                    | `prerender-publish.test.tsx` — "after a crash, the pointer wins, else the newest whole generation, and staging is never served"                                                                                                                                        |
-| One build per output                                      | `prerender-publish.test.tsx` — "one build writes an output at a time: another fails with PrerenderBuildLocked"                                                                                                                                                         |
-| A loaded site's bytes match its ETag after a rebuild      | `prerender-publish.test.tsx` — "a loaded site serves the bytes its ETag names, after a rebuild too"                                                                                                                                                                    |
-| A matching ETag for a missing file goes to SSR            | `prerender-publish.test.tsx` — "a matching If-None-Match for a file that is gone renders through the router"                                                                                                                                                           |
-| HEAD has no body                                          | `prerender-publish.test.tsx` — "HEAD answers with the GET's status and headers, and no body"                                                                                                                                                                           |
-| Case collision, search part, broken link, document limit  | `prerender-publish.test.tsx` — "two hrefs that differ only in case …", "a page whose href has a search part …", "a link a prerender route matches but no input listed …", "one limit covers a page from its document on …"                                             |
-| A failed batch fails every reader                         | `prerender-publish.test.tsx` — "a failed batch fails every reader of its keys at once"                                                                                                                                                                                 |
-| A policy that refuses `Anonymous` fails the build         | `prerender-build.test.tsx` — "a query whose policy refuses Anonymous fails the build with PrerenderUnauthorized and writes no file"; `prerender-actor-refusal.test.tsx` — "fails the build with PrerenderUnauthorized naming the actor's contract, and writes nothing" |
-| A built file is served before the router, 304 on match    | `prerender-build.test.tsx` — "a prerendered file is served before the router runs, with an ETag, and If-None-Match answers 304"                                                                                                                                        |
-| A missing file answers through SSR, with no `builtAt`     | `prerender-build.test.tsx` — "a prerender route with no file on disk answers through SSR, and its patches carry no builtAt"                                                                                                                                            |
-| A baked value paints stale and revalidates once           | `prerender-resume.test.tsx` — "a baked query value paints at once, marked stale, and revalidates once to Ready{stale:false}"                                                                                                                                           |
-| An actor resumes from R and catches up                    | `prerender-resume.test.tsx` — "a prerendered page's actor resumes from the baked revision R, calls changes after R, and shows the later state"                                                                                                                         |
-| A store past R converges, and no scope hangs              | `prerender-resume.test.tsx` — "a client whose baked revision the store no longer holds takes the newest, and no scope hangs"                                                                                                                                           |
-| The HTML and the resume script show one revision          | `prerender-resume.test.tsx` — "the page's HTML and its resume script show one revision, although the store moved between them"                                                                                                                                         |
-| An actor does not move during the build                   | `prerender-resume.test.tsx` — "an actor does not move while the build reads it: the build's change stream is empty"                                                                                                                                                    |
-| A real browser hydrates a built island through the bundle | `prerender-browser.test.ts` — "the built page loads the client bundle, hydrates with no mismatch, and resumes past its baked revision" (WebKit and Chrome)                                                                                                             |
+| Claim                                                     | Test                                                                                                                                                                                                                                                                          |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Prerender without inputs does not compile                 | `prerender-definition.test.tsx` — "prerender without inputs does not compile, and a child's inputs see its parent's"                                                                                                                                                          |
+| The refusal names the ancestor and the param              | `prerender-definition.test.tsx` — "a prerender leaf under a layout that adds a param with no inputs is refused, naming the ancestor and the param", "a leaf that adds a param itself must …"                                                                                  |
+| A param-free layout is allowed                            | `prerender-definition.test.tsx` — "a prerender leaf under a layout that adds no param is allowed"; `prerender-build.test.tsx` — "a prerender leaf under a plain layout … builds"                                                                                              |
+| Every input renders at the URL `href` prints              | `prerender-build.test.tsx` — "prerender renders every input through the SSR pipeline, at the URL href prints"                                                                                                                                                                 |
+| Every link points at a built page                         | `prerender-build.test.tsx` — "every link a prerendered page renders points at a page that was built"                                                                                                                                                                          |
+| The nested product                                        | `prerender-build.test.tsx` — "nested prerender routes enumerate the product of parent and child inputs"                                                                                                                                                                       |
+| Duplicates collapse, pages are listed by href             | `prerender-build.test.tsx` — "two inputs that print one href are one page, and pages are listed by href"                                                                                                                                                                      |
+| A prerendered document is `AwaitAll`                      | `prerender-build.test.tsx` — "a prerendered document is AwaitAll: only a seed of patches, stamped builtAt"                                                                                                                                                                    |
+| One read for a shared query                               | `prerender-build.test.tsx` — "the build issues one read for a query two routes share"                                                                                                                                                                                         |
+| A rebuild is the same content, apart from build metadata  | `prerender-build.test.tsx` — "a rebuild over an unchanged store produces the same content, apart from builtAt and the ETags it changes"                                                                                                                                       |
+| A crashed build leaves the previous generation            | `prerender-build.test.tsx` — "a crashed build leaves the previous tree serving, and leaves no staging behind"                                                                                                                                                                 |
+| An interruption after the pointer rename keeps the commit | `prerender-publish.test.tsx` — "an interruption after the pointer rename leaves the new generation published"                                                                                                                                                                 |
+| A fault at each publishing step leaves a whole generation | `prerender-publish.test.tsx` — "a fault at each publishing step leaves a whole generation served"                                                                                                                                                                             |
+| Recovery after a crash                                    | `prerender-publish.test.tsx` — "after a crash, the pointer wins, else the newest whole generation, and staging is never served"                                                                                                                                               |
+| One build per output                                      | `prerender-publish.test.tsx` — "one build writes an output at a time: another fails with PrerenderBuildLocked"                                                                                                                                                                |
+| A loaded site's bytes match its ETag after a rebuild      | `prerender-publish.test.tsx` — "a loaded site serves the bytes its ETag names, after a rebuild too"                                                                                                                                                                           |
+| A loaded site keeps its generation across rebuilds        | `prerender-publish.test.tsx` — "a loaded site keeps its generation across two rebuilds, and releases it when its scope closes"; `apps/blog/tests/serve.test.ts` — "a running server keeps serving the generation it loaded across two rebuilds, and lets it go when it stops" |
+| A matching ETag for a missing file goes to SSR            | `prerender-publish.test.tsx` — "a matching If-None-Match for a file that is gone renders through the router"                                                                                                                                                                  |
+| HEAD has no body                                          | `prerender-publish.test.tsx` — "HEAD answers with the GET's status and headers, and no body"                                                                                                                                                                                  |
+| Case collision, search part, broken link, document limit  | `prerender-publish.test.tsx` — "two hrefs that differ only in case …", "a page whose href has a search part …", "a link a prerender route matches but no input listed …", "one limit covers a page from its document on …"                                                    |
+| A failed batch fails every reader                         | `prerender-publish.test.tsx` — "a failed batch fails every reader of its keys at once"                                                                                                                                                                                        |
+| A policy that refuses `Anonymous` fails the build         | `prerender-build.test.tsx` — "a query whose policy refuses Anonymous fails the build with PrerenderUnauthorized and writes no file"; `prerender-actor-refusal.test.tsx` — "fails the build with PrerenderUnauthorized naming the actor's contract, and writes nothing"        |
+| A built file is served before the router, 304 on match    | `prerender-build.test.tsx` — "a prerendered file is served before the router runs, with an ETag, and If-None-Match answers 304"                                                                                                                                               |
+| A missing file answers through SSR, with no `builtAt`     | `prerender-build.test.tsx` — "a prerender route with no file on disk answers through SSR, and its patches carry no builtAt"                                                                                                                                                   |
+| A baked value paints stale and revalidates once           | `prerender-resume.test.tsx` — "a baked query value paints at once, marked stale, and revalidates once to Ready{stale:false}"                                                                                                                                                  |
+| An actor resumes from R and catches up                    | `prerender-resume.test.tsx` — "a prerendered page's actor resumes from the baked revision R, calls changes after R, and shows the later state"                                                                                                                                |
+| A store past R converges, and no scope hangs              | `prerender-resume.test.tsx` — "a client whose baked revision the store no longer holds takes the newest, and no scope hangs"                                                                                                                                                  |
+| The HTML and the resume script show one revision          | `prerender-resume.test.tsx` — "the page's HTML and its resume script show one revision, although the store moved between them"                                                                                                                                                |
+| An actor does not move during the build                   | `prerender-resume.test.tsx` — "an actor does not move while the build reads it: the build's change stream is empty"                                                                                                                                                           |
+| A real browser hydrates a built island through the bundle | `prerender-browser.test.ts` — "the built page loads the client bundle, hydrates with no mismatch, and resumes past its baked revision" (WebKit and Chrome)                                                                                                                    |
 
 ## Mutations
 
@@ -322,7 +336,7 @@ Review round 1 added these. Each ran against the files named in the table.
 | The pointer is trusted without a manifest       | Killed   | the recovery test                                      |
 | Recovery picks the oldest generation            | Killed   | the recovery test                                      |
 | Recovery serves a generation without a manifest | Killed   | the recovery test                                      |
-| The previous generation is not kept             | Killed   | the loaded-site test                                   |
+| A lease does not keep its generation            | Killed   | the two-rebuild test                                   |
 | `If-None-Match` is compared before the read     | Killed   | the missing-file test                                  |
 | Names are not lower-cased                       | Killed   | the collision test                                     |
 | Names are not NFC-normalized                    | Survived | none; equivalent: file names are percent-encoded ASCII |

@@ -136,13 +136,15 @@ export const treeOf = (directory: string) =>
     return files;
   });
 
-/** The generation `out` publishes: the directory a loaded site reads. */
+/** The generation `out` publishes: the directory a loaded site reads. Its lease is released at once. */
 export const generationOf = (out: string) =>
-  Effect.flatMap(Effect.orDie(Prerender.load(out)), (site) =>
-    Option.match(site.generation, {
-      onNone: () => Effect.die(`nothing is published in ${out}`),
-      onSome: Effect.succeed,
-    }),
+  Effect.scoped(
+    Effect.flatMap(Effect.orDie(Prerender.load(out)), (site) =>
+      Option.match(site.generation, {
+        onNone: () => Effect.die(`nothing is published in ${out}`),
+        onSome: Effect.succeed,
+      }),
+    ),
   );
 
 /** Every file of the published generation, relative to it. */

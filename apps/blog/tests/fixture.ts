@@ -176,13 +176,15 @@ export const withClockAt =
   <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.flatMap(fixedAt(at), (clock) => Effect.provideService(effect, Clock.Clock, clock));
 
-/** The generation `out` publishes. */
+/** The generation `out` publishes. Its lease is released at once. */
 export const generationOf = (out: string) =>
-  Effect.flatMap(Effect.orDie(Prerender.load(out)), (site) =>
-    Option.match(site.generation, {
-      onNone: () => Effect.die(`nothing is published in ${out}`),
-      onSome: Effect.succeed,
-    }),
+  Effect.scoped(
+    Effect.flatMap(Effect.orDie(Prerender.load(out)), (site) =>
+      Option.match(site.generation, {
+        onNone: () => Effect.die(`nothing is published in ${out}`),
+        onSome: Effect.succeed,
+      }),
+    ),
   );
 
 export const readText = (file: string) =>

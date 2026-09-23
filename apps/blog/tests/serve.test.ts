@@ -98,6 +98,40 @@ describe("serving the built Blog over SSR (#23 §5)", () => {
   );
 
   platform(
+    "a running server keeps serving the generation it loaded across two rebuilds, and lets it go when it stops",
+    () =>
+      Effect.gen(function* () {
+        const site = yield* workspace();
+        const store = yield* storeOf(site.posts);
+        yield* buildInto(store, site.out);
+        const loaded = yield* generationOf(site.out);
+        const built = yield* builtPage(site.out, "/posts/second-wind");
+        const spans = spanNames();
+        const fs = yield* FileSystem.FileSystem;
+        const generations = () => Effect.orDie(fs.readDirectory(`${site.out}/generations`));
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const server = yield* serverOver(store, site.out, spans.layer);
+            // Two rebuilds while it runs: its generation is two behind the pointer.
+            yield* buildInto(store, site.out);
+            yield* buildInto(store, site.out);
+            expect(yield* generationOf(site.out)).not.toBe(loaded);
+            const hit = yield* fetchPage(`${server.url}/posts/second-wind`);
+            expect(hit.status).toBe(200);
+            expect(hit.text).toBe(built);
+            // Its file, not a render: the router never ran.
+            expect(routerRuns(spans.names)).toBe(0);
+          }),
+        );
+        // Stopped: the next build removes it and keeps only what it published.
+        yield* buildInto(store, site.out);
+        const published = yield* generationOf(site.out);
+        expect(yield* generations()).toEqual([published.slice(published.lastIndexOf("/") + 1)]);
+      }),
+    20_000,
+  );
+
+  platform(
     "a page with no file on the first start renders through the router: the output is optional",
     () =>
       Effect.gen(function* () {

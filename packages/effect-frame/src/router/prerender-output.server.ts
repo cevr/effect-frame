@@ -1,5 +1,4 @@
-import { Effect, Exit, FileSystem, Option, Path, Schema } from "effect";
-import type { Scope } from "effect";
+import { Effect, Exit, FileSystem, Option, Path, Schema, Scope } from "effect";
 import type { PlatformError } from "effect/PlatformError";
 
 /**
@@ -11,6 +10,7 @@ import type { PlatformError } from "effect/PlatformError";
  * <out>/current.json          { "generation": "<id>" }: the published build
  * <out>/generations/<id>/     one complete build: pages, client.js, manifest.json
  * <out>/staging/<id>/         a build still being written; never served
+ * <out>/leases/<id>.<random>/ one loaded site's hold on generation <id>
  * <out>/build.lock            held by the one build that writes <out>
  * ```
  *
@@ -18,7 +18,8 @@ import type { PlatformError } from "effect/PlatformError";
  * `generations` with one rename, and publishes it by replacing
  * `current.json` with one rename. Every step before that last rename leaves
  * the previous generation published. A generation is never written again,
- * so a server that loaded one reads the same bytes until it loads another.
+ * and one a lease names is never removed, so a server that loaded one reads
+ * the same bytes until it releases it, across any number of builds.
  *
  * Server-only.
  */
@@ -56,6 +57,7 @@ export interface Output {
   readonly pointer: string;
   readonly generations: string;
   readonly staging: string;
+  readonly leases: string;
   readonly lock: string;
 }
 
@@ -64,6 +66,7 @@ export const outputOf = (path: Path.Path, out: string): Output => ({
   pointer: path.join(out, "current.json"),
   generations: path.join(out, "generations"),
   staging: path.join(out, "staging"),
+  leases: path.join(out, "leases"),
   lock: path.join(out, "build.lock"),
 });
 
@@ -121,10 +124,11 @@ const pointed = (fs: FileSystem.FileSystem, output: Output) =>
 
 /**
  * Publish a finished staging directory: move it into `generations`, then
- * replace the pointer. The previous generation is kept, so a server that
- * loaded it keeps its bytes; older ones, and what crashed builds left, are
- * removed after the pointer moved. That clean-up is best effort: the new
- * generation is already published.
+ * replace the pointer. After the pointer moved, every generation that is
+ * neither the new one nor named by a lease is removed, with what crashed
+ * builds left: a server that loaded a generation holds it by its lease, so
+ * it keeps its bytes however many builds follow. That clean-up is best
+ * effort: the new generation is already published.
  *
  * The two renames run with interruption masked. A rename can replace
  * `current.json` before its Effect resumes, so an interruption there would
@@ -145,10 +149,12 @@ export const publish = (
       const id = path.basename(staged);
       const generation = path.join(output.generations, id);
       const written = path.join(output.out, `current.json.${id}.tmp`);
-      const previous = yield* restore(pointed(fs, output));
       yield* restore(
         Effect.andThen(
-          fs.makeDirectory(output.generations, { recursive: true }),
+          Effect.andThen(
+            fs.makeDirectory(output.generations, { recursive: true }),
+            fs.makeDirectory(output.leases, { recursive: true }),
+          ),
           fs.writeFileString(written, encodePointer({ generation: id })),
         ).pipe(Effect.onError(() => Effect.ignore(fs.remove(written)))),
       );
@@ -161,10 +167,78 @@ export const publish = (
           ),
         ),
       );
-      yield* restore(Effect.ignore(clean(fs, path, output, [id, ...Option.toArray(previous)])));
+      yield* restore(
+        Effect.ignore(
+          Effect.flatMap(leased(fs, output), (held) => clean(fs, path, output, [id, ...held])),
+        ),
+      );
       return generation;
     }),
   );
+
+/**
+ * The generations the leases name. A lease is a directory named
+ * `<generation>.<random>`: one `mkdtemp` creates it whole, so a lease is
+ * either there and names its generation, or not there. The random part
+ * holds no dot, so the generation is the name up to the last one.
+ */
+const leased = (fs: FileSystem.FileSystem, output: Output) =>
+  Effect.map(
+    Effect.orElseSucceed(fs.readDirectory(output.leases), (): ReadonlyArray<string> => []),
+    (names) => names.map((name) => name.slice(0, name.lastIndexOf("."))),
+  );
+
+/** Take one lease on `generation`, released when the scope closes. */
+const leaseOn = (fs: FileSystem.FileSystem, output: Output, generation: string) =>
+  Effect.acquireRelease(
+    Effect.andThen(
+      fs.makeDirectory(output.leases, { recursive: true }),
+      fs.makeTempDirectory({ directory: output.leases, prefix: `${generation}.` }),
+    ),
+    (lease) => Effect.ignore(fs.remove(lease, { recursive: true })),
+  );
+
+/**
+ * The published generation, held for this scope: clean-up removes no
+ * generation a lease names, so its bytes stay for as long as the scope is
+ * open, however many builds publish meanwhile. The lease goes when the
+ * scope closes, and the next build removes the generation.
+ *
+ * Clean-up runs only after the pointer moved. So the lease is written
+ * first and the published generation resolved again after it: when it is
+ * still the one leased, any later clean-up reads the lease and keeps it.
+ * When a build published another meanwhile, that lease is released and the
+ * new generation is held instead. A lease left by a process that crashed
+ * keeps its generation until the file is removed by hand, as `build.lock`
+ * is. `None`: nothing was ever published, and nothing is held.
+ */
+export const hold = (
+  output: Output,
+): Effect.Effect<Option.Option<string>, never, FileSystem.FileSystem | Path.Path | Scope.Scope> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const outer = yield* Effect.scope;
+    let found = yield* current(output);
+    while (Option.isSome(found)) {
+      const directory = found.value;
+      const attempt = yield* Scope.fork(outer);
+      const leasedOn = yield* Effect.exit(
+        Scope.provide(leaseOn(fs, output, path.basename(directory)), attempt),
+      );
+      const again = yield* current(output);
+      if (Exit.isSuccess(leasedOn) && Option.contains(again, directory)) {
+        return found;
+      }
+      yield* Scope.close(attempt, Exit.void);
+      if (Exit.isFailure(leasedOn) && Option.contains(again, directory)) {
+        // The lease cannot be written: serve it unheld rather than not at all.
+        return found;
+      }
+      found = again;
+    }
+    return found;
+  });
 
 /** Remove every generation but `keep`, every staging directory, and every stray pointer. */
 const clean = (

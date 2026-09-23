@@ -262,7 +262,8 @@ describe("the prerender build (#23 §2)", () => {
           firstTree.map(([name, text]) => [name, unstamped(text)]),
         );
         expect(yield* namesIn(`${out}/staging`)).toEqual([]);
-        expect(yield* namesIn(`${out}/generations`)).toHaveLength(2);
+        // No loaded site holds an older generation: only the published one is left.
+        expect(yield* namesIn(`${out}/generations`)).toHaveLength(1);
       }),
   );
 

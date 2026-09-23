@@ -349,7 +349,8 @@ const buildSite = Effect.gen(function* () {
   });
 });
 
-// The server: a built page answers before the router runs.
+// The server: a built page answers before the router runs. `load` holds the
+// generation for the calling scope: run it in the scope the server lives in.
 const handler = Effect.gen(function* () {
   const site = yield* Prerender.load("dist/prerender");
   return yield* Prerender.serve(site, routerHandler);
@@ -360,8 +361,10 @@ const handler = Effect.gen(function* () {
   `dist/prerender/generations/`, at the URL its route's `href` prints,
   beside `client.js` and `manifest.json`. The build publishes the
   generation by renaming `current.json` over the old pointer, so a failed
-  or crashed build leaves the previous generation serving. One previous
-  generation is kept.
+  or crashed build leaves the previous generation serving. `load` holds
+  the generation it read for its scope, so a running server keeps its
+  files across any number of rebuilds; the first build after the server
+  stops removes them.
 - Publishing is safe against a process crash or interruption on POSIX file
   systems; it does not `fsync`, so it is not durable across power loss, and
   Windows replacement semantics are not claimed.

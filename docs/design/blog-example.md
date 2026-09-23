@@ -32,7 +32,7 @@ build: `build:client`, then `prerender` (#38). The repository gate runs
 `turbo run build` for every other package and `build:client` for the Blog,
 so it never reads content (#23 §2.1). `tests/deploy-build.test.ts` runs
 `bun run build` as a process and reads the page tree it published. The server (`src/server.ts`) loads the published generation at
-start and puts `Prerender.serve` in front of the router.
+start, holds it until it stops, and puts `Prerender.serve` in front of the router.
 
 ## Rows, tests and mutations
 
@@ -52,6 +52,7 @@ reverted. The runner restores every file after each mutation.
 | `PrerenderUnauthorized`, nothing written        | `build.test.ts`: "a route whose query refuses Anonymous fails the build …"; "the prerender command exits non-zero …"           | The build does not map `Unauthorized`                                  | Killed (2 tests)                                         |
 | One read for a shared query                     | `build.test.ts`: "the build reads PostIndex once for N + 1 pages"                                                              | The build's transport reads each key per page (no `once`)              | Killed                                                   |
 | A rebuild differs only in metadata (Open, B1)   | `build.test.ts`: "a rebuild over an unchanged store is the same tree but for builtAt and each form's minted identity"          | `builtAt` from `Date.now()` instead of `Clock`                         | Killed                                                   |
+| A running server keeps its generation           | `serve.test.ts`: "a running server keeps serving the generation it loaded across two rebuilds, …" (counsel round 1, M5)        | clean-up ignores leases; a lease is never released                     | Killed (3 tests; 4 tests)                                |
 | A crashed build leaves the previous generation  | `build.test.ts`: "a build aborted mid-way leaves the previous tree serving, and no staging"                                    | `stage` keeps the staging directory on failure                         | Killed (3 tests)                                         |
 | The actor resumes from R and catches up         | `island.test.tsx`: "the hearts resume from the baked revision R, call changes after R, …"                                      | `branch.ts` opens the route actor with no seed                         | Killed (2 tests)                                         |
 | A store past R is followed to its newest        | `island.test.tsx`: "a store that no longer holds the baked revision is followed to its newest"                                 | (the same mutation)                                                    | Killed                                                   |

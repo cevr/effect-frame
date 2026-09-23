@@ -111,8 +111,8 @@ export interface RunningServer {
 
 /**
  * Start the blog on one port over one runtime. It loads the published
- * generation of `out` once, at start: no generation, no built pages, and
- * every page renders on request.
+ * generation of `out` once, at start, and holds it until `stop`: no
+ * generation, no built pages, and every page renders on request.
  */
 export const makeServer = async (options: ServerOptions): Promise<RunningServer> => {
   const runtime = options.runtime;
@@ -137,7 +137,12 @@ export const makeServer = async (options: ServerOptions): Promise<RunningServer>
     }
     return Effect.provideContext(answerPage(request), context);
   };
-  const loaded = await runtime.runPromise(Effect.orDie(Prerender.load(options.out)));
+  // The loaded generation is held for as long as the server runs: a rebuild
+  // meanwhile does not remove its files. `stop` releases it.
+  const held = await runtime.runPromise(Scope.make());
+  const loaded = await runtime.runPromise(
+    Scope.provide(Effect.orDie(Prerender.load(options.out)), held),
+  );
   const pages = await runtime.runPromise(Prerender.serve(loaded, router));
 
   // oxlint-disable-next-line effect/noGlobals -- Bun.serve is the platform boundary.
@@ -161,7 +166,10 @@ export const makeServer = async (options: ServerOptions): Promise<RunningServer>
   return {
     url: `http://127.0.0.1:${String(bound)}`,
     port: bound,
-    stop: (): Promise<void> => server.stop(true),
+    stop: async (): Promise<void> => {
+      await server.stop(true);
+      await runtime.runPromise(Scope.close(held, Exit.void));
+    },
   };
 };
 

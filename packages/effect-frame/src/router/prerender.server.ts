@@ -42,14 +42,7 @@ import { enumerate, planOf } from "./prerender.js";
 import type { NotFoundProps } from "./router.js";
 import { segmentsOf } from "./path.js";
 import type { Output, PrerenderBuildLocked } from "./prerender-output.server.js";
-import {
-  current,
-  lock,
-  manifestFile,
-  outputOf,
-  publish,
-  stage,
-} from "./prerender-output.server.js";
+import { hold, lock, manifestFile, outputOf, publish, stage } from "./prerender-output.server.js";
 
 export { PrerenderBuildLocked } from "./prerender-output.server.js";
 
@@ -695,12 +688,18 @@ const emptySite: Site = { generation: Option.none(), pages: new Map(), client: O
  * Read the published generation of an output directory: the one its pointer
  * names, or, when the pointer is missing or names nothing whole, the newest
  * complete generation. An output with none serves nothing.
+ *
+ * The generation is held for the calling scope: a build removes no
+ * generation a loaded site holds, so the site's files stay for as long as
+ * the scope is open, however many builds publish meanwhile. Load in the
+ * scope the server lives in; when it closes, the next build removes the
+ * generation.
  */
 export const load = Effect.fn("Prerender.load")(function* (out: string) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const output: Output = outputOf(path, out);
-  const found = yield* current(output);
+  const found = yield* hold(output);
   if (Option.isNone(found)) {
     return emptySite;
   }

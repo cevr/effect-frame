@@ -132,6 +132,9 @@ for (const engine of engines) {
       try {
         expect(await navigate(view, "/site/late")).toBe("Committed /site/late");
         await shown(view, "#late-fallback");
+        // The push lands after `Committed`: it scrolls to the top, then focuses
+        // the leaf root. Scroll only once it has, or landing undoes the scroll.
+        await H.waitFor(view, `document.activeElement?.id === "late"`, "the push landed");
         expect(await scrollTo(view, 1000)).toBe(1000);
         await read(view, "window.__nav.settle()");
         await shown(view, "#late-content");

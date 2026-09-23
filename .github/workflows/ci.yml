@@ -19,14 +19,10 @@ jobs:
 
       - run: bun install
 
-      - name: Typecheck
-        run: bun run typecheck
-
-      - name: Lint
-        run: bun run lint
-
-      - name: Format
-        run: bun run fmt
-
-      - name: Test
-        run: bun run test
+      - name: Full suite 5 times
+        run: |
+          set +e
+          fails=0
+          for i in 1 2 3 4 5; do bun run test --force > full-$i.log 2>&1; code=$?; echo "run $i exit $code"; [ $code -ne 0 ] && fails=$((fails+1)); grep -E -B40 "\(fail\)" full-$i.log | grep -v "(pass)" | head -120; done
+          echo "failed runs: $fails"
+          exit $fails

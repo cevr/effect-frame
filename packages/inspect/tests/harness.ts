@@ -30,15 +30,26 @@ export const bundle = async (entry: "main.tsx" | "main.dev.tsx"): Promise<Bundle
   return { text: await output.text(), inputs };
 };
 
-/** Counts WebSocket constructions before the application script runs. */
+/**
+ * Counts WebSocket constructions before the application script runs. While
+ * `holding`, an inbound frame reaches the page and is counted in `held` but
+ * never reaches the application, so a request stays pending at an idle root.
+ */
 const socketProbe = `<script>
-window.__sockets = { created: 0, all: [] };
+window.__sockets = { created: 0, all: [], holding: false, held: 0 };
 const NativeWebSocket = window.WebSocket;
 window.WebSocket = class extends NativeWebSocket {
   constructor(...args) {
     super(...args);
     window.__sockets.created += 1;
     window.__sockets.all.push(this);
+  }
+  addEventListener(type, listener, options) {
+    if (type !== "message") return super.addEventListener(type, listener, options);
+    return super.addEventListener(type, (event) => {
+      if (window.__sockets.holding) window.__sockets.held += 1;
+      else listener.call(this, event);
+    }, options);
   }
 };
 window.__openSockets = () => window.__sockets.all.filter((socket) => socket.readyState === 1).length;

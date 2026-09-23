@@ -362,12 +362,16 @@ describe.skipIf(!H.hasBrowser)("live Frame inspection over a browser-originated 
       expect(failure((await inspect(r, rootId)).body)._tag).toBe("RootNotFound");
 
       // Tab close with a read in flight fails that read, not the gateway.
+      // The page holds the request frame while its thread stays idle: WebKit
+      // may let a busy page finish its task and answer queued frames before
+      // it tears the page down, so a busy page does not keep a read in flight.
       const tab = await r.open("tab");
       await waitAttached(r, 1);
       const tabId = await rootIdOf(tab);
-      void (await busy(tab, 2_000));
+      await tab.evaluate<unknown>("window.__sockets.holding = true");
       const inFlight = inspect(r, tabId, ["--deadline", "8000"]);
       await H.waitUntil(async () => (await H.stats(r.gateway)).pendingReads === 1, "tab read");
+      await H.waitFor(tab, "window.__sockets.held > 0", "tab read held at the root");
       tab.close();
       const lost = await inFlight;
       expect(failure(lost.body)._tag).toBe("RootDisconnected");

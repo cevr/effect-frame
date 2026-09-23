@@ -5,6 +5,7 @@ import {
   Exit,
   Fiber,
   Hash,
+  Layer,
   Option,
   Queue,
   Schema,
@@ -111,6 +112,34 @@ const add = (amount: number): Add => ({ _tag: "Add", amount });
 const withStore = it.scoped.layer(MailboxStore.layerMemory);
 
 describe("durable actor", () => {
+  it.scoped("a call returns only after the actor's state shows its commit", () =>
+    Effect.gen(function* () {
+      const memory = yield* Layer.build(MailboxStore.layerMemory);
+      const inner = Context.get(memory, MailboxStore);
+      const hold = yield* Deferred.make<void>();
+      // The receipt is in the store, but the engine has not yet published it.
+      const store = MailboxStore.of({
+        ...inner,
+        commit: (commandId, state) =>
+          Effect.tap(inner.commit(commandId, state), () => Deferred.await(hold)),
+      });
+      const counter = yield* durable(counterOptions).pipe(
+        Effect.provideService(MailboxStore, store),
+      );
+      const call = yield* Effect.forkScoped(
+        counter.call(add(3), { commandId: id("c1"), timeout: "1 minute" }),
+      );
+      yield* TestClock.adjust("1 second");
+      expect(Option.isSome(yield* inner.receipt(id("c1")))).toBe(true);
+      expect(call.pollUnsafe()).toBeUndefined();
+      expect(yield* counter.state.get).toBe(0);
+
+      yield* Deferred.succeed(hold, void 0);
+      expect(yield* Fiber.join(call)).toEqual({ revision: committedRevision(1), state: 3 });
+      expect(yield* counter.state.get).toBe(3);
+    }),
+  );
+
   withStore("call commits the command and returns the applied revision", () =>
     Effect.gen(function* () {
       const counter = yield* durable(counterOptions);

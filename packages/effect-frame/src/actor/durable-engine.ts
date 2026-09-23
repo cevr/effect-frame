@@ -273,10 +273,22 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <
       return Option.none<StoredReceipt>();
     });
     const found = yield* Effect.repeat(poll(), { until: Option.isSome });
-    return yield* Option.match(found, {
+    const receipt = yield* Option.match(found, {
       onNone: () => Effect.die("Actor.durable.awaitReceipt: repeat ended without a receipt"),
       onSome: Effect.succeed,
     });
+    // The store holds the receipt before this engine publishes the commit:
+    // processCommand writes the store first. Reply only once `committed` has
+    // reached the receipt, so a reader that follows the reply sees the
+    // commit (read-your-writes). This engine is the store's one writer, so
+    // the wait ends; the caller's timeout and `closed` bound it anyway.
+    yield* Stream.runHead(
+      Stream.filter(
+        SubscriptionRef.changes(committed),
+        (current) => current.revision >= receipt.revision,
+      ),
+    );
+    return receipt;
   });
 
   const callEncoded = Effect.fn("Actor.durable.callEncoded")(function* (

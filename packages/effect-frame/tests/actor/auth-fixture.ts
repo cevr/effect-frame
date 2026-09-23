@@ -252,7 +252,14 @@ const follow = (
       );
       return transport.changes(address, -1).pipe(
         Stream.mapEffect((projection) => principalOf(clock, projection.snapshot)),
-        Stream.catch(() => Stream.succeed(anonymous)),
+        Stream.catch((error) =>
+          Stream.fromEffect(
+            Effect.sync(() => {
+              console.error("[expiry] follow failed:", JSON.stringify(error));
+              return anonymous;
+            }),
+          ),
+        ),
       );
     }),
   );
@@ -262,7 +269,12 @@ const read = (transport: TransportService, clock: Clock.Clock, sessionId: string
   Effect.flatMap(sessionAddress(sessionId), (address) =>
     transport.snapshot(address).pipe(
       Effect.flatMap((projection) => principalOf(clock, projection.snapshot)),
-      Effect.orElseSucceed(() => anonymous),
+      Effect.catch((error) =>
+        Effect.sync(() => {
+          console.error("[expiry] read failed:", JSON.stringify(error));
+          return anonymous;
+        }),
+      ),
     ),
   );
 

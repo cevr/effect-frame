@@ -97,26 +97,40 @@ console.log("dispatch returned");
     stderr: "pipe",
     stdout: "pipe",
   });
-  const readOutput = async (timedOut: boolean, code: number): Promise<SchedulerProbeResult> => {
-    const [stdout, stderr] = await Promise.all([
-      child.stdout === null ? Promise.resolve("") : new Response(child.stdout).text(),
-      child.stderr === null ? Promise.resolve("") : new Response(child.stderr).text(),
-    ]);
-    return { timedOut, code, stdout, stderr };
-  };
+  // The fairness window opens once the child has dispatched the click, so the
+  // limit measures a starved timer, not how long a fresh Bun takes to start
+  // and load the source on a busy runner. Start-up has its own, wide limit.
+  const startupLimit = 30_000;
+  const fairnessLimit = 1000;
   return new Promise((resolve) => {
     let settled = false;
-    const timeout = setTimeout(() => {
+    let stdout = "";
+    let deadline = setTimeout(() => expire(), startupLimit);
+    const stderr = child.stderr === null ? Promise.resolve("") : new Response(child.stderr).text();
+    const expire = () => {
       if (settled) return;
       settled = true;
       child.kill();
-      void child.exited.then((code) => readOutput(true, code).then(resolve));
-    }, 1000);
-    void child.exited.then((code) => {
+      void Promise.all([child.exited, stderr]).then(([code, err]) =>
+        resolve({ timedOut: true, code, stdout, stderr: err }),
+      );
+    };
+    const read = async () => {
+      const decoder = new TextDecoder();
+      for await (const chunk of child.stdout) {
+        const before = stdout.includes("dispatch returned");
+        stdout += decoder.decode(chunk, { stream: true });
+        if (!before && stdout.includes("dispatch returned") && !settled) {
+          clearTimeout(deadline);
+          deadline = setTimeout(() => expire(), fairnessLimit);
+        }
+      }
+    };
+    void Promise.all([read(), child.exited, stderr]).then(([, code, err]) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timeout);
-      void readOutput(false, code).then(resolve);
+      clearTimeout(deadline);
+      resolve({ timedOut: false, code, stdout, stderr: err });
     });
   });
 };

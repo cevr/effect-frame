@@ -44,7 +44,7 @@ import { segmentsOf } from "./path.js";
 import type { Output, PrerenderBuildLocked } from "./prerender-output.server.js";
 import { hold, lock, manifestFile, outputOf, publish, stage } from "./prerender-output.server.js";
 
-export { PrerenderBuildLocked } from "./prerender-output.server.js";
+export { PrerenderBuildLocked, PrerenderLeaseFailed } from "./prerender-output.server.js";
 
 export type { Page } from "./prerender.js";
 

@@ -205,9 +205,10 @@ does, with no body.
     clean-up sees held; otherwise the lease goes and `load` holds the new
     one. Only a missing `leases/` directory means no leases: a build that
     cannot read it skips clean-up (counsel round 2). A lease a crashed process left keeps its generation until it is
-    removed by hand, as `build.lock` is. When no lease can be written, as
-    on a read-only output, `load` serves the generation unheld: no build
-    can write there either. Clean-up is best effort: when it fails, the
+    removed by hand, as `build.lock` is. When no lease can be written,
+    `load` fails with `PrerenderLeaseFailed { out, generation, reason }`
+    and holds nothing: a site served unheld would lose its files to the
+    next build (counsel round 2 found the first version served it unheld). Clean-up is best effort: when it fails, the
     build still succeeds, and the next build removes what is left.
 13. **One build writes one output.** A build creates `build.lock` with the
     exclusive `wx` flag and removes it when its scope closes. A second

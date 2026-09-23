@@ -51,6 +51,21 @@ export class PrerenderBuildLocked extends Schema.TaggedError<PrerenderBuildLocke
   }
 }
 
+/**
+ * A loaded site could not take its lease on the published generation. A
+ * site served unheld would lose its files to the next build, so `load`
+ * fails instead: an output a server cannot write under `leases/` is one a
+ * build could not publish into either.
+ */
+export class PrerenderLeaseFailed extends Schema.TaggedError<PrerenderLeaseFailed>()(
+  "PrerenderLeaseFailed",
+  { out: Schema.String, generation: Schema.String, reason: Schema.String },
+) {
+  override get message(): string {
+    return `could not hold generation ${this.generation} of ${this.out}: ${this.reason}. A loaded site holds a lease under ${this.out}/leases; make that directory writable.`;
+  }
+}
+
 /** The paths of one output directory. */
 export interface Output {
   readonly out: string;
@@ -216,11 +231,16 @@ const leaseOn = (fs: FileSystem.FileSystem, output: Output, generation: string) 
  * When a build published another meanwhile, that lease is released and the
  * new generation is held instead. A lease left by a process that crashed
  * keeps its generation until the file is removed by hand, as `build.lock`
- * is. `None`: nothing was ever published, and nothing is held.
+ * is. A lease that cannot be taken fails with `PrerenderLeaseFailed`.
+ * `None`: nothing was ever published, and nothing is held.
  */
 export const hold = (
   output: Output,
-): Effect.Effect<Option.Option<string>, never, FileSystem.FileSystem | Path.Path | Scope.Scope> =>
+): Effect.Effect<
+  Option.Option<string>,
+  PrerenderLeaseFailed,
+  FileSystem.FileSystem | Path.Path | Scope.Scope
+> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -228,19 +248,24 @@ export const hold = (
     let found = yield* current(output);
     while (Option.isSome(found)) {
       const directory = found.value;
+      const generation = path.basename(directory);
       const attempt = yield* Scope.fork(outer);
       const leasedOn = yield* Effect.exit(
-        Scope.provide(leaseOn(fs, output, path.basename(directory)), attempt),
+        Scope.provide(leaseOn(fs, output, generation), attempt).pipe(
+          Effect.mapError((error) =>
+            PrerenderLeaseFailed.make({ out: output.out, generation, reason: error.message }),
+          ),
+        ),
       );
+      if (Exit.isFailure(leasedOn)) {
+        yield* Scope.close(attempt, Exit.void);
+        return yield* Effect.failCause(leasedOn.cause);
+      }
       const again = yield* current(output);
-      if (Exit.isSuccess(leasedOn) && Option.contains(again, directory)) {
+      if (Option.contains(again, directory)) {
         return found;
       }
       yield* Scope.close(attempt, Exit.void);
-      if (Exit.isFailure(leasedOn) && Option.contains(again, directory)) {
-        // The lease cannot be written: serve it unheld rather than not at all.
-        return found;
-      }
       found = again;
     }
     return found;

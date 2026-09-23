@@ -374,6 +374,32 @@ describe("serving a loaded generation (#86)", () => {
     15_000,
   );
 
+  platform(
+    "a load that cannot write its lease fails with PrerenderLeaseFailed and holds nothing",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = yield* tempDirectory;
+        const out = `${directory}/out`;
+        yield* buildInto(yield* sideOf(makeControl(blogLabels)), blogRoutes, out);
+        const generation = yield* generationOf(out);
+        const refused = yield* Effect.flip(
+          Effect.scoped(Prerender.load(out)).pipe(
+            Effect.provideService(
+              FileSystem.FileSystem,
+              faulty(fs, { makeTempDirectory: (parent) => parent.endsWith("/leases") }),
+            ),
+          ),
+        );
+        expect(refused).toMatchObject({
+          _tag: "PrerenderLeaseFailed",
+          out,
+          generation: nameOf(generation),
+        });
+        expect(yield* namesIn(`${out}/leases`)).toEqual([]);
+      }),
+  );
+
   platform("a matching If-None-Match for a file that is gone renders through the router", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

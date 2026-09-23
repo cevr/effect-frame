@@ -188,6 +188,11 @@ newer admission also ends the wait for `drawn` at once.
    Locations put the same landing at the same place. Focus under
    `Preserve` stays where it is on a traversal too.
 
+   The parity holds while the intercepted event is still committed and
+   can scroll. `event.scroll()` throws once the navigation finished or was
+   aborted (a newer navigation); the landing then places nothing and has
+   no other way to restore the position.
+
 ## Server
 
 `navigation.ts` and `browser-commit.ts` are browser-only. Their top-level

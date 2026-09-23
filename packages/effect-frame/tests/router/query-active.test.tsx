@@ -11,8 +11,9 @@ import {
   Policy,
 } from "effect-frame/actor";
 import type { QueryKey, TransportService } from "effect-frame/actor";
-import { canonicalize } from "effect-frame/actor/client";
+import { canonicalize, useQuery } from "effect-frame/actor/client";
 import { QueryTest } from "effect-frame/actor/testing";
+import type { FollowedQuery, QueryFailure } from "effect-frame/actor/client";
 import { Location, Route, mount as mountRouter } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
 import { Html, View } from "effect-frame/view";
@@ -299,6 +300,56 @@ describe("#28 active follows the mounted branch", () => {
       // The declared set never grew past one branch: a layout query and at
       // most two child queries, not 50 branches' worth.
       expect(most.current).toBe(3);
+    }),
+  );
+});
+
+describe("a route query binding's override (#19)", () => {
+  it.scoped.layer(testLayer)("writes the entry the binding names after a stayed move", () =>
+    Effect.gen(function* () {
+      // The leaf hands its binding out, as a view's handler would hold it.
+      const bound = yield* Ref.make(Option.none<FollowedQuery<string, QueryFailure>>());
+      const overrideApp = Route.client(
+        "override",
+        Route.layout(
+          tenantSegment,
+          [
+            Route.leaf(postSegment, (props) =>
+              Effect.as(Ref.set(bound, Option.some(props.data.post)), <p>post</p>),
+            ),
+          ],
+          (props) => Effect.map(props.outlet, (outlet) => <section>{outlet}</section>),
+        ),
+      );
+      const current = yield* Ref.make(new URL(`${origin}/app/t1/posts/1`));
+      const location: LocationService = {
+        current: Ref.get(current),
+        push: (url) => Ref.set(current, url),
+        replace: (url) => Ref.set(current, url),
+        pops: Stream.never,
+      };
+      const router = yield* mountRouter({
+        routes: [overrideApp],
+        notFound: NotFound,
+        host: Html.host,
+        root: Html.element("#root"),
+      }).pipe(Effect.provideService(Location, location));
+      const post = Option.getOrThrow(yield* Ref.get(bound));
+
+      // A stayed move of the child's param: the binding now names post 2.
+      yield* router.navigate("/app/t1/posts/2");
+      const second = yield* useQuery(Post, { tenant: "t1", postId: "2" });
+      yield* post.override("guess");
+      expect(yield* post.state.get).toEqual({ _tag: "Ready", value: "guess", stale: true });
+      expect(yield* second.state.get).toEqual({ _tag: "Ready", value: "guess", stale: true });
+
+      // Any authoritative value replaces it.
+      yield* post.refresh;
+      expect(yield* post.state.get).toEqual({
+        _tag: "Ready",
+        value: "value:post:t1/2",
+        stale: false,
+      });
     }),
   );
 });

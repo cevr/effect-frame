@@ -850,6 +850,55 @@ describe("Query: the Dashboard shape", () => {
     }),
   );
 
+  withDashboard("a followed query's override writes the entry its arguments name now", () =>
+    Effect.gen(function* () {
+      const args = yield* SubscriptionRef.make<Option.Option<{ readonly pair: string }>>(
+        Option.some({ pair: "USDEUR" }),
+      );
+      const followed = yield* followQuery(ExchangeRate, {
+        get: SubscriptionRef.get(args),
+        changes: SubscriptionRef.changes(args),
+      });
+      yield* settled(followed.state);
+      const euro = yield* useQuery(ExchangeRate, { pair: "USDEUR" });
+
+      // Shown at once, stale, on the followed source and on the entry itself.
+      yield* followed.override({ rate: 1.5 });
+      expect(yield* followed.state.get).toEqual({
+        _tag: "Ready",
+        value: { rate: 1.5 },
+        stale: true,
+      });
+      expect(yield* euro.state.get).toEqual({ _tag: "Ready", value: { rate: 1.5 }, stale: true });
+
+      // Any authoritative value drops it.
+      yield* followed.refresh;
+      expect(yield* followed.state.get).toEqual({
+        _tag: "Ready",
+        value: { rate: 0.92 },
+        stale: false,
+      });
+
+      // After the arguments move, it writes the new key's entry, not the old.
+      rates.set("USDGBP", 0.79);
+      yield* SubscriptionRef.set(args, Option.some({ pair: "USDGBP" }));
+      yield* followed.state.changes.pipe(
+        Stream.filter((state) => state._tag === "Ready" && !state.stale),
+        Stream.take(1),
+        Stream.runDrain,
+      );
+      yield* followed.override({ rate: 2 });
+      expect(yield* followed.state.get).toEqual({ _tag: "Ready", value: { rate: 2 }, stale: true });
+      expect(yield* euro.state.get).toEqual({ _tag: "Ready", value: { rate: 0.92 }, stale: false });
+
+      // With no arguments there is no entry, and nothing is written.
+      yield* SubscriptionRef.set(args, Option.none());
+      yield* Effect.yieldNow;
+      yield* followed.override({ rate: 3 });
+      expect((yield* followed.state.get)._tag).toBe("Loading");
+    }),
+  );
+
   withDashboard("followQuery keeps the last value, stale, while the next key loads", () =>
     Effect.gen(function* () {
       const cache = yield* QueryCache;

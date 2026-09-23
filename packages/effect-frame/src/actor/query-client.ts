@@ -1206,12 +1206,21 @@ export interface FollowedQuery<A, E> {
   readonly state: Source<QueryState<A, E>>;
   /** Refreshes the entry the arguments currently name. */
   readonly refresh: Effect.Effect<void>;
+  /**
+   * `QueryEntry.override` on the entry the arguments name at the call: the
+   * value shows at once, marked stale, stamped with the principal generation
+   * of that moment, and any authoritative value replaces it. A command's
+   * rejection does not take it back. With no arguments there is no entry,
+   * and nothing is written.
+   */
+  readonly override: (value: A) => Effect.Effect<void>;
 }
 
 interface Following<A, E> {
   readonly key: QueryKey;
   readonly scope: Scope.Closeable;
   readonly refresh: Effect.Effect<void>;
+  readonly override: (value: A) => Effect.Effect<void>;
   /** The followed entry's state now. */
   readonly get: Effect.Effect<Stamped<QueryState<A, E>>>;
 }
@@ -1313,7 +1322,13 @@ export const followQuery = Effect.fn("followQuery")(function* <Q extends AnyQuer
       const opened = yield* Scope.provide(openStamped(cache, contract, next), child).pipe(
         Effect.provideService(ActorTransport, transport),
       );
-      current = Option.some({ key, scope: child, refresh: opened.entry.refresh, get: opened.get });
+      current = Option.some({
+        key,
+        scope: child,
+        refresh: opened.entry.refresh,
+        override: opened.entry.override,
+        get: opened.get,
+      });
       // A delivery only asks for a step: the step reads the entry now.
       yield* Effect.forkIn(
         Stream.runForEach(opened.changes, () => advance(output, step)),
@@ -1349,6 +1364,13 @@ export const followQuery = Effect.fn("followQuery")(function* <Q extends AnyQuer
         onSome: (following) => following.refresh,
       }),
     ),
+    override: (value) =>
+      Effect.suspend(() =>
+        Option.match(current, {
+          onNone: () => Effect.void,
+          onSome: (following) => following.override(value),
+        }),
+      ),
   };
   return followed;
 });

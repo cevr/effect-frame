@@ -365,7 +365,8 @@ describe("a prerender build renders as Anonymous (#23 §2.3)", () => {
           Prerender.PrerenderUnauthorized.make({
             route: "drafts",
             href: "/drafts/d1",
-            query: "PrerenderDraft",
+            read: "query",
+            contract: "PrerenderDraft",
           }),
         );
         expect(yield* treeOf(out)).toEqual([]);

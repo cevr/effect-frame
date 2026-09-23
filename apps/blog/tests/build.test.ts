@@ -159,7 +159,8 @@ describe("the Blog build (#23 §2)", () => {
           _tag: "PrerenderUnauthorized",
           route: "drafts",
           href: "/drafts/next-week",
-          query: "Draft",
+          read: "query",
+          contract: "Draft",
         });
         // Nothing was written: the published tree, pointer and all, is as it was.
         expect(yield* treeOf(site.out)).toEqual(before);

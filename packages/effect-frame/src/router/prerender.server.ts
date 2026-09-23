@@ -13,6 +13,7 @@ import {
   QueryCache,
   QueryFailure,
   Streaming,
+  Unauthorized,
 } from "effect-frame/actor/client";
 import type { View } from "effect-frame/view";
 import type { Duration, Scope } from "effect";
@@ -101,19 +102,22 @@ const decodeManifest = Schema.decodeUnknownEffect(ManifestJson);
 // ---------------------------------------------------------------------------
 
 /**
- * A query the page reads refused `Anonymous` (#23 §2.3). A prerendered page
- * is one file served to everyone, so the build fails and writes no file.
+ * A query or an actor the page reads refused `Anonymous` (#23 §2.3). A
+ * prerendered page is one file served to everyone, so the build fails and
+ * writes no file. `contract` names the contract, which names its policy;
+ * `read` says whether the page read it as a query or as an actor.
  */
 export class PrerenderUnauthorized extends Schema.TaggedError<PrerenderUnauthorized>()(
   "PrerenderUnauthorized",
   {
     route: Schema.String,
     href: Schema.String,
-    query: Schema.String,
+    read: Schema.Literals(["query", "actor"]),
+    contract: Schema.String,
   },
 ) {
   override get message(): string {
-    return `route "${this.route}" page ${this.href} reached query "${this.query}", whose policy refuses Anonymous. A prerendered page renders as Anonymous. Make the policy admit Anonymous, or mount "${this.route}" with another mode.`;
+    return `route "${this.route}" page ${this.href} reached ${this.read} "${this.contract}", whose policy refuses Anonymous. A prerendered page renders as Anonymous. Make the policy admit Anonymous, or mount "${this.route}" with another mode.`;
   }
 }
 
@@ -293,6 +297,8 @@ const renderedName = <R>(
   return route.route.name;
 };
 
+const isUnauthorized = Schema.is(Unauthorized);
+
 /** The first failure a baked seed holds. A page with a failed query is not written. */
 const seedFailure = (
   page: Page,
@@ -303,7 +309,12 @@ const seedFailure = (
       const error = patch.outcome.error;
       if (error._tag === "Unauthorized") {
         return Option.some(
-          PrerenderUnauthorized.make({ route: page.route, href: page.href, query: error.contract }),
+          PrerenderUnauthorized.make({
+            route: page.route,
+            href: page.href,
+            read: "query",
+            contract: error.contract,
+          }),
         );
       }
       return Option.some(
@@ -484,7 +495,26 @@ export const build = <Routes extends AnyRoute<unknown>, N, DE, DR, CE, CR>(
           const written: ManifestPage = { href: page.href, route: page.route, file, etag };
           return written;
         }),
-      ).pipe(withShared);
+      ).pipe(
+        // An actor snapshot that refuses `Anonymous` does not reach the
+        // seed: the router fails the mount with the transport's
+        // `Unauthorized` as a defect. The build names it like a query's.
+        Effect.catchDefect((defect) =>
+          Option.match(Option.liftPredicate(defect, isUnauthorized), {
+            onNone: () => Effect.die(defect),
+            onSome: (refused) =>
+              Effect.fail(
+                PrerenderUnauthorized.make({
+                  route: one.page.route,
+                  href: one.page.href,
+                  read: "actor",
+                  contract: refused.contract,
+                }),
+              ),
+          }),
+        ),
+        withShared,
+      );
 
     const written = yield* Effect.forEach(pages, renderOne, { concurrency });
     yield* fs.writeFileString(path.join(staging, clientFile), yield* options.client);

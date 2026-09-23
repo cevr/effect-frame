@@ -132,15 +132,24 @@ a client read never replaces the newer value" holds this.
 Only the query's own failure is final. A `Patch` that carries
 `QueryFailed` lands as the entry's failure. A `Patch` that carries any
 other failure (`Unreachable`, `Unauthorized`, `StreamEnded`) describes the
-server's read, not the query: it lands, and the slot reads again at once
-over `POST /query`. So does a seed that fails `StreamEnded` at the end of
-the channel.
+server's read, not the query: it lands, and the slot reads again over
+`POST /query` once hydration is done. So does a seed that fails
+`StreamEnded` at the end of the channel, and a seed that lands stale.
 
 A seed no slot took is dropped when the client runs `Resumed.hydrated`,
 after its hydration finished. A key a view declares later reads over the
 query path, never a value the document held since the page loaded. Seeds
 are not dropped when the channel closes: a deferred module reads `Closed`
 before it mounts.
+
+A read that a landed seed calls for starts at `Resumed.hydrated` too, not
+when the seed lands (review round 2). The seed is what the server drew.
+A reply that came before the client's first drawing would draw a newer
+value than the server's markup, and the page would not hydrate. So until
+hydration is done, a seeded entry shows the seed; a read the client starts
+itself, or a command's re-read, still runs at once. A principal change
+runs the same point. A client that never runs `Resumed.hydrated` never
+reads those keys again.
 
 `Resumed.closed` completes after the channel ended and after every slot
 that took a seed has put the seed's last state in the slot, or closed. So
@@ -362,10 +371,13 @@ The rule has two halves.
 3. **A value the server shows stale is seeded stale.** A patch carries
    `stale: true` when the server's entry showed its value stale: a read,
    refresh or command it waits for was open, or `override` set it. The
-   client seeds such a value `Ready{stale: true}` and reads it again at
-   once, as it does a prerendered value. Before this, the server drew the
-   flag and the client seeded `stale: false`, so a view that shows the
-   flag did not hydrate (review round 1, finding 2).
+   client seeds such a value `Ready{stale: true}` and reads it again once
+   hydration is done, as it does a prerendered value. Before this, the
+   server drew the flag and the client seeded `stale: false`, so a view
+   that shows the flag did not hydrate (review round 1, finding 2). In
+   round 1 the read started when the seed landed, so a reply that came
+   before the first drawing drew the fresh value against the stale markup;
+   it now waits for `Resumed.hydrated` (review round 2).
 
 Prerender uses the `AwaitAll` pipeline, so it gets the rule too. A
 `QueryState.held` source that a view builds from its own stream keeps
@@ -402,6 +414,14 @@ hydrates with no mismatch" fails, and "end at the limit…" does not end
 | `holdSome` applies the value a delivery carried       | "a late delivery never undoes a value a read showed"                                   |
 | a patch drops `stale`                                 | "is seeded stale, and the page hydrates with no mismatch"                              |
 | `readDrawn` ignores the limit                         | "end at the limit: AwaitAll, the streamed shell and SSR each write a document" (hangs) |
+
+Review round 2. Each mutation was applied alone, and the named tests were
+run. The mutation is the code before the round's repair, so each test is
+red on that code.
+
+| Mutation                                                     | Failed                                                                                              |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| a landed seed's read starts when it lands, not at `hydrated` | "a read that answers at once waits for hydration…" (mismatch `"Draft:true"` became `"Alpha:false"`) |
 
 #### Known limit: a streamed view with no boundary
 

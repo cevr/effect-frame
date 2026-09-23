@@ -23,6 +23,7 @@ import {
   frame,
   hydrateWith,
   idOf,
+  eventually,
   install,
   makeControl,
   parsing,
@@ -221,7 +222,7 @@ describe("an SSR drawing and its seed", () => {
  * only. The server draws the flag, so the seed must carry it (review
  * round 1, finding 2).
  */
-const Overridden = (props: { readonly server: boolean }): Drawn =>
+const Overridden = (props: { readonly server: boolean; readonly pause?: boolean }): Drawn =>
   Loading({
     fallback: <p id="pending">loading</p>,
     children: Effect.gen(function* () {
@@ -229,6 +230,10 @@ const Overridden = (props: { readonly server: boolean }): Drawn =>
       const entry = yield* useQuery(Label, { id: "a" });
       if (props.server) {
         yield* entry.override({ label: "Draft" });
+      }
+      // Setup that takes a while after the key is declared, before the drawing.
+      if (props.pause === true) {
+        yield* Effect.sleep("30 millis");
       }
       const value = yield* readyWithStale(entry.state, { label: "?" });
       return (
@@ -259,6 +264,32 @@ describe("a value the server shows stale", () => {
       expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
       expect(textOf("#state")).toBe("Draft:true");
     }),
+  );
+
+  it.scopedLive(
+    "a read that answers at once waits for hydration: no mismatch, then the fresh value (review round 2)",
+    () =>
+      Effect.gen(function* () {
+        const server = yield* sideOf(makeControl({ a: "Alpha" }));
+        const html = yield* Effect.provideContext(
+          Html.renderAwaitAll(Overridden, { server: true }, frame, { closeWhen: Effect.never }),
+          server,
+        );
+        expect(stateIn(html)).toBe("Draft:true");
+
+        // The client's read is not held, and the view's setup pauses after
+        // it declares the key: a read started when the seed landed would
+        // have its reply before the first drawing.
+        const clientControl = makeControl({ a: "Alpha" });
+        const client = yield* sideOf(clientControl);
+        yield* install(html);
+        const { report } = yield* hydrateWith(client, (host, root) =>
+          mount(Overridden, { server: false, pause: true }, host, root),
+        );
+        expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
+        yield* eventually("the fresh value", () => textOf("#state") === "Alpha:false");
+        expect(clientControl.calls).toEqual(["a"]);
+      }),
   );
 });
 

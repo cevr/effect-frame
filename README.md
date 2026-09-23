@@ -494,7 +494,7 @@ const start = Effect.gen(function* () {
   yield* mount(App, props, hydration.host, root);
   yield* render;
   const report = yield* hydration.finish; // report.resolvedAhead
-  yield* resumed.hydrated; // seeds no view took are dropped now
+  yield* resumed.hydrated; // seeds no view took are dropped, seeded reads start
 });
 ```
 
@@ -515,7 +515,10 @@ const start = Effect.gen(function* () {
   also reads an `AwaitAll` seed. `Streaming.resume(records)` puts them into
   the cache before `mount` and returns `Resumed`: `closed` completes once
   the channel ended and every live entry shows its value or failure;
-  `hydrated` drops the seeds no view took.
+  `hydrated` drops the seeds no view took, and starts the reads that the
+  seeds call for (a stale value, a failure that is not final). Until then
+  a seeded entry shows what the server drew, so run it after
+  `hydration.finish`.
 - `HydrationReport.resolvedAhead` counts boundaries that the client drew
   with the other branch, because their query settled before hydration.
   That is not a mismatch.

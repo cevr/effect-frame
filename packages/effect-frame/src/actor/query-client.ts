@@ -597,7 +597,7 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
   // Join the live set, then count the claims that exist now. A claim made
   // after the join updates this slot itself, so none is missed.
   yield* ownership.join(slot);
-  yield* begin(slot, seeds.take(keyOf(key)));
+  yield* begin(slot, seeds.take(keyOf(key)), seeds.hydrated);
   return slot;
 });
 
@@ -611,20 +611,24 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
  * the slot reads again at once. `published` completes once the seed has
  * landed, was superseded, or the slot closed.
  */
-const begin = (slot: CacheSlot, seed: Option.Option<Seed>): Effect.Effect<void> =>
+const begin = (
+  slot: CacheSlot,
+  seed: Option.Option<Seed>,
+  hydrated: Effect.Effect<void>,
+): Effect.Effect<void> =>
   Option.match(seed, {
     onNone: () => Effect.asVoid(Effect.forkIn(slot.refresh, slot.scope)),
     onSome: (found) => {
       const published = Deferred.succeed(found.published, void 0);
       return Option.match(found.current, {
-        onSome: (state) => Effect.andThen(landSeed(slot, state), published),
+        onSome: (state) => Effect.andThen(landSeed(slot, state, hydrated), published),
         onNone: () => {
           const commit = slot.outsideRead();
           return Effect.andThen(
             Scope.addFinalizer(slot.scope, published),
             Effect.forkIn(
               Effect.flatMap(Deferred.await(found.settled), (state) =>
-                commit(landSeed(slot, state)),
+                commit(landSeed(slot, state, hydrated)),
               ).pipe(Effect.ensuring(published)),
               slot.scope,
             ),
@@ -634,11 +638,25 @@ const begin = (slot: CacheSlot, seed: Option.Option<Seed>): Effect.Effect<void> 
     },
   });
 
-const landSeed = (slot: CacheSlot, state: SeedState): Effect.Effect<void> => {
-  // A prerendered page's value: shown at once, marked unconfirmed, and read
-  // again now. The reply lands `Ready{stale: false}` in its place (#23 §3.2).
+/**
+ * Land a seed's state. The seed is what the server drew, so it stays on
+ * screen until hydration is done: a read the seed calls for starts only
+ * then (review round 2). A reply that came before the client's first
+ * drawing would draw a newer value than the server's markup.
+ */
+const landSeed = (
+  slot: CacheSlot,
+  state: SeedState,
+  hydrated: Effect.Effect<void>,
+): Effect.Effect<void> => {
+  const readAfterHydration = Effect.asVoid(
+    Effect.forkIn(Effect.andThen(hydrated, slot.refresh), slot.scope),
+  );
+  // A prerendered page's value, or one the server showed stale: shown at
+  // once, marked unconfirmed, and read again once hydration is done. The
+  // reply lands `Ready{stale: false}` in its place (#23 §3.2).
   if (state._tag === "Ready" && state.stale) {
-    return Effect.andThen(slot.acceptStale(state.value), Effect.forkIn(slot.refresh, slot.scope));
+    return Effect.andThen(slot.acceptStale(state.value), readAfterHydration);
   }
   if (state._tag === "Ready") {
     return slot.accept(state.value);
@@ -647,9 +665,9 @@ const landSeed = (slot: CacheSlot, state: SeedState): Effect.Effect<void> => {
     return slot.reject(state.error);
   }
   if (state._tag === "Failed") {
-    return Effect.andThen(slot.reject(state.error), Effect.forkIn(slot.refresh, slot.scope));
+    return Effect.andThen(slot.reject(state.error), readAfterHydration);
   }
-  return Effect.asVoid(Effect.forkIn(slot.refresh, slot.scope));
+  return readAfterHydration;
 };
 
 /**
@@ -683,6 +701,11 @@ interface Seed {
 interface Seeds {
   /** The seed for a key, if the document holds one no slot has consumed. */
   readonly take: (id: string) => Option.Option<Seed>;
+  /**
+   * Completes when hydration is done (`Resumed.hydrated`), or when the
+   * principal changed. A read a seed calls for waits for it.
+   */
+  readonly hydrated: Effect.Effect<void>;
 }
 
 /** One live entry as the server's streamed render reads it. */
@@ -712,7 +735,9 @@ export interface DocumentAccess {
   readonly end: Effect.Effect<void>;
   /**
    * Hydration is done. A seed no slot took is dropped: a key declared from
-   * now on reads over the query path, never from the document.
+   * now on reads over the query path, never from the document. A read a
+   * landed seed called for (a stale value, a failure that is not final)
+   * starts now, not before: until then the entry shows what the server drew.
    */
   readonly expire: Effect.Effect<void>;
 }
@@ -732,6 +757,7 @@ interface CacheDocument {
 const makeDocument = (live: ReadonlySet<CacheSlot>): CacheDocument => {
   const table = new Map<string, Seed>();
   let expired = false;
+  const hydrated = Deferred.makeUnsafe<void>();
   const seedFor = (id: string): Seed =>
     Option.getOrElse(Option.fromNullishOr(table.get(id)), () => {
       const created: Seed = {
@@ -785,9 +811,12 @@ const makeDocument = (live: ReadonlySet<CacheSlot>): CacheDocument => {
         ),
       ),
     ),
-    expire: Effect.sync(() => {
-      expired = true;
-    }),
+    expire: Effect.andThen(
+      Effect.sync(() => {
+        expired = true;
+      }),
+      Deferred.succeed(hydrated, void 0),
+    ),
   };
   const seeds: Seeds = {
     take: (id) =>
@@ -798,6 +827,7 @@ const makeDocument = (live: ReadonlySet<CacheSlot>): CacheDocument => {
         seed.taken = true;
         return true;
       }),
+    hydrated: Deferred.await(hydrated),
   };
   const document: CacheDocument = { access, seeds };
   return document;

@@ -225,8 +225,9 @@ does, with no body.
     Pages are listed by href, so the manifest does not depend on the order
     in which the inputs answered.
 18. **A baked patch lands stale and revalidates once.** A `Patch` with
-    `builtAt` lands as `Ready { stale: true }`, and the entry reads once;
-    it reaches `Ready { stale: false }`. A patch without `builtAt`, from an
+    `builtAt` lands as `Ready { stale: true }`, and the entry reads once
+    when `Resumed.hydrated` runs (streaming review round 2); it reaches
+    `Ready { stale: false }`. A patch without `builtAt`, from an
     SSR or streamed document, is fresh and is not read again.
 19. **A reset store whose revisions restarted below R is out of scope.** As
     #23 §3.1 says, a store that no longer holds R but is past it answers

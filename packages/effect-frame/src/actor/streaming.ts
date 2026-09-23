@@ -61,15 +61,16 @@ export const Patch = Schema.TaggedStruct("Patch", {
   /**
    * Present only on a prerendered page (#23 §3.2): when the build read this
    * value, in milliseconds since the epoch. Its presence is what seeds the
-   * entry `Ready{stale: true}`, so the client reads it again at once. Nothing
-   * branches on its value.
+   * entry `Ready{stale: true}`, so the client reads it again once hydration
+   * is done (`Resumed.hydrated`). Nothing branches on its value.
    */
   builtAt: Schema.optionalKey(Schema.Finite),
   /**
    * Present only when the server showed the value stale: a read, a refresh
    * or a command that the value waits for was still open, or the value was
    * set by `override`. The server drawing shows the flag, so the client
-   * seeds the entry `Ready{stale: true}` too, and reads it again at once.
+   * seeds the entry `Ready{stale: true}` too, and reads it again once
+   * hydration is done (`Resumed.hydrated`).
    */
   stale: Schema.optionalKey(Schema.Literal(true)),
 });
@@ -291,7 +292,10 @@ export interface Resumed {
   /**
    * Run it once hydration is done. A seed no view took is dropped then, so
    * a key a view declares later reads over the query path, never a value
-   * the document held since the page loaded.
+   * the document held since the page loaded. The reads that seeds call for
+   * start then too (a stale value, a failure that is not final,
+   * `StreamEnded`): until hydration is done, an entry shows what the server
+   * drew. A client that never runs it never reads those keys again.
    */
   readonly hydrated: Effect.Effect<void>;
 }
@@ -304,8 +308,9 @@ export interface Resumed {
  *
  * A placeholder that nothing settles fails `StreamEnded` when the channel
  * ends, whether `Closed` said so or the response was cut. That entry reads
- * again over the ordinary query path at once, and so does an entry whose
- * patch is a failure other than the query's own `QueryFailed`. A cache not built by
+ * again over the ordinary query path once hydration is done
+ * (`Resumed.hydrated`), and so does an entry whose patch is a failure other
+ * than the query's own `QueryFailed`. A cache not built by
  * `QueryCache.layer` has nowhere to put a seed: its views read normally.
  */
 export const resume: (

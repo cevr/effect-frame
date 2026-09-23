@@ -238,7 +238,7 @@ export type Mounting = (
   root: HTMLElement,
 ) => Effect.Effect<unknown, never, QueryCache | ActorTransport | Scope.Scope>;
 
-/** The client: read the records, seed the cache, hydrate `#app` with `mounting`. */
+/** The client: read the records, seed the cache, hydrate `#app` with `mounting`, then run `Resumed.hydrated`. */
 export const hydrateWith = (client: Side, mounting: Mounting) =>
   Effect.gen(function* () {
     const root = Option.getOrThrow(
@@ -253,6 +253,8 @@ export const hydrateWith = (client: Side, mounting: Mounting) =>
     yield* mounting(hydration.host, root);
     yield* render;
     const report = yield* hydration.finish;
+    // As the documented client does: a read a seed calls for starts now.
+    yield* resumed.hydrated;
     return { report, resumed, root };
   }).pipe(Effect.provideContext(client));
 

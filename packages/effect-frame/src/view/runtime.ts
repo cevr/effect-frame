@@ -1020,6 +1020,12 @@ const planShow = <HostNode, A>(
   );
 };
 
+/** Each value in a new box, so an effect over it runs on every write. */
+const boxed = <A>(source: Source<A>): Source<Box<A>> => ({
+  get: Effect.map(source.get, (value) => ({ value })),
+  changes: Stream.map(source.changes, (value) => ({ value })),
+});
+
 /**
  * A readiness boundary starts its content owner once and only switches the
  * presented host writes. The fallback uses the ordinary destructive branch
@@ -1029,7 +1035,8 @@ const planRetained = <HostNode>(
   renderer: Renderer<HostNode>,
   node: RetainedNode,
 ): Build<HostNode> => {
-  const visible = renderer.tracker.track(node.when);
+  const wanted = renderer.tracker.track(boxed(node.when));
+  const visible = (): boolean => wanted().value;
   return (parent, slot, changed) => {
     const contentSlot: Slot<HostNode> = { nodes: [] };
     // Hydrating a streamed document (#22): the server may have drawn the
@@ -1047,6 +1054,13 @@ const planRetained = <HostNode>(
     let presented = visible();
     const [fallbackVisible, setFallbackVisible] = createSignal(!presented);
     let hideAfterFallback = false;
+    // The place mark a synchronous hold left for the fallback, until it lands.
+    let held = Option.none<HostNode>();
+    const releaseHeld = (): void => {
+      Option.map(held, (mark) => renderer.host.remove(parent, mark));
+      held = Option.none();
+    };
+    renderer.tracker.register(() => releaseHeld);
 
     // Server HTML (#22): a comment pair around the boundary's nodes, so a
     // hydrating client finds this boundary by its own pair.
@@ -1077,8 +1091,13 @@ const planRetained = <HostNode>(
       fallbackVisible,
       () => plan(branchRenderer, node.fallback),
       () => nothing(),
-      () => Option.orElse(Option.fromNullishOr(contentSlot.nodes[0]), () => closeAnchor),
+      () =>
+        Option.orElse(
+          Option.orElse(held, () => Option.fromNullishOr(contentSlot.nodes[0])),
+          () => closeAnchor,
+        ),
       () => {
+        releaseHeld();
         if (!hideAfterFallback) {
           return;
         }
@@ -1139,7 +1158,29 @@ const planRetained = <HostNode>(
     };
 
     apply(presented);
-    createRenderEffect(visible, apply, { defer: true });
+    // A registration that arrives unsettled while the content is on screen
+    // (#16): leave the document now, before the registering row writes a
+    // node, and let the fallback follow. `when` brings the content back.
+    Option.map(Option.fromNullishOr(node.hold), (subscribe) =>
+      renderer.tracker.register(() =>
+        subscribe(() => {
+          if (!presented) {
+            return;
+          }
+          // An empty text node keeps the content's place for the fallback,
+          // which is drawn at the next flush, after the row has been built.
+          const mark = renderer.host.createText("");
+          renderer.host.insert(parent, mark, Option.fromNullishOr(contentSlot.nodes[0]));
+          held = Option.some(mark);
+          presentation.hide();
+          apply(false);
+        }),
+      ),
+    );
+    // Every value of `when` arrives in a new box, so a value equal to the
+    // last one the effect saw still runs `apply`: after the hold above hid
+    // the content, `when` may go false and back to true before a flush.
+    createRenderEffect(wanted, (box) => apply(box.value), { defer: true });
   };
 };
 

@@ -12,7 +12,7 @@ import {
   Policy,
 } from "effect-frame/actor";
 import type { QueryEntry, Source } from "effect-frame/actor";
-import { select as selectSource } from "effect-frame/actor/client";
+import { Behavior, Value, select as selectSource, spawn } from "effect-frame/actor/client";
 import { QueryTest } from "effect-frame/actor/testing";
 import {
   Await,
@@ -763,6 +763,96 @@ describe("readiness through context", () => {
         });
         expect(has(root, "#failed-owner-error")).toBe(false);
         expect(textOf(root, "#failed-owner-content")).toBe("content");
+      }),
+  );
+
+  it.scoped.layer(readinessLayer)(
+    "a row that registers after first paint is never connected while its scope is pending",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* makeRoot;
+        const fixtures = yield* ReadinessFixtures;
+        const lateGate = yield* Deferred.make<void>();
+        yield* setResponse(fixtures, "shown", readyResponse("shown"));
+        yield* setResponse(fixtures, "late", pendingResponse(lateGate, "late"));
+        const reveal = yield* Deferred.make<Effect.Effect<void>>();
+
+        const LateCard = Effect.gen(function* () {
+          const entry = yield* useQuery(ReadinessQuery, { id: "late" });
+          const value = yield* ready(entry.state, "");
+          return <p id="late-card">{View.bind(value)}</p>;
+        });
+        const Page = () =>
+          Loading({
+            fallback: <p id="late-pending">loading</p>,
+            children: Effect.gen(function* () {
+              const entry = yield* useQuery(ReadinessQuery, { id: "shown" });
+              const value = yield* ready(entry.state, "");
+              const revealed = yield* spawn(Behavior.value(false));
+              yield* Deferred.succeed(reveal, Effect.asVoid(revealed.send(Value.Set(true))));
+              const late = yield* View.list({
+                each: selectSource(revealed.state, (open): ReadonlyArray<string> =>
+                  Option.match(Option.liftPredicate(open, Boolean), {
+                    onNone: () => [],
+                    onSome: () => ["late"],
+                  }),
+                ),
+                keyBy: (name: string) => name,
+                row: () => LateCard,
+              });
+              return (
+                <section id="late-page">
+                  <p id="late-shown">{View.bind(value)}</p>
+                  {late}
+                </section>
+              );
+            }),
+          });
+
+        const page = yield* mountScoped(Page, root);
+        yield* page.waitFor({
+          label: "first paint",
+          until: (actualRoot) => textAt(actualRoot, "#late-shown") === "shown",
+        });
+
+        // Every element connected under the root that is or holds the card.
+        const connected: Array<string> = [];
+        const note = (records: ReadonlyArray<MutationRecord>): void => {
+          for (const record of records) {
+            for (const added of Array.from(record.addedNodes)) {
+              if (
+                added instanceof HTMLElement &&
+                (added.id === "late-card" || has(added, "#late-card"))
+              ) {
+                connected.push(added.id || added.tagName);
+              }
+            }
+          }
+        };
+        const observer = new MutationObserver(note);
+        yield* Effect.acquireRelease(
+          Effect.sync(() => observer.observe(root, { childList: true, subtree: true })),
+          () => Effect.sync(() => observer.disconnect()),
+        );
+
+        yield* Effect.flatten(Deferred.await(reveal));
+        yield* page.waitFor({
+          label: "the late registration puts the fallback back",
+          until: (actualRoot) => hasAt(actualRoot, "#late-pending"),
+        });
+        yield* Effect.sync(() => note(observer.takeRecords()));
+        // The card was built while the scope was pending: none of its nodes
+        // reached the root.
+        expect(connected).toEqual([]);
+        expect(has(root, "#late-card")).toBe(false);
+
+        yield* Deferred.succeed(lateGate, void 0);
+        yield* page.waitFor({
+          label: "the late card lands with its value",
+          until: (actualRoot) =>
+            !hasAt(actualRoot, "#late-pending") && textAt(actualRoot, "#late-card") === "late",
+        });
+        expect(textOf(root, "#late-shown")).toBe("shown");
       }),
   );
 

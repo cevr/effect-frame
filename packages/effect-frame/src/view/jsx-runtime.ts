@@ -113,6 +113,14 @@ export interface RetainedNode {
   readonly when: Source<boolean>;
   readonly fallback: Node;
   readonly content: Node;
+  /**
+   * Subscribes to the registrations that make this boundary pending, heard
+   * synchronously inside the registering setup. A row mounted after first
+   * paint registers before it writes a node, so the runtime takes the content
+   * out of the document first and the row is built detached (#16). `when`
+   * still decides when the content returns. Returns the unsubscribe.
+   */
+  readonly hold?: (listener: () => void) => () => void;
 }
 
 /** Control flow in the tree. `control.ts` builds it; `runtime.ts` reads it. */

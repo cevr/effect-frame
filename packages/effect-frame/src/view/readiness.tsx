@@ -65,8 +65,31 @@ interface Registry {
   readonly entries: Source<ReadonlyArray<Registration>>;
 }
 
-const makeRegistry: Effect.Effect<Registry> = Effect.gen(function* () {
+/** The registry a `Loading` builds for itself: it can also report a hold. */
+interface OwnRegistry extends Registry {
+  /**
+   * Hears, synchronously and before `register` returns, each registration
+   * that arrives unsettled. The retained runtime node uses it to leave the
+   * document before the registering view writes (#16). Returns the
+   * unsubscribe.
+   */
+  readonly onPending: (listener: () => void) => () => void;
+}
+
+const makeRegistry: Effect.Effect<OwnRegistry> = Effect.gen(function* () {
   const ref = yield* SubscriptionRef.make<ReadonlyArray<Registration>>([]);
+  const listeners = new Set<() => void>();
+  const announce = (registration: Registration) =>
+    Effect.flatMap(registration.settled.get, (settled) =>
+      Effect.sync(() => {
+        if (settled) {
+          return;
+        }
+        for (const listener of listeners) {
+          listener();
+        }
+      }),
+    );
   // Registration and its release are one scoped acquisition. A branch or
   // owner scope that disappears cannot leave a stale pending contribution.
   const remove = (registration: Registration) =>
@@ -74,10 +97,19 @@ const makeRegistry: Effect.Effect<Registry> = Effect.gen(function* () {
   return {
     register: (registration) =>
       Effect.acquireRelease(
-        SubscriptionRef.update(ref, (all) => [...all, registration]),
+        Effect.andThen(
+          SubscriptionRef.update(ref, (all) => [...all, registration]),
+          announce(registration),
+        ),
         () => remove(registration),
       ),
     entries: { get: SubscriptionRef.get(ref), changes: SubscriptionRef.changes(ref) },
+    onPending: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
   };
 });
 
@@ -322,13 +354,14 @@ const retained = (
   when: Source<boolean>,
   fallback: Node,
   content: Node,
-): RetainedNode => ({
-  _tag: "Retained",
-  kind,
-  when,
-  fallback,
-  content,
-});
+  hold: Option.Option<NonNullable<RetainedNode["hold"]>>,
+): RetainedNode => {
+  const node: RetainedNode = { _tag: "Retained", kind, when, fallback, content };
+  return Option.match(hold, {
+    onNone: () => node,
+    onSome: (found) => ({ ...node, hold: found }),
+  });
+};
 
 /**
  * Provide a `LoadingScope` to the children and show `fallback` until every
@@ -354,6 +387,7 @@ export const Loading = <E, R>(
       select(pending, (value) => !value),
       props.fallback,
       content,
+      Option.some(registry.onPending),
     );
   });
 
@@ -393,6 +427,7 @@ export const Errored = <E, R>(
       select(failed, (value) => !value),
       props.fallback(failure),
       content,
+      Option.none(),
     );
   });
 

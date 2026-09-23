@@ -336,8 +336,8 @@ The build and the server are server-only, in `effect-frame/router/prerender`:
 import * as Prerender from "effect-frame/router/prerender";
 
 // The build: every input, through renderDocument's pipeline, in AwaitAll, as Anonymous.
-yield *
-  Prerender.build({
+const buildSite = Effect.gen(function* () {
+  yield* Prerender.build({
     routes: [Posts, App],
     notFound,
     document: (page) => Effect.succeed(documentFor(page)),
@@ -345,10 +345,13 @@ yield *
     out: "dist/prerender",
     timeLimit: "10 seconds",
   });
+});
 
 // The server: a built page answers before the router runs.
-const site = yield * Prerender.load("dist/prerender");
-const handler = yield * Prerender.serve(site, routerHandler);
+const handler = Effect.gen(function* () {
+  const site = yield* Prerender.load("dist/prerender");
+  return yield* Prerender.serve(site, routerHandler);
+});
 ```
 
 - Each page is written to `<href>/index.html` in a new generation under
@@ -530,6 +533,71 @@ const start = Effect.gen(function* () {
   `<!--frame-boundary:…-->` marks around each readiness boundary.
 
 See [the streaming design](docs/design/streaming.md).
+
+## Server-driven views
+
+A view can run on the server and draw into a browser over a stream of host
+operations. The server mounts the view on a recording host; the client
+replays the operations and sends events back. A connection starts with the
+drive actor's snapshot, never with an operation log, and a reconnect does
+the same at constant cost.
+
+```tsx
+import * as Driven from "effect-frame/view/driven"; // server only
+import { Dom, Remote } from "effect-frame/view";
+
+// Server: one session per connection.
+const serve = Effect.gen(function* () {
+  const session = yield* Driven.session(RoomView, props, { contract: Room, key });
+  send(session.resume);
+  yield* Effect.forkScoped(Stream.runForEach(received, session.fire)); // events back
+  yield* Stream.runForEach(session.patches, (patch) => send(encode(patch)));
+});
+
+// Client: draw from the snapshot, then apply each patch.
+const client = Remote.client(
+  RoomView,
+  props,
+  { contract: Room, key },
+  { host: Dom.host, root, send },
+);
+const follow = Effect.gen(function* () {
+  yield* client.resume(payload); // the first connect and every reconnect
+  yield* client.apply(patch); // ForeignSession, StaleClient, or UnknownNode: applies nothing
+});
+```
+
+- `Driven.session(view, props, drive, { limit })` mounts the view on a fresh
+  `Remote.recorder()` at the drive's latest snapshot. `resume` is the
+  session id, the snapshot, and a digest of the drawing, as one JSON
+  string. `patches` streams every later change from position 0, each
+  naming the session, with the writes that would not change the client's
+  tree left out. A client that falls more than `limit` operations behind
+  (default `Driven.defaultLimit`) ends the stream with `Backlogged` and must
+  resume. `retained` shows what the session holds; after its scope closes,
+  that is nothing.
+- `Remote.client(view, props, drive, { host, root, send })` works with any
+  host. `resume(payload)` removes what the client drew and draws the view
+  from the snapshot on its own recorder, which gives the ids the server's
+  recorder gave, and fails `Diverged` if its drawing is not the server's.
+  `apply(patch)` refuses a patch from another session (`ForeignSession`),
+  one whose `from` is not the position it holds (`StaleClient`), or one
+  that names an id it does not hold (`UnknownNode`), and changes nothing.
+- `Remote.draw(view, props, drive, payload)` returns the operations a
+  drawing from a snapshot makes. Two drawings at one snapshot are equal.
+- `Remote.Op`, `Remote.Patch`, `Remote.RemoteEvent`, `Remote.PatchJson`,
+  `Remote.RemoteEventJson`, `Remote.StaleClient`, `Remote.UnknownNode`,
+  `Remote.recorder`, `Remote.root`, `Remote.Drive`, `Remote.payloadOf`.
+- A driven view draws from its one drive actor, on both sides; any other
+  read fails `Unreachable`. Its drawing must depend on its props and that
+  snapshot only. An event carries its value only, and reaches only a
+  listener a patch has delivered. Patches are trusted server output. The
+  socket is the application's.
+- A host may implement `forget(node)`: the runtime calls it when the owner
+  that drew the node ends. The recorder sends it as a `Forget` op, so a
+  long session holds only live nodes.
+
+See [the op wire design](docs/design/op-wire.md).
 
 ## Authorization
 

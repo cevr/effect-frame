@@ -40,7 +40,7 @@ Route.leaf(tabs, TabsView, { behavior: NavigationBehavior.Preserve }); // per le
 Route.client("flat", { path, params, search, view, behavior: NavigationBehavior.Preserve });
 mount({ routes, notFound, host, root, behavior: NavigationBehavior.Restore }); // default: Restore
 
-const location = yield * browserNavigation; // Navigation API, History fallback
+const location = browserNavigation; // Effect<Location, never, Scope>: Navigation API, History fallback
 ```
 
 - `NavigationBehavior` is a namespace with the type and two values,

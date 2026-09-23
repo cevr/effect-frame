@@ -706,11 +706,31 @@ const trackHostWrites = <HostNode>(host: Host<HostNode>): TrackedHost<HostNode> 
     });
   };
 
+  // A host that forgets nodes hears when each node's owner ends. Every node
+  // is created inside the owner that draws it, so its cleanup is that end.
+  const owned = <Args extends ReadonlyArray<unknown>>(
+    create: (...args: Args) => HostNode,
+  ): ((...args: Args) => HostNode) =>
+    Option.match(Option.fromNullishOr(host.forget), {
+      onNone: () => create,
+      onSome:
+        (ended) =>
+        (...args: Args) => {
+          const node = create(...args);
+          onCleanup(() => ended(node));
+          return node;
+        },
+    });
+
   return {
-    createElement: host.createElement,
-    createText: host.createText,
-    createDetachedElement: host.createDetachedElement,
-    createDetachedText: host.createDetachedText,
+    createElement: owned(host.createElement),
+    createText: owned(host.createText),
+    createDetachedElement: Option.getOrUndefined(
+      Option.map(Option.fromNullishOr(host.createDetachedElement), owned),
+    ),
+    createDetachedText: Option.getOrUndefined(
+      Option.map(Option.fromNullishOr(host.createDetachedText), owned),
+    ),
     boundaryMarks: host.boundaryMarks,
     adoptBoundary: host.adoptBoundary,
     setupStarted: host.setupStarted,
@@ -1663,16 +1683,17 @@ export const mount = Effect.fn("View.mount")(function* <Props, E, R, HostNode>(
       Effect.gen(function* () {
         let dispose: Option.Option<() => void> = Option.none();
         const outcome = yield* Effect.exit(
-          Effect.sync(() =>
-            createRoot((disposeRoot) => {
+          Effect.sync(() => {
+            flush();
+            return createRoot((disposeRoot) => {
               dispose = Option.some(disposeRoot);
               tracker.commit(() => {
                 plan({ host: trackedHost, tracker }, tree)(root, slot, () => {});
                 flush();
               });
               return disposeRoot;
-            }),
-          ),
+            });
+          }),
         );
         return yield* Exit.match(outcome, {
           onFailure: (cause) =>

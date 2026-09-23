@@ -59,6 +59,11 @@
       "types": "./dist/view/jsx-runtime.d.ts",
       "default": "./dist/view/jsx-runtime.js"
     },
+    "./view/driven": {
+      "source": "./src/view/driven.server.ts",
+      "types": "./dist/view/driven.server.d.ts",
+      "default": "./dist/view/driven.server.js"
+    },
     "./view/opentui": {
       "source": "./src/view/hosts/opentui.ts",
       "types": "./dist/view/hosts/opentui.d.ts",

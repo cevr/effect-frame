@@ -39,8 +39,8 @@ const Posts = Route.prerender("posts", Route.layout(org, [Route.leaf(post, PostV
 });
 
 // A build script, server side:
-yield *
-  Prerender.build({
+const buildSite = Effect.gen(function* () {
+  yield* Prerender.build({
     routes: [Posts, About, App],
     notFound,
     document: (page) => Effect.succeed(documentFor(page)),
@@ -48,10 +48,13 @@ yield *
     out: "dist/prerender",
     timeLimit: "10 seconds",
   });
+});
 
-// The server, in front of the router:
-const site = yield * Prerender.load("dist/prerender");
-const handler = yield * Prerender.serve(site, routerHandler);
+// The server: a built page answers before the router runs.
+const handler = Effect.gen(function* () {
+  const site = yield* Prerender.load("dist/prerender");
+  return yield* Prerender.serve(site, routerHandler);
+});
 ```
 
 A build goes through four steps:

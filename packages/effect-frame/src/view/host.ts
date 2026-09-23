@@ -60,6 +60,15 @@ export interface Host<Node> {
    * draw nodes. Only that render's host counts them.
    */
   readonly setupStarted?: () => () => void;
+  /**
+   * The owner that created `node` ended: the list row, branch, or mount it
+   * was drawn in is gone, and the runtime never names the node again. This
+   * is the end of a node's life. A remove is not: a retained branch removes
+   * its nodes when it hides and inserts them again when it shows. Only a
+   * host that keeps state for each node needs it, as the op wire's recorder
+   * does (#87).
+   */
+  readonly forget?: (node: Node) => void;
 }
 
 /** The comment pair around one readiness boundary in server HTML (#22). */

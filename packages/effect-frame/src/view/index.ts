@@ -51,6 +51,8 @@ export type {
 } from "./jsx-runtime.js";
 export * as Dom from "./hosts/dom.js";
 export * as Html from "./hosts/html-public.js";
+// The streamed host-operation wire (#15), client half. The server half is `effect-frame/view/driven`.
+export * as Remote from "./hosts/remote.js";
 export * as ViewTest from "./testing.js";
 
 // Readiness through context (#16).

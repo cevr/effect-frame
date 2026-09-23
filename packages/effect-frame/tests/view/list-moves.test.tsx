@@ -5,8 +5,8 @@ registerDom();
 import { Behavior, Value, spawn } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
 import type { Host } from "effect-frame/view";
-import { Dom, For, View, ViewTest, mount } from "effect-frame/view";
-import { Effect, Option } from "effect";
+import { Dom, For, Html, View, ViewTest, mount, render } from "effect-frame/view";
+import { Deferred, Effect, Option, Stream, SubscriptionRef } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 const makeRoot = Effect.sync(() => document.createElement("main"));
@@ -300,6 +300,57 @@ describe("a keyed list moves only what moved", () => {
       });
       expect(idsIn(root)).toEqual(["b", "d"]);
       expect(Array.from(root.querySelectorAll("li"))[0]).toBe(b);
+    }),
+  );
+});
+
+/** Let every fiber that is ready run, under the test clock. */
+const settle = Effect.gen(function* () {
+  for (let step = 0; step < 100; step += 1) {
+    yield* Effect.yieldNow;
+  }
+});
+
+describe("a mount never adopts another view's rows", () => {
+  it.scoped("a row added just before another view mounts and closes stays live", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const items = yield* SubscriptionRef.make<ReadonlyArray<LabeledItem>>([
+        { key: "a", label: "alpha" },
+      ]);
+      // The view's subscriber writes the list signal right after this tap,
+      // in the same step. The test wakes after that write and before Solid
+      // flushes it: the window in which the bug struck.
+      const delivered = yield* Deferred.make<ReadonlyArray<LabeledItem>>();
+      const source: Source<ReadonlyArray<LabeledItem>> = {
+        get: SubscriptionRef.get(items),
+        changes: Stream.tap(SubscriptionRef.changes(items), (value) =>
+          Effect.when(Deferred.succeed(delivered, value), Effect.succeed(value.length === 2)),
+        ),
+      };
+      yield* mount(LabeledKeyed, { items: source }, Dom.host, root);
+      yield* settle;
+      yield* render;
+
+      // The list update is pending in Solid when another view mounts and
+      // closes: a server render, for one. That mount's flush must not run the
+      // update under its own root, or closing that root disposes the new
+      // row's binding.
+      yield* SubscriptionRef.set(items, [
+        { key: "a", label: "alpha" },
+        { key: "b", label: "beta" },
+      ]);
+      yield* Deferred.await(delivered);
+      yield* Html.renderToString(() => Effect.succeed(<p>elsewhere</p>), {});
+      yield* settle;
+      expect(idsIn(root)).toEqual(["alpha", "beta"]);
+
+      yield* SubscriptionRef.set(items, [
+        { key: "a", label: "alpha" },
+        { key: "b", label: "BETA" },
+      ]);
+      yield* settle;
+      expect(idsIn(root)).toEqual(["alpha", "BETA"]);
     }),
   );
 });

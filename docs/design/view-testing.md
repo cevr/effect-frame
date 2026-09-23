@@ -13,11 +13,10 @@ const page =
     setup: (host, root) => mount(Page, props, host, root),
   });
 
-yield *
-  page.act(update, {
-    label: "counter reaches one",
-    until: (root) => root.querySelector("#count")?.textContent === "1",
-  });
+const reachOne = page.act(update, {
+  label: "counter reaches one",
+  until: (root) => root.querySelector("#count")?.textContent === "1",
+});
 ```
 
 `waitFor` observes a synchronous, read-only predicate. `act` waits for the

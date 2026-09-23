@@ -1,5 +1,0 @@
----
-"effect-frame": minor
----
-
-A behavior can refuse a message. `Behavior.reducer({ initial, reduce, refuse })` and `Behavior.value(initial, { refuse })` take an optional pure rule `refuse: (message) => Option<Refused>`; `reduce` stays total. A refused message is never applied and commits no revision: its handle settles `Rejected(Refused { reason })`. A durable or hosted actor refuses a new command at admission (nothing is appended), a command it already holds is answered from its record, the HTTP wire answers 422 with the decoded `Refused`, a plain form post answers 422 with the reason as its issue, and a reference that predicts with the same behavior never predicts a refused message. The command owner treats `Refused` as conclusive and never retries it. The refusal is typed: `Behavior`, `ActorRef`, `LocalActorRef`, `Rejection`, `CallError`, `CommandState`, `CommandSettled`, and the handle types take a `Refusal` parameter that defaults to `never`, so a behavior without a rule keeps its exact error types; a remote reference always includes `Refused`.

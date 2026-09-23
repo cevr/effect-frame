@@ -1,5 +1,29 @@
 # effect-frame
 
+## 0.21.0
+
+### Minor Changes
+
+- [`f0c7d95`](https://github.com/cevr/effect-frame/commit/f0c7d95ae75083303bb767f596418ab8f4a1f9c0) Thanks [@cevr](https://github.com/cevr)! - A behavior can refuse a message. `Behavior.reducer({ initial, reduce, refuse })` and `Behavior.value(initial, { refuse })` take an optional pure rule `refuse: (message) => Option<Refused>`; `reduce` stays total. A refused message is never applied and commits no revision: its handle settles `Rejected(Refused { reason })`. A durable or hosted actor refuses a new command at admission (nothing is appended), a command it already holds is answered from its record, the HTTP wire answers 422 with the decoded `Refused`, a plain form post answers 422 with the reason as its issue, and a reference that predicts with the same behavior never predicts a refused message. The command owner treats `Refused` as conclusive and never retries it. The refusal is typed: `Behavior`, `ActorRef`, `LocalActorRef`, `Rejection`, `CallError`, `CommandState`, `CommandSettled`, and the handle types take a `Refusal` parameter that defaults to `never`, so a behavior without a rule keeps its exact error types; a remote reference always includes `Refused`.
+
+- [`f925b5c`](https://github.com/cevr/effect-frame/commit/f925b5c78e1465863f7ee7fc5e8d127eaae9155d) Thanks [@cevr](https://github.com/cevr)! - A route actor is seeded into the document. A route that declares `Route.actor` holds its reference's committed snapshot while it draws, and the document carries it beside the drawing: `SSR` and `AwaitAll` in a `frame-actor-seed` script, `Streamed` as `ActorSeed` records in the first chunk. The client's route opens its reference from it while the page hydrates and reads no snapshot; seeds are dropped at `Resumed.hydrated`. `Streaming.StreamRecord` now includes `ActorSeed`, and `Streaming.actorSeeds`, `Streaming.actorSeedId` and `Streaming.ActorSeedJson` are new. `Route.actor(contract, key, { behavior })` gives the route's reference a behavior, so a view sends through it with prediction.
+
+- [`8691948`](https://github.com/cevr/effect-frame/commit/8691948eef6e6fbf8d94d04b87518e363ac0f66f) Thanks [@cevr](https://github.com/cevr)! - `mount` takes `traversalReadLimit` (a `Duration.Input`, default 3 seconds): how long a traversal waits for the reads its page declared before it places the saved position. At the limit it lands on the page as it is (the scroll may clamp) and never places again when the reads settle later, and the Navigation API's traversal is released. Before, a declared read that never settled held the traversal for ever.
+
+### Patch Changes
+
+- [`d84ac96`](https://github.com/cevr/effect-frame/commit/d84ac96d3d060166901a5b5e3be050123d9ee880) - Predict a command whose ID the framework minted. `Generated.send` and `View.form` pass the ID they minted for one send, and that send now predicts at once, as a plain `send` does ([#67](https://github.com/cevr/effect-frame/issues/67) §3). An ID an application supplies, and an ID the server drew into a form's markup, still waits for its receipt. Not breaking.
+
+- [`32205b9`](https://github.com/cevr/effect-frame/commit/32205b9aaef96d79737da6668a02db40c7cdd4a6) Thanks [@cevr](https://github.com/cevr)! - A minted command ID is known by identity ([#67](https://github.com/cevr/effect-frame/issues/67) §3). The framework recorded that it minted an ID by a private symbol on the send options, and checked it with `in`, so a `Proxy` whose `has` trap answers true passed as minted: an application's own, possibly reused ID then predicted, and a first refusal counted as conclusive. The options the framework mints are now recorded in a module-private `WeakSet` and frozen. Not breaking.
+
+- [`9b23449`](https://github.com/cevr/effect-frame/commit/9b234495d5c4eade84cf23cbdc4f762436670e17) Thanks [@cevr](https://github.com/cevr)! - A framework-minted command ID is fresh for one send only. The reference's check consumes the minted options' record, so an application wrapper that keeps the frozen options and sends them again sends a supplied ID: it waits for receipt evidence instead of predicting over a used ID.
+
+- [`657197b`](https://github.com/cevr/effect-frame/commit/657197bf70a9e573ca2561e91cf5b41d8742d486) - The first frame holds a layout's outlet ([#37](https://github.com/cevr/effect-frame/issues/37)). A layout that yields its outlet inside `Loading` now draws a settled child on the first frame: an `SSR` document writes the child, not the fallback, and hydration of an `SSR` or `AwaitAll` document claims it with no `resolvedAhead`. A child that presents `pending` still starts in its row, when the parent is drawn. Not breaking.
+
+- [`c5ce77c`](https://github.com/cevr/effect-frame/commit/c5ce77cf4940abbce3ce0f43ad14a6930712bad6) Thanks [@cevr](https://github.com/cevr)! - Declarations of one route actor address in one tree share one reference. A layout and its leaf that declare the same actor now draw one revision and the document carries one seed for it; before, a commit between their opens could draw two revisions, and the leaf did not hydrate.
+
+- [`a0aae72`](https://github.com/cevr/effect-frame/commit/a0aae72447855ce2f6ef9f7f2a25040a9285dc85) Thanks [@cevr](https://github.com/cevr)! - A Back or Forward lands once its page is drawn ([#31](https://github.com/cevr/effect-frame/issues/31)). The router placed a traversal's saved position at shell commit, while a declared query of the page could still be read again, so the position landed clamped against a short page (always in WebKit, sometimes in Chrome). A traversal now waits until every query the drawn branch declared has settled and the drawing shows it, then restores the position. A push or replace still lands at shell commit. Not breaking.
+
 ## 0.20.1
 
 ### Patch Changes

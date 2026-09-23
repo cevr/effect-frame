@@ -24,23 +24,22 @@ export const freshCommandId: Effect.Effect<CommandId> = Effect.sync(() =>
  * (`Generated.send`), and a form whose own ID was drawn into its markup
  * (`View.form`). The framework minted that ID for this one send, so nothing
  * else can hold it, and it is as fresh as one the reference mints itself: it
- * predicts, and a first refusal is conclusive. The mark is a module symbol
- * that no public entry exports, so an application cannot claim it: an ID an
- * application supplies stays supplied, whatever its origin.
+ * predicts, and a first refusal is conclusive.
+ *
+ * Provenance is identity, not shape. The options object `mintedFor` made is
+ * recorded in a module-private `WeakSet` and frozen, so its ID cannot change
+ * after it was recorded. No property, symbol, or `Proxy` trap can claim it:
+ * an ID an application supplies stays supplied, whatever its origin.
  */
-const Minted: unique symbol = Symbol("effect-frame/actor/command-id/Minted");
-
-interface MintedSendOptions extends DurableSendOptions {
-  readonly commandId: CommandId;
-  readonly [Minted]: true;
-}
+const minted = new WeakSet<object>();
 
 /** Send options for an ID the framework minted for this send alone. Internal. */
 export const mintedFor = (commandId: CommandId): DurableSendOptions => {
-  const options: MintedSendOptions = { commandId, [Minted]: true };
+  const options: DurableSendOptions = Object.freeze({ commandId });
+  minted.add(options);
   return options;
 };
 
-/** Whether these options carry an ID the framework minted for this send. Internal. */
+/** Whether these options are the ones the framework minted for this send. Internal. */
 export const isMinted = (options: DurableSendOptions | void): boolean =>
-  Predicate.hasProperty(options, Minted);
+  Predicate.isObject(options) && minted.has(options);

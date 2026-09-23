@@ -464,6 +464,38 @@ describe("optimistic sends (#19, #67)", () => {
     }),
   );
 
+  it.scoped("a Proxy that answers every key cannot pass for a minted ID", () =>
+    Effect.gen(function* () {
+      const wire = yield* heldWire();
+      const held = yield* wire.holdSend("a");
+      const list = yield* Effect.provideService(
+        ref(List, "shelf", { resume: Option.none(), behavior: predicting }),
+        ActorTransport,
+        wire.transport,
+      );
+      const commandId = yield* Schema.decodeEffect(CommandId)("proxied");
+      // `in` and every read answer yes for every key, the private one too.
+      const forged = new Proxy(
+        { commandId },
+        {
+          has: () => true,
+          get: (target, key) => {
+            if (key === "commandId") {
+              return target.commandId;
+            }
+            return true;
+          },
+        },
+      );
+      const handle = yield* list.send(append("a"), forged);
+      // Supplied: nothing is predicted before the receipt.
+      expect(yield* list.displayed.get).toEqual({ revision: committedRevision(0), state: [] });
+      yield* wire.release(held);
+      yield* handle.settled;
+      expect(yield* list.state.get).toEqual([stamped("a", 1)]);
+    }),
+  );
+
   it.scoped("Uncertain keeps the provisional state and the same-ID retry applies once", () =>
     Effect.gen(function* () {
       const wire = yield* heldWire();

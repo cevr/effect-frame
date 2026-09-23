@@ -63,9 +63,11 @@ A send predicts when all of these are true:
    in (#37): `Generated.send` derives fields from it, and `View.form` draws
    it into the form's markup. The framework minted both IDs for one send
    alone, so both are fresh. They reach the reference through `mintedFor`,
-   which marks the options with a module-private symbol that no public entry
-   exports. An application cannot make that mark, so an ID it supplies stays
-   supplied, whatever its origin. A form marks only an ID its own client
+   which records the exact options object in a module-private `WeakSet` and
+   freezes it. Provenance is that object's identity, not its shape: no
+   property, symbol or `Proxy` trap can claim it (review round 1 found that
+   a `Proxy` whose `has` answers true passed a symbol-presence check). An
+   ID an application supplies stays supplied, whatever its origin. A form marks only an ID its own client
    binding minted. An ID that the server drew into the markup stays
    supplied, because a plain post that raced hydration can already have
    admitted it. Each later send from the same form mints, so it predicts.

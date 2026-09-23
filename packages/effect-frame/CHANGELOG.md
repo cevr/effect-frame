@@ -1,5 +1,31 @@
 # effect-frame
 
+## 0.22.0
+
+### Minor Changes
+
+- [`f20a683`](https://github.com/cevr/effect-frame/commit/f20a6837325f60d0bb0d904562aacf519f522c75) Thanks [@cevr](https://github.com/cevr)! - `commandRef(contract, key)` is a remote reference that only sends. It reads no snapshot and opens no change stream, so a page that commands an actor it does not draw holds no live stream for it. Its `send` and `call` go through the same command owner a full `ref` uses: the same identities, retries and receipts, and the reply refreshes the page's active dependents in one round trip. It never predicts.
+
+- [`0a91eea`](https://github.com/cevr/effect-frame/commit/0a91eea7475c2aeda9697de29407bdc2e0806c8f) Thanks [@cevr](https://github.com/cevr)! - `FollowedQuery` has `override`, as `QueryEntry` does, and so does every `Route.query` binding. It acts on the entry the arguments name at the call, and derives its value from that entry's own Ready value (see the function form in `override-derives-from-own-entry`). The value shows at once, marked stale, and any authoritative value replaces it; a command's rejection does not take it back. After a transition moves the binding, an override acts on the new entry, never the one that exited. With no arguments, nothing is written.
+
+- [`43bd02c`](https://github.com/cevr/effect-frame/commit/43bd02cb75e9d3d9aae6d13fd89845824ec64ff1) Thanks [@cevr](https://github.com/cevr)! - A machine actor no longer takes its state back after a message. `Behavior.machine`'s `changes` also carries the start state and every transition its own messages make, and the actor committed each one it received as a new revision, after any message processed since. Three quick increments committed 0, 1, 2, 3, then 0, 1, 2, 3 again. A durable session could read `Empty` right after a sign-in committed.
+
+  A behavior's turn can now name its own state as `current`. When a change arrives, the actor commits that read, not the value the change carried. `Behavior.machine` sets it. A custom behavior whose `changes` only carries states it made on its own needs nothing new.
+
+- [`828bfd1`](https://github.com/cevr/effect-frame/commit/828bfd13f58c6f5853fcd1a8b001863181cdd71e) Thanks [@cevr](https://github.com/cevr)! - `Behavior.machine(definition, { refuse })` takes a refusal rule, as `reducer` and `value` do. The rule reads the event alone. A refused event never reaches the machine, commits no revision, and settles `Rejected(Refused)`.
+
+- [`7d9311c`](https://github.com/cevr/effect-frame/commit/7d9311ccff609af2e456043f449ae46b9f3fac7b) Thanks [@cevr](https://github.com/cevr)! - Breaking: `override` takes a function, `override((current) => next)`, and returns whether it wrote. This applies on `QueryEntry`, `FollowedQuery` and a route's query binding. The function receives the entry's own Ready value, which is read in the same step that writes the result, under the principal generation of that moment. While the entry is Loading or Failed nothing is written and the result is `false`.
+
+  The plain `override(value)` form is removed. A caller built its value from what a view showed, and during a key switch a followed query still shows the old key's value while `override` writes the new key's entry, so one key's data could be written into another. The function form cannot take a value from another entry.
+
+### Patch Changes
+
+- [`8576999`](https://github.com/cevr/effect-frame/commit/85769995ba6d9404cab5ec31d57048f3150ac43c) Thanks [@cevr](https://github.com/cevr)! - A durable `call` now returns only after the actor's state shows its commit. Before, the reply could arrive while `state.get` and `state.changes` still showed the previous revision, so a read that followed the reply could miss the write.
+
+- [`3caa844`](https://github.com/cevr/effect-frame/commit/3caa8441f813d89742b25d5984143b004a800e65) Thanks [@cevr](https://github.com/cevr)! - A view that registers with a settled `Loading` after first paint no longer reaches the document before the fallback returns. The registration now tells the boundary at once, inside the registering setup: the content leaves the document before the new view writes a node, an empty mark keeps its place, and the fallback is drawn there. Before, a late row was connected for about a millisecond before `Loading` hid it.
+
+- [`3e51d02`](https://github.com/cevr/effect-frame/commit/3e51d0221e6aecb2bed2944e8e82f1ddebd217c1) Thanks [@cevr](https://github.com/cevr)! - `zip`, and so `Source.all`, no longer loses a change that lands between its first read and its subscriptions. It read both sides up front and then dropped each side's first element, so a value that changed in between was never seen: a view bound to it stayed on the old value. It now reads once both sides are followed, then once per later element.
+
 ## 0.21.0
 
 ### Minor Changes

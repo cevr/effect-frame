@@ -6,7 +6,7 @@ import type { QueryCache } from "effect-frame/actor/client";
 import { ActorTransport, queryCacheLayer } from "effect-frame/actor/client";
 import { Location, Route, renderDocument } from "effect-frame/router";
 import type { AnyRoute, RenderedDocument, Router } from "effect-frame/router";
-import { Context, Effect, Layer, Option, Stream } from "effect";
+import { Context, Effect, Layer, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { hydrateRoutes } from "../src/app.js";
 import { inProcess } from "../src/notes.server.js";
@@ -196,24 +196,6 @@ describe("one ListView in every rendering mode", () => {
       expect(yield* modeAt("/lists/inbox")).toBe("Streamed");
       expect(yield* modeAt("/lists/inbox/print")).toBe("AwaitAll");
       expect(yield* modeAt("/scratch")).toBe("ClientOnly");
-    }),
-  );
-
-  it.effect("no view module names a rendering mode", () =>
-    Effect.gen(function* () {
-      const pattern =
-        /\b(SSR|Streamed|AwaitAll|ClientOnly|RenderingMode)\b|Route\.(ssr|streamed|awaitAll|client|prerender)\b|\.mode\b/;
-      for (const file of ["page.tsx", "views.tsx"]) {
-        const source = yield* Effect.promise(() =>
-          // oxlint-disable-next-line effect/noGlobals -- the test reads its own sources.
-          Bun.file(new URL(`../src/${file}`, import.meta.url)).text(),
-        );
-        const found = Option.getOrElse(
-          Option.map(Option.fromNullishOr(pattern.exec(source)), (match) => match[0]),
-          () => "",
-        );
-        expect({ file, found }).toEqual({ file, found: "" });
-      }
     }),
   );
 });

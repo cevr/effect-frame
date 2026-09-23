@@ -19,7 +19,15 @@ import {
   SubscriptionRef,
 } from "effect";
 import * as Inspection from "../inspection.js";
-import type { AnyQuery, ArgsOf, QueryFailure, QueryKey, QueryState, ResultOf } from "./query.js";
+import type {
+  AnyQuery,
+  ArgsOf,
+  QueryFailure,
+  QueryKey,
+  QueryLoading,
+  QueryState,
+  ResultOf,
+} from "./query.js";
 import { Failed, Loading, Ready, StreamEnded, canonicalize, keyOf, markStale } from "./query.js";
 import type { Source } from "./source.js";
 import type { ActorSeed } from "./streaming.js";
@@ -1221,6 +1229,37 @@ export const useQuery = Effect.fn("useQuery")(function* <Q extends AnyQuery>(
 ) {
   const cache = yield* QueryCache;
   return yield* cache.open(contract, args);
+});
+
+/**
+ * Read one query once, as a value (#23 §1.1). It declares the key for the
+ * length of the read, waits for the entry's first value or failure, and
+ * lets go. A failed read fails with its `QueryFailure`. A prerender route's
+ * `inputs` read the list its pages come from this way: in a build, the
+ * read is shared with every page that declares the same key.
+ */
+export const runQuery = Effect.fn("runQuery")(function* <Q extends AnyQuery>(
+  contract: Q,
+  args: ArgsOf<Q>,
+) {
+  const cache = yield* QueryCache;
+  const settled = yield* Effect.scoped(
+    Effect.flatMap(cache.open(contract, args), (entry) =>
+      Stream.runHead(
+        Stream.filter(
+          entry.state.changes,
+          (state): state is Exclude<typeof state, QueryLoading> => state._tag !== "Loading",
+        ),
+      ),
+    ),
+  );
+  if (Option.isNone(settled)) {
+    return yield* Effect.die(`runQuery: ${contract.name} closed before it settled`);
+  }
+  if (settled.value._tag === "Failed") {
+    return yield* settled.value.error;
+  }
+  return settled.value.value;
 });
 
 // ---------------------------------------------------------------------------

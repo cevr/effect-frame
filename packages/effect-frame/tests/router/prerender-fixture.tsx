@@ -1,12 +1,12 @@
 /* oxlint-disable effect/noGlobals -- the serving proofs build web-standard Requests and read Responses, the boundary under test. */
-import { QueryCache, Streaming, isReady, useQuery } from "effect-frame/actor";
-import type { ActorTransport, QueryFailure, QueryState } from "effect-frame/actor";
+import { Streaming, runQuery, useQuery } from "effect-frame/actor";
+import type { ActorTransport, QueryCache, QueryFailure, QueryState } from "effect-frame/actor";
 import { Route, renderDocument } from "effect-frame/router";
 import type { AnyRoute, NotFoundProps } from "effect-frame/router";
 import * as Prerender from "effect-frame/router/prerender";
 import { View } from "effect-frame/view";
 import type { Context, Scope } from "effect";
-import { Effect, FileSystem, Option, Path, Schema, Stream } from "effect";
+import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { Label, collect, frame } from "../view/streaming-fixture.js";
 
 /**
@@ -63,13 +63,9 @@ export const postSegment = Route.segment("post", {
 });
 
 /** The posts the index names, read through the query cache the build shares. */
-export const readIndex = Effect.gen(function* () {
-  const cache = yield* QueryCache;
-  const entry = yield* cache.open(Label, { id: "index" });
-  const ready = yield* Stream.runHead(Stream.filter(entry.state.changes, isReady));
-  const label = Option.match(ready, { onNone: () => "", onSome: (state) => state.value.label });
-  return label.split(",").map((slug) => ({ slug }));
-});
+export const readIndex = Effect.map(runQuery(Label, { id: "index" }), (index) =>
+  index.label.split(",").map((slug) => ({ slug })),
+);
 
 export const postsRoute = Route.prerender(
   "posts",

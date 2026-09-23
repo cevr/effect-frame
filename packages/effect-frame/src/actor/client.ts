@@ -69,6 +69,7 @@ export * as Streaming from "./streaming.js";
 export {
   QueryCache,
   followQuery,
+  runQuery,
   useQuery,
   layer as queryCacheLayer,
   type FollowedQuery,

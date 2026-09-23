@@ -35,7 +35,8 @@ export interface Shell {
   readonly drawn: Effect.Effect<void>;
   /**
    * Completes when the reads the drawn branch declared have settled
-   * (`Ready` or `Failed`). A traversal waits for it as well as `drawn`:
+   * (`Ready` or `Failed`). A traversal waits for it as well as `drawn`,
+   * up to the router's `traversalReadLimit`:
    * the entry's saved position is a place in the page's content, and a
    * shell that still waits for that content cannot reach it (#31). A push
    * or replace does not wait: it goes to the top or a fragment at shell

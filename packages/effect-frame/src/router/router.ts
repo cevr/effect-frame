@@ -2,6 +2,7 @@ import type { Source } from "effect-frame/actor";
 import type { Host, View } from "effect-frame/view";
 import { mount as mountView, render } from "effect-frame/view";
 import { read as readInspection, register as registerInspection } from "./route-inspection.js";
+import type { Duration } from "effect";
 import {
   Cause,
   Context,
@@ -115,7 +116,19 @@ export interface MountOptions<R, HostNode, N = R> {
    * the destination leaf names its own. Absent: `NavigationBehavior.Restore`.
    */
   readonly behavior?: NavigationBehavior;
+  /**
+   * How long a traversal (Back, Forward, a history jump) waits for the
+   * reads its page declared before it places the saved position. At the
+   * limit it lands on the page as it is, so the scroll may clamp, and it
+   * never places again when the reads settle later: a late jump after the
+   * reader has been looking at the page is worse than a clamped one.
+   * Absent: 3 seconds.
+   */
+  readonly traversalReadLimit?: Duration.Input;
 }
+
+/** How long a traversal waits for its declared reads when `mount` names no limit. */
+const defaultTraversalReadLimit: Duration.Input = "3 seconds";
 
 interface Mounted<R> {
   readonly route: AnyRoute<R>;
@@ -272,6 +285,10 @@ export const mount: <R, HostNode, N = R>(
   const requests = yield* Queue.unbounded<Request>();
   const surface = readSurface(location);
   const defaultBehavior = Option.getOrElse(Option.fromNullishOr(options.behavior), () => Restore);
+  const traversalReadLimit = Option.getOrElse(
+    Option.fromNullishOr(options.traversalReadLimit),
+    () => defaultTraversalReadLimit,
+  );
   const drawing = drawingOf(options.host);
   const pending = new Set<Request>();
   let closed = false;
@@ -665,7 +682,10 @@ export const mount: <R, HostNode, N = R>(
       if (admittedMovers !== seen) {
         yield* Deferred.succeed(newer, void 0);
       }
-      const reached = Effect.andThen(shell.drawn, reachedAfterDrawn(shell, until, drawing.catchUp));
+      const reached = Effect.andThen(
+        shell.drawn,
+        reachedAfterDrawn(shell, until, traversalReadLimit, drawing.catchUp),
+      );
       const drew = yield* Effect.raceFirst(
         Effect.as(reached, true),
         Effect.as(Deferred.await(newer), false),
@@ -1129,17 +1149,20 @@ type LandingPoint = "drawn" | "settled";
 
 /**
  * After shell commit. A traversal waits for the branch's declared reads,
- * then brings the drawing to them: a value travels from a source to the
- * drawing on a fiber, so without the catch-up the saved position would be
- * placed against a page that has not drawn what its reads hold.
+ * or for `limit`, whichever is first, then brings the drawing to its
+ * sources: a value travels from a source to the drawing on a fiber, so
+ * without the catch-up the saved position would be placed against a page
+ * that has not drawn what its reads hold. At the limit the reads are not
+ * waited on again: the landing is placed once.
  */
 const reachedAfterDrawn = (
   shell: Shell,
   until: LandingPoint,
+  limit: Duration.Input,
   catchUp: Effect.Effect<void>,
 ): Effect.Effect<void> => {
   if (until === "settled") {
-    return Effect.andThen(shell.settled, catchUp);
+    return Effect.andThen(Effect.raceFirst(shell.settled, Effect.sleep(limit)), catchUp);
   }
   return Effect.void;
 };

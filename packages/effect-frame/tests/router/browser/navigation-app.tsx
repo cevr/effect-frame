@@ -19,12 +19,14 @@ import {
   mount,
 } from "effect-frame/router";
 import { Dom, Loading, QueryState, View, ready } from "effect-frame/view";
-import { Deferred, Effect, Exit, Layer, Option, Schema, SubscriptionRef } from "effect";
+import { Deferred, Duration, Effect, Exit, Layer, Option, Schema, SubscriptionRef } from "effect";
 import * as Receipt from "../../../src/router/receipt.js";
 
 export interface NavConfig {
   /** `none` removes the Navigation API before the router mounts. */
   readonly api: "native" | "none";
+  /** The router's `traversalReadLimit`, in milliseconds. Absent: its default. */
+  readonly traversalReadLimitMillis?: number;
 }
 
 export interface NavWindow {
@@ -342,6 +344,10 @@ const start = (): void => {
       notFound: NotFound,
       host: Dom.host,
       root: found.value,
+      ...Option.match(Option.fromNullishOr(window.__navConfig.traversalReadLimitMillis), {
+        onNone: () => ({}),
+        onSome: (millis) => ({ traversalReadLimit: Duration.millis(millis) }),
+      }),
     }).pipe(Effect.provideService(Location, location));
     yield* followLinks(document, router);
     const receipts = Receipt.of(router);

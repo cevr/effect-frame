@@ -27,8 +27,9 @@ const openAt = async (
   engine: H.Engine,
   path: string,
   api: NavConfig["api"] = "native",
+  more: Omit<NavConfig, "api"> = {},
 ): Promise<Bun.WebView> => {
-  const server = await H.serve<NavConfig>(await bundleOnce(), { api }, "__navConfig");
+  const server = await H.serve<NavConfig>(await bundleOnce(), { api, ...more }, "__navConfig");
   const view = await H.open(engine, `${server.origin}${path}`);
   servers.set(view, server);
   await H.waitFor(view, "window.__nav && window.__nav.ready", "the router mounted");
@@ -179,6 +180,37 @@ for (const engine of engines) {
         await read(view, "(window.__nav.releaseRows(), true)");
         await shown(view, "#rows-content");
         await H.waitFor(view, "scrollY === 2500", "the rows page's position restored");
+      } finally {
+        closePage(view);
+      }
+    }, 30_000);
+
+    it("Back whose declared read never settles lands at the limit, releases the traversal, and never moves later", async () => {
+      const view = await openAt(engine, "/site/rows/a", "native", {
+        traversalReadLimitMillis: 400,
+      });
+      try {
+        await shown(view, "#rows-content");
+        expect(await scrollTo(view, 2500)).toBe(2500);
+        expect(await navigate(view, "/site/pages/2")).toBe("Committed /site/pages/2");
+        await H.waitFor(view, `document.querySelector("#page-id")?.textContent === "2"`, "page 2");
+        await H.waitFor(view, "scrollY === 0", "page 2 at the top");
+        // Back reads the released rows key again, and that read is held.
+        await read(view, "(window.__nav.holdRows(), true)");
+        await read(view, "(history.back(), true)");
+        await shown(view, "#rows-fallback");
+        // Before the limit the traversal is still held.
+        expect(await read<boolean>(view, "navigation.transition !== null")).toBe(true);
+        // At the limit it lands on the short page as it is, and the handler is released.
+        await H.waitFor(view, "navigation.transition === null", "the traversal released", 3_000);
+        const landed = await scrollY(view);
+        expect(landed).toBeLessThan(2500);
+        expect(await read<boolean>(view, `!!document.querySelector("#rows-fallback")`)).toBe(true);
+        // The read settles later: the page grows, and the scroll is not placed again.
+        await read(view, "(window.__nav.releaseRows(), true)");
+        await shown(view, "#rows-content");
+        await settleMargin();
+        expect(await scrollY(view)).toBe(landed);
       } finally {
         closePage(view);
       }

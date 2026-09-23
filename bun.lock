@@ -56,7 +56,7 @@
     },
     "packages/effect-frame": {
       "name": "effect-frame",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@solidjs/signals": "2.0.0-rc.8",
         "effect-machine": "0.27.0",

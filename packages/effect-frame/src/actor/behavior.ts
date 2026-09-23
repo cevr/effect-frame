@@ -16,6 +16,16 @@ export interface Turn<State, Message> {
    * a revision. A value or reducer never changes on its own.
    */
   readonly changes: Stream.Stream<State>;
+  /**
+   * The behavior's own state, read when the actor takes a change from
+   * `changes`. Present, the actor commits this read and not the value the
+   * change carried. A machine needs it: its `changes` also carries the
+   * start state and the transitions its own `apply` made, and one of those
+   * can reach the actor after a newer message's turn. Committing the
+   * carried value would take the state back; the read is never older than
+   * the last turn.
+   */
+  readonly current?: Effect.Effect<State>;
 }
 
 /**
@@ -162,6 +172,7 @@ export const machine = <
     return {
       apply: (_state, event) => Effect.map(actor.call(event), (result) => result.newState),
       changes: actor.changes,
+      current: actor.snapshot,
     };
   }),
 });

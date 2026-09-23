@@ -74,12 +74,20 @@ export const openLocal = Effect.fn("Actor.local.open")(function* <
       return [nextCommitted, nextCommitted];
     });
 
+  /** What an autonomous change commits: the behavior's own state when it names one. */
+  const stateOf = (carried: State): Effect.Effect<State> =>
+    Option.match(Option.fromNullishOr(turn.current), {
+      onNone: () => Effect.succeed(carried),
+      onSome: (current) => current,
+    });
+
   const step = Effect.gen(function* () {
     const envelope = yield* Queue.take(mailbox);
     const current = yield* SubscriptionRef.get(committed);
     if (envelope._tag === "Autonomous") {
-      if (!Equal.equals(envelope.state, current.state)) {
-        yield* commitState(envelope.state);
+      const changed = yield* stateOf(envelope.state);
+      if (!Equal.equals(changed, current.state)) {
+        yield* commitState(changed);
       }
       return;
     }

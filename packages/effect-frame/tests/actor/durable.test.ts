@@ -101,6 +101,17 @@ const uploadOptions = {
   message: Schema.fromJsonString(uploadMachine.eventSchema),
 };
 
+// A machine with no task: every transition is a command's.
+const TallyState = State({ Counting: { count: Schema.Finite } });
+const TallyEvent = Event({ Increment: {} });
+const tallyMachine = Machine.make({
+  state: TallyState,
+  event: TallyEvent,
+  initial: TallyState.Counting({ count: 0 }),
+}).on(TallyState.Counting, TallyEvent.Increment, ({ state }) =>
+  TallyState.Counting({ count: state.count + 1 }),
+);
+
 const gateThatNeverOpens = Effect.map(Deferred.make<void>(), (latch) =>
   Gate.of({ open: Deferred.await(latch) }),
 );
@@ -112,6 +123,38 @@ const add = (amount: number): Add => ({ _tag: "Add", amount });
 const withStore = it.scoped.layer(MailboxStore.layerMemory);
 
 describe("durable actor", () => {
+  withStore("a machine's echo of an older command never takes its state back", () =>
+    Effect.gen(function* () {
+      const tally = yield* durable({
+        behavior: Behavior.machine(tallyMachine),
+        state: Schema.fromJsonString(tallyMachine.stateSchema),
+        message: Schema.fromJsonString(tallyMachine.eventSchema),
+      });
+      const seen: Array<number> = [];
+      yield* Effect.forkScoped(
+        Stream.runForEach(tally.applied.changes, (applied) =>
+          Effect.sync(() => {
+            seen.push(applied.state.count);
+          }),
+        ),
+      );
+      yield* tally.send(TallyEvent.Increment, { commandId: id("t1") });
+      yield* tally.send(TallyEvent.Increment, { commandId: id("t2") });
+      const last = yield* tally.call(TallyEvent.Increment, {
+        commandId: id("t3"),
+        timeout: "1 second",
+      });
+      for (let round = 0; round < 10; round += 1) {
+        yield* yieldFibers;
+      }
+      expect(last.state.count).toBe(3);
+      expect(seen).toEqual([0, 1, 2, 3]);
+      expect(Option.map(yield* (yield* MailboxStore).latest, (latest) => latest.revision)).toEqual(
+        Option.some(3),
+      );
+    }),
+  );
+
   it.scoped("a call returns only after the actor's state shows its commit", () =>
     Effect.gen(function* () {
       const memory = yield* Layer.build(MailboxStore.layerMemory);

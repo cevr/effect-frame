@@ -194,6 +194,31 @@ describe("local actor", () => {
     }),
   );
 
+  it.scoped("a machine's echo of an older message never takes its state back", () =>
+    Effect.gen(function* () {
+      const counter = yield* spawn(Behavior.machine(counterMachine));
+      const seen: Array<number> = [];
+      yield* Effect.forkScoped(
+        Stream.runForEach(counter.applied.changes, (applied) =>
+          Effect.sync(() => {
+            seen.push(applied.state.count);
+          }),
+        ),
+      );
+      // Three messages in the mailbox before any turn runs: each turn's
+      // transition reaches the actor after the next message is queued.
+      yield* counter.send(CounterEvent.Increment);
+      yield* counter.send(CounterEvent.Increment);
+      const last = yield* counter.call(CounterEvent.Increment);
+      for (let round = 0; round < 10; round += 1) {
+        yield* yieldFibers;
+      }
+      expect(last.state.count).toBe(3);
+      expect(seen).toEqual([0, 1, 2, 3]);
+      expect((yield* counter.applied.get).revision.value).toBe(3);
+    }),
+  );
+
   it.scoped("a machine refuses by its rule: Rejected, and no transition runs", () =>
     Effect.gen(function* () {
       const counter = yield* spawn(

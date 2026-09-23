@@ -152,8 +152,14 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <
   });
 
   const processAutonomous = Effect.fn("Actor.durable.processAutonomous")(function* (
-    changed: State,
+    carried: State,
   ) {
+    // A behavior that names its own state is read now: the carried value
+    // can be older than a command committed since (see `Turn.current`).
+    const changed = yield* Option.match(Option.fromNullishOr(turn.current), {
+      onNone: () => Effect.succeed(carried),
+      onSome: (current) => current,
+    });
     const encoded = yield* Effect.orDie(encodeState(changed));
     const previous = yield* Ref.get(lastEncoded);
     if (Option.isSome(previous) && previous.value === encoded) {

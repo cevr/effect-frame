@@ -1,5 +1,5 @@
 import type { Scope } from "effect";
-import { Effect, Option, Stream, SubscriptionRef } from "effect";
+import { Effect, Option, Result, Stream, SubscriptionRef } from "effect";
 import type { Committed } from "./engine-types.js";
 import type { Source } from "./source.js";
 import type { CommandId, Displayed } from "./vocabulary.js";
@@ -46,6 +46,8 @@ interface Log<State, Message> {
   /** The receipt with the greatest admission position this reference saw. */
   readonly anchor: Option.Option<Anchor>;
   readonly shown: Displayed<State>;
+  /** Entries whose prediction threw in the last update, for its log line. */
+  readonly dropped: ReadonlyArray<CommandId>;
 }
 
 type Membership = "Included" | "Excluded" | "Unknown";
@@ -93,18 +95,43 @@ const membership = <State, Message>(
   return "Unknown";
 };
 
-const show = <State, Message>(
+const committedShown = <State>(base: Committed<State>): Displayed<State> => ({
+  revision: committedRevision(base.revision),
+  state: base.state,
+});
+
+/**
+ * Sets the base and the log, and replays the log over the base. `predict` is
+ * application code. A prediction that throws cannot be shown, so its entry
+ * leaves the log and the rest replays without it. The command itself is not
+ * touched: its handle still settles from its own receipt.
+ */
+const rebuild = <State, Message>(
+  log: Log<State, Message>,
   base: Committed<State>,
   overlays: ReadonlyArray<Overlay<State, Message>>,
   predict: (state: State, message: Message) => State,
-): Displayed<State> => {
-  if (overlays.length === 0) {
-    return { revision: committedRevision(base.revision), state: base.state };
+): Log<State, Message> => {
+  let state = base.state;
+  const kept: Array<Overlay<State, Message>> = [];
+  const dropped: Array<CommandId> = [];
+  for (const overlay of overlays) {
+    const predicted = Result.try(() => predict(state, overlay.message));
+    if (Result.isSuccess(predicted)) {
+      state = predicted.success;
+      kept.push(overlay);
+    } else {
+      dropped.push(overlay.commandId);
+    }
   }
-  return {
-    revision: { _tag: "Provisional", base: base.revision, depth: overlays.length },
-    state: overlays.reduce((state, overlay) => predict(state, overlay.message), base.state),
+  let shown: Displayed<State> = {
+    revision: { _tag: "Provisional", base: base.revision, depth: kept.length },
+    state,
   };
+  if (kept.length === 0) {
+    shown = committedShown(base);
+  }
+  return { ...log, base, overlays: kept, shown, dropped: [...log.dropped, ...dropped] };
 };
 
 const greatest = <State>(
@@ -142,13 +169,7 @@ const offer = <State, Message>(
     return { ...log, held: Option.some(greatest(log.held, candidate)) };
   }
   const overlays = log.overlays.filter((_, index) => memberships[index] === "Excluded");
-  const advanced: Log<State, Message> = {
-    ...log,
-    base: candidate,
-    held: Option.none(),
-    overlays,
-    shown: show(candidate, overlays, predict),
-  };
+  const advanced = rebuild({ ...log, held: Option.none() }, candidate, overlays, predict);
   // A newer held state may be classifiable over the new base.
   return Option.match(log.held, {
     onNone: () => advanced,
@@ -201,7 +222,7 @@ const incorporate = <State, Message>(
   if (overlays.length === log.overlays.length) {
     return log;
   }
-  return { ...log, overlays, shown: show(log.base, overlays, predict) };
+  return rebuild(log, log.base, overlays, predict);
 };
 
 // ---------------------------------------------------------------------------
@@ -248,11 +269,27 @@ export const make = <State, Message>(
       held: Option.none(),
       overlays: [],
       anchor: Option.none(),
-      shown: show(initial, [], predict),
+      shown: committedShown(initial),
+      dropped: [],
     }),
     (log): Display<State, Message> => {
+      // One serialized step. A prediction that threw is logged after it.
       const update = (step: (current: Log<State, Message>) => Log<State, Message>) =>
-        SubscriptionRef.update(log, step);
+        SubscriptionRef.modify(
+          log,
+          (current): readonly [ReadonlyArray<CommandId>, Log<State, Message>] => {
+            const next = step({ ...current, dropped: [] });
+            return [next.dropped, { ...next, dropped: [] }];
+          },
+        ).pipe(
+          Effect.flatMap((dropped) =>
+            Effect.forEach(
+              dropped,
+              (commandId) => Effect.logWarning(`command.predict.defect commandId=${commandId}`),
+              { discard: true },
+            ),
+          ),
+        );
       return {
         // Evidence that moves nothing keeps the same shown value, so a view
         // sees one change per displayed value and none per bookkeeping step.
@@ -272,7 +309,7 @@ export const make = <State, Message>(
                 ...current.overlays,
                 { commandId, message, admitted: Option.none(), exact: Option.none() },
               ];
-              return { ...current, overlays, shown: show(current.base, overlays, predict) };
+              return rebuild(current, current.base, overlays, predict);
             }),
             () =>
               update((current) => {
@@ -284,10 +321,7 @@ export const make = <State, Message>(
                 }
                 // It left without a receipt: rejected, or its reference
                 // closed. The rest replays over the same base.
-                return reoffer(
-                  { ...current, overlays, shown: show(current.base, overlays, predict) },
-                  predict,
-                );
+                return reoffer(rebuild(current, current.base, overlays, predict), predict);
               }),
           ),
         admit: (commandId, admitted) =>

@@ -343,6 +343,62 @@ describe("optimistic sends (#19, #67)", () => {
     }),
   );
 
+  it.scoped("a prediction that throws leaves the log and the reference keeps following", () =>
+    Effect.gen(function* () {
+      const wire = yield* heldWire();
+      const heldA = yield* wire.holdSend("a");
+      // This prediction cannot run over a state that holds "boom".
+      const fragile = Behavior.reducer<ReadonlyArray<Item>, Append>({
+        initial: [],
+        reduce: (items, message) => {
+          if (items.some((item) => item.text === "boom")) {
+            // Application code can throw; this is the case under test.
+            // oxlint-disable-next-line effect/noThrowStatement, effect/noNewError
+            throw new Error("the prediction cannot run here");
+          }
+          return [...items, pending(message.text)];
+        },
+      });
+      const list = yield* Effect.provideService(
+        ref(List, "shelf", { resume: Option.none(), behavior: fragile }),
+        ActorTransport,
+        wire.transport,
+      );
+
+      const a = yield* list.send(append("a"));
+      expect(yield* list.state.get).toEqual([pending("a")]);
+      // A supplied ID does not predict. Its receipt orders "a" after it.
+      const boomId = yield* Schema.decodeEffect(CommandId)("boom-1");
+      const boom = yield* list.send(append("boom"), { commandId: boomId });
+      yield* boom.settled;
+
+      // "a" is admitted after "boom", so it must replay over "boom", and its
+      // prediction throws there. It leaves the log; the base shows alone.
+      yield* wire.release(heldA);
+      const applied = yield* a.settled;
+      expect(applied).toMatchObject({ _tag: "Applied", revision: committedRevision(2) });
+      yield* until(list.displayed, (shown) => shown.revision._tag === "Committed");
+
+      // Another client commits. The change stream still follows.
+      const otherId = yield* Schema.decodeEffect(CommandId)("other-1");
+      yield* wire.real.call(
+        address,
+        otherId,
+        yield* Schema.encodeEffect(List.message)(append("c")),
+        "1 second",
+        [],
+      );
+      const latest = yield* until(list.applied, (committed) => committed.revision.value === 3);
+      expect(latest.state).toEqual([stamped("boom", 1), stamped("a", 2), stamped("c", 3)]);
+      expect(
+        yield* until(
+          list.displayed,
+          (shown) => shown.revision._tag === "Committed" && shown.revision.value === 3,
+        ),
+      ).toEqual({ revision: committedRevision(3), state: latest.state });
+    }),
+  );
+
   it.scoped("a supplied command ID never predicts", () =>
     Effect.gen(function* () {
       const wire = yield* heldWire();

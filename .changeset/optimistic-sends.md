@@ -12,7 +12,8 @@ New public surface on `effect-frame/actor` and `effect-frame/actor/client`:
 
 Behavior changes:
 
-- `ActorRef.state` on a remote reference is now `displayed.state`. With no `behavior`, it is the committed state, as before. `applied` stays committed.
+- `ActorRef.state` on a remote reference is now `displayed.state`. With no `predict`, `displayed` is `applied` and nothing changes. `applied` stays committed.
+- A `predict` that throws during a replay drops only that command's prediction and logs `command.predict.defect`; the reference keeps following.
 - A committed state replaces the prediction. A rejected command leaves the pending log and the rest replays over the same base. An `Uncertain` command keeps its prediction. A supplied command ID never predicts.
 - Local and durable references never predict. Their `displayed` is their `applied`.
 

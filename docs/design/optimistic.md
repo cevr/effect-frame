@@ -42,6 +42,14 @@ interface ActorRef<State, Message, Kind> {
   `*.server.ts` rule (#24) decides which actors are transparent.
 - A local or durable reference never predicts. Its `displayed` is its
   `applied`.
+- A remote reference with no `predict` keeps no display. Its `displayed` is
+  its `applied`, and `state` derives from `applied`, as before this change.
+  So `applied` and `state` never disagree on that reference.
+- On a predicting reference, `displayed` and `state` change only when the
+  shown value changes. The same committed state seen through the stream and
+  through a receipt emits once. `applied` is a separate source there. A
+  reader that combines both can see `applied` one revision ahead of
+  `displayed` for one step, and longer during a hold.
 
 ## Who predicts
 
@@ -128,31 +136,51 @@ The display changes before the handle turns terminal. A caller that waits on
 
 ## Limits
 
-- A command with no known admission holds every newer committed state. A lost
-  send, or an `Uncertain` record that never saw its admission, freezes remote
-  updates on this reference until a retry or a rejection. #67 accepted this
-  cost.
+- **The hold.** An entry whose membership is unknown holds every newer
+  committed state on this reference. The display stays on the old base, and
+  `applied` moves on. The hold ends at exactly one of three events: a same-ID
+  call returns the entry's receipt, the record is rejected, or the reference
+  closes. Two cases hold:
+  - The entry has no known admission. Example: the first send is
+    `Unreachable`, and later sends are `Unauthorized`. The owner reads this as
+    Hold, and the handle is `Uncertain{admitted: None}`. A retry that meets the
+    same refusal holds again.
+  - The entry is `Uncertain` with a known admission, but no receipt anchors
+    it. The test "Uncertain keeps the provisional state and the same-ID retry
+    applies once" shows this: the display stays on base 0 while the server is
+    at revision 1, until the retry returns the receipt.
+
+  No API gives up a prediction today. #67 accepted the hold as the cost of
+  selective receipts. The missing give-up path is raised with the owner on
+  #67.
+
 - The reference holds one greatest unclassified state and the receipt states
   of the log. An intermediate stream state can be dropped. A later state
   subsumes it.
-- `predict` must be total, pure, and fast. A throw is a defect in `send`.
+- `predict` must be total, pure, and fast. When it throws during a replay,
+  that entry leaves the log, and the display shows the base with the other
+  entries. The reference logs `command.predict.defect commandId=…` as a
+  warning. The change stream, `applied`, and the command itself continue:
+  its handle still settles from its own receipt.
 - A reload loses the log. The next page reads committed state.
 - Notes stays opaque. No example app passes a behavior yet.
 
 ## Evidence
 
-| Proof                                                   | What the test observes                                                                                                                                                                        |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| An optimistic send shows the new state in the same turn | The send is held before the host. When `send` returns, the handle is `Sent` and `displayed` is `Provisional{base: 0, depth: 1}`. The change stream is down, and the receipt alone commits it. |
-| A committed revision replaces a provisional one         | The server stamps each item. A's commit replaces its `pending` stamp while B stays provisional over base 1. No predicted field survives.                                                      |
-| A rejected command rolls back by leaving the log        | A is refused while B is held. The display becomes B alone over base 0.                                                                                                                        |
-| Provisional order converges on committed order          | A is sent first and admitted second. The view goes `[a?]`, `[a?, b?]`, `[b1, a?]`, `[b1, a2]`. The last value equals the server snapshot.                                                     |
-| A supplied command ID never predicts                    | A held send with a supplied ID leaves the display committed.                                                                                                                                  |
-| Uncertain keeps the provisional state                   | A lost call reply leaves `Uncertain{attempt: 1}` and the guess. One retry settles it: two sends, two calls, one application.                                                                  |
-| A machine behavior is never applied optimistically      | `Behavior.machine` has no `predict`. At `Sent` and at `Admitted`, the display stays committed.                                                                                                |
+| Proof                                                   | What the test observes                                                                                                                                                                          |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An optimistic send shows the new state in the same turn | The send is held before the host. When `send` returns, the handle is `Sent` and `displayed` is `Provisional{base: 0, depth: 1}`. The change stream is down, and the receipt alone commits it.   |
+| A committed revision replaces a provisional one         | The server stamps each item. A's commit replaces its `pending` stamp while B stays provisional over base 1. No predicted field survives.                                                        |
+| A rejected command rolls back by leaving the log        | A is refused while B is held. The display becomes B alone over base 0.                                                                                                                          |
+| Provisional order converges on committed order          | A is sent first and admitted second. The view goes `[a?]`, `[a?, b?]`, `[b1, a?]`, `[b1, a2]`. The last value equals the server snapshot.                                                       |
+| A supplied command ID never predicts                    | A held send with a supplied ID leaves the display committed.                                                                                                                                    |
+| Uncertain keeps the provisional state                   | A lost call reply leaves `Uncertain{attempt: 1}` and the guess. One retry settles it: two sends, two calls, one application.                                                                    |
+| A prediction that throws leaves the log                 | The prediction of "a" throws over a base that holds "boom". "a" leaves the log and still settles at revision 2. Another client commits revision 3, and `applied` and `displayed` both reach it. |
+| A machine behavior is never applied optimistically      | `Behavior.machine` has no `predict`. At `Sent` and at `Admitted`, the display stays committed.                                                                                                  |
 
-Nine mutations were checked. Each made at least one proof fail: no log entry
+Ten mutations were checked. Each made at least one proof fail: no log entry
 on send, a rejected entry kept, included entries kept after a new base,
 unknown membership read as excluded, a machine given an identity prediction,
 a supplied ID predicted, an `Uncertain` record that closes its scope, a
-refresh that keeps an override, and an ignored receipt.
+refresh that keeps an override, an ignored receipt, and a replay that does
+not catch a throwing `predict` (the stream stops and the test times out).

@@ -10,6 +10,7 @@ import type { QueryKey } from "./query.js";
 import { QueryCache, ownershipOf } from "./query-client.js";
 import * as Provisional from "./provisional.js";
 import { fromSubscriptionRef, select } from "./source.js";
+import type { Source } from "./source.js";
 import type { Projection, TransportReadError } from "./transport.js";
 import { ActorTransport } from "./transport.js";
 import type {
@@ -18,6 +19,7 @@ import type {
   DurableCallOptions,
   DurableSendOptions,
   CommandId,
+  Displayed,
   IdentifiedCommandHandle,
 } from "./vocabulary.js";
 
@@ -105,16 +107,18 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
   const predict = Option.flatMap(Option.fromNullishOr(options.behavior), (behavior) =>
     Option.fromNullishOr(behavior.predict),
   );
-  // With no prediction the log stays empty and the display follows the
-  // newest committed state.
-  const display = yield* Provisional.make<SnapshotOf<C>, MessageOf<C>>(
-    initial,
-    Option.getOrElse(predict, () => (state: SnapshotOf<C>) => state),
+  // Only a predicting reference keeps a display. Without one, `displayed`
+  // and `state` derive from `applied`, so the three never disagree.
+  const display = yield* Effect.transposeOption(
+    Option.map(predict, (fn) => Provisional.make<SnapshotOf<C>, MessageOf<C>>(initial, fn)),
   );
+  const withDisplay = (
+    use: (found: Provisional.Display<SnapshotOf<C>, MessageOf<C>>) => Effect.Effect<void>,
+  ): Effect.Effect<void> => Option.match(display, { onNone: () => Effect.void, onSome: use });
   const observe = (next: Committed<SnapshotOf<C>>) =>
     Effect.andThen(
       SubscriptionRef.update(applied, (current) => newest(current, next)),
-      display.offer(next),
+      withDisplay((found) => found.offer(next)),
     );
 
   yield* Effect.forkScoped(
@@ -177,25 +181,25 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
         Effect.tap((admission) =>
           Effect.andThen(
             Effect.sync(() => admissions.set(commandId, admission.admitted)),
-            display.admit(commandId, admission.admitted),
+            withDisplay((found) => found.admit(commandId, admission.admitted)),
           ),
         ),
       ),
     call: (commandId, payload, deadline, active) =>
-      adapter
-        .call(commandId, payload, deadline, active)
-        .pipe(
-          Effect.tap((settlement) =>
-            Effect.andThen(
-              display.receipt(
+      adapter.call(commandId, payload, deadline, active).pipe(
+        Effect.tap((settlement) =>
+          Effect.andThen(
+            withDisplay((found) =>
+              found.receipt(
                 commandId,
                 Option.fromNullishOr(admissions.get(commandId)),
                 settlement.committed,
               ),
-              observe(settlement.committed),
             ),
+            observe(settlement.committed),
           ),
         ),
+      ),
   });
 
   /**
@@ -206,8 +210,8 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
   const enlist = (identified: Commands.Identified, message: MessageOf<C>): Commands.Enlist =>
     Effect.gen(function* () {
       yield* Effect.addFinalizer(() => Effect.sync(() => admissions.delete(identified.commandId)));
-      if (identified.identity === "fresh" && Option.isSome(predict)) {
-        yield* display.predict(identified.commandId, message);
+      if (identified.identity === "fresh" && Option.isSome(display)) {
+        yield* display.value.predict(identified.commandId, message);
       }
     });
 
@@ -241,11 +245,16 @@ export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
     );
   });
 
+  const appliedSource = select(fromSubscriptionRef(applied), toApplied);
+  const displayed: Source<Displayed<SnapshotOf<C>>> = Option.match(display, {
+    onNone: () => appliedSource,
+    onSome: (found) => found.displayed,
+  });
   const reference: RemoteActorRef<C> = {
     kind: "remote",
-    applied: select(fromSubscriptionRef(applied), toApplied),
-    displayed: display.displayed,
-    state: select(display.displayed, (shown) => shown.state),
+    applied: appliedSource,
+    displayed,
+    state: select(displayed, (shown) => shown.state),
     send,
     call,
   };

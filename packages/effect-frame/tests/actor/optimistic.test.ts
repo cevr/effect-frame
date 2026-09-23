@@ -12,7 +12,12 @@ import {
   contract,
   ref,
 } from "effect-frame/actor/client";
-import type { Displayed, Source, TransportService } from "effect-frame/actor/client";
+import type {
+  Displayed,
+  DurableSendOptions,
+  Source,
+  TransportService,
+} from "effect-frame/actor/client";
 import { CommandPolicy } from "../../src/actor/command-owner.js";
 
 /**
@@ -441,6 +446,39 @@ describe("optimistic sends (#19, #67)", () => {
       yield* wire.release(held);
       yield* handle.settled;
       expect(yield* list.state.get).toEqual([stamped("a", 1)]);
+    }),
+  );
+
+  it.scoped("minted options sent a second time are supplied: the resend never predicts", () =>
+    Effect.gen(function* () {
+      const wire = yield* heldWire();
+      const list = yield* Effect.provideService(
+        ref(List, "shelf", { resume: Option.none(), behavior: predicting }),
+        ActorTransport,
+        wire.transport,
+      );
+      // An application reference that wraps the real one and keeps what it was sent.
+      const captured: Array<DurableSendOptions | void> = [];
+      const wrapping: typeof list = {
+        ...list,
+        send: (message, options) => {
+          captured.push(options);
+          return list.send(message, options);
+        },
+      };
+      const first = yield* Generated.send(wrapping, List, append("a"));
+      yield* first.settled;
+      expect(yield* list.state.get).toEqual([stamped("a", 1)]);
+
+      // The same frozen options again: the ID is used, so this send is supplied.
+      const held = yield* wire.holdSend("b");
+      const again = yield* list.send(append("b"), captured[0]);
+      expect(yield* list.displayed.get).toEqual({
+        revision: committedRevision(1),
+        state: [stamped("a", 1)],
+      });
+      yield* wire.release(held);
+      yield* again.settled;
     }),
   );
 

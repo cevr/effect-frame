@@ -67,7 +67,12 @@ A send predicts when all of these are true:
    freezes it. Provenance is that object's identity, not its shape: no
    property, symbol or `Proxy` trap can claim it (review round 1 found that
    a `Proxy` whose `has` answers true passed a symbol-presence check). An
-   ID an application supplies stays supplied, whatever its origin. A form marks only an ID its own client
+   ID an application supplies stays supplied, whatever its origin. The
+   record is for one send: the reference's first check consumes it, so an
+   application wrapper that kept the frozen options and sends them again
+   sends a supplied, already used ID, which waits for its receipt (review
+   round 2; "minted options sent a second time are supplied: the resend
+   never predicts" is red when the check does not consume). A form marks only an ID its own client
    binding minted. An ID that the server drew into the markup stays
    supplied, because a plain post that raced hydration can already have
    admitted it. Each later send from the same form mints, so it predicts.

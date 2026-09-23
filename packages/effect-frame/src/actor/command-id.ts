@@ -29,7 +29,8 @@ export const freshCommandId: Effect.Effect<CommandId> = Effect.sync(() =>
  * Provenance is identity, not shape. The options object `mintedFor` made is
  * recorded in a module-private `WeakSet` and frozen, so its ID cannot change
  * after it was recorded. No property, symbol, or `Proxy` trap can claim it:
- * an ID an application supplies stays supplied, whatever its origin.
+ * an ID an application supplies stays supplied, whatever its origin. The
+ * record is for one send: the first check consumes it.
  */
 const minted = new WeakSet<object>();
 
@@ -40,6 +41,12 @@ export const mintedFor = (commandId: CommandId): DurableSendOptions => {
   return options;
 };
 
-/** Whether these options are the ones the framework minted for this send. Internal. */
+/**
+ * Whether these options are the ones the framework minted for this send.
+ * Internal. It answers true once: the check consumes the registration, so
+ * the same frozen options sent again (an application wrapper that kept
+ * them) are a supplied ID, whose ID is already used. The one send path
+ * that asks (`ref`'s `send`) asks once per send.
+ */
 export const isMinted = (options: DurableSendOptions | void): boolean =>
-  Predicate.isObject(options) && minted.has(options);
+  Predicate.isObject(options) && minted.delete(options);

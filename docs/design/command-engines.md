@@ -128,7 +128,8 @@ Inspection does no transport work and shows no payload. Zero records is
 
 - A remote reference predicts only when it is given a behavior with `predict`
   (see [optimistic.md](optimistic.md)). A durable or local reference never
-  predicts. Notes stays opaque.
+  predicts. Notes passes a behavior, so its list reference predicts an add
+  (#37).
 - Inspection has no Applied case. An Applied record closes its scope first.
 - A closed owner can leave a handle's `settled` pending forever.
 - An entry mounted after a command committed can read once more after the

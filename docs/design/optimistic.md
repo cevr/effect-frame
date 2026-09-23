@@ -175,7 +175,7 @@ The display changes before the handle turns terminal. A caller that waits on
   warning. The change stream, `applied`, and the command itself continue:
   its handle still settles from its own receipt.
 - A reload loses the log. The next page reads committed state.
-- Notes stays opaque. No example app passes a behavior yet.
+- Notes passes a behavior: its list reference predicts an add (#37).
 
 ## Evidence
 

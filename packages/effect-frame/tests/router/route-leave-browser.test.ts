@@ -229,6 +229,31 @@ describe.skipIf(!H.hasEngine("chrome"))("leave checks in Chrome", () => {
     }
   }, 30_000);
 
+  it("Back and Forward restore each entry's scroll once the router is done", async () => {
+    const view = await openAt("chrome", "/app/t1/posts/1");
+    try {
+      expect(await read<number>(view, "(scrollTo(0, 1200), scrollY)")).toBe(1200);
+      expect(await navigate(view, "/app/t1/posts/2")).toBe("Committed /app/t1/posts/2");
+      expect(await read<number>(view, "(scrollTo(0, 300), scrollY)")).toBe(300);
+      await read(view, "(history.back(), true)");
+      await shows(view, "1");
+      await H.waitFor(view, "scrollY === 1200", "post 1's scroll restored");
+      await read(view, "(navigation.forward(), true)");
+      await shows(view, "2");
+      await H.waitFor(view, "scrollY === 300", "post 2's scroll restored");
+
+      // From a short page, the tall destination exists only once the router
+      // installed it: restoration must wait for that, or it clamps to the top.
+      expect(await navigate(view, "/elsewhere")).toBe("Committed /elsewhere");
+      await H.waitFor(view, `document.querySelector("#missing") && scrollY === 0`, "a short page");
+      await read(view, "(history.back(), true)");
+      await shows(view, "2");
+      await H.waitFor(view, "scrollY === 300", "post 2's scroll restored after its shell");
+    } finally {
+      closePage(view);
+    }
+  }, 30_000);
+
   it("a wholly stayed traversal keeps the caret", async () => {
     const view = await openAt("chrome", "/app/t1/posts/1");
     try {

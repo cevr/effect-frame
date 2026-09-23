@@ -1,10 +1,11 @@
-# Nested transition (private proof)
+# Nested transition
 
 This note records route execution slice 2: the explicit outlet, the nested
-branch diff, typed route data bindings, and declaration overlap. All of it is
-private. `src/router/branch.ts` is not exported from `effect-frame/router`. No
-public route constructor, route field, or public type changed. There is no
-Changeset. Issue #36 stays open.
+branch diff, typed route data bindings, and declaration overlap. The slice
+was private when it landed. It is now public as `Route.segment`,
+`Route.child`, `Route.leaf`, `Route.layout`, and `Route.client(name, root)`;
+see `docs/design/route-public.md`. The code examples below use the old
+private names (`Branch.route` is now `Route.client`).
 
 Source: `packages/effect-frame/src/router/branch.ts`, plus `matchPrefix` and
 `segmentsOf` in `packages/effect-frame/src/router/path.ts`.
@@ -167,6 +168,7 @@ swap. No view sees that difference without a render in between.
 - A retained old ref still commands its old address after its interest is
   released. It is not refused.
 - Only the first HTML frame is proved. There is no streaming.
-- Nested routes have no url-state, `updateSearch`, pending state, lazy views,
-  or leave checks yet. Segment `href` targets and `before` checks are slice 3,
-  in `route-checks.md`.
+- Segment `href` targets and `before` checks are slice 3, in
+  `route-checks.md`. Pending state and lazy views are slice 4. Segment
+  `href`, `updateSearch`, and `replaceSearch` props arrived with the public
+  surface (`route-public.md`).

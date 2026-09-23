@@ -1,11 +1,11 @@
-# Route checks and errors (private proof)
+# Route checks and errors
 
 This note records route execution slice 3: typed route targets, `before`
 checks, redirect traversal, navigation receipts, and typed route failures.
-All of it is private. `src/router/check.ts`, `src/router/receipt.ts`, and
-`src/router/branch.ts` are not exported from `effect-frame/router`, and no
-`package.json` export changed. There is no Changeset. Issues #36, #55, and
-#56 stay open. Leave checks are slice 5, not this slice.
+The slice was private when it landed. Targets, `before`, `redirect`,
+`Continue`, and `RouteFailure` are now public on `Route`; navigation
+receipts stay private (see `docs/design/route-public.md`). Leave checks are
+slice 5, not this slice, and stay private until #56 is answered.
 
 Source: `packages/effect-frame/src/router/check.ts`,
 `packages/effect-frame/src/router/receipt.ts`,
@@ -219,8 +219,8 @@ scratchpad; this table is the record.
 - No browser proof: pop and fragment behavior use a fixture `Location`
   (`tests/router/route-check-edges.test.tsx` feeds it pops).
   Real Back/Forward, precommit cancellation, and focus are slice 5.
-- Nested routes still have no url-state or `updateSearch`. Pending state
-  and lazy views are slice 4 (`docs/design/route-pending.md`).
+- Pending state and lazy views are slice 4 (`docs/design/route-pending.md`).
+  Segment `updateSearch` arrived with the public surface.
 
 ## Open questions
 

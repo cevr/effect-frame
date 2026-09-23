@@ -1,11 +1,10 @@
-# Route pending and lazy views (private proof)
+# Route pending and lazy views
 
 This note records route execution slice 4: timed route setup presentation
-and lazy views on the same transition owner as slices 2 and 3. All of it is
-private. `src/router/branch.ts` and `src/view/lazy.ts` are not exported from
-`effect-frame/router` or `effect-frame/view`, and no `package.json` export
-changed. There is no Changeset. Issues #36, #55, and #56 stay open. Leave
-checks and browser commit are slice 5. Streaming records (#22) are not part
+and lazy views on the same transition owner as slices 2 and 3. The slice was
+private when it landed. `Route.Pending` and `View.lazy` are now public (see
+`docs/design/route-public.md`). Leave checks and browser commit are slice 5
+and stay private. Streaming records (#22) are not part
 of this slice.
 
 Source: `packages/effect-frame/src/router/branch.ts` (`Pending`,
@@ -220,8 +219,8 @@ scratchpad; this table is the record.
   attempt through the definition.
 - No browser proof: the module import is a test Promise, not a bundler
   chunk. Real chunk caching and evaluation failure are platform behavior.
-- Nested routes still have no url-state or `updateSearch`. Leave checks,
-  `Stayed`, and precommit browser behavior are slice 5.
+- Leave checks, `Stayed`, and precommit browser behavior are slice 5. They
+  stay private.
 
 ## Planned follow-up: declared acquisition under pending
 

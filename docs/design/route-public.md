@@ -298,9 +298,12 @@ Proof against EGW (`bible-tools/apps/egw-search`): its router use is
 `Route.client` with `Route.search(Schema.Struct({}))`, `mount`,
 `followLinks`, `browserLocation`, `Location`, `link(search, {}, {})`,
 `Link`, `UrlState.make`, and `Route.SearchRecord`, `Route.readSearch`,
-`Route.printSearch`. The EGW sources are type-checked unchanged against this
-package's built output, from a copy in the session scratchpad (the EGW
-checkout is not touched). The router tests that cover flat behavior
+`Route.printSearch`. The EGW sources were checked unchanged against this
+package's packed output (`npm pack`), from a copy outside the EGW checkout.
+The packed package sat in the same store layout Bun uses, beside the same
+`effect` (4.0.0-rc.115), `effect-machine`, and `@solidjs/signals`. Result:
+`tsc --noEmit` exits 0 with the Effect language service on (the 0.12.0
+baseline also exits 0), and `bun test src server` passes 28 of 28. The router tests that cover flat behavior
 (`router.test.tsx`, `route.test.tsx`, `url-state.test.tsx`,
 `inspection.test.tsx`, `mount-types.test.tsx`) pass unchanged.
 

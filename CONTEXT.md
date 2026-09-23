@@ -41,7 +41,7 @@ A region of a view drawn under a host node outside the view's own subtree. The v
 _Avoid_: Teleport, overlay root.
 
 **Rendering mode**:
-Where and when a route's view is turned into markup: on the client only (`Route.client`), on the server before hydration, streamed from the server as its data settles, on the server for every change, or at build time. The destination route names it, and naming it is choosing a constructor rather than setting a field. A plain form post is not a mode: it is a command path that works under every mode that renders on a server.
+Where and when a route's view is turned into markup: on the client only (`Route.client`), on the server before hydration, streamed from the server as its data settles, on the server for every change, or at build time. The mount of a route tree names it (`Route.client(name, root)`), and naming it is choosing a constructor rather than setting a field. A plain form post is not a mode: it is a command path that works under every mode that renders on a server.
 _Avoid_: Strategy, target.
 
 **Query state**:

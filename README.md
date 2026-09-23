@@ -76,6 +76,86 @@ Public subpaths of `effect-frame`: `actor`, `actor/client`, `actor/testing`,
 `frame`, `inspection`, `view`, `view/testing`, `view/jsx-runtime`,
 `view/jsx-dev-runtime`, `view/opentui`, and `router`.
 
+## Routing
+
+`effect-frame/router` exports one route model on the `Route` namespace. A
+segment is an address. A branch is a segment with its view. A mount picks the
+rendering mode for a whole tree; `Route.client` is the one mode today.
+
+```tsx
+import { Link, Route, link, mount } from "effect-frame/router";
+import { Loading, View } from "effect-frame/view";
+import { Effect, Schema } from "effect";
+
+// A flat route is the one-leaf shorthand of the same model.
+const Login = Route.client("login", {
+  path: "/login",
+  params: Schema.Struct({}),
+  search: Route.search(Schema.Struct({ next: Schema.String.pipe(Route.withDefault("/")) })),
+  view: (props) => Effect.succeed(<p>{View.bind(props.search, (s) => s.next)}</p>),
+});
+
+const tenant = Route.segment("tenant", {
+  path: "/app/:tenant",
+  params: Schema.Struct({ tenant: Schema.String }),
+  data: ({ params }) => ({ info: Route.query(TenantInfo, { tenant: params.tenant }) }),
+  before: ({ params, url }) =>
+    Effect.gen(function* () {
+      if (yield* isSignedIn(params.tenant)) {
+        return Route.Continue;
+      }
+      return Route.redirect(Route.target(Login, {}, { next: url.pathname }));
+    }),
+});
+
+const post = Route.child(tenant, "post", {
+  path: "posts/:postId",
+  params: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
+});
+
+const App = Route.client(
+  "app",
+  Route.layout(
+    tenant,
+    [
+      Route.leaf(
+        post,
+        View.lazy(() => import("./post-view.js")),
+        {
+          errored: (failure) => <p>{View.bind(failure, (f) => f._tag)}</p>,
+          pending: { fallback: <p>opening</p>, after: "100 millis", atLeast: "300 millis" },
+        },
+      ),
+    ],
+    (props) =>
+      Effect.gen(function* () {
+        const first = yield* link(post, { tenant: "t1", postId: "1" }, {});
+        const body = yield* Loading({ fallback: <p>loading</p>, children: props.outlet });
+        return (
+          <section>
+            <Link link={first}>first post</Link>
+            {body}
+          </section>
+        );
+      }),
+  ),
+);
+
+yield * mount({ routes: [App, Login], notFound, host, root });
+```
+
+- `before` runs parent first, before anything commits. It returns
+  `Route.Continue` or `Route.redirect(Route.target(...))`.
+- A view that can fail, and every `View.lazy` view, needs an `errored`
+  handler. It receives a `Route.RouteFailure`.
+- Every segment view gets `params`, `search`, `data`, `href`,
+  `updateSearch`, and `replaceSearch`. A layout also gets `outlet`.
+- `link` takes a flat route or a segment. A segment link is active while the
+  current URL is inside it.
+- Leave checks and navigation receipts are not public yet (#56).
+
+See [the public route design](docs/design/route-public.md).
+
 ## Planning
 
 Read [the GitHub tracker guide](docs/wayfinder/github.md) before changing the map. Read source findings in `docs/research/` when they are available.

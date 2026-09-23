@@ -313,6 +313,76 @@ another value, and parse never yields one.
 
 See [the route data design](docs/design/route-data.md).
 
+### Prerendered pages
+
+`Route.prerender` is a mode constructor that lists its inputs. A tree names
+one `Route.inputs(segment, enumerate)` for each segment that adds a path
+param. A child's function runs once for each parent, receives the parent's
+params, and returns only its own.
+
+```ts
+const Posts = Route.prerender("posts", Route.layout(org, [Route.leaf(post, PostView)], OrgView), {
+  inputs: [Route.inputs(org, listOrgs), Route.inputs(post, ({ org }) => listPosts(org))],
+});
+```
+
+A segment that adds a param and names no inputs is refused where the tree
+is constructed, with `PrerenderAncestorNotEnumerable` naming the segment
+and the param. A layout that adds no param needs no inputs.
+
+The build and the server are server-only, in `effect-frame/router/prerender`:
+
+```ts
+import * as Prerender from "effect-frame/router/prerender";
+
+// The build: every input, through renderDocument's pipeline, in AwaitAll, as Anonymous.
+yield *
+  Prerender.build({
+    routes: [Posts, App],
+    notFound,
+    document: (page) => Effect.succeed(documentFor(page)),
+    client: bundleText, // your browser bundle, written as client.js
+    out: "dist/prerender",
+    timeLimit: "10 seconds",
+  });
+
+// The server: a built page answers before the router runs.
+const site = yield * Prerender.load("dist/prerender");
+const handler = yield * Prerender.serve(site, routerHandler);
+```
+
+- Each page is written to `<href>/index.html` in a new generation under
+  `dist/prerender/generations/`, at the URL its route's `href` prints,
+  beside `client.js` and `manifest.json`. The build publishes the
+  generation by renaming `current.json` over the old pointer, so a failed
+  or crashed build leaves the previous generation serving. One previous
+  generation is kept.
+- Publishing is safe against a process crash or interruption on POSIX file
+  systems; it does not `fsync`, so it is not durable across power loss, and
+  Windows replacement semantics are not claimed.
+- One build writes one output: a second build fails with
+  `PrerenderBuildLocked`. A lock file a hard crash left names itself in
+  the error; remove it once no build runs.
+- A query two pages read, or that an inputs Effect and a page read, is read
+  once. An actor snapshot is read once too, and actors do not move while
+  the build runs, so the page and its resume script show one revision.
+- A query whose policy refuses `Anonymous` fails the build with
+  `PrerenderUnauthorized`, and nothing is published.
+- The build refuses what it could not serve as written: an href with a
+  search part (`PrerenderSearchRejected`), two hrefs that differ only in
+  case (`PrerenderPathCollision`), and a local link to a prerender route
+  that no input built (`PrerenderBrokenLink`). `timeLimit` covers each
+  page from `document(page)` on.
+- A loaded site reads one generation. A built page answers with a strong
+  `ETag` for the bytes it read, and a matching `If-None-Match` answers 304.
+  HEAD answers as GET does, with no body. A page with no file renders
+  through the router.
+- A baked query value paints at once as `Ready { stale: true }` and is read
+  once to confirm it. An actor island resumes from the revision the page
+  baked: write its `resumeCodec` script in `document(page)`, as SSR does.
+
+See [the prerender design](docs/design/prerender.md).
+
 ## Plain-form commands
 
 A command form works with no JavaScript. The server renders a real

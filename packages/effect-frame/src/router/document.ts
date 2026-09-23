@@ -2,7 +2,7 @@ import type { View } from "effect-frame/view";
 import { Deferred, Effect, Exit, Option, Schema, Scope, Stream } from "effect";
 import type { ActorTransport } from "effect-frame/actor/client";
 import { QueryCache } from "effect-frame/actor/client";
-import type { Document, Drawing, HtmlNode } from "../view/hosts/html.js";
+import type { CacheSource, Document, Drawing, HtmlNode } from "../view/hosts/html.js";
 import { awaitAllDrawing, renderSeeded, requestCache, streamPrepared } from "../view/hosts/html.js";
 import { ResolveBeforeRender } from "./branch.js";
 import type { AnyRoute } from "./codec.js";
@@ -95,7 +95,9 @@ type Mounted<R> = Exclude<
 export type DocumentServices<R> = Exclude<Mounted<R>, QueryCache> | ActorTransport;
 
 /** What the pipelines need before the drawing's Scope is provided. */
-type Prepared<R, N> = Exclude<Mounted<R> | Mounted<N> | Scope.Scope, QueryCache> | ActorTransport;
+type PreparedServices<R, N> =
+  | Exclude<Mounted<R> | Mounted<N> | Scope.Scope, QueryCache>
+  | ActorTransport;
 
 /** A server render does not move: the URL stays the request's. */
 const requestLocation = (url: URL): LocationService => ({
@@ -106,14 +108,42 @@ const requestLocation = (url: URL): LocationService => ({
 });
 
 /**
- * Answer one request. It runs in the request's Scope: the time limit runs
- * there once, and a `Streamed` body keeps its drawing there until the body
- * ends. On `DocumentTimedOut`, what the render opened is already closed.
+ * What a settled request hands the pipeline that prepares its body: the
+ * routed drawing, the same drawing resolving its declared data first, the
+ * release of the checks' interests, the time limit, and the request cache.
  */
-export const renderDocument = <R, N = R>(
+interface Pipelines<R, N> {
+  readonly routed: Drawing<DocumentTimedOut, Mounted<R> | Mounted<N> | Scope.Scope>;
+  readonly resolvedFirst: Drawing<DocumentTimedOut, Mounted<R> | Mounted<N> | Scope.Scope>;
+  readonly releaseChecks: Effect.Effect<void>;
+  readonly closeWhen: Effect.Effect<void>;
+  readonly shared: CacheSource;
+}
+
+/** A request that settled on a document, and the body its pipeline prepared. */
+export interface Prepared<R, A> {
+  readonly _tag: "Prepared";
+  readonly route: DocumentRoute<R>;
+  readonly mode: RenderingMode;
+  readonly status: 200 | 404;
+  readonly body: A;
+}
+
+/**
+ * Settle one request, then prepare its body with `prepare`, over the cache
+ * `cacheOf` gives. `renderDocument` prepares by the settled mode over a
+ * cache of its own; the prerender build prepares an `AwaitAll` page over the
+ * build's one cache. Internal: see `docs/design/prerender.md`.
+ */
+export const settleAndPrepare = <R, N, A>(
   options: DocumentOptions<R, N>,
+  cacheOf: CacheSource,
+  prepare: (
+    mode: RenderingMode,
+    pipelines: Pipelines<R, N>,
+  ) => Effect.Effect<A, DocumentTimedOut, PreparedServices<R, N>>,
 ): Effect.Effect<
-  DocumentOutcome<R>,
+  DocumentRedirect | Prepared<R, A>,
   DocumentTimedOut,
   DocumentServices<R> | DocumentServices<N> | Scope.Scope
 > =>
@@ -132,7 +162,7 @@ export const renderDocument = <R, N = R>(
     // One query cache per request (#28), in the request Scope: the checks
     // and the drawing read through it, so a query both read is read once
     // and seeded once.
-    const cache = yield* requestCache;
+    const cache = yield* cacheOf;
     const shared = Effect.succeed(cache);
     // What the render opens lives in `opened`, closed at once on a failure.
     // The checks' interests live in `checks`, closed once the drawing has
@@ -158,7 +188,6 @@ export const renderDocument = <R, N = R>(
         Option.flatMap(settlement.route, readMode),
         (): RenderingMode => "SSR",
       );
-      const { document } = options;
       const routed: Drawing<DocumentTimedOut, Mounted<R> | Mounted<N> | Scope.Scope> = (
         host,
         root,
@@ -182,47 +211,76 @@ export const renderDocument = <R, N = R>(
       // SSR: the transition waits for each declared query before any view draws.
       const resolvedFirst: typeof routed = (host, root) =>
         Effect.provideService(routed(host, root), ResolveBeforeRender, true);
-      /** Prepare the body in the render's Scope, by the settled mode. */
-      const prepare = (): Effect.Effect<
-        Stream.Stream<string>,
-        DocumentTimedOut,
-        Prepared<R, N>
-      > => {
-        if (mode === "ClientOnly") {
-          // Nothing is drawn and nothing is read: the client mounts into the empty element.
-          return Effect.as(
-            releaseChecks,
-            Stream.succeed(
-              [document.head, document.tail, document.bootstrap, document.end].join(""),
-            ),
-          );
-        }
-        if (mode === "SSR") {
-          return Effect.map(renderSeeded(resolvedFirst, document, shared), Stream.succeed);
-        }
-        if (mode === "AwaitAll") {
-          return Effect.map(
-            awaitAllDrawing(routed, document, { closeWhen }, shared),
-            Stream.succeed,
-          );
-        }
-        return streamPrepared(routed, document, { closeWhen }, shared);
-      };
-      const body = yield* Scope.provide(prepare(), opened);
+      const body = yield* Scope.provide(
+        prepare(mode, { routed, resolvedFirst, releaseChecks, closeWhen, shared }),
+        opened,
+      );
       const route = Option.match(settlement.route, {
         onNone: (): DocumentRoute<R> => ({ _tag: "NotFound" }),
         onSome: (matched): DocumentRoute<R> => ({ _tag: "Matched", route: matched }),
       });
-      const rendered: RenderedDocument<R> = {
-        _tag: "Rendered",
+      const done: Prepared<R, A> = {
+        _tag: "Prepared",
         route,
         mode,
         status: Option.match(settlement.route, { onNone: () => 404, onSome: () => 200 }),
         body,
       };
-      return rendered;
+      return done;
     });
     return yield* prepared.pipe(
       Effect.onError((cause) => Scope.close(opened, Exit.failCause(cause))),
     );
   });
+
+/**
+ * Answer one request. It runs in the request's Scope: the time limit runs
+ * there once, and a `Streamed` body keeps its drawing there until the body
+ * ends. On `DocumentTimedOut`, what the render opened is already closed.
+ */
+export const renderDocument = <R, N = R>(
+  options: DocumentOptions<R, N>,
+): Effect.Effect<
+  DocumentOutcome<R>,
+  DocumentTimedOut,
+  DocumentServices<R> | DocumentServices<N> | Scope.Scope
+> =>
+  Effect.map(
+    settleAndPrepare(options, requestCache, (mode, pipelines) =>
+      prepareBody(options.document, mode, pipelines),
+    ),
+    (outcome): DocumentOutcome<R> => {
+      if (outcome._tag === "Redirect") {
+        return outcome;
+      }
+      return {
+        _tag: "Rendered",
+        route: outcome.route,
+        mode: outcome.mode,
+        status: outcome.status,
+        body: outcome.body,
+      };
+    },
+  );
+
+/** Prepare the body in the render's Scope, by the settled mode. */
+const prepareBody = <R, N>(
+  document: Document,
+  mode: RenderingMode,
+  { routed, resolvedFirst, releaseChecks, closeWhen, shared }: Pipelines<R, N>,
+): Effect.Effect<Stream.Stream<string>, DocumentTimedOut, PreparedServices<R, N>> => {
+  if (mode === "ClientOnly") {
+    // Nothing is drawn and nothing is read: the client mounts into the empty element.
+    return Effect.as(
+      releaseChecks,
+      Stream.succeed([document.head, document.tail, document.bootstrap, document.end].join("")),
+    );
+  }
+  if (mode === "SSR") {
+    return Effect.map(renderSeeded(resolvedFirst, document, shared), Stream.succeed);
+  }
+  if (mode === "AwaitAll") {
+    return Effect.map(awaitAllDrawing(routed, document, { closeWhen }, shared), Stream.succeed);
+  }
+  return streamPrepared(routed, document, { closeWhen }, shared);
+};

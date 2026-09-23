@@ -58,6 +58,13 @@ export const ErrorOutcome = Schema.TaggedStruct("Error", { error: QueryFailure }
 export const Patch = Schema.TaggedStruct("Patch", {
   id: Schema.String,
   outcome: Schema.Union([ValueOutcome, ErrorOutcome]),
+  /**
+   * Present only on a prerendered page (#23 §3.2): when the build read this
+   * value, in milliseconds since the epoch. Its presence is what seeds the
+   * entry `Ready{stale: true}`, so the client reads it again at once. Nothing
+   * branches on its value.
+   */
+  builtAt: Schema.optionalKey(Schema.Finite),
 });
 export type Patch = Schema.Schema.Type<typeof Patch>;
 
@@ -110,7 +117,8 @@ const stateOf = (patch: Patch): Encoded =>
   Match.value(patch.outcome).pipe(
     Match.withReturnType<Encoded>(),
     Match.tagsExhaustive({
-      Value: (value) => Ready(value.value, false),
+      // A baked value is one this client has not confirmed.
+      Value: (value) => Ready(value.value, Option.isSome(Option.fromNullishOr(patch.builtAt))),
       Error: (error) => Failed(error.error),
     }),
   );

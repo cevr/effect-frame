@@ -453,16 +453,43 @@ export const renderAwaitAll = <Props, E, R>(
   awaitAllDrawing(viewDrawing(view, props), document, options, requestCache);
 
 /** `renderAwaitAll` over any drawing. Internal: see `Drawing`. */
-export const awaitAllDrawing: <E, R>(
+export const awaitAllDrawing = <E, R>(
   drawing: Drawing<E, R>,
   document: Document,
   options: Streaming.ShellOptions,
   cacheOf: CacheSource,
-) => Effect.Effect<string, E, Drawn<R>> = Effect.fn("Html.renderAwaitAll")(function* <E, R>(
+): Effect.Effect<string, E, Drawn<R>> =>
+  Effect.map(awaitAllPage(drawing, document, options, cacheOf, Option.none()), (done) => done.html);
+
+/** An `AwaitAll` document and what it holds. Internal: the prerender build reads it. */
+export interface AwaitedPage {
+  readonly html: string;
+  /** The seed the document carries, stamped with `builtAt` when it was given. */
+  readonly seed: ReadonlyArray<Streaming.Patch>;
+  /**
+   * The drawing waited for nothing when it was written. False when the time
+   * limit wrote it with a query still open or a fallback still shown.
+   */
+  readonly complete: boolean;
+}
+
+/**
+ * `awaitAllDrawing`, with the seed it wrote and whether it finished before
+ * the limit. `builtAt` stamps every patch of a prerendered page (#23 §3.2):
+ * the client seeds such a value stale and reads it again. Internal.
+ */
+export const awaitAllPage: <E, R>(
   drawing: Drawing<E, R>,
   document: Document,
   options: Streaming.ShellOptions,
   cacheOf: CacheSource,
+  builtAt: Option.Option<number>,
+) => Effect.Effect<AwaitedPage, E, Drawn<R>> = Effect.fn("Html.renderAwaitAll")(function* <E, R>(
+  drawing: Drawing<E, R>,
+  document: Document,
+  options: Streaming.ShellOptions,
+  cacheOf: CacheSource,
+  builtAt: Option.Option<number>,
 ) {
   const scope = yield* Scope.make();
   const html = yield* Effect.gen(function* () {
@@ -507,7 +534,7 @@ export const awaitAllDrawing: <E, R>(
       // taken its fallback away by now.
       yield* render;
       if (settledSetups && setups === 0 && !open && !root.children.some(waitsForData)) {
-        return page(document, root, seed);
+        return awaited(document, root, stamp(seed, builtAt), true);
       }
       const wakes: Array<Effect.Effect<boolean>> = [
         Effect.as(Deferred.await(signal), true),
@@ -519,7 +546,8 @@ export const awaitAllDrawing: <E, R>(
       waiting = yield* Effect.raceAll(wakes);
     }
     yield* render;
-    return page(document, root, yield* withCache(Streaming.settledPatches));
+    const seed = stamp(yield* withCache(Streaming.settledPatches), builtAt);
+    return awaited(document, root, seed, false);
   }).pipe(
     Scope.provide(scope),
     Effect.onExit((exit) => Scope.close(scope, exit)),
@@ -569,6 +597,23 @@ const page = (
     document.bootstrap,
     document.end,
   ].join("");
+
+const awaited = (
+  document: Document,
+  root: HtmlElement,
+  seed: ReadonlyArray<Streaming.Patch>,
+  complete: boolean,
+): AwaitedPage => ({ html: page(document, root, seed), seed, complete });
+
+/** Mark every patch as read at build time. None: an ordinary request. */
+const stamp = (
+  seed: ReadonlyArray<Streaming.Patch>,
+  builtAt: Option.Option<number>,
+): ReadonlyArray<Streaming.Patch> =>
+  Option.match(builtAt, {
+    onNone: () => seed,
+    onSome: (at) => seed.map((patch): Streaming.Patch => ({ ...patch, builtAt: at })),
+  });
 
 const seedScript = (seed: ReadonlyArray<Streaming.Patch>): string => {
   if (seed.length === 0) {

@@ -179,6 +179,11 @@ interface CacheSlot {
   readonly forget: Effect.Effect<void>;
   /** Replaces the entry from an encoded result a command reply delivered. */
   readonly accept: (encoded: string) => Effect.Effect<void>;
+  /**
+   * Shows a value this client has not confirmed: a prerendered page's baked
+   * value (#23 §3.2). It lands `Ready{stale: true}`; the next read confirms it.
+   */
+  readonly acceptStale: (encoded: string) => Effect.Effect<void>;
   /** Records a refresh that the server could not serve. */
   readonly reject: (error: QueryFailure) => Effect.Effect<void>;
 }
@@ -408,6 +413,7 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
       return write(() => Ready(encoded, stale));
     });
   const accept = (encoded: string) => land(encoded, false);
+  const acceptStale = (encoded: string) => land(encoded, true);
   const reject = (error: QueryFailure) =>
     Effect.suspend(() => {
       generation += 1;
@@ -550,6 +556,7 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
     markStale: write(markStale),
     forget,
     accept,
+    acceptStale,
     reject,
   };
 
@@ -625,6 +632,11 @@ const begin = (slot: CacheSlot, seed: Option.Option<Seed>): Effect.Effect<void> 
   });
 
 const landSeed = (slot: CacheSlot, state: SeedState): Effect.Effect<void> => {
+  // A prerendered page's value: shown at once, marked unconfirmed, and read
+  // again now. The reply lands `Ready{stale: false}` in its place (#23 §3.2).
+  if (state._tag === "Ready" && state.stale) {
+    return Effect.andThen(slot.acceptStale(state.value), Effect.forkIn(slot.refresh, slot.scope));
+  }
   if (state._tag === "Ready") {
     return slot.accept(state.value);
   }

@@ -68,6 +68,11 @@
       "source": "./src/router/index.ts",
       "types": "./dist/router/index.d.ts",
       "default": "./dist/router/index.js"
+    },
+    "./router/prerender": {
+      "source": "./src/router/prerender.server.ts",
+      "types": "./dist/router/prerender.server.d.ts",
+      "default": "./dist/router/prerender.server.js"
     }
   },
   "publishConfig": {
@@ -87,6 +92,7 @@
     "effect-machine": "0.27.0"
   },
   "devDependencies": {
+    "@effect/platform-bun": "catalog:",
     "@happy-dom/global-registrator": "20.14.5",
     "@opentui/core": "0.5.11",
     "happy-dom": "20.14.5"

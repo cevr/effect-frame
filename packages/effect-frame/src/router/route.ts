@@ -5,7 +5,7 @@
  *
  * One model: a segment is an address, a branch is a segment with its view
  * (`leaf`, `layout`), and a rendering-mode constructor (`client`, `ssr`,
- * `streamed`, `awaitAll`) mounts a tree. `client(name, definition)` is the
+ * `streamed`, `awaitAll`, `prerender`) mounts a tree. `client(name, definition)` is the
  * one-leaf shorthand of that model, and so is each other mode's.
  */
 
@@ -51,8 +51,10 @@ export {
   awaitAll,
   child,
   client,
+  inputs,
   layout,
   leaf,
+  prerender,
   query,
   segment,
   ssr,
@@ -69,7 +71,11 @@ export type {
   LayoutPropsOf,
   LeafOptions,
   ModeConstructor,
+  NoParams,
   Pending,
+  PrerenderConstructor,
+  PrerenderDefinition,
+  PrerenderOptions,
   Presentation,
   PropsOf,
   QueryDeclaration,
@@ -97,3 +103,15 @@ export type {
 
 // Rendering modes.
 export type { RenderingMode } from "./rendering-mode.js";
+
+// Prerender inputs and the definition-time refusal (#23).
+export { PrerenderAncestorNotEnumerable, PrerenderInputsRejected } from "./prerender.js";
+export type {
+  AnyInputs,
+  Enumerate,
+  Inputs,
+  OwnParams,
+  PrerenderError,
+  PrerenderServices,
+  Prerendered,
+} from "./prerender.js";

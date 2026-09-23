@@ -81,6 +81,21 @@ import * as LeafRoot from "./leaf-root.js";
 import type { NavigationBehavior } from "./navigation-behavior.js";
 import type { RenderingMode } from "./rendering-mode.js";
 import { register as registerMode } from "./rendering-mode.js";
+import type {
+  AnyInputs,
+  Enumerate,
+  InputsError,
+  InputsServices,
+  ParamsRecord,
+  Prerendered,
+  Level as PrerenderLevel,
+} from "./prerender.js";
+import {
+  inputs as makeInputs,
+  planFor,
+  prerendered,
+  register as registerPrerender,
+} from "./prerender.js";
 
 /**
  * The nested route model: segments, branches, and the client mode. The
@@ -241,6 +256,7 @@ export interface Segment<
   Data extends Declarations,
   CheckR = never,
   Root extends boolean = boolean,
+  Inherited = unknown,
 > extends AnySegment {
   readonly name: Name;
   /** Encoded search ownership. Unknown means an opaque codec needs a declaration. */
@@ -266,7 +282,15 @@ export interface Segment<
   readonly "~check": (_: never) => CheckR;
   /** Phantom: `true` for a segment without a parent. */
   readonly "~root": (_: never) => Root;
+  /**
+   * Phantom: the decoded params every ancestor contributes, which a
+   * prerender `Route.inputs` of this segment receives. Empty for a root.
+   */
+  readonly "~inherited": (_: never) => Inherited;
 }
+
+/** The params a root segment inherits: none. */
+export type NoParams = Readonly<Record<never, never>>;
 
 /**
  * What the transition reads from a segment. It is not part of the public
@@ -289,6 +313,11 @@ interface SegmentRuntime<Params, Search, Own> {
   searchUpdate(current: URL, values: Values<Params, Search>, deepest: boolean): string;
   /** This segment's own check, when it has one. Its services are `CheckR`. */
   check(values: Values<Params, Search>, url: URL, kind: NavigationKind): Option.Option<Check>;
+  /**
+   * Print this segment's URL for a prerender page: its full params and the
+   * empty search. None when the record is not this segment's params.
+   */
+  print(params: ParamsRecord): Option.Option<string>;
 }
 
 const segmentRuntimes = new WeakMap<AnySegment, SegmentRuntime<unknown, unknown, Declarations>>();
@@ -372,6 +401,9 @@ const phantom =
 
 const noDeclarations = (): NoDeclarations => ({});
 
+/** A prerender page carries no search: its URL prints the empty one. */
+const prerenderBase = new URL("http://prerender.invalid/");
+
 /** A stable printed form of a path record, used only to compare two matches. */
 const recordSignature = (record: PathRecord): string =>
   Object.keys(record)
@@ -396,12 +428,13 @@ const makeSegment = <
   Data extends Declarations,
   CheckR,
   Root extends boolean,
+  Inherited,
 >(
   name: Name,
   parent: Option.Option<AnySegment>,
   options: SegmentOptions<P, S, Own, CheckR>,
   data: (values: Values<P["Type"], S["Type"]>) => Own,
-): Segment<Name, P["Type"], S["Type"], Own, Data, CheckR, Root> => {
+): Segment<Name, P["Type"], S["Type"], Own, Data, CheckR, Root, Inherited> => {
   const parts = Result.getOrThrowWith(parseTemplate(options.path), (rejected) => rejected);
   const search: SearchCodec = Option.getOrElse(
     Option.fromNullishOr(options.search),
@@ -419,7 +452,7 @@ const makeSegment = <
     searchKeys: Option.fromNullishOr(options.searchKeys),
     retain: Option.fromNullishOr(options.retain),
   });
-  const made: Segment<Name, P["Type"], S["Type"], Own, Data, CheckR, Root> = {
+  const made: Segment<Name, P["Type"], S["Type"], Own, Data, CheckR, Root, Inherited> = {
     _tag: "Segment",
     [SegmentBrand]: "Segment",
     name,
@@ -445,9 +478,17 @@ const makeSegment = <
     "~data": phantom<Data>(),
     "~check": phantom<CheckR>(),
     "~root": phantom<Root>(),
+    "~inherited": phantom<Inherited>(),
   };
+  const isParams = Schema.is(options.params);
   const runtime: SegmentRuntime<P["Type"], S["Type"], Own> = {
     parts,
+    print: (params) => {
+      if (!isParams(params)) {
+        return Option.none();
+      }
+      return Option.some(printer.href(params, printer.searchAt(prerenderBase)));
+    },
     searchUpdate: (current, values, deepest) => {
       if (deepest) {
         return printer.hrefFrom(current, values.params, values.search);
@@ -479,8 +520,8 @@ export const segment = <
 >(
   name: Name,
   options: SegmentOptions<P, S, Own, CheckR> & DataRequired<Own>,
-): Segment<Name, P["Type"], S["Type"], Own, Own, CheckR, true> =>
-  makeSegment<Name, P, S, Own, Own, CheckR, true>(
+): Segment<Name, P["Type"], S["Type"], Own, Own, CheckR, true, NoParams> =>
+  makeSegment<Name, P, S, Own, Own, CheckR, true, NoParams>(
     name,
     Option.none(),
     options,
@@ -489,6 +530,7 @@ export const segment = <
 
 /** A segment under a parent. It inherits the parent's declarations. */
 export const child = <
+  ParentParams,
   ParentData extends Declarations,
   const Name extends string,
   P extends ParamsCodec,
@@ -496,11 +538,11 @@ export const child = <
   Own extends Declarations & Disjoint<ParentData> = NoDeclarations,
   CheckR = never,
 >(
-  parent: Segment<string, unknown, unknown, Declarations, ParentData, unknown>,
+  parent: Segment<string, ParentParams, unknown, Declarations, ParentData, unknown>,
   name: Name,
   options: SegmentOptions<P, S, Own, CheckR> & DataRequired<Own>,
-): Segment<Name, P["Type"], S["Type"], Own, ParentData & Own, CheckR, false> => {
-  const made = makeSegment<Name, P, S, Own, ParentData & Own, CheckR, false>(
+): Segment<Name, P["Type"], S["Type"], Own, ParentData & Own, CheckR, false, ParentParams> => {
+  const made = makeSegment<Name, P, S, Own, ParentData & Own, CheckR, false, ParentParams>(
     name,
     Option.some(parent),
     options,
@@ -815,6 +857,8 @@ interface BranchRuntime<R> {
   readonly searchKeys: ReadonlyArray<SearchKeyInfo>;
   /** This segment and every descendant. */
   readonly segments: ReadonlyArray<AnySegment>;
+  /** This segment and its children, as a prerender build walks them. */
+  readonly level: PrerenderLevel;
 }
 
 const runtimes = new WeakMap<object, BranchRuntime<unknown>>();
@@ -2253,6 +2297,12 @@ const makeBranch = <
     match,
     searchKeys: [seg.searchKeys, ...childRuntimes.flatMap((below) => below.searchKeys)],
     segments: [seg, ...childRuntimes.flatMap((below) => below.segments)],
+    level: {
+      segment: seg,
+      params: paramNames(segRuntime.parts),
+      print: segRuntime.print,
+      children: childRuntimes.map((below) => below.level),
+    },
   };
   runtimes.set(made, runtime);
   return made;
@@ -2549,6 +2599,48 @@ export interface ModeConstructor {
   ): Route<Name, Params, Search, R>;
 }
 
+/** The one leaf of a flat definition, and the segment it prints with. */
+const flatLeaf = <
+  const Name extends string,
+  Params extends ParamsCodec,
+  Search extends SearchCodec,
+  R,
+>(
+  name: Name,
+  input: RouteDefinition<Params, Search, R>,
+) => {
+  const one = segment(name, {
+    path: input.path,
+    params: input.params,
+    search: input.search,
+    ...Option.match(Option.fromNullishOr(input.searchKeys), {
+      onNone: () => ({}),
+      onSome: (searchKeys) => ({ searchKeys }),
+    }),
+    ...Option.match(Option.fromNullishOr(input.retain), {
+      onNone: () => ({}),
+      onSome: (retain) => ({ retain }),
+    }),
+  });
+  const branch = leaf(one, input.view, ...flatOptions(Option.fromNullishOr(input.behavior)));
+  /** A flat route's own codecs and printers, copied onto the tree. */
+  const extra: Omit<Route<Name, Params, Search, R>, keyof Tree<Name, R>> = {
+    params: input.params,
+    search: input.search,
+    href: one.href,
+    hrefAt: one.hrefAt,
+    searchAt: one.searchAt,
+    // The router resolved the document to this route: the flat rule.
+    currentAt: (current): Current => {
+      if (current.name === name) {
+        return "page";
+      }
+      return "none";
+    },
+  };
+  return { one, branch, extra };
+};
+
 const modeConstructor = (mode: RenderingMode): ModeConstructor => {
   function made<const Name extends string, Seg extends RootSegment, ViewR, DataR>(
     name: Name,
@@ -2572,43 +2664,13 @@ const modeConstructor = (mode: RenderingMode): ModeConstructor => {
     if (isBranch(input)) {
       return mountTree(name, input, {}, mode);
     }
-    const one = segment(name, {
-      path: input.path,
-      params: input.params,
-      search: input.search,
-      ...Option.match(Option.fromNullishOr(input.searchKeys), {
-        onNone: () => ({}),
-        onSome: (searchKeys) => ({ searchKeys }),
-      }),
-      ...Option.match(Option.fromNullishOr(input.retain), {
-        onNone: () => ({}),
-        onSome: (retain) => ({ retain }),
-      }),
-    });
+    const flat = flatLeaf(name, input);
     return mountTree<
       Name,
       Exclude<R, Scope.Scope>,
       never,
       Omit<Route<Name, Params, Search, R>, keyof Tree<Name, R>>
-    >(
-      name,
-      leaf(one, input.view, ...flatOptions(Option.fromNullishOr(input.behavior))),
-      {
-        params: input.params,
-        search: input.search,
-        href: one.href,
-        hrefAt: one.hrefAt,
-        searchAt: one.searchAt,
-        // The router resolved the document to this route: the flat rule.
-        currentAt: (current): Current => {
-          if (current.name === name) {
-            return "page";
-          }
-          return "none";
-        },
-      },
-      mode,
-    );
+    >(name, flat.branch, flat.extra, mode);
   }
   return made;
 };
@@ -2639,3 +2701,119 @@ export const streamed: ModeConstructor = modeConstructor("Streamed");
  * then writes one document and one seed.
  */
 export const awaitAll: ModeConstructor = modeConstructor("AwaitAll");
+
+/** A prerender tree's options: how each segment that adds a param is enumerated. */
+export interface PrerenderOptions<I extends ReadonlyArray<AnyInputs>> {
+  /**
+   * One `Route.inputs` per segment that adds a param, and none for a
+   * segment that adds none. A tree whose segments add no param gives `[]`.
+   */
+  readonly inputs: I;
+}
+
+/** The flat prerender definition: a route definition and its inputs. */
+export interface PrerenderDefinition<
+  Params extends ParamsCodec,
+  Search extends SearchCodec,
+  R,
+  E,
+  IR,
+> extends RouteDefinition<Params, Search, R> {
+  /** Every page this route contributes to the build, as params. No search. */
+  readonly inputs: Enumerate<Params["Type"], NoParams, E, IR>;
+}
+
+/**
+ * The prerender constructor (#23). It takes `inputs` in both forms, and a
+ * call without them does not compile: a build must know every page.
+ */
+export interface PrerenderConstructor {
+  <
+    const Name extends string,
+    Seg extends RootSegment,
+    ViewR,
+    DataR,
+    const I extends ReadonlyArray<AnyInputs>,
+  >(
+    name: Name,
+    root: Branch<Seg, ViewR, DataR>,
+    options: PrerenderOptions<I>,
+  ): Tree<Name, ViewR | DataR> & Prerendered<InputsError<I[number]>, InputsServices<I[number]>>;
+  <
+    const Name extends string,
+    Params extends ParamsCodec,
+    Search extends SearchCodec,
+    R,
+    E = never,
+    IR = never,
+  >(
+    name: Name,
+    definition: PrerenderDefinition<Params, Search, R, E, IR>,
+  ): Route<Name, Params, Search, R> & Prerendered<E, IR>;
+}
+
+function prerenderTree<
+  const Name extends string,
+  Seg extends RootSegment,
+  ViewR,
+  DataR,
+  const I extends ReadonlyArray<AnyInputs>,
+>(
+  name: Name,
+  root: Branch<Seg, ViewR, DataR>,
+  options: PrerenderOptions<I>,
+): Tree<Name, ViewR | DataR> & Prerendered<InputsError<I[number]>, InputsServices<I[number]>>;
+function prerenderTree<
+  const Name extends string,
+  Params extends ParamsCodec,
+  Search extends SearchCodec,
+  R,
+  E = never,
+  IR = never,
+>(
+  name: Name,
+  definition: PrerenderDefinition<Params, Search, R, E, IR>,
+): Route<Name, Params, Search, R> & Prerendered<E, IR>;
+function prerenderTree<
+  const Name extends string,
+  Params extends ParamsCodec,
+  Search extends SearchCodec,
+  R,
+  E,
+  IR,
+>(
+  name: Name,
+  input: PrerenderDefinition<Params, Search, R, E, IR> | AnyBranch<unknown>,
+  options: PrerenderOptions<ReadonlyArray<AnyInputs>> = { inputs: [] },
+): (Route<Name, Params, Search, R> & Prerendered<E, IR>) | Tree<Name, unknown> {
+  if (isBranch(input)) {
+    // Checked before the tree is mounted: a refused tree registers nothing.
+    const plan = planFor(name, runtimeOf(input).level, options.inputs);
+    const tree = mountTree(name, input, prerendered<unknown, unknown>(), "AwaitAll");
+    registerPrerender(tree, plan);
+    return tree;
+  }
+  const flat = flatLeaf(name, input);
+  const plan = planFor(name, runtimeOf(flat.branch).level, [makeInputs(flat.one, input.inputs)]);
+  const tree = mountTree<
+    Name,
+    Exclude<R, Scope.Scope>,
+    never,
+    Omit<Route<Name, Params, Search, R>, keyof Tree<Name, R>> & Prerendered<E, IR>
+  >(name, flat.branch, { ...flat.extra, ...prerendered<E, IR>() }, "AwaitAll");
+  registerPrerender(tree, plan);
+  return tree;
+}
+
+/**
+ * `Prerender` (#23): the build renders every page its inputs enumerate, at
+ * the URL `href` prints, and writes it to a file served before the router.
+ * A request with no file renders through the same pipeline. Its rendering
+ * mode is `AwaitAll`: a file cannot stream. Every segment that adds a param
+ * names its `Route.inputs`, or the constructor refuses the tree with
+ * `PrerenderAncestorNotEnumerable`.
+ */
+export const prerender: PrerenderConstructor = prerenderTree;
+
+/** How one segment enumerates its own params for a prerender tree. See `prerender`. */
+export const inputs = makeInputs;

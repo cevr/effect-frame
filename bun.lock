@@ -45,6 +45,7 @@
         "effect-machine": "0.27.0",
       },
       "devDependencies": {
+        "@effect/platform-bun": "catalog:",
         "@happy-dom/global-registrator": "20.14.5",
         "@opentui/core": "0.5.11",
         "happy-dom": "20.14.5",
@@ -71,6 +72,9 @@
     "packages/inspect": {
       "name": "@effect-frame/inspect",
       "version": "0.0.0",
+      "bin": {
+        "effect-frame": "./dist/bin.js",
+      },
       "dependencies": {
         "effect-frame": "workspace:*",
       },
@@ -101,6 +105,9 @@
         "effect": "catalog:",
       },
     },
+  },
+  "overrides": {
+    "@effect/platform-node-shared": "4.0.0-rc.115",
   },
   "catalog": {
     "@effect/platform-bun": "4.0.0-rc.115",
@@ -154,6 +161,10 @@
     "@effect-frame/inspect": ["@effect-frame/inspect@workspace:packages/inspect"],
 
     "@effect-frame/toolchain-checks": ["@effect-frame/toolchain-checks@workspace:tooling/checks"],
+
+    "@effect/platform-bun": ["@effect/platform-bun@4.0.0-rc.115", "", { "dependencies": { "@effect/platform-node-shared": "^4.0.0-rc.115" }, "peerDependencies": { "effect": "^4.0.0-rc.115" } }, "sha512-ilTFcs66ghInP8WHCJYa4bx/yzohYM9dRR//qjmVBBpSKu1hrCTiRWpEcc1N6zrnOEPk2kyVaKg5ykSMgiBMqQ=="],
+
+    "@effect/platform-node-shared": ["@effect/platform-node-shared@4.0.0-rc.115", "", { "dependencies": { "@types/ws": "^8.18.1", "ws": "^8.21.3" }, "peerDependencies": { "effect": "^4.0.0-rc.115" } }, "sha512-rcBwhDIfb82akJoTv7Vwh8K5x9vC/XfuePS7JjOr+z+dORXzsmKqI1BUQF27ARCN9fTAbDh7I6YvBlWhLjnqNg=="],
 
     "@effect/tsgo": ["@effect/tsgo@0.24.3", "", { "optionalDependencies": { "@effect/tsgo-darwin-arm64": "0.24.3", "@effect/tsgo-darwin-x64": "0.24.3", "@effect/tsgo-linux-arm": "0.24.3", "@effect/tsgo-linux-arm64": "0.24.3", "@effect/tsgo-linux-x64": "0.24.3", "@effect/tsgo-win32-arm64": "0.24.3", "@effect/tsgo-win32-x64": "0.24.3" }, "bin": { "effect-tsgo": "dist/effect-tsgo.js" } }, "sha512-WQxKU3MFzWzI38GbE9cf0POkVX4y0xahD8QqDjLfixW1AEValuHNfOQvyKM2MDWOLdGff4hP8VnIOeduwQt66A=="],
 

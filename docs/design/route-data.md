@@ -176,10 +176,12 @@ Other`; the render does not follow it, and the browser's next request
     each params Schema: the printers are the one place every href goes
     through, url-state included, and a Schema refinement would still need
     them for `Route.printPath` and `Route.printSearch`.
-14. **Prerender stays with #86.** `Route.prerender` needs `inputs`, and
-    #23 decides nested inputs. So the row "prerender without `inputs` does
-    not compile" and the row "prerender renders every input" stay open.
-    `renderDocument` is the pipeline #86 will call once per input.
+14. **Prerender is a fifth mode constructor (#86).** `Route.prerender`
+    takes `inputs`, and a call without them does not compile. It registers
+    `AwaitAll`, so a prerender URL with no built file renders through this
+    same pipeline. The build calls `settleAndPrepare`, the settle and
+    prepare half of `renderDocument`, once per input. See
+    [prerender.md](prerender.md).
 
 ## Evidence
 

@@ -1,0 +1,5 @@
+---
+"effect-frame": minor
+---
+
+`Route.driven` mounts a tree whose leaves are drawn over the op wire (#18 §6, #22 §5). A driven leaf is `Route.leaf(segment, Route.drivenView({ drive, view }))`; the flat form is `Route.driven(name, { path, params, search, drive, view })`. The server's document draws the leaf's view over its drive. The client hydrates everything else and leaves the leaf's nodes alone. Once `Route.OpWire`'s `ready` completes (the application completes it after `Streaming.Resumed.closed` and hydration), the leaf connects, adopts the nodes the document drew, and applies the session's patches. A change of params follows the new drive, and a dropped connection resumes. A driven view that needs a service other than `ActorTransport | Scope` does not compile, and `Route.driven` refuses a tree with a leaf whose view is not a `Route.drivenView` with `BranchRejected`. `Route.drivenAt(routes, url)` gives the server end what `Driven.session` needs. A page with no `Route.OpWire` keeps each driven leaf as its document drew it. `Remote.Client` gains `detach`.

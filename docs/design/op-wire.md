@@ -352,11 +352,12 @@ without its first yield: no test needed that yield, so it was removed
 
 ## What stays open
 
-- **The op wire starts only after the document closes** (#22). The client
-  here enters the wire only through `resume`, which draws fresh. Handing a
-  hydrated, streamed document over to the wire, which adopts the server's
-  nodes and waits for `Resumed.closed`, belongs with `Route.driven` (#18)
-  and the Chat example (#43).
+- **The op wire starts only after the document closes** (#22). This is
+  done in the package by `Route.driven` (#36, `docs/design/driven-route.md`):
+  a client adopts a driven leaf's server nodes through `resume` over a
+  hydrating host, and no leaf connects before `OpWire.ready`. The
+  application half, a real connection and its tests, belongs with the Chat
+  example (#43).
 - **Ids are never reclaimed** (#15 risk 5). A long session counts up. A
   reconnect starts the count again.
 - **The shadow is memory per connected client** (#15 risk 3). It is state,

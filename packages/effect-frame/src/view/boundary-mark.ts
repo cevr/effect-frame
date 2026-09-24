@@ -26,3 +26,11 @@ export const boundaryOpen = (shown: boolean): string => {
   }
   return boundaryFallback;
 };
+
+/**
+ * The attribute on a server-driven view's container (#18, #22 §5). The
+ * container's children belong to the op wire, not to the page's hydration:
+ * `Dom.hydrate` claims the container and leaves its children for the wire,
+ * which adopts them when it opens. See `docs/design/driven-route.md`.
+ */
+export const drivenContainer = "data-frame-driven";

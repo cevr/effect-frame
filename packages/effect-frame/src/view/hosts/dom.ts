@@ -1,7 +1,12 @@
 import { Form, Streaming } from "effect-frame/actor/client";
 import type { Cause, Scope } from "effect";
 import { Effect, Option, Queue, Schema, Stream } from "effect";
-import { boundaryClose, boundaryContent, boundaryPrefix } from "../boundary-mark.js";
+import {
+  boundaryClose,
+  boundaryContent,
+  boundaryPrefix,
+  drivenContainer,
+} from "../boundary-mark.js";
 import type { Cleanup, EventHandler, Host, PropertyValue, StaticProps } from "../host.js";
 import type { Attached } from "../view.js";
 import { attach as attachNode } from "../view.js";
@@ -222,7 +227,15 @@ interface ServerTree {
   readonly opens: Array<Node>;
 }
 
-/** The server's nodes under `root`. A comment only separates text or marks a boundary. */
+/** A server-driven view's container: its children are the op wire's. */
+const isDrivenContainer = (node: Node): boolean =>
+  Option.exists(asElement(node), (element) => element.hasAttribute(drivenContainer));
+
+/**
+ * The server's nodes under `root`. A comment only separates text or marks a
+ * boundary. A driven container is claimed, and its children are not: the op
+ * wire adopts them when it opens (#22 §5).
+ */
 const collect = (root: Node): ServerTree => {
   const nodes: Array<Node> = [];
   const opens: Array<Node> = [];
@@ -234,7 +247,9 @@ const collect = (root: Node): ServerTree => {
       if (isOpenMark(child)) {
         opens.push(child);
       }
-      walk(child);
+      if (!isDrivenContainer(child)) {
+        walk(child);
+      }
     }
   };
   walk(root);

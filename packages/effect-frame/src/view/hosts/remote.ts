@@ -864,6 +864,13 @@ export interface Client<E, R> {
   /** The position the client holds. */
   readonly position: Effect.Effect<number>;
   readonly retained: Effect.Effect<ClientRetained>;
+  /**
+   * Stop following: remove every listener and forget every id, and leave the
+   * drawn nodes where they are. The next client over the same root adopts
+   * them, as `Route.driven` does on a reconnect (#18). Every later patch is
+   * refused with `ForeignSession`.
+   */
+  readonly detach: Effect.Effect<void>;
 }
 
 /**
@@ -1026,6 +1033,14 @@ export const client = <Props, E, R, C extends AnyContract, HostNode>(
       }),
     position: Effect.sync(() => position),
     retained: Effect.sync(() => ({ nodes: nodes.size - 1, listeners: cleanups.size })),
+    detach: Effect.sync(() => {
+      for (const cleanup of cleanups.values()) {
+        cleanup();
+      }
+      nodes = new Map<number, HostNode>([[root.id, target.root]]);
+      cleanups = new Map<number, Cleanup>();
+      session = Option.none();
+    }),
   };
   return self;
 };

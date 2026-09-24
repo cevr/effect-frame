@@ -51,6 +51,8 @@ export {
   awaitAll,
   child,
   client,
+  driven,
+  drivenAt,
   inputs,
   layout,
   leaf,
@@ -69,6 +71,9 @@ export type {
   Branch,
   Declaration,
   Declarations,
+  DrivenAt,
+  DrivenConstructor,
+  DrivenDefinition,
   LayoutProps,
   LayoutPropsOf,
   LeafOptions,
@@ -105,6 +110,17 @@ export type {
 
 // Rendering modes.
 export type { RenderingMode } from "./rendering-mode.js";
+
+// Server-driven leaves and the op wire's client end (#18 §6, #22 §5).
+export { OpWire, WireFailed, drivenView } from "./driven.js";
+export type {
+  Connection,
+  DrivenOptions,
+  DrivenProps,
+  DrivenServices,
+  DrivenView,
+  OpWireService,
+} from "./driven.js";
 
 // Prerender inputs and the definition-time refusal (#23).
 export { PrerenderAncestorNotEnumerable, PrerenderInputsRejected } from "./prerender.js";

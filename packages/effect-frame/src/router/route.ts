@@ -112,7 +112,7 @@ export type {
 export type { RenderingMode } from "./rendering-mode.js";
 
 // Server-driven leaves and the op wire's client end (#18 §6, #22 §5).
-export { OpWire, WireFailed, drivenView } from "./driven.js";
+export { WireFailed, drivenView } from "./driven.js";
 export type {
   Connection,
   DrivenOptions,

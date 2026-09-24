@@ -19,8 +19,8 @@ import {
 } from "effect-frame/actor";
 import type { TransportService } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
-import { Location, Route, mount as mountRouter, renderDocument } from "effect-frame/router";
-import type { AnyRoute, LocationService, NotFoundProps, RouterService } from "effect-frame/router";
+import { Location, Route, hydrate, renderDocument } from "effect-frame/router";
+import type { AnyRoute, LocationService, NotFoundProps } from "effect-frame/router";
 import { For, Loading, View, ready } from "effect-frame/view";
 import * as Driven from "effect-frame/view/driven";
 import { Context, Deferred, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
@@ -30,7 +30,6 @@ import {
   append,
   eventually,
   frame,
-  hydrateWith,
   idOf,
   install,
   parsing,
@@ -135,6 +134,35 @@ const lineup = Route.driven("lineup", {
   view: LineupView,
 });
 
+class RoomClosed extends Schema.TaggedError<RoomClosed>()("RoomClosed", {
+  room: Schema.String,
+}) {}
+
+/** A driven view whose drawing fails with a typed error. */
+const ClosedRoom = (params: { readonly room: string }) =>
+  Effect.fail(RoomClosed.make({ room: params.room }));
+
+const closedSegment = Route.segment("closed", { path: "/closed", params: Schema.Struct({}) });
+
+/** A driven leaf whose view fails: its leaf draws the `errored` view. */
+const closed = Route.driven(
+  "closed",
+  Route.layout(
+    closedSegment,
+    [
+      Route.leaf(
+        Route.child(closedSegment, "closedRoom", {
+          path: ":room",
+          params: Schema.Struct({ room: Schema.String }),
+        }),
+        Route.drivenView({ drive: roomDrive, view: ClosedRoom }),
+        { errored: () => <p id="closed">closed</p> },
+      ),
+    ],
+    (props) => props.outlet,
+  ),
+);
+
 /** The layout's title: its query is held, so the document stays open until the test releases it. */
 const Title = Loading({
   fallback: <p id="pending-title">loading</p>,
@@ -194,23 +222,31 @@ const sideOver = (transport: TransportService) =>
     (built) => Context.add(built, ActorTransport, transport),
   );
 
+/** What the in-process wire saw, by the leaf's path. */
+interface WireLog {
+  readonly connects: Array<string>;
+  readonly sends: Array<string>;
+  /** Sends interrupted before they reached the session. */
+  readonly interrupted: Array<string>;
+  /** While set, a send waits here before it reaches the session. */
+  hold: Option.Option<Deferred.Deferred<void>>;
+}
+
+const wireLog = (): WireLog => ({ connects: [], sends: [], interrupted: [], hold: Option.none() });
+
 /**
  * The op wire's two ends, in process: `connect` opens a `Driven.session` for
  * the driven leaf `Route.drivenAt` finds at the URL, as a server end would.
- * Every connect, and every event sent, is recorded by the leaf's path.
  */
 const wireOver = <R,>(
   routes: ReadonlyArray<AnyRoute<R>>,
   transport: TransportService,
-  whenReady: Effect.Effect<void>,
-  connects: Array<string>,
-  sends: Array<string> = [],
+  log: WireLog,
 ): Route.OpWireService => ({
-  ready: whenReady,
   reconnectAfter: "10 millis",
   connect: (url) =>
     Effect.gen(function* () {
-      connects.push(url.pathname);
+      log.connects.push(url.pathname);
       const at = yield* Effect.fromOption(Route.drivenAt(routes, url)).pipe(
         Effect.mapError(() => Route.WireFailed.make({ reason: "no driven leaf here" })),
       );
@@ -224,13 +260,34 @@ const wireOver = <R,>(
           Route.WireFailed.make({ reason: error._tag }),
         ),
         send: (event) =>
-          Effect.andThen(
-            Effect.sync(() => void sends.push(url.pathname)),
-            session.fire(event),
+          Effect.gen(function* () {
+            log.sends.push(url.pathname);
+            yield* Option.match(log.hold, { onNone: () => Effect.void, onSome: Deferred.await });
+            yield* session.fire(event);
+          }).pipe(
+            Effect.onInterrupt(() => Effect.sync(() => void log.interrupted.push(url.pathname))),
           ),
       };
     }),
 });
+
+/** The page's own client half: `hydrate` over `#app`, with or without a wire. */
+const hydratePage = (
+  client: Context.Context<ActorTransport | QueryCache>,
+  url: URL,
+  routes: ReadonlyArray<AnyRoute<ActorTransport | QueryCache | Location>>,
+  wire: Option.Option<Route.OpWireService>,
+) =>
+  Effect.gen(function* () {
+    const root = yield* Effect.fromOption(Option.fromNullishOr(document.getElementById("app")));
+    const location = yield* locationAt(url.href);
+    return yield* hydrate({
+      routes,
+      notFound: NotFound,
+      root,
+      ...Option.match(wire, { onNone: () => ({}), onSome: (opened) => ({ wire: opened }) }),
+    }).pipe(Effect.provideService(Location, location));
+  }).pipe(Effect.orDie, Effect.provideContext(client));
 
 /** Let every fiber that is ready run: nothing here waits on the clock. */
 const settle = Effect.gen(function* () {
@@ -300,25 +357,21 @@ describe("a driven route (#36)", () => {
         const drawn = Option.getOrThrow(countNode());
         expect(drawn.textContent).toBe("2");
 
-        // The app's `ready`: the record channel ended, and hydration is done.
-        const over = yield* Deferred.make<void>();
-        const connects: Array<string> = [];
-        const wire = wireOver([app], transport, Deferred.await(over), connects);
+        // The page hydrates with a wire: `hydrate` holds it until the document is over.
+        const log = wireLog();
         const client = yield* sideOver(transport);
-        const location = yield* locationAt(url.href);
-        const { report, resumed } = yield* hydrateWith(client, (hydrating, root) =>
-          mountRouter({ routes: [app], notFound: NotFound, host: hydrating, root }).pipe(
-            Effect.provideService(Location, location),
-            Effect.provideService(Route.OpWire, wire),
-          ),
+        const { report } = yield* hydratePage(
+          client,
+          url,
+          [app],
+          Option.some(wireOver([app], transport, log)),
         );
-        yield* Effect.forkScoped(Effect.andThen(resumed.closed, Deferred.succeed(over, void 0)));
         expect(report.mismatches).toEqual([]);
         expect(report.unclaimed).toBe(0);
 
         // The document is open: no wire, and the drawn nodes are untouched.
         yield* settle;
-        expect(connects).toEqual([]);
+        expect(log.connects).toEqual([]);
         expect(Option.getOrThrow(countNode())).toBe(drawn);
 
         // The layout's patch lands; the document is still open.
@@ -326,12 +379,12 @@ describe("a driven route (#36)", () => {
         yield* append(valueRecord(idOf("title"), "Rooms"));
         yield* eventually("the layout's patch", () => textOf("#title") === "Rooms");
         yield* settle;
-        expect(connects).toEqual([]);
+        expect(log.connects).toEqual([]);
 
         // The document closes: the wire opens, once, for the leaf's URL.
         yield* append({ _tag: "Closed", patched: [idOf("title")] });
-        yield* eventually("the wire", () => connects.length === 1);
-        expect(connects).toEqual(["/rooms/r1"]);
+        yield* eventually("the wire", () => log.connects.length === 1);
+        expect(log.connects).toEqual(["/rooms/r1"]);
 
         // The wire adopted the document's nodes: nothing was drawn twice,
         // and the server's patches move the node the document drew.
@@ -349,7 +402,7 @@ describe("a driven route (#36)", () => {
         );
         button.click();
         yield* eventually("the handler's patch", () => drawn.textContent === "13");
-        expect(connects).toEqual(["/rooms/r1"]);
+        expect(log.connects).toEqual(["/rooms/r1"]);
       }),
     10_000,
   );
@@ -372,35 +425,27 @@ describe("a driven route (#36)", () => {
         const drawn = Option.getOrThrow(countNode());
         expect(drawn.textContent).toBe("1");
 
-        const over = yield* Deferred.make<void>();
-        const connects: Array<string> = [];
-        const sends: Array<string> = [];
-        const wire = wireOver([flat], transport, Deferred.await(over), connects, sends);
+        const log = wireLog();
         const client = yield* sideOver(transport);
-        const location = yield* locationAt(url.href);
-        const mounted = yield* Deferred.make<RouterService>();
-        const { report, resumed } = yield* hydrateWith(client, (hydrating, root) =>
-          mountRouter({ routes: [flat], notFound: NotFound, host: hydrating, root }).pipe(
-            Effect.flatMap((router) => Deferred.succeed(mounted, router)),
-            Effect.provideService(Location, location),
-            Effect.provideService(Route.OpWire, wire),
-          ),
+        const { router, report } = yield* hydratePage(
+          client,
+          url,
+          [flat],
+          Option.some(wireOver([flat], transport, log)),
         );
         expect(report.mismatches).toEqual([]);
-        yield* Effect.forkScoped(Effect.andThen(resumed.closed, Deferred.succeed(over, void 0)));
 
-        yield* eventually("the wire", () => connects.length === 1);
+        yield* eventually("the wire", () => log.connects.length === 1);
         yield* first.call({ _tag: "Add", amount: 1 }, { timeout: "1 second" });
         yield* eventually("the first drive's patch", () => drawn.textContent === "2");
         expect(Option.getOrThrow(countNode())).toBe(drawn);
 
         // New params name a new drive: the leaf follows it, over a new session.
-        const router = yield* Deferred.await(mounted);
         yield* router.navigate("/room/b");
         yield* eventually("the second drive", () =>
           Option.exists(countNode(), (node) => node.textContent === "20"),
         );
-        expect(connects).toEqual(["/room/a", "/room/b"]);
+        expect(log.connects).toEqual(["/room/a", "/room/b"]);
         expect(document.querySelectorAll("#count").length).toBe(1);
         yield* second.call({ _tag: "Add", amount: 1 }, { timeout: "1 second" });
         yield* eventually("the second drive's patch", () =>
@@ -420,7 +465,7 @@ describe("a driven route (#36)", () => {
           Option.exists(countNode(), (node) => node.textContent === "22"),
         );
         yield* settle;
-        expect(sends).toEqual(["/room/b"]);
+        expect(log.sends).toEqual(["/room/b"]);
         expect(yield* first.state.get).toBe(2);
       }),
     10_000,
@@ -439,12 +484,7 @@ describe("a driven route (#36)", () => {
       const drawn = Option.getOrThrow(countNode());
 
       const client = yield* sideOver(transport);
-      const location = yield* locationAt(url.href);
-      const { report, resumed } = yield* hydrateWith(client, (hydrating, root) =>
-        mountRouter({ routes: [flat], notFound: NotFound, host: hydrating, root }).pipe(
-          Effect.provideService(Location, location),
-        ),
-      );
+      const { report, resumed } = yield* hydratePage(client, url, [flat], Option.none());
       yield* resumed.closed;
       expect(report.mismatches).toEqual([]);
       yield* writer.call({ _tag: "Add", amount: 1 }, { timeout: "1 second" });
@@ -466,19 +506,10 @@ describe("a driven route (#36)", () => {
       expect(items()).toEqual(["a", "b", "c"]);
       const first = Option.getOrThrow(Option.fromNullishOr(document.querySelector("#lineup li")));
 
-      const over = yield* Deferred.make<void>();
-      const connects: Array<string> = [];
-      const wire = wireOver([lineup], transport, Deferred.await(over), connects);
+      const log = wireLog();
       const client = yield* sideOver(transport);
-      const location = yield* locationAt(url.href);
-      const { resumed } = yield* hydrateWith(client, (hydrating, root) =>
-        mountRouter({ routes: [lineup], notFound: NotFound, host: hydrating, root }).pipe(
-          Effect.provideService(Location, location),
-          Effect.provideService(Route.OpWire, wire),
-        ),
-      );
-      yield* Effect.forkScoped(Effect.andThen(resumed.closed, Deferred.succeed(over, void 0)));
-      yield* eventually("the wire", () => connects.length === 1);
+      yield* hydratePage(client, url, [lineup], Option.some(wireOver([lineup], transport, log)));
+      yield* eventually("the wire", () => log.connects.length === 1);
 
       // The server moves the first item to the end: the adopted node moves.
       const writer = yield* ref(Lineup, "l1").pipe(Effect.provideContext(server));
@@ -486,6 +517,78 @@ describe("a driven route (#36)", () => {
       yield* eventually("the move", () => items().join() === "b,c,a");
       expect(document.querySelectorAll("#lineup li")[2]).toBe(first);
     }),
+  );
+
+  it.scopedLive("a driven view's failure keeps its errored view through hydration", () =>
+    Effect.gen(function* () {
+      const host = yield* sharedHost(yield* Deferred.make<void>());
+      const transport = Context.get(host, ActorTransport);
+      const server = yield* sideOver(transport);
+      const url = new URL(`${origin}/closed/c1`);
+      const html = yield* wholeDocument([closed], url).pipe(Effect.provideContext(server));
+      yield* install(html);
+      expect(textOf("#closed")).toBe("closed");
+
+      const client = yield* sideOver(transport);
+      const { report, resumed } = yield* hydratePage(client, url, [closed], Option.none());
+      yield* resumed.closed;
+      yield* settle;
+      expect(report.mismatches).toEqual([]);
+      expect(textOf("#closed")).toBe("closed");
+    }),
+  );
+
+  it.scopedLive(
+    "a send still in flight when the leaf moves on is interrupted with its connection",
+    () =>
+      Effect.gen(function* () {
+        const host = yield* sharedHost(yield* Deferred.make<void>());
+        const transport = Context.get(host, ActorTransport);
+        const server = yield* sideOver(transport);
+        const first = yield* ref(Room, "h1").pipe(Effect.provideContext(server));
+        const second = yield* ref(Room, "h2").pipe(Effect.provideContext(server));
+        yield* first.call({ _tag: "Add", amount: 1 }, { timeout: "1 second" });
+        yield* second.call({ _tag: "Add", amount: 30 }, { timeout: "1 second" });
+        const url = new URL(`${origin}/room/h1`);
+        const html = yield* wholeDocument([flat], url).pipe(Effect.provideContext(server));
+        yield* install(html);
+        const drawn = Option.getOrThrow(countNode());
+
+        const log = wireLog();
+        const client = yield* sideOver(transport);
+        const { router } = yield* hydratePage(
+          client,
+          url,
+          [flat],
+          Option.some(wireOver([flat], transport, log)),
+        );
+        yield* eventually("the wire", () => log.connects.length === 1);
+        yield* first.call({ _tag: "Add", amount: 1 }, { timeout: "1 second" });
+        yield* eventually("the adoption", () => drawn.textContent === "2");
+
+        // A click whose send is held on its way to the first session.
+        const held = yield* Deferred.make<void>();
+        log.hold = Option.some(held);
+        const button = Option.getOrThrow(
+          Option.filter(
+            Option.fromNullishOr(document.querySelector("[data-frame-driven] #add")),
+            (found): found is HTMLElement => found instanceof HTMLElement,
+          ),
+        );
+        button.click();
+        yield* eventually("the held send", () => log.sends.length === 1);
+
+        // The leaf moves on: the first connection closes, and its send with it.
+        yield* router.navigate("/room/h2");
+        yield* eventually("the send's interruption", () => log.interrupted.length === 1);
+        expect(log.interrupted).toEqual(["/room/h1"]);
+        yield* Deferred.succeed(held, void 0);
+        yield* eventually("the second drive", () =>
+          Option.exists(countNode(), (node) => node.textContent === "30"),
+        );
+        yield* settle;
+        expect(yield* first.state.get).toBe(2);
+      }),
   );
 });
 
@@ -506,6 +609,46 @@ describe("Route.driven forbids a client-only view (#18)", () => {
         Route.drivenAt([app], new URL(`${origin}/rooms/r9`)).pipe(Option.map((at) => at.drive.key)),
       ).toEqual(Option.some("r9"));
       expect(Route.drivenAt([app], new URL(`${origin}/elsewhere`))).toEqual(Option.none());
+    }),
+  );
+
+  it.effect("sibling leaves that share a segment name each resolve to their own drive", () =>
+    Effect.sync(() => {
+      const shared = Route.segment("shared", { path: "/r", params: Schema.Struct({}) });
+      const first = Route.child(shared, "item", {
+        path: "a/:room",
+        params: Schema.Struct({ room: Schema.String }),
+      });
+      const second = Route.child(shared, "item", {
+        path: "b/:room",
+        params: Schema.Struct({ room: Schema.String }),
+      });
+      const siblings = Route.driven(
+        "siblings",
+        Route.layout(
+          shared,
+          [
+            Route.leaf(first, Route.drivenView({ drive: roomDrive, view: RoomView })),
+            Route.leaf(
+              second,
+              Route.drivenView({
+                drive: (params: { readonly room: string }) => ({
+                  contract: Lineup,
+                  key: params.room,
+                }),
+                view: LineupView,
+              }),
+            ),
+          ],
+          (props) => props.outlet,
+        ),
+      );
+      const contractAt = (path: string) =>
+        Route.drivenAt([siblings], new URL(`${origin}${path}`)).pipe(
+          Option.map((at) => at.drive.contract.name),
+        );
+      expect(contractAt("/r/a/x")).toEqual(Option.some("DrivenRoom"));
+      expect(contractAt("/r/b/x")).toEqual(Option.some("DrivenLineup"));
     }),
   );
 });

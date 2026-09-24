@@ -92,7 +92,7 @@ import { registerShell } from "./landing.js";
 import * as LeafRoot from "./leaf-root.js";
 import type { NavigationBehavior } from "./navigation-behavior.js";
 import type { AnyView, DrivenOptions, DrivenServices, ErasedDriven } from "./driven.js";
-import { drivenOf, drivenView } from "./driven.js";
+import { drivenOf, drivenShell, drivenView } from "./driven.js";
 import type { RenderingMode } from "./rendering-mode.js";
 import { register as registerMode } from "./rendering-mode.js";
 import type {
@@ -959,7 +959,7 @@ interface BranchRuntime<R> {
   /** This segment and its children, as a prerender build walks them. */
   readonly level: PrerenderLevel;
   /** Every leaf at or below this branch, as `Route.driven` checks them. */
-  readonly leaves: ReadonlyArray<AnyBranch<unknown>>;
+  readonly leaves: ReadonlyArray<Leaf>;
 }
 
 const runtimes = new WeakMap<object, BranchRuntime<unknown>>();
@@ -1026,7 +1026,13 @@ export const buildLeaf = <
     seg,
     [],
     (props) => view(props),
-    boundaryOf<E>(options),
+    {
+      ...boundaryOf<E>(options),
+      setupShell: Option.match(drivenOf(view), {
+        onNone: () => (failed: Node) => failed,
+        onSome: () => drivenShell,
+      }),
+    },
     lazyDefinitionOf(view),
     behaviorOf(options),
   );
@@ -1034,13 +1040,22 @@ export const buildLeaf = <
   return made;
 };
 
+/**
+ * A leaf, and the identity its outlines carry. Sibling segments may share a
+ * name, so a leaf is found by its identity, never by its name.
+ */
+interface Leaf {
+  readonly branch: AnyBranch<unknown>;
+  readonly identity: BranchIdentity;
+}
+
 /** A branch with no children is its own leaf; a layout's are its children's. */
 const leavesOf = (
-  branch: AnyBranch<unknown>,
+  leaf: Leaf,
   children: ReadonlyArray<BranchRuntime<unknown>>,
-): ReadonlyArray<AnyBranch<unknown>> => {
+): ReadonlyArray<Leaf> => {
   if (children.length === 0) {
-    return [branch];
+    return [leaf];
   }
   return children.flatMap((below) => below.leaves);
 };
@@ -1186,6 +1201,12 @@ export const layout = <
 interface Boundary<E> {
   readonly errored: Option.Option<(failure: Source<RouteFailure<E>>) => Node>;
   readonly pending: Option.Option<Timed>;
+  /**
+   * What holds `errored` when the view's own setup failed. A driven leaf's
+   * view draws its container on the client whatever the server drew, so its
+   * setup failure is drawn inside that container, where hydration keeps it.
+   */
+  readonly setupShell: (failed: Node) => Node;
 }
 
 /** `Pending` with its durations decoded once, where the branch is defined. */
@@ -1220,6 +1241,7 @@ const boundaryOf = <E>(recovery: ReadonlyArray<Recovery<E> | Presentation>): Bou
       Option.flatMap(given, (one) => Option.fromNullishOr(one.pending)),
       timed,
     ),
+    setupShell: (failed) => failed,
   };
 };
 
@@ -2026,7 +2048,9 @@ const makeBranch = <
             }),
           ),
           Effect.suspend(() =>
-            presentFailure(errored(constant<RouteFailure<E>>({ _tag: "Setup", error }))),
+            presentFailure(
+              boundary.setupShell(errored(constant<RouteFailure<E>>({ _tag: "Setup", error }))),
+            ),
           ),
         ),
     });
@@ -2547,7 +2571,7 @@ const makeBranch = <
       print: segRuntime.print,
       children: childRuntimes.map((below) => below.level),
     },
-    leaves: leavesOf(made, childRuntimes),
+    leaves: leavesOf({ branch: made, identity }, childRuntimes),
   };
   runtimes.set(made, runtime);
   return made;
@@ -2995,11 +3019,14 @@ export interface DrivenConstructor {
   >(
     name: Name,
     definition: DrivenDefinition<Params, Search, C>,
-  ): Route<Name, Params, Search, DrivenLeafServices>;
+  ): Route<Name, Params, Search, DrivenRouteServices>;
 }
 
 /** What a driven leaf's view needs from the router: the transport, the Location, and its Scope. */
 type DrivenLeafServices = ActorTransport | Location | Scope.Scope;
+
+/** What a flat driven route needs: its leaf's services, less the Scope its instance owns. */
+type DrivenRouteServices = Exclude<DrivenLeafServices, Scope.Scope>;
 
 /**
  * A driven leaf's view and props at one URL, and the actor that drives it.
@@ -3028,18 +3055,18 @@ const drivenTree = <R>(
   root: AnyBranch<R>,
 ): ((url: URL) => Option.Option<DrivenAt>) => {
   const runtime = runtimeOf(root);
-  const options = new Map<string, ErasedDriven>();
-  for (const leafBranch of runtime.leaves) {
-    const found = Option.flatMap(Option.fromNullishOr(leafViews.get(leafBranch)), drivenOf);
+  const options = new Map<BranchIdentity, ErasedDriven>();
+  for (const below of runtime.leaves) {
+    const found = Option.flatMap(Option.fromNullishOr(leafViews.get(below.branch)), drivenOf);
     if (Option.isNone(found)) {
       return Option.getOrThrowWith(Option.none(), () =>
         BranchRejected.make({
-          segment: leafBranch.segment.name,
+          segment: below.identity.segment,
           reason: `Route.driven("${name}") draws every leaf over the op wire; this leaf's view is a client view, not a Route.drivenView`,
         }),
       );
     }
-    options.set(leafBranch.segment.name, found.value);
+    options.set(below.identity, found.value);
   }
   return (url) =>
     Option.flatMap(matchUrl(runtime, url), (matched) => {
@@ -3047,7 +3074,7 @@ const drivenTree = <R>(
       // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- the leaf's own segment decoded these params, so they are its driven view's Params.
       const params = leafOutline.values.params as never;
       return Option.map(
-        Option.fromNullishOr(options.get(leafOutline.branch.segment)),
+        Option.fromNullishOr(options.get(leafOutline.branch)),
         (leafOptions): DrivenAt => ({
           view: leafOptions.view,
           props: params,
@@ -3078,7 +3105,7 @@ function drivenRoute<
 >(
   name: Name,
   definition: DrivenDefinition<Params, Search, C>,
-): Route<Name, Params, Search, DrivenLeafServices>;
+): Route<Name, Params, Search, DrivenRouteServices>;
 function drivenRoute<
   const Name extends string,
   Params extends ParamsCodec,
@@ -3087,7 +3114,7 @@ function drivenRoute<
 >(
   name: Name,
   input: DrivenDefinition<Params, Search, C> | AnyBranch<unknown>,
-): Route<Name, Params, Search, DrivenLeafServices> | Tree<Name, unknown> {
+): Route<Name, Params, Search, DrivenRouteServices> | Tree<Name, unknown> {
   if (isDrivenBranch(input)) {
     // Checked before the tree is mounted: a refused tree registers nothing.
     const resolve = drivenTree(name, input);
@@ -3102,9 +3129,9 @@ function drivenRoute<
   const resolve = drivenTree(name, flat.branch);
   const tree = mountTree<
     Name,
-    Exclude<DrivenLeafServices, Scope.Scope>,
+    DrivenRouteServices,
     never,
-    Omit<Route<Name, Params, Search, DrivenLeafServices>, keyof Tree<Name, DrivenLeafServices>>
+    Omit<Route<Name, Params, Search, DrivenRouteServices>, keyof Tree<Name, DrivenRouteServices>>
   >(name, flat.branch, flat.extra, "Streamed");
   drivenTrees.set(tree, resolve);
   return tree;
@@ -3119,8 +3146,8 @@ function drivenRoute<
  *
  * Its documents are `Streamed`: a layout's queries stream through the record
  * channel, and each driven leaf is drawn in its container. The client's page
- * hands each container to the op wire (`OpWire`) once the document is over,
- * and never before. The server end of the wire opens `Driven.session` for
+ * hands each container to the op wire once `hydrate` has seen the document
+ * end, and never before. The server end of the wire opens `Driven.session` for
  * `drivenAt(routes, url)`.
  */
 export const driven: DrivenConstructor = drivenRoute;

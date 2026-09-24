@@ -355,7 +355,8 @@ without its first yield: no test needed that yield, so it was removed
 - **The op wire starts only after the document closes** (#22). This is
   done in the package by `Route.driven` (#36, `docs/design/driven-route.md`):
   a client adopts a driven leaf's server nodes through `resume` over a
-  hydrating host, and no leaf connects before `OpWire.ready`. The
+  hydrating host, and `hydrate` opens no wire before the record channel
+  has ended and hydration is done. The
   application half, a real connection and its tests, belongs with the Chat
   example (#43).
 - **Ids are never reclaimed** (#15 risk 5). A long session counts up. A

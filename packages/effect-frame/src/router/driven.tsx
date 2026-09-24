@@ -4,7 +4,7 @@ import { ActorTransport } from "effect-frame/actor/client";
 import type { Host, Node, View } from "effect-frame/view";
 import { Dom, Remote } from "effect-frame/view";
 import type { Duration, Scope } from "effect";
-import { Context, Effect, Equal, Option, Schedule, Schema, Stream } from "effect";
+import { Context, Effect, Equal, FiberSet, Option, Schedule, Schema, Stream } from "effect";
 import { drivenContainer } from "../view/boundary-mark.js";
 import { driveOnly } from "../view/drive-transport.js";
 import type { LocationService } from "./router.js";
@@ -72,6 +72,16 @@ const drivenViews = new WeakMap<AnyView, ErasedDriven>();
 export const drivenOf = (view: AnyView): Option.Option<ErasedDriven> =>
   Option.fromNullishOr(drivenViews.get(view));
 
+/**
+ * A driven leaf's `errored` view, when its view failed on the server, drawn
+ * inside the container. The client's view draws the container and never
+ * fails, so hydration keeps the server's fallback; a wire that later adopts
+ * the container replaces it.
+ */
+export const drivenShell = (failed: Node): Node => (
+  <div {...{ [drivenContainer]: "" }}>{failed}</div>
+);
+
 /** The connection to the op wire failed or was cut. The leaf resumes from a new session. */
 export class WireFailed extends Schema.TaggedError<WireFailed>()("WireFailed", {
   reason: Schema.String,
@@ -88,27 +98,29 @@ export interface Connection {
 }
 
 /**
- * How a page reaches the op wire. The page provides it to the router's
- * `mount`; a mount without it keeps each driven leaf as its document drew
- * it. The connection itself (a socket, a stream) is the application's: the
- * server end opens `Driven.session` for `Route.drivenAt(routes, url)`.
+ * How a page reaches the op wire. The page gives it to `hydrate`, which
+ * opens no wire before the document is over (#22 §5); a page without it
+ * keeps each driven leaf as its document drew it. The connection itself (a
+ * socket, a stream) is the application's: the server end opens
+ * `Driven.session` for `Route.drivenAt(routes, url)`.
  */
 export interface OpWireService {
-  /**
-   * Completes when the document is over: its record channel ended
-   * (`Streaming.Resumed.closed`) and hydration is done. No wire opens
-   * before it (#22 §5). A page with no document completes it at once.
-   */
-  readonly ready: Effect.Effect<void>;
   /** Open one session for the driven leaf the page shows at `url`. */
   readonly connect: (url: URL) => Effect.Effect<Connection, WireFailed, Scope.Scope>;
   /** How long a dropped or failed connection waits before it resumes. */
   readonly reconnectAfter: Duration.Input;
 }
 
-export class OpWire extends Context.Service<OpWire, OpWireService>()(
-  "effect-frame/src/router/driven/OpWire",
-) {}
+/**
+ * The op wire as `hydrate` hands it to the driven leaves: the application's
+ * wire, and `over`, which completes once the document's record channel has
+ * ended and hydration is done. Only `hydrate` provides it, so no leaf can
+ * connect while the document is open.
+ */
+export class WireGate extends Context.Service<
+  WireGate,
+  { readonly wire: OpWireService; readonly over: Effect.Effect<void> }
+>()("effect-frame/src/router/driven/WireGate") {}
 
 /**
  * A host that forwards to whichever host is current. A connection adopts
@@ -149,14 +161,15 @@ const follow = <Params, C extends AnyContract, E>(
   Effect.scoped(
     Effect.gen(function* () {
       const connection = yield* wire.connect(url);
-      const context = yield* Effect.context<never>();
-      const runFork = Effect.runForkWith(context);
+      // Each event's send runs in this connection's scope: when the
+      // connection ends, a send still in flight ends with it.
+      const runSend = yield* FiberSet.makeRuntime<never, void, never>();
       const adopting = Dom.hydrate(container);
       let current = adopting.host;
       const client = Remote.client(options.view, params, options.drive(params), {
         host: switching(() => current),
         root: container,
-        send: (event) => void runFork(connection.send(event)),
+        send: (event) => void runSend(connection.send(event)),
       });
       yield* Effect.addFinalizer(() => client.detach);
       yield* client.resume(connection.resume);
@@ -227,7 +240,8 @@ const followParams = <Params, C extends AnyContract, E>(
  * The server's document draws `view` inside the container, over a transport
  * that serves the drive and refuses every other read, as the session's does.
  * The client's page draws the container, and hands it to the op wire once
- * `OpWire.ready` completes. A change of params follows the new drive.
+ * the document is over (see `hydrate`). A change of params follows the new
+ * drive.
  */
 export const drivenView = <Params, C extends AnyContract, E = never>(
   options: DrivenOptions<Params, C, E>,
@@ -254,16 +268,16 @@ export const drivenView = <Params, C extends AnyContract, E = never>(
         );
         return <div {...{ [drivenContainer]: "" }}>{drawn}</div>;
       }
-      const wire = yield* Effect.serviceOption(OpWire);
+      const gate = yield* Effect.serviceOption(WireGate);
       const location = yield* Location;
       const handover = Dom.attach((container) =>
-        Option.match(wire, {
+        Option.match(gate, {
           onNone: () => Effect.void,
           onSome: (opened) =>
             Effect.forkScoped(
               Effect.andThen(
-                opened.ready,
-                followParams(options, props.params, container, opened, location),
+                opened.over,
+                followParams(options, props.params, container, opened.wire, location),
               ),
             ),
         }),

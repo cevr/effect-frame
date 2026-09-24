@@ -28,6 +28,7 @@ export {
   type DocumentServices,
   type RenderedDocument,
 } from "./document.js";
+export { hydrate, type HydrateOptions } from "./hydrate.js";
 export { searchKeysOf } from "./route.js";
 export type {
   AnyRoute,

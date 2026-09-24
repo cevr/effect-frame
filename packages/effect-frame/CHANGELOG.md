@@ -1,5 +1,11 @@
 # effect-frame
 
+## 0.25.1
+
+### Patch Changes
+
+- [`9ce2574`](https://github.com/cevr/effect-frame/commit/9ce25747b712b864deb890c00a6551d0936b6571) Thanks [@cevr](https://github.com/cevr)! - `Form.codec` accepts an effect-machine event schema ([#105](https://github.com/cevr/effect-frame/issues/105)). Before, `Form.codec(contract.raw.message)` did not compile for a machine contract, because its message schema names `variants`, not `members`. Each variant is now checked as a union member is: a machine event whose fields all encode to strings builds a form codec, and one with a `Uint8Array` field, or a boolean with no decoding default, is still a compile error.
+
 ## 0.25.0
 
 ### Minor Changes

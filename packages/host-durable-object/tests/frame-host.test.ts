@@ -1,4 +1,4 @@
-import { Context, Effect, Hash, Layer, Option, Schema } from "effect";
+import { Context, Duration, Effect, Hash, Layer, Option, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import {
   Behavior,
@@ -10,7 +10,7 @@ import {
 } from "effect-frame/actor";
 import type { Principal as PrincipalValue } from "effect-frame/actor/client";
 import { Anonymous, Authenticated, Principal, contract } from "effect-frame/actor/client";
-import { defineFrameHost } from "../src/frame-host.js";
+import { defineFrameHost, holdOf } from "../src/frame-host.js";
 import * as StorageStore from "../src/storage-store.js";
 import { scopedFake } from "./sqlite-storage.js";
 
@@ -292,6 +292,16 @@ describe("the generic frame host over durable-object storage", () => {
       yield* Effect.promise(() => storage.setAlarm(1));
       yield* Effect.promise(() => host.alarm());
       expect(storage.armed()).toEqual(Option.some(1));
+    }),
+  );
+
+  it.effect("one alarm's hold stays finite and inside the runtime's limit", () =>
+    Effect.sync(() => {
+      expect(Duration.toMillis(holdOf(Option.none()))).toBe(30_000);
+      expect(Duration.toMillis(holdOf(Option.some("2 seconds")))).toBe(2000);
+      expect(Duration.toMillis(holdOf(Option.some("Infinity")))).toBe(600_000);
+      expect(Duration.toMillis(holdOf(Option.some("1 hour")))).toBe(600_000);
+      expect(Duration.toMillis(holdOf(Option.some(0)))).toBe(20);
     }),
   );
 });

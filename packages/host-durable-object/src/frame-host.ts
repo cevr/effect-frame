@@ -126,7 +126,9 @@ export interface FrameHostOptions<R> {
   /**
    * How long one alarm holds the object while work is due (#101 §5). Work
    * still due at the end arms the next alarm at once. `None` is 30 seconds,
-   * well inside the runtime's limit for one alarm.
+   * well inside the runtime's limit for one alarm. A value outside one poll
+   * step to ten minutes is clamped to that range, so one alarm always ends
+   * inside Cloudflare's 15-minute limit for an alarm handler.
    */
   readonly alarmHold: Option.Option<Duration.Input>;
 }
@@ -159,9 +161,7 @@ export const defineFrameHost = <R>(options: FrameHostOptions<R>): FrameHostClass
     }),
   );
   const requirements = options.layer;
-  const hold = Duration.fromInputUnsafe(
-    Option.getOrElse<Duration.Input, Duration.Input>(options.alarmHold, () => "30 seconds"),
-  );
+  const hold = holdOf(options.alarmHold);
 
   return class FrameHost implements FrameHostInstance {
     readonly #storage: DurableStorage;
@@ -251,6 +251,22 @@ const due = (storage: DurableStorage, now: number): Option.Option<number> => {
 
 /** How often the hold reads the tables. */
 const holdStep = Duration.millis(20);
+
+/** The longest hold, with margin below Cloudflare's 15-minute alarm limit. */
+const holdLimit = Duration.minutes(10);
+
+/**
+ * The hold one alarm runs for: `None` is 30 seconds, and any value is
+ * clamped between one poll step and `holdLimit`, so an infinite hold still
+ * ends and re-arms.
+ */
+export const holdOf = (alarmHold: Option.Option<Duration.Input>): Duration.Duration =>
+  Duration.clamp(
+    Duration.fromInputUnsafe(
+      Option.getOrElse<Duration.Input, Duration.Input>(alarmHold, () => "30 seconds"),
+    ),
+    { minimum: holdStep, maximum: holdLimit },
+  );
 
 /** The committed revision, for the log line that closes a wake. */
 const committedRevision = (storage: DurableStorage): Option.Option<number> =>

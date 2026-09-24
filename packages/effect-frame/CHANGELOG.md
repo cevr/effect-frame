@@ -1,5 +1,13 @@
 # effect-frame
 
+## 0.24.0
+
+### Minor Changes
+
+- [`a0f557c`](https://github.com/cevr/effect-frame/commit/a0f557cc8c3cb4a8dc446f6db282982e25a6cef0) Thanks [@cevr](https://github.com/cevr)! - A durable behavior can name when a state next needs the actor running with no request: `Behavior.wakeAt`, and `Behavior.machine(definition, { wakeAt })` for a machine. The durable engine stores the wake with each commit, so a machine deadline or work in flight survives a restart or an eviction. A host that can wake an idle actor, such as a Durable Object, arms its alarm in the same transaction.
+
+  `MailboxStore.commit` and `MailboxStore.advance` take the wake as a new argument, and `Committed` carries it as `wake`. A custom store must store it with the state and return it from `latest`. The conformance suite checks this.
+
 ## 0.23.1
 
 ### Patch Changes

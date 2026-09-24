@@ -1,5 +1,5 @@
 import type { Context } from "effect";
-import { Effect, Match, Option, Schema } from "effect";
+import { Duration, Effect, Match, Option, Schema } from "effect";
 import type { Principal } from "../principal.js";
 import { CurrentPrincipal } from "../principal.js";
 import { freshCommandId } from "../command-id.js";
@@ -20,17 +20,22 @@ import {
 } from "../form.js";
 import { membersOf } from "../generated.js";
 import { ActorTransport } from "../transport.js";
-import type { TransportSendError } from "../transport.js";
-import { CommandId } from "../vocabulary.js";
+import type { TransportCallError } from "../transport.js";
+import { CommandId, Uncertain } from "../vocabulary.js";
 import type { DerivePrincipal, WebHandler } from "./server.js";
 
 /**
  * `POST {base}/form`: the plain-form route (#21 §2). Its client is the
  * browser, its body is `application/x-www-form-urlencoded`, its success is
  * a 303, and its failure is the page the user asked for, drawn again with
- * the issues. It reaches `transport.send` exactly as `/send` does, with the
+ * the issues. It reaches `transport.call` exactly as `/call` does, with the
  * same command id and the same JSON payload, so there is no second send
  * path and no second idempotency rule.
+ *
+ * The 303 follows the commit, not the admission: the commit is readable
+ * before the 303, so a `$return` page rendered on request draws it (#21 §5). A commit that does not
+ * come within `commitWithin` answers 504 with the same command id, because
+ * the command may be in the mailbox (#21 §2).
  */
 export interface FormPostOptions<E, R, P = never> {
   /** The contracts a form may post to, found by `$contract`. */
@@ -38,7 +43,7 @@ export interface FormPostOptions<E, R, P = never> {
   /**
    * Derives who is posting, exactly as the JSON handler does (#20 §5): the
    * same cookie, the same derivation, the same policy check at
-   * `transport.send`. There is no second authorization path.
+   * `transport.call`. There is no second authorization path.
    */
   readonly principal: DerivePrincipal<P>;
   /**
@@ -55,7 +60,15 @@ export interface FormPostOptions<E, R, P = never> {
    * reads the issues, the submitted values, and the id the form carries.
    */
   readonly render: (path: string) => Effect.Effect<string, E, R>;
+  /**
+   * How long a post waits for its command to commit before it answers 504
+   * with the same command id. Ten seconds when omitted.
+   */
+  readonly commitWithin?: Duration.Input;
 }
+
+/** How long a post waits for its commit when the app names no limit. */
+const defaultCommitWithin = Duration.seconds(10);
 
 /** Where a refused anonymous post goes: the login path, with `next` set to `$return`. */
 const loginLocation = (login: string, returnTo: string): string => {
@@ -271,7 +284,7 @@ const encodeOnce = (
   });
 
 /** The behavior's own words for a refusal; the tag for every other failure. */
-const failureIssue = (error: TransportSendError): FormIssue => {
+const failureIssue = (error: TransportCallError): FormIssue => {
   if (error._tag === "Refused") {
     return { field: "", message: error.reason };
   }
@@ -300,16 +313,17 @@ const unauthorized = (
     },
   );
 
-/** A send failure as the page it draws. Only a lost reply keeps the id. */
+/** A send failure as the page it draws. Only a lost reply or a late commit keeps the id. */
 const sendFailure = (
   posted: Posted,
-  error: TransportSendError,
+  error: TransportCallError,
   principal: Principal,
   login: Option.Option<string>,
 ): Effect.Effect<Reply> => {
   const issues = [failureIssue(error)];
   switch (error._tag) {
     case "Unreachable":
+    case "Uncertain":
       return page(posted, 504, issues, "same");
     case "CommandConflict":
     case "ContractMismatch":
@@ -334,6 +348,7 @@ const post = (
   request: Request,
   contracts: ReadonlyMap<string, AnyContract>,
   login: Option.Option<string>,
+  commitWithin: Duration.Input,
 ): Effect.Effect<Reply, never, ActorTransport> =>
   Effect.gen(function* () {
     const fields = yield* readBody(request);
@@ -357,7 +372,14 @@ const post = (
     };
     const transport = yield* ActorTransport;
     const principal = yield* CurrentPrincipal;
-    return yield* transport.send(address, posted.commandId, payload, []).pipe(
+    // The browser reads `$return` next: answer once that read sees the commit.
+    return yield* transport.call(address, posted.commandId, payload, commitWithin, []).pipe(
+      // A remote transport starts its host's deadline only once the host is
+      // reached, so the route bounds the whole call: no post waits unanswered.
+      Effect.timeoutOrElse({
+        duration: commitWithin,
+        orElse: () => Effect.fail(Uncertain.make({ commandId: posted.commandId })),
+      }),
       Effect.as<Reply>({ _tag: "SeeOther", location: posted.returnTo }),
       Effect.catch((error) => sendFailure(posted, error, principal, login)),
     );
@@ -379,6 +401,10 @@ export const form = <E, R, P = never>(
       yield* Effect.context<ActorTransport | Exclude<R, FormContext>>();
     const derivation: Context.Context<P> = yield* Effect.context<P>();
     const contracts = new Map(options.contracts.map((contract) => [contract.name, contract]));
+    const commitWithin = Option.getOrElse(
+      Option.fromNullishOr(options.commitWithin),
+      () => defaultCommitWithin,
+    );
     const draw = (path: string, status: number, issues: FormIssues): Effect.Effect<Response> =>
       options.render(path).pipe(
         Effect.provideService(FormContext, issues),
@@ -398,7 +424,7 @@ export const form = <E, R, P = never>(
       // The route is the boundary: the derivation runs with the context `form` was built in.
       // oxlint-disable-next-line effect/noInlineProvide
       const derived = Effect.provideContext(options.principal(request), derivation);
-      const answer = post(request, contracts, options.login).pipe(
+      const answer = post(request, contracts, options.login, commitWithin).pipe(
         Effect.provideContext(context),
         Effect.flatMap(
           Match.type<Reply>().pipe(

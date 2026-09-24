@@ -4,15 +4,10 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import { HttpServer } from "effect-frame/actor";
-import { Form, HttpTransport, ref } from "effect-frame/actor/client";
-import type {
-  ActorTransport,
-  DurableReceipt,
-  IdentifiedCommandHandle,
-} from "effect-frame/actor/client";
+import { ActorTransport, Form, HttpTransport, ref } from "effect-frame/actor/client";
+import type { DurableReceipt, IdentifiedCommandHandle } from "effect-frame/actor/client";
 import { Dom, Html, View, mount, render } from "effect-frame/view";
-import { Deferred, Effect, Fiber, Layer, Option, Ref, Stream } from "effect";
-import type { Context } from "effect";
+import { Context, Deferred, Effect, Fiber, Layer, Option, Ref, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import type { TasksSnapshot, Wire } from "../plain-form-fixture.js";
 import {
@@ -21,6 +16,7 @@ import {
   board,
   hiddenOf,
   hiddenValue,
+  formPosts,
   makeWire,
   recordedTransport,
 } from "../plain-form-fixture.js";
@@ -108,7 +104,7 @@ const serve = Effect.gen(function* () {
       login: Option.none(),
       render: () => page,
     }),
-    host,
+    Context.add(host, ActorTransport, formPosts(Context.get(host, ActorTransport))),
   );
   const run = Effect.runPromiseWith(host);
   const server = yield* Effect.acquireRelease(

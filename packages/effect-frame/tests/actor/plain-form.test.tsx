@@ -1,9 +1,8 @@
 /* oxlint-disable effect/noGlobals -- Bun.serve and fetch are this test's platform boundary: a real socket and a browser with no script. */
 import { HttpServer } from "effect-frame/actor";
-import { Form, contract, ref } from "effect-frame/actor/client";
-import type { ActorTransport, AnyContract } from "effect-frame/actor/client";
-import { Effect, Hash, Layer, Option, Ref, Schema, Stream } from "effect";
-import type { Context } from "effect";
+import { ActorTransport, Form, contract, ref } from "effect-frame/actor/client";
+import type { AnyContract } from "effect-frame/actor/client";
+import { Context, Effect, Hash, Layer, Option, Ref, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import type { Wire } from "../plain-form-fixture.js";
 import {
@@ -15,6 +14,7 @@ import {
   vault as vaultKey,
   hiddenOf,
   hiddenValue,
+  formPosts,
   makeWire,
   recordedTransport,
   refusedTitle,
@@ -55,7 +55,7 @@ const serveWith = <E,>(
         login: Option.none(),
         render: () => document,
       }),
-      context,
+      Context.add(context, ActorTransport, formPosts(Context.get(context, ActorTransport))),
     );
     const run = Effect.runPromiseWith(context);
     const server = yield* Effect.acquireRelease(
@@ -140,7 +140,8 @@ const withField = (body: string, name: string, value: string): string =>
 
 /**
  * The actor's committed state at `revision`, read through the same host.
- * A 303 follows admission, not application, so the read waits for it.
+ * The 303 follows the commit (`plain-commit.test.tsx`), so the read finds it;
+ * the wait bounds a read of a later revision.
  */
 const snapshot = (served: Served, revision = 0) =>
   Effect.scoped(

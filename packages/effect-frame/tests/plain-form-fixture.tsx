@@ -184,6 +184,24 @@ export const recordedTransport = (
     Layer.orDie,
   );
 
+/**
+ * The transport the plain-form route reaches, over `recordedTransport`. The
+ * route calls: it answers once the commit is readable. Here the admission
+ * is the recorded `send`, so a post is counted, and can lose its reply,
+ * exactly as a scripted send is; the wait is the host's own `call` under
+ * the same id, which the store answers `Duplicate`. Only the form route
+ * gets this transport, so a scripted command settling by `call` is never
+ * counted as a second admission.
+ */
+export const formPosts = (transport: TransportService): TransportService => ({
+  ...transport,
+  call: (address, commandId, payload, timeout, active) =>
+    Effect.andThen(
+      transport.send(address, commandId, payload, []),
+      transport.call(address, commandId, payload, timeout, active),
+    ),
+});
+
 export interface NoProps {
   readonly _tag: "NoProps";
 }

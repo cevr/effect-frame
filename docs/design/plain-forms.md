@@ -124,7 +124,8 @@ accepted.
 | A structural failure (`FormMalformed`)                      | 400, plain text                                                                             |
 | The message does not decode                                 | 200, the page with issues and a fresh id, or the same id when the post carries `$uncertain` |
 | The fields decode to two different payloads                 | 500, plain text, logged, nothing sent                                                       |
-| `Admitted` or `Duplicate`                                   | 303 to `$return`                                                                            |
+| The command commits, or it is a `Duplicate`                 | 303 to `$return`, after the commit is readable                                              |
+| No commit within `commitWithin` (`Uncertain`)               | 504, the page with the same id and values                                                   |
 | `Unreachable` (the outcome is `Uncertain`)                  | 504, the page with the same id and values                                                   |
 | `CommandConflict`, `ContractMismatch`                       | 409, the page with a fresh id                                                               |
 | `UnknownContract`                                           | 404, the page with a fresh id                                                               |
@@ -134,6 +135,18 @@ accepted.
 
 `render(path)` draws the page for the posted `$return`. The route provides
 `FormContext` to it. A render failure is a 500, and it is logged.
+
+The 303 follows the commit, not the admission. The route calls the host
+with a wait of `commitWithin` (ten seconds when the app names none), and
+the host answers once a read sees the commit. So a `$return` page that is
+rendered on request draws the committed state (#21 §5). A prerendered
+`$return` page, such as a Blog post, is a file: it shows the commit only
+after the page hydrates. The route also bounds the whole call by
+`commitWithin`, because a remote host starts its own wait only once it is
+reached. A post that admits and does not commit in time may still apply, so
+it answers 504 with the same id. `tests/actor/plain-commit.test.tsx` holds
+the store's commit on a latch, and replaces the transport with one that never
+answers, and proves each case.
 
 The page must carry its `FormIssues` to the client, the way it carries a
 snapshot. Otherwise the hydrating client draws the form without the issues,
@@ -266,9 +279,9 @@ const Compose = (props: { readonly notes: NotesRef }) =>
 A plain post and a scripted send settle a lost reply the same way (#29
 §5, #21 §5). These facts make it hold:
 
-1. The form route calls `transport.send` with the posted `$command` and the
-   JSON payload of the decoded message. `/send` calls the same host
-   `send`. The host admits a command id once. A later send of that id with
+1. The form route calls `transport.call` with the posted `$command` and the
+   JSON payload of the decoded message. `/send` and `/call` reach the same
+   host mailbox. The host admits a command id once. A later send of that id with
    the same payload text is `Duplicate`, and it carries the stored
    receipt. A different payload text is `CommandConflict`, even when the
    two payload hashes are equal. The stores use the hash only as a fast

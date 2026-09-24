@@ -10,6 +10,8 @@ pre-commit:
       run: bun run build
     - name: boundary
       run: bun run boundary
+    - name: declarations
+      run: bun run declarations
     - name: test
       run: bun run test
 pre-push:

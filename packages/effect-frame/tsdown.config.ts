@@ -4,8 +4,8 @@ export default defineConfig({
   entry: ["src/**/*.ts", "src/**/*.tsx"],
   format: "esm",
   dts: {
-    // Published types resolve the package's own subpaths through dist, not
-    // the "source" condition the workspace uses in the editor and in tests.
+    // Emitted from source, so the package's own subpath imports resolve
+    // while `dist` is cleaned: see tsconfig.build.json.
     tsconfig: "tsconfig.build.json",
   },
   clean: true,

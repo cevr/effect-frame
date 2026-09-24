@@ -3,7 +3,8 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import type { Source } from "effect-frame/actor";
-import { Route, Router, mount } from "effect-frame/router";
+import type { QueryCache } from "effect-frame/actor/client";
+import { Route, Router, hydrate, mount } from "effect-frame/router";
 import type { Location } from "effect-frame/router";
 import { Dom } from "effect-frame/view";
 import { Context, Effect, Schema } from "effect";
@@ -55,10 +56,29 @@ const mountRequirements: Equals<
   Extra | RouteValue | Location | Scope.Scope
 > = true;
 
+const hydrateEffect = hydrate({
+  routes: [plain],
+  notFound: NotFound,
+  root: document.createElement("main"),
+});
+
+// `hydrate` keeps the routes' and the not-found view's requirements, as
+// `mount` does, and adds the query cache its records seed.
+const hydrateRequirements: Equals<
+  Effect.Services<typeof hydrateEffect>,
+  Extra | RouteValue | Location | QueryCache | Scope.Scope
+> = true;
+
 describe("mount types", () => {
   it.effect("keeps the not-found view's requirements beside the routes'", () =>
     Effect.sync(() => {
       expect(mountRequirements).toBe(true);
+    }),
+  );
+
+  it.effect("hydrate keeps the same requirements, plus the query cache", () =>
+    Effect.sync(() => {
+      expect(hydrateRequirements).toBe(true);
     }),
   );
 });

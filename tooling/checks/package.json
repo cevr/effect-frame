@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "build": "bun build src/codec-probe.ts --target browser --outdir dist",
     "test": "bun test tests/",
-    "boundary": "bun run src/boundary-cli.ts"
+    "boundary": "bun run src/boundary-cli.ts",
+    "declarations": "bun run src/declarations-cli.ts && tsc -p consumer"
   },
   "devDependencies": {
     "effect-frame": "workspace:*"

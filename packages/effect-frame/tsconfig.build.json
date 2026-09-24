@@ -1,7 +1,12 @@
 {
+  // The declarations are emitted from source. The package imports its own
+  // subpaths (`effect-frame/actor/client`, `effect-frame/view`), and tsdown
+  // cleans `dist` before it emits, so those imports must resolve through the
+  // `source` condition that tsconfig.json sets. Without it they find no
+  // `dist`, and the emitter writes each inferred type that crosses one as
+  // `any` or `unknown` with no error (it runs with --noCheck). The emitted
+  // files still name the subpaths, which a consumer resolves through `types`.
+  // `bun run declarations` refuses a leaked `any` or `unknown` in `dist`.
   "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "customConditions": []
-  },
   "include": ["src"]
 }

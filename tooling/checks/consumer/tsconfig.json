@@ -1,0 +1,10 @@
+{
+  // A consumer's view of the package: no `source` condition, so each
+  // `effect-frame/*` import resolves through `types` to the built `dist`.
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "customConditions": [],
+    "plugins": []
+  },
+  "include": ["."]
+}

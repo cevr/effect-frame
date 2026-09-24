@@ -16,10 +16,11 @@
     "build": "turbo run build --filter=!@effect-frame/example-blog && turbo run build:client",
     "test": "turbo run test",
     "boundary": "bun run --cwd tooling/checks boundary",
+    "declarations": "bun run --cwd tooling/checks declarations",
     "bench": "bun run --cwd tooling/dom-bench bench",
     "prerender": "bun run --cwd apps/blog prerender",
     "test:deploy": "bun run --cwd apps/blog test:deploy",
-    "gate": "concurrently -n type,style,build -c blue,yellow,cyan \"bun run typecheck\" \"bun run lint && bun run fmt:check\" \"bun run build && bun run boundary\" && bun run test",
+    "gate": "concurrently -n type,style,build -c blue,yellow,cyan \"bun run typecheck\" \"bun run lint && bun run fmt:check\" \"bun run build && bun run boundary && bun run declarations\" && bun run test",
     "prepare": "lefthook install && effect-tsgo patch",
     "version": "changeset version && bun install --lockfile-only --ignore-scripts",
     "release": "bun run build && changeset publish"

@@ -35,6 +35,7 @@ import type { Projection, Refreshed, TransportService } from "./transport.js";
 import { ActorTransport } from "./transport.js";
 import { Unreachable } from "./vocabulary.js";
 import { advance, advancedChanges } from "./advance.js";
+import { heldOf, holding } from "./read-ahead.js";
 
 interface BatchedQueryRequest extends Request.Request<string, QueryFailure> {
   readonly _tag: "BatchedQueryRequest";
@@ -725,9 +726,15 @@ type SeedState = QueryState<string, QueryFailure>;
  * the seed, so a later declaration of the key reads fresh. `published`
  * completes when the slot that took it has put its state in the slot, or
  * closed first.
+ *
+ * `held` is a settle that came after the shell, while the page hydrates:
+ * the shell drew the key open, so the settle waits in `held` and becomes
+ * `current` at `expire` (`Patch.late`). A readiness boundary may read it
+ * ahead (`read-ahead.ts`).
  */
 interface Seed {
   current: Option.Option<SeedState>;
+  held: Option.Option<SeedState>;
   readonly settled: Deferred.Deferred<SeedState>;
   readonly published: Deferred.Deferred<void>;
   taken: boolean;
@@ -736,6 +743,8 @@ interface Seed {
 interface Seeds {
   /** The seed for a key, if the document holds one no slot has consumed. */
   readonly take: (id: string) => Option.Option<Seed>;
+  /** The settle the document holds back for a key until hydration is done. */
+  readonly held: (id: string) => Option.Option<SeedState>;
   /**
    * Completes when hydration is done (`Resumed.hydrated`), or when the
    * principal changed. A read a seed calls for waits for it.
@@ -761,16 +770,22 @@ export interface DocumentAccess {
   readonly entries: Effect.Effect<ReadonlyArray<DocumentEntry>>;
   /** The document opened `id`. A second placeholder for one id changes nothing. */
   readonly placeholder: (id: string) => Effect.Effect<void>;
-  /** The document settled `id`. The first settle wins; a duplicate changes nothing. */
-  readonly settle: (id: string, state: SeedState) => Effect.Effect<void>;
   /**
-   * The document ended. Every id still open fails `StreamEnded`, and this
-   * returns once every slot that took a seed has published it or closed.
+   * The document settled `id`. The first settle wins; a duplicate changes
+   * nothing. A `late` settle, one the server wrote after its shell, is held
+   * until hydration is done: the shell drew `id` open.
+   */
+  readonly settle: (id: string, state: SeedState, late: boolean) => Effect.Effect<void>;
+  /**
+   * The document ended. Every id still open fails `StreamEnded`, late, and
+   * this returns once every slot that took a seed has published it or
+   * closed: after hydration, when a slot took a held settle.
    */
   readonly end: Effect.Effect<void>;
   /**
-   * Hydration is done. A seed no slot took is dropped: a key declared from
-   * now on reads over the query path, never from the document. A read a
+   * Hydration is done. Each held settle lands. A seed no slot took is
+   * dropped: a key declared from now on reads over the query path, never
+   * from the document. A read a
    * landed seed called for (a stale value, a failure that is not final)
    * starts now, not before: until then the entry shows what the server drew.
    * An actor seed no route took is dropped too.
@@ -828,6 +843,7 @@ const makeDocument = (live: ReadonlySet<CacheSlot>): CacheDocument => {
     Option.getOrElse(Option.fromNullishOr(table.get(id)), () => {
       const created: Seed = {
         current: Option.none(),
+        held: Option.none(),
         settled: Deferred.makeUnsafe(),
         published: Deferred.makeUnsafe(),
         taken: false,
@@ -835,14 +851,24 @@ const makeDocument = (live: ReadonlySet<CacheSlot>): CacheDocument => {
       table.set(id, created);
       return created;
     });
-  const settle = (id: string, state: SeedState) =>
+  const land = (seed: Seed, state: SeedState) => {
+    seed.current = Option.some(state);
+    seed.held = Option.none();
+    return Effect.asVoid(Deferred.succeed(seed.settled, state));
+  };
+  const settle = (id: string, state: SeedState, late: boolean) =>
     Effect.suspend(() => {
       const seed = seedFor(id);
-      if (Option.isSome(seed.current)) {
+      if (Option.isSome(seed.current) || Option.isSome(seed.held)) {
         return Effect.void;
       }
-      seed.current = Option.some(state);
-      return Effect.asVoid(Deferred.succeed(seed.settled, state));
+      // The shell drew `id` open, and the page still hydrates: the settle
+      // waits, so each node the client claims shows what the server drew.
+      if (late && !expired) {
+        seed.held = Option.some(state);
+        return Effect.void;
+      }
+      return land(seed, state);
     });
   const access: DocumentAccess = {
     entries: Effect.sync(() =>
@@ -864,8 +890,10 @@ const makeDocument = (live: ReadonlySet<CacheSlot>): CacheDocument => {
     end: Effect.andThen(
       Effect.suspend(() =>
         Effect.forEach(
-          Array.from(table).filter(([, seed]) => Option.isNone(seed.current)),
-          ([id]) => settle(id, Failed(StreamEnded.make({ key: id }))),
+          Array.from(table).filter(
+            ([, seed]) => Option.isNone(seed.current) && Option.isNone(seed.held),
+          ),
+          ([id]) => settle(id, Failed(StreamEnded.make({ key: id })), true),
           { discard: true },
         ),
       ),
@@ -877,13 +905,23 @@ const makeDocument = (live: ReadonlySet<CacheSlot>): CacheDocument => {
         ),
       ),
     ),
-    expire: Effect.andThen(
-      Effect.sync(() => {
-        expired = true;
-        actorSeeds.clear();
-      }),
-      Deferred.succeed(hydrated, void 0),
-    ),
+    expire: Effect.suspend(() => {
+      expired = true;
+      actorSeeds.clear();
+      // Each held settle lands now, as the late update it is.
+      return Effect.andThen(
+        Effect.forEach(
+          Array.from(table.values()),
+          (seed) =>
+            Option.match(seed.held, {
+              onNone: () => Effect.void,
+              onSome: (state) => land(seed, state),
+            }),
+          { discard: true },
+        ),
+        Deferred.succeed(hydrated, void 0),
+      );
+    }),
     actors: Effect.suspend(() =>
       Effect.forEach(Array.from(held.values()), (one) =>
         Effect.map(one.projection, (projection): ActorSeed => ({
@@ -919,6 +957,7 @@ const makeDocument = (live: ReadonlySet<CacheSlot>): CacheDocument => {
         seed.taken = true;
         return true;
       }),
+    held: (id) => Option.flatMap(Option.fromNullishOr(table.get(id)), (seed) => seed.held),
     hydrated: Deferred.await(hydrated),
   };
   const document: CacheDocument = { access, seeds };
@@ -963,20 +1002,33 @@ const stampedChanges = <Q extends AnyQuery>(
 const entryOf = <Q extends AnyQuery>(
   contract: Q,
   slot: CacheSlot,
+  seeds: Seeds,
 ): QueryEntry<ResultOf<Q>, QueryFailure> => {
   // A Ready value was decoded through this contract before, and the
   // caller's result is typed by it: a failure either way is a defect.
   const decode = Schema.decodeSync(contract.result);
   const encode = Schema.encodeSync(contract.result);
   const decodeState = decoderOf(contract);
+  const id = keyOf(slot.key);
   return {
     key: slot.key,
-    state: {
-      get: Effect.flatMap(SubscriptionRef.get(slot.state), (stamped) => decodeState(stamped.state)),
-      changes: Stream.mapEffect(SubscriptionRef.changes(slot.state), (stamped) =>
-        decodeState(stamped.state),
+    // A readiness boundary may read a held settle ahead (`read-ahead.ts`).
+    state: holding(
+      {
+        get: Effect.flatMap(SubscriptionRef.get(slot.state), (stamped) =>
+          decodeState(stamped.state),
+        ),
+        changes: Stream.mapEffect(SubscriptionRef.changes(slot.state), (stamped) =>
+          decodeState(stamped.state),
+        ),
+      },
+      Effect.suspend(() =>
+        Option.match(seeds.held(id), {
+          onNone: () => Effect.succeed(Option.none()),
+          onSome: (state) => Effect.map(decodeState(state), Option.some),
+        }),
       ),
-    },
+    ),
     refresh: slot.refresh,
     override: (update) => slot.amend((encoded) => encode(update(decode(encoded)))),
   };
@@ -1114,11 +1166,11 @@ const make = (): Effect.Effect<QueryCacheService, never, Scope.Scope> =>
       });
 
     const open = <Q extends AnyQuery>(contract: Q, args: ArgsOf<Q>) =>
-      Effect.map(openSlot(contract, args), (slot) => entryOf(contract, slot));
+      Effect.map(openSlot(contract, args), (slot) => entryOf(contract, slot, document.seeds));
 
     const openStamped = <Q extends AnyQuery>(contract: Q, args: ArgsOf<Q>) =>
       Effect.map(openSlot(contract, args), (slot): StampedEntry<Q> => ({
-        entry: entryOf(contract, slot),
+        entry: entryOf(contract, slot, document.seeds),
         get: stampedState(contract, slot),
         changes: stampedChanges(contract, slot),
       }));
@@ -1290,6 +1342,8 @@ interface Following<A, E> {
   readonly override: (update: (current: A) => A) => Effect.Effect<boolean>;
   /** The followed entry's state now. */
   readonly get: Effect.Effect<Stamped<QueryState<A, E>>>;
+  /** The settle the document holds back for the followed entry (`read-ahead.ts`). */
+  readonly held: Effect.Effect<Option.Option<QueryState<A, E>>>;
 }
 
 /**
@@ -1395,6 +1449,7 @@ export const followQuery = Effect.fn("followQuery")(function* <Q extends AnyQuer
         refresh: opened.entry.refresh,
         override: opened.entry.override,
         get: opened.get,
+        held: heldOf(opened.entry.state),
       });
       // A delivery only asks for a step: the step reads the entry now.
       yield* Effect.forkIn(
@@ -1421,10 +1476,18 @@ export const followQuery = Effect.fn("followQuery")(function* <Q extends AnyQuer
   // A read steps first, so it is never older than the entry: a server
   // render reads it beside the seed and must see what the seed carries.
   const followed: FollowedQuery<ResultOf<Q>, QueryFailure> = {
-    state: {
-      get: Effect.map(advance(output, step), (shown) => shown.state),
-      changes: Stream.map(advancedChanges(output, step), (shown) => shown.state),
-    },
+    state: holding(
+      {
+        get: Effect.map(advance(output, step), (shown) => shown.state),
+        changes: Stream.map(advancedChanges(output, step), (shown) => shown.state),
+      },
+      Effect.suspend(() =>
+        Option.match(current, {
+          onNone: () => Effect.succeed(Option.none()),
+          onSome: (following) => following.held,
+        }),
+      ),
+    ),
     refresh: Effect.suspend(() =>
       Option.match(current, {
         onNone: () => Effect.void,

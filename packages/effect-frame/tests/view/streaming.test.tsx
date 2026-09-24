@@ -40,8 +40,10 @@ import {
   eventually,
   eventuallyEffect,
   hydrateClient,
+  hydrateWith,
   stateOf,
   valueRecord,
+  lateRecord,
   idOf,
   isStreamEnded,
 } from "./streaming-fixture.js";
@@ -109,8 +111,9 @@ describe("a streamed document, on the server", () => {
           const chunk = yield* read;
           rest += decoder.decode(chunk.value, { stream: true });
         }
+        // The shell drew `a` open, so its patch says it came late.
         expect(recordsIn(rest)).toEqual([
-          valueRecord(idOf("a"), "Alpha"),
+          { ...valueRecord(idOf("a"), "Alpha"), late: true },
           { _tag: "Closed", patched: [idOf("a")] },
         ]);
       }),
@@ -233,7 +236,7 @@ describe("a streamed document, record order", () => {
       expect(scripts.length).toBe(4);
       expect(closes.length).toBe(4);
       expect(html).not.toContain("window.__owned = 1</script>");
-      expect(recordsIn(html)[1]).toEqual(valueRecord(idOf("a"), hostile));
+      expect(recordsIn(html)[1]).toEqual({ ...valueRecord(idOf("a"), hostile), late: true });
 
       // The client decodes the value exactly.
       const client = yield* sideOf(makeControl({}));
@@ -315,7 +318,7 @@ describe("a streamed document, on the client", () => {
         expect(textOf("#pending-a")).toBe("loading a");
 
         // The parser appends the patch: the observer lands it.
-        yield* append(valueRecord(idOf("a"), "Alpha"));
+        yield* append(lateRecord(idOf("a"), "Alpha"));
         yield* eventually("the late patch", () => textOf("#label-a") === "Alpha");
         expect(present("#pending-a")).toBe(false);
         expect(clientControl.calls).toEqual([]);
@@ -358,9 +361,9 @@ describe("a streamed document, on the client", () => {
         }),
         client,
       );
-      yield* append(valueRecord(idOf("a"), "Alpha"));
+      yield* append(lateRecord(idOf("a"), "Alpha"));
       yield* eventually("the first patch", () => textOf("#label-a") === "Alpha");
-      yield* append(valueRecord(idOf("a"), "Changed"));
+      yield* append(lateRecord(idOf("a"), "Changed"));
       yield* Effect.sleep("30 millis");
       expect(textOf("#label-a")).toBe("Alpha");
       expect(seen.filter((tag) => tag === "Ready")).toEqual(["Ready"]);
@@ -378,8 +381,8 @@ describe("a duplicate patch in the document", () => {
       yield* parsing;
       yield* install(first);
       // Both patches are in the document before the client reads it.
-      yield* append(valueRecord(idOf("a"), "Alpha"));
-      yield* append(valueRecord(idOf("a"), "Changed"));
+      yield* append(lateRecord(idOf("a"), "Alpha"));
+      yield* append(lateRecord(idOf("a"), "Changed"));
       const clientControl = makeControl({});
       const client = yield* sideOf(clientControl);
       const { report } = yield* hydrateClient(client, ["a"]);
@@ -483,10 +486,23 @@ describe("a streamed document that ends early", () => {
         const clientControl = makeControl({ a: "Alpha, read again" }, ["a"]);
         const client = yield* sideOf(clientControl);
         yield* install(html);
-        const { resumed } = yield* hydrateClient(client, ["a"]);
+        // The shell drew `a` open, so its failure lands once hydration is
+        // done, and the read it calls for starts then: watch it pass.
+        const seen: Array<Effect.Success<ReturnType<typeof stateOf>>> = [];
+        const { resumed } = yield* hydrateWith(client, (host, root) =>
+          Effect.gen(function* () {
+            yield* mount(Page, { ids: ["a"] }, host, root);
+            const cache = yield* QueryCache;
+            const entry = yield* cache.open(Label, { id: "a" });
+            yield* Effect.forkScoped(
+              Stream.runForEach(entry.state.changes, (state) =>
+                Effect.sync(() => void seen.push(state)),
+              ),
+            );
+          }),
+        );
         yield* resumed.closed;
         // The entry failed, so the scope settled: no fallback is on screen.
-        expect(isStreamEnded(yield* stateOf(client, "a"))).toBe(true);
         expect(present("#pending-a")).toBe(false);
         yield* eventually("the refresh", () => clientControl.calls.length === 1);
         expect(clientControl.calls).toEqual(["a"]);
@@ -497,6 +513,7 @@ describe("a streamed document that ends early", () => {
           () => textOf("#label-a") === "Alpha, read again",
         );
         expect((yield* stateOf(client, "a"))._tag).toBe("Ready");
+        expect(seen.some(isStreamEnded)).toBe(true);
       }),
   );
 

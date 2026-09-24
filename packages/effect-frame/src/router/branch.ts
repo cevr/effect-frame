@@ -56,6 +56,7 @@ import {
 } from "effect";
 import { advance, advancedChanges } from "../actor/advance.js";
 import { documentOf } from "../actor/query-client.js";
+import { heldOf, holding } from "../actor/read-ahead.js";
 import { attempt } from "../view/attempt.js";
 import type { Definition as LazyDefinition, Ticket } from "../view/lazy.js";
 import { definitionOf as lazyDefinitionOf, withTicket } from "../view/lazy.js";
@@ -1531,7 +1532,11 @@ const queryBinding = Effect.fn("Branch.queryBinding")(function* (
     );
   yield* followEntry(entry, follow);
   const exposed: FollowedQuery<unknown, QueryFailure> = {
-    state: { get: advance(output, step), changes: advancedChanges(output, step) },
+    // A readiness boundary may read a held settle ahead (`read-ahead.ts`).
+    state: holding(
+      { get: advance(output, step), changes: advancedChanges(output, step) },
+      Effect.suspend(() => heldOf(currentEntry.state)),
+    ),
     refresh: Effect.suspend(() => currentEntry.refresh),
     // The entry the binding names at the call: after a transition moved it,
     // an override reads and writes the new entry, never the one that exited,

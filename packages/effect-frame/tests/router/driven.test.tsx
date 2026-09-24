@@ -34,7 +34,7 @@ import {
   install,
   parsing,
   textOf,
-  valueRecord,
+  lateRecord,
 } from "../view/streaming-fixture.js";
 
 /**
@@ -376,7 +376,7 @@ describe("a driven route (#36)", () => {
 
         // The layout's patch lands; the document is still open.
         yield* Deferred.succeed(title, void 0);
-        yield* append(valueRecord(idOf("title"), "Rooms"));
+        yield* append(lateRecord(idOf("title"), "Rooms"));
         yield* eventually("the layout's patch", () => textOf("#title") === "Rooms");
         yield* settle;
         expect(log.connects).toEqual([]);

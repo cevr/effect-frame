@@ -283,6 +283,12 @@ export const valueRecord = (id: string, label: string): Streaming.Patch => ({
   outcome: { _tag: "Value", value: JSON.stringify({ label }) },
 });
 
+/** A patch as the server writes it after its shell, which drew the entry open. */
+export const lateRecord = (id: string, label: string): Streaming.Patch => ({
+  ...valueRecord(id, label),
+  late: true,
+});
+
 export const idOf = (id: string): string =>
   Streaming.recordId({ query: Label.name, version: Label.version, args: JSON.stringify({ id }) });
 

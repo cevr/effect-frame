@@ -34,7 +34,7 @@ import {
   sideOf,
   stateOf,
   textOf,
-  valueRecord,
+  lateRecord,
 } from "./streaming-fixture.js";
 
 /**
@@ -182,7 +182,7 @@ describe("boundaries side by side", () => {
       yield* firstChunkOf(streamed(EmptyFallback), { a: "Alpha", b: "Beta" }, ["a", "b"]);
       // `a` settles before the client reads the document; `b` is still open.
       yield* append({ _tag: "Placeholder", id: idOf("a"), kind: "query" });
-      yield* append(valueRecord(idOf("a"), "Alpha"));
+      yield* append(lateRecord(idOf("a"), "Alpha"));
       const client = yield* sideOf(makeControl({}));
       const { report, root } = yield* hydrateWith(client, (host, at) =>
         mount(EmptyFallback, {}, host, at),
@@ -257,7 +257,7 @@ describe("a boundary inside a fallback", () => {
       yield* firstChunkOf(streamed(FallbackIsBoundary), { outer: "Outer", inner: "Inner" }, [
         "outer",
       ]);
-      yield* append(valueRecord(idOf("outer"), "Outer"));
+      yield* append(lateRecord(idOf("outer"), "Outer"));
       const client = yield* sideOf(makeControl({}));
       const { report, root } = yield* hydrateWith(client, (host, at) =>
         mount(FallbackIsBoundary, {}, host, at),
@@ -273,7 +273,7 @@ describe("a boundary inside a fallback", () => {
         "outer",
         "inner",
       ]);
-      yield* append(valueRecord(idOf("outer"), "Outer"));
+      yield* append(lateRecord(idOf("outer"), "Outer"));
       const client = yield* sideOf(makeControl({}));
       const { report, root } = yield* hydrateWith(client, (host, at) =>
         mount(FallbackHoldsBoundary, {}, host, at),
@@ -290,7 +290,7 @@ describe("a boundary inside a fallback", () => {
         "inner",
       ]);
       // Only the inner query settled before the client ran.
-      yield* append(valueRecord(idOf("inner"), "Inner"));
+      yield* append(lateRecord(idOf("inner"), "Inner"));
       const client = yield* sideOf(makeControl({}, ["outer"]));
       const { report, root } = yield* hydrateWith(client, (host, at) =>
         mount(FallbackHoldsBoundary, {}, host, at),
@@ -317,9 +317,9 @@ describe("a seed no view took", () => {
   it.scopedLive("is dropped once hydration is done, so a later declaration reads fresh", () =>
     Effect.gen(function* () {
       yield* firstChunkOf(streamed(OnlyA), { a: "Alpha" }, ["a"]);
-      yield* append(valueRecord(idOf("a"), "Alpha"));
+      yield* append(lateRecord(idOf("a"), "Alpha"));
       yield* append({ _tag: "Placeholder", id: idOf("c"), kind: "query" });
-      yield* append(valueRecord(idOf("c"), "Old"));
+      yield* append(lateRecord(idOf("c"), "Old"));
       const clientControl = makeControl({ c: "Fresh" });
       const client = yield* sideOf(clientControl);
       const { resumed } = yield* hydrateWith(client, (host, at) => mount(OnlyA, {}, host, at));
@@ -455,7 +455,7 @@ describe("a boundary inside hidden content", () => {
     Effect.gen(function* () {
       yield* firstChunkOf(streamed(HiddenInner), { o: "O", i: "I", c: "C" }, ["o", "i", "c"]);
       // Only `c` settled before the client ran.
-      yield* append(valueRecord(idOf("c"), "C"));
+      yield* append(lateRecord(idOf("c"), "C"));
       const client = yield* sideOf(makeControl({}, ["o", "i"]));
       const { report, root } = yield* hydrateWith(client, (host, at) =>
         mount(HiddenInner, {}, host, at),
@@ -527,7 +527,7 @@ describe("a seed that settles after a client read", () => {
       }).pipe(Effect.scoped, Effect.provideContext(client));
       yield* eventually("the client value", () => textOf("#label-a") === "Fresh");
       // The server's older value arrives after it.
-      yield* append(valueRecord(idOf("a"), "Old"));
+      yield* append(lateRecord(idOf("a"), "Old"));
       yield* append({ _tag: "Closed", patched: [idOf("a")] });
       yield* resumed.closed;
       const state = yield* stateOf(client, "a");
@@ -563,7 +563,7 @@ describe("Resumed.closed", () => {
       // The client's own read of `b` is held, so `StreamEnded` is what it shows.
       const client = yield* sideOf(makeControl({ b: "Beta" }, ["b"]));
       const { resumed } = yield* hydrateWith(client, (host, at) => mount(TwoLabels, {}, host, at));
-      yield* append(valueRecord(idOf("a"), "Alpha"));
+      yield* append(lateRecord(idOf("a"), "Alpha"));
       yield* append({ _tag: "Closed", patched: [idOf("a")] });
       yield* resumed.closed;
       const a = yield* stateOf(client, "a");

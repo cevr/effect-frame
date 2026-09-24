@@ -73,6 +73,14 @@ export const Patch = Schema.TaggedStruct("Patch", {
    * hydration is done (`Resumed.hydrated`).
    */
   stale: Schema.optionalKey(Schema.Literal(true)),
+  /**
+   * Present only on a patch written after the shell: the shell drew the
+   * entry open. A client that reads it before hydration is done holds the
+   * value until then, so each node it claims shows what the server drew. A
+   * readiness boundary may draw it ahead: its marks let it replace the
+   * server's branch (`Resumed.hydrated`).
+   */
+  late: Schema.optionalKey(Schema.Literal(true)),
 });
 export type Patch = Schema.Schema.Type<typeof Patch>;
 
@@ -247,6 +255,8 @@ export const shell: (options: ShellOptions) => Effect.Effect<ShellRecords, never
     const patches: Stream.Stream<Patch> = Stream.mergeAll(open.map(firstSettle), {
       concurrency: Math.max(open.length, 1),
     }).pipe(
+      // Each of these settles after the shell drew its entry open.
+      Stream.map((patch): Patch => ({ ...patch, late: true })),
       Stream.tap((patch) => Effect.sync(() => void patched.push(patch.id))),
       Stream.interruptWhen(options.closeWhen),
       Stream.catchCause(() => Stream.empty),
@@ -351,7 +361,10 @@ export interface Resumed {
  * Seed the cache from the document, then follow late patches. Run it once,
  * before `mount`: the records already present land synchronously, so a view
  * that declares a patched key sees its value on its first read and never
- * starts a fetch. The rest are followed in the caller's scope.
+ * starts a fetch. The rest are followed in the caller's scope. A patch the
+ * server wrote after its shell (`Patch.late`) is held until hydration is
+ * done, so the first drawing shows what the server drew; a readiness
+ * boundary may draw it ahead (`read-ahead.ts`).
  *
  * A placeholder that nothing settles fails `StreamEnded` when the channel
  * ends, whether `Closed` said so or the response was cut. That entry reads
@@ -380,7 +393,12 @@ export const resume: (
         Match.withReturnType<Effect.Effect<void>>(),
         Match.tagsExhaustive({
           Placeholder: (placeholder) => document.placeholder(placeholder.id),
-          Patch: (patch) => document.settle(patch.id, stateOf(patch)),
+          Patch: (patch) =>
+            document.settle(
+              patch.id,
+              stateOf(patch),
+              Option.isSome(Option.fromNullishOr(patch.late)),
+            ),
           ActorSeed: (seed) =>
             document.seedActor(seed.id, { revision: seed.revision, snapshot: seed.snapshot }),
           Closed: () => end,

@@ -1050,9 +1050,13 @@ const planRetained = <HostNode>(
     // Hydrating a streamed document (#22): the server may have drawn the
     // other branch here. Then both branches build fresh nodes.
     let branchHost = renderer.host;
-    if (adoptBoundaryOf(renderer.host)(visible())) {
+    const drewFresh = adoptBoundaryOf(renderer.host)(visible());
+    if (drewFresh) {
       branchHost = detachedHost(renderer.host);
     }
+    // Only a branch drawn fresh may show a settle the document holds back
+    // until hydration is done: a claimed one shows what the server drew.
+    node.started(drewFresh);
     const branchRenderer: Renderer<HostNode> = { host: branchHost, tracker: renderer.tracker };
     const presentation = presentationHost(branchHost, visible(), parent);
     const contentRenderer: Renderer<HostNode> = {

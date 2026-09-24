@@ -114,6 +114,13 @@ export interface RetainedNode {
   readonly fallback: Node;
   readonly content: Node;
   /**
+   * The runtime started the boundary. `drewFresh` is true when a hydrating
+   * host found the server's other branch here and the boundary built its
+   * own fresh (#22): only then may its queries show a settle the document
+   * holds back until hydration is done.
+   */
+  readonly started: (drewFresh: boolean) => void;
+  /**
    * Subscribes to the registrations that make this boundary pending, heard
    * synchronously inside the registering setup. A row mounted after first
    * paint registers before it writes a node, so the runtime takes the content

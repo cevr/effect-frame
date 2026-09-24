@@ -113,9 +113,10 @@ through the cache the caller provides.
 
 - `Placeholder` marks the key as seeded and open.
 - `Patch` settles the key. The first settle wins. A second patch for the
-  same key changes nothing.
+  same key changes nothing. A `late` patch, read before hydration is done,
+  is held until then (see "A late patch waits for hydration").
 - `Closed`, or the end of the record channel, fails every open seed with
-  `StreamEnded`.
+  `StreamEnded`, held the same way.
 
 A slot takes the seed for its key when it opens, in place of its first
 read. A settled seed lands synchronously, so a view that declares the key
@@ -456,16 +457,106 @@ red on that code.
 | a landed seed's read starts when it lands, not at `hydrated` | "a read that answers at once waits for hydration…" (mismatch `"Draft:true"` became `"Alpha:false"`)                                                                                                                         |
 | `readDrawn` ignores `agreed` and returns the last read       | "AwaitAll, the streamed shell and SSR never write a seed the markup does not show" (mismatch `"Alpha:false"` became `"Draft-1:true"`); "end at the limit…" (hangs); route-data "fails DocumentTimedOut { phase: "agree" }…" |
 
-#### Known limit: a streamed view with no boundary
+#### Update: a streamed view with no boundary (0.26.2)
 
-A streamed shell draws a query that is still open as the view draws
-`Loading`, for example "searching…". When its patch arrives before the
-client hydrates, the client seeds the value, and its first drawing shows
-the value while the shell holds the loading text. A `Loading` boundary
-reconciles this through its marks; a view with no boundary has no marks,
-so hydration reports the text as a mismatch and the client's text wins.
-This fix does not change it. Put a `Loading` boundary around such a view,
-or render the route `AwaitAll`.
+The first version of this rule left a known limit: a streamed view with no
+boundary reported a mismatch when a patch beat hydration. The next section
+removes it.
+
+### A late patch waits for hydration; a boundary may draw it ahead
+
+EGW search found the fault. From 0.20.1 (the rule above: the client mount
+reads each binding's first value with `get`), a patch that the server
+wrote after its shell, and that the client read before it hydrated, was in
+the client's first drawing. The shell drew that entry open. So two views
+did not hydrate:
+
+- A text with no boundary: the shell holds "searching…", and the client
+  drew the results. Hydration reported a mismatch, and the client's text
+  won. EGW logs a mismatch, and its browser suite fails on it.
+- A `Query` (a `Match`, so no marks): the client drew the `Ready` branch
+  over the nodes of the `Loading` branch. `Dom.hydrate` claims an element
+  by its tag, and a claimed element keeps its static attributes, so the
+  results kept `aria-busy="true"` and `class="hit skeleton"`. No mismatch
+  was reported.
+
+The rule that fixes both is the one a seed already follows (review round
+2, above): until hydration is done, an entry shows what the server drew.
+
+1. **A late patch says so.** `Streaming.shell` writes `late: true` on each
+   patch after the shell (`Patch.late`). A patch in the first chunk is the
+   shell's own: the drawing shows it. The wire is the only place the
+   client can learn this. A deferred module runs after the whole document
+   is parsed, so every record is `present` when it starts.
+2. **The cache holds a late settle until hydration is done.** The document
+   table puts it in `Seed.held`, not `current`: a slot that takes the seed
+   stays `Loading`, as the shell drew it. `Resumed.hydrated` (`expire`)
+   lands each held settle, and the update is an ordinary reactive one,
+   after the claims. A `StreamEnded` that `Closed` writes is late too. A
+   late patch that arrives after hydration lands at once, as before.
+   `Resumed.closed` then completes after hydration when a slot took a held
+   settle.
+3. **A boundary may draw it ahead.** A readiness boundary has marks, so it
+   can replace the server's branch (`resolvedAhead`). An entry's state
+   source carries its held settle as a capability (`src/actor/read-ahead.ts`).
+   `useQuery`, `followQuery` and a route's query binding carry it; a
+   derived source (`select`, `zip`) does not. `ready`, `readyWithStale`
+   and `orErrored` read through `readAhead`, which shows the held settle
+   in place of `Loading` while the boundary's `ReadAhead` flag holds.
+   - A boundary gives its children the flag set when they run, so its
+     first branch counts the held settles.
+   - When it starts (`RetainedNode.started`), the flag stays set only if
+     the hydrating host found the server's other branch and the boundary
+     drew its own fresh. Then nothing below claims a server node.
+   - If the boundary claims the server's branch, the flag is cleared, and
+     every source below it shows what the server drew. An `Errored`
+     boundary whose content binds the source `orErrored` returns is the
+     case this matters for: a late value fails nothing, so its content is
+     claimed, and it must show the server's text until hydration is done.
+   - A nested boundary's flag is its own or its parent's.
+
+So a claimed node always shows what the server drew, and hydration
+reports no mismatch for a late patch, with or without a boundary.
+
+**Why not a mark for each control.** The other fix gave `Show`, `Match`
+and `Query` comment marks, so a control could replace the server's branch
+as a boundary does. It fixes the `Query`, but not a text with no control
+around it, such as EGW's status line: a text has no branch to replace. It
+also puts marks around every control of every server page. The rule above
+fixes both cases at the one owner, the document table, and it keeps
+`resolvedAhead` for the boundaries that #22 specified it for.
+
+**Why not hold every late settle, with no read-ahead.** That is simpler,
+and it is correct: a boundary claims the fallback and draws its content
+once hydration is done. But `resolvedAhead` would then never count a
+patch, and a boundary would draw its fallback's setup only to throw it
+away. The acceptance rows for #22 prove the read-ahead; they stay.
+
+**Remaining limit.** A boundary over a derived source (`ready(select(...))`)
+cannot read ahead: it claims its fallback and draws the content once
+hydration is done. It reports no mismatch. `resolvedAhead` does not count
+it.
+
+Tests: `tests/view/streaming-hydrate-order.test.tsx` holds the wire flag,
+the text with no boundary, the `Query` and its attributes, the claimed
+`Errored` content, and a boundary that draws ahead beside a text that
+reads the same key and waits. The hand-built patches that the streaming
+tests append after the first chunk now carry `late: true`, as the server
+writes them (`lateRecord`).
+
+#### Mutations
+
+Each mutation was applied alone, and the new test file,
+`streaming.test.tsx`, `streaming-edges.test.tsx` and
+`tests/router/route-data.test.tsx` were run (63 tests).
+
+| Mutation                                       | Killed by |
+| ---------------------------------------------- | --------- |
+| A late settle lands at once (no hold)          | 4 tests   |
+| A boundary never clears its flag               | 1 test    |
+| An entry carries no held settle                | 7 tests   |
+| The shell marks no patch late                  | 7 tests   |
+| `ready` reads without the flag (no read-ahead) | 7 tests   |
 
 ### A streamed shell does not wait for a late setup
 

@@ -9,6 +9,7 @@ import {
 } from "effect";
 import type { Scope } from "effect";
 import { advance, followedChanges } from "../actor/advance.js";
+import { readAhead } from "../actor/read-ahead.js";
 import { Match } from "./control.js";
 import type { Node, RetainedNode } from "./jsx-runtime.js";
 import type { QueryState } from "./query-state.js";
@@ -127,6 +128,32 @@ export class ErroredScope extends ServiceMap.Service<ErroredScope, Registry>()(
   "effect-frame/src/view/readiness/ErroredScope",
 ) {}
 
+const noAhead = (): boolean => false;
+
+/**
+ * Streamed documents (#22): whether `ready`, `readyWithStale` and
+ * `orErrored` may read a settle the document holds back until hydration is
+ * done (`read-ahead.ts`). Outside every boundary it is false, so a node the
+ * client claims shows what the server drew. A boundary gives its children
+ * true until it starts, so it can see that the settle changes its branch;
+ * then true only if it drew its branch fresh over the server's other one.
+ */
+const ReadAhead = ServiceMap.Reference<() => boolean>("effect-frame/src/view/readiness/ReadAhead", {
+  defaultValue: () => noAhead,
+});
+
+/** A boundary's own `ReadAhead`, under the one its parent gives. */
+const boundaryAhead = Effect.gen(function* () {
+  const parent = yield* ReadAhead;
+  let fresh = true;
+  return {
+    ahead: (): boolean => fresh || parent(),
+    started: (drewFresh: boolean): void => {
+      fresh = drewFresh;
+    },
+  };
+});
+
 // ---------------------------------------------------------------------------
 // ready
 // ---------------------------------------------------------------------------
@@ -171,11 +198,12 @@ export const orErrored: <Value, Error>(
   "Readiness.orErrored",
 )(function* <Value, Error>(state: Source<QueryState<Value, Error>>) {
   const erroredScope = yield* ErroredScope;
+  const read = readAhead(state, yield* ReadAhead);
   yield* erroredScope.register({
-    settled: select(state, isNotFailed),
-    failure: select(state, errorOf),
+    settled: select(read, isNotFailed),
+    failure: select(read, errorOf),
   });
-  return state;
+  return read;
 });
 
 /**
@@ -193,11 +221,12 @@ const registerLoading = Effect.fn("Readiness.registerLoading")(function* <Value,
   state: Source<QueryState<Value, Error>>,
 ) {
   const loadingScope = yield* LoadingScope;
+  const read = readAhead(state, yield* ReadAhead);
   yield* loadingScope.register({
-    settled: select(state, hasSettled),
+    settled: select(read, hasSettled),
     failure: noFailure,
   });
-  return state;
+  return read;
 });
 
 /**
@@ -356,8 +385,9 @@ const retained = (
   fallback: Node,
   content: Node,
   hold: Option.Option<NonNullable<RetainedNode["hold"]>>,
+  started: RetainedNode["started"],
 ): RetainedNode => {
-  const node: RetainedNode = { _tag: "Retained", kind, when, fallback, content };
+  const node: RetainedNode = { _tag: "Retained", kind, when, fallback, content, started };
   return Option.match(hold, {
     onNone: () => node,
     onSome: (found) => ({ ...node, hold: found }),
@@ -378,7 +408,11 @@ export const Loading = <E, R>(
 ): Effect.Effect<Node, E, Exclude<R, LoadingScope>> =>
   Effect.gen(function* () {
     const registry = yield* makeRegistry;
-    const content = yield* Effect.provideService(props.children, LoadingScope, registry);
+    const read = yield* boundaryAhead;
+    const content = yield* props.children.pipe(
+      Effect.provideService(LoadingScope, registry),
+      Effect.provideService(ReadAhead, read.ahead),
+    );
     // The immediate children Effect runs before this snapshot, so registrations
     // made there contribute at once. Deferred producers register through the
     // retained runtime node and still drive this source after mount.
@@ -389,6 +423,7 @@ export const Loading = <E, R>(
       props.fallback,
       content,
       Option.some(registry.onPending),
+      read.started,
     );
   });
 
@@ -417,7 +452,11 @@ export const Errored = <E, R>(
 ): Effect.Effect<Node, E, Exclude<R, ErroredScope>> =>
   Effect.gen(function* () {
     const registry = yield* makeRegistry;
-    const content = yield* Effect.provideService(props.children, ErroredScope, registry);
+    const read = yield* boundaryAhead;
+    const content = yield* props.children.pipe(
+      Effect.provideService(ErroredScope, registry),
+      Effect.provideService(ReadAhead, read.ahead),
+    );
     // The immediate children Effect runs before this snapshot, so an already
     // Failed registration contributes at once. Deferred producers register
     // through the retained runtime node and still drive this source later.
@@ -429,6 +468,7 @@ export const Errored = <E, R>(
       props.fallback(failure),
       content,
       Option.none(),
+      read.started,
     );
   });
 

@@ -42,14 +42,33 @@ export const stringColumn = (row: SqlRow, column: string): Option.Option<string>
   return Option.none();
 };
 
+/** What a transaction body wrote, and the alarm to arm at its commit. */
+export interface Armed<A> {
+  readonly value: A;
+  readonly alarm: Option.Option<number>;
+}
+
 /**
- * Runs SQL writes in one transaction. The body writes through `storage.sql`,
- * which the runtime binds to the open transaction. The runtime commits when
- * the callback's promise resolves and rolls back when it rejects, so a
- * synchronous body that only writes rows always commits as a unit.
+ * Runs SQL writes in one transaction and arms the alarm the body chose in
+ * the same transaction. The body writes through `storage.sql`, which the
+ * runtime binds to the open transaction. The runtime commits when the
+ * callback's promise resolves and publishes the alarm at that commit, so the
+ * rows and their wake land together or not at all. `None` leaves the alarm
+ * as it was.
  */
-export const transact = <A>(storage: DurableStorage, body: () => A): Effect.Effect<A> =>
-  Effect.promise(() => storage.transaction(() => Promise.resolve(body())));
+export const transactArming = <A>(
+  storage: DurableStorage,
+  body: () => Armed<A>,
+): Effect.Effect<A> =>
+  Effect.promise(() =>
+    storage.transaction(async (txn: StorageTransaction) => {
+      const armed = body();
+      if (Option.isSome(armed.alarm)) {
+        await txn.setAlarm(armed.alarm.value);
+      }
+      return armed.value;
+    }),
+  );
 
 /** One command's admission row. */
 export interface Admission {

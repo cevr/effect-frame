@@ -92,9 +92,23 @@ CREATE TABLE IF NOT EXISTS commands (
 CREATE TABLE IF NOT EXISTS committed (
   id       INTEGER PRIMARY KEY CHECK (id = 1),
   revision INTEGER,
-  state    TEXT
+  state    TEXT,
+  wake_at  INTEGER NULL
 );
 ```
+
+**Wakes (#101 §5).** A behavior may name `wakeAt(state)`: the epoch
+milliseconds at which that state next needs the actor running with no
+request. `Running` work in flight names a time at or before now; a deadline
+names the time the state holds. The engine passes the wake to `commit` and
+`advance`, and the store keeps it in `committed.wake_at` in the same step as
+the state. The storage store arms the alarm in that transaction: now while a
+command is pending, otherwise the wake, never earlier than now (workerd
+refuses a past alarm, and the commit with it). The alarm opens the actor and
+holds until no command is pending and the wake is absent or later than now;
+work still in flight at the hold's bound arms the next alarm at once. A
+waiting machine sleeps until the time its state carries, not for a duration,
+because a reopened machine re-enters its task from the start.
 
 `admitted` and `revision` are two counters: admission order and commit order.
 `revision` is shared by command commits and autonomous `advance` commits, so one
@@ -105,12 +119,14 @@ step that runs inside one storage transaction before the actor opens. Receipts
 are retained without bound in the first release; `compact` is a later store
 operation.
 
-**Conformance.** `effect-frame/actor/testing` holds eight cases every
+**Conformance.** `effect-frame/actor/testing` holds the cases every
 `MailboxStore` must pass: starts empty; append admits in order and `next` walks
 admission order; a duplicate append carries the receipt; a conflicting payload
 fails with `CommandConflict`; `commit` advances one revision and updates
 `latest`; `advance` shares the revision clock; a receipt is absent until commit
-and stable after it; `next` never skips a pending command. The in-memory store
+and stable after it; `next` never skips a pending command; a seen command ID
+is never admitted again; a receipt outlives the retry bound; the wake is
+stored with the latest commit. The in-memory store
 and the celld storage store pass it. A Cloudflare or Rivet store is accepted when
 it passes the same suite and the recovery harness rows.
 

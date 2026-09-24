@@ -95,7 +95,7 @@ const duplicateCarriesReceipt = Effect.fn("Conformance.duplicateCarriesReceipt")
 ) {
   yield* store.append({ commandId: id("a"), payload: "1", payloadHash: 1 });
   const beforeCommit = yield* store.append({ commandId: id("a"), payload: "1", payloadHash: 1 });
-  const receipt = yield* store.commit(id("a"), "s1");
+  const receipt = yield* store.commit(id("a"), "s1", Option.none());
   const afterCommit = yield* store.append({ commandId: id("a"), payload: "1", payloadHash: 1 });
   const afterReceipt = Option.map(duplicateReceipt(afterCommit), receiptFields);
   return [
@@ -149,7 +149,7 @@ const conflictDespiteEqualHash = Effect.fn("Conformance.conflictDespiteEqualHash
   const whilePending = yield* Effect.exit(
     store.append({ commandId: id("a"), payload: second, payloadHash: secondHash }),
   );
-  yield* store.commit(id("a"), "s1");
+  yield* store.commit(id("a"), "s1", Option.none());
   const afterCommit = yield* Effect.exit(
     store.append({ commandId: id("a"), payload: second, payloadHash: secondHash }),
   );
@@ -177,10 +177,10 @@ const commitAdvancesRevision = Effect.fn("Conformance.commitAdvancesRevision")(f
 ) {
   yield* store.append({ commandId: id("a"), payload: "1", payloadHash: 1 });
   yield* store.append({ commandId: id("b"), payload: "2", payloadHash: 2 });
-  const first = yield* store.commit(id("a"), "s1");
+  const first = yield* store.commit(id("a"), "s1", Option.none());
   const latest = yield* store.latest;
   const next = yield* store.next;
-  const second = yield* store.commit(id("b"), "s2");
+  const second = yield* store.commit(id("b"), "s2", Option.none());
   const drained = yield* store.next;
   const pending = yield* store.pending;
   return [
@@ -205,10 +205,10 @@ const commitAdvancesRevision = Effect.fn("Conformance.commitAdvancesRevision")(f
 const advanceSharesTheClock = Effect.fn("Conformance.advanceSharesTheClock")(function* (
   store: StoreService,
 ) {
-  const first = yield* store.advance("s1");
+  const first = yield* store.advance("s1", Option.none());
   yield* store.append({ commandId: id("a"), payload: "1", payloadHash: 1 });
-  const receipt = yield* store.commit(id("a"), "s2");
-  const third = yield* store.advance("s3");
+  const receipt = yield* store.commit(id("a"), "s2", Option.none());
+  const third = yield* store.advance("s3", Option.none());
   const latest = yield* store.latest;
   const pending = yield* store.pending;
   return [
@@ -231,7 +231,7 @@ const receiptIsStable = Effect.fn("Conformance.receiptIsStable")(function* (stor
   yield* store.append({ commandId: id("a"), payload: "1", payloadHash: 1 });
   const beforeCommit = yield* store.receipt(id("a"));
   const missing = yield* store.receipt(id("missing"));
-  const receipt = yield* store.commit(id("a"), "s1");
+  const receipt = yield* store.commit(id("a"), "s1", Option.none());
   const readOnce = yield* store.receipt(id("a"));
   const readTwice = yield* store.receipt(id("a"));
   const want = Option.some(receiptFields(receipt));
@@ -249,7 +249,7 @@ const drainsPendingOnReopen = Effect.fn("Conformance.drainsPendingOnReopen")(fun
   yield* store.append({ commandId: id("a"), payload: "1", payloadHash: 1 });
   yield* store.append({ commandId: id("b"), payload: "2", payloadHash: 2 });
   const firstPending = yield* store.next;
-  yield* store.commit(id("a"), "s1");
+  yield* store.commit(id("a"), "s1", Option.none());
   const secondPending = yield* store.next;
   const pending = yield* store.pending;
   const latest = yield* store.latest;
@@ -271,10 +271,10 @@ const retryPasses = 8;
 const neverReadmits = Effect.fn("Conformance.neverReadmits")(function* (store: StoreService) {
   const first = yield* store.append({ commandId: id("a"), payload: "1", payloadHash: 1 });
   const whilePending = yield* store.append({ commandId: id("a"), payload: "1", payloadHash: 1 });
-  const receipt = yield* store.commit(id("a"), "s1");
+  const receipt = yield* store.commit(id("a"), "s1", Option.none());
   yield* store.append({ commandId: id("b"), payload: "2", payloadHash: 2 });
-  yield* store.commit(id("b"), "s2");
-  yield* store.advance("s3");
+  yield* store.commit(id("b"), "s2", Option.none());
+  yield* store.advance("s3", Option.none());
   const afterCommit = yield* store.append({ commandId: id("a"), payload: "1", payloadHash: 1 });
   const pending = yield* store.pending;
   const next = yield* store.next;
@@ -306,7 +306,7 @@ const receiptOutlivesRetryBound = Effect.fn("Conformance.receiptOutlivesRetryBou
   store: StoreService,
 ) {
   yield* store.append({ commandId: id("a"), payload: "1", payloadHash: 1 });
-  const receipt = yield* store.commit(id("a"), "s1");
+  const receipt = yield* store.commit(id("a"), "s1", Option.none());
   const want = Option.some(receiptFields(receipt));
   const checks: Array<Check> = [];
   // Every pass of the bound re-sends the command and reads its receipt,
@@ -316,8 +316,8 @@ const receiptOutlivesRetryBound = Effect.fn("Conformance.receiptOutlivesRetryBou
     const read = yield* store.receipt(id("a"));
     const other = id(`other-${String(pass)}`);
     yield* store.append({ commandId: other, payload: String(pass), payloadHash: pass + 100 });
-    yield* store.commit(other, `other-${String(pass)}`);
-    yield* store.advance(`autonomous-${String(pass)}`);
+    yield* store.commit(other, `other-${String(pass)}`, Option.none());
+    yield* store.advance(`autonomous-${String(pass)}`, Option.none());
     checks.push(
       equals(
         `pass ${String(pass)} re-send`,
@@ -336,6 +336,30 @@ const receiptOutlivesRetryBound = Effect.fn("Conformance.receiptOutlivesRetryBou
     equals("receipt after the bound", Option.map(read, receiptFields), want),
   );
   return checks;
+});
+
+/**
+ * The wake is part of the committed state (#101 §5): it is stored in the
+ * same step, read back with `latest`, and replaced by the next commit, so a
+ * later state that waits for nothing clears an earlier deadline.
+ */
+const wakeFollowsTheLatestCommit = Effect.fn("Conformance.wakeFollowsTheLatestCommit")(function* (
+  store: StoreService,
+) {
+  const advanced = yield* store.advance("s1", Option.some(1_000));
+  const afterAdvance = yield* store.latest;
+  yield* store.append({ commandId: id("a"), payload: "1", payloadHash: 1 });
+  yield* store.commit(id("a"), "s2", Option.some(2_000));
+  const afterCommit = yield* store.latest;
+  yield* store.advance("s3", Option.none());
+  const cleared = yield* store.latest;
+  const wakeOf = (latest: Option.Option<Committed>) => Option.map(latest, (found) => found.wake);
+  return [
+    equals("advance returns its wake", advanced.wake, Option.some(1_000)),
+    equals("latest after the advance", wakeOf(afterAdvance), Option.some(Option.some(1_000))),
+    equals("latest after the commit", wakeOf(afterCommit), Option.some(Option.some(2_000))),
+    equals("a state with no wake clears it", wakeOf(cleared), Option.some(Option.none())),
+  ];
 });
 
 interface Definition {
@@ -368,6 +392,7 @@ const definitions: ReadonlyArray<Definition> = [
   { name: "next walks pending commands in admission order", run: drainsPendingOnReopen },
   { name: "a seen command ID is never admitted again", run: neverReadmits },
   { name: "a receipt outlives the retry bound", run: receiptOutlivesRetryBound },
+  { name: "the wake is stored with the latest commit", run: wakeFollowsTheLatestCommit },
 ];
 
 const runCase = Effect.fn("Conformance.runCase")(function* (

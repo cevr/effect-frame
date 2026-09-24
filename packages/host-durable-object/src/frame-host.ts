@@ -26,7 +26,9 @@ import * as StorageStore from "./storage-store.js";
  * address it served; the alarm reads that row back and opens the instance
  * again. Opening restores the committed state, drains pending commands, and
  * re-enters machine work, because the instance runs the same durable actor a
- * client request would have started.
+ * client request would have started. A command's admission arms the alarm,
+ * and so does a commit whose state names a wake (`Behavior.wakeAt`), so a
+ * machine deadline fires with no client attached.
  */
 
 /** The one row that remembers which actor this object hosts. */
@@ -191,11 +193,11 @@ export const defineFrameHost = <R>(options: FrameHostOptions<R>): FrameHostClass
     }
 
     /**
-     * The wake an admission transaction armed, or a retry of a failed alarm.
-     * It opens the instance the last request named, which restores the
-     * committed state, drains pending commands, and re-enters machine work.
-     * It waits until the mailbox is empty so the object is not evicted
-     * mid-drain.
+     * The wake an admission or a committed deadline armed, or a retry of a
+     * failed alarm. It opens the instance the last request named, which
+     * restores the committed state, drains pending commands, and re-enters
+     * machine work. It holds until nothing is due, so the object is not
+     * evicted while that work runs.
      */
     async alarm(): Promise<void> {
       const address = readAddress(this.#storage);
@@ -222,15 +224,43 @@ export const defineFrameHost = <R>(options: FrameHostOptions<R>): FrameHostClass
 };
 
 /**
- * Opens the instance and waits until the mailbox drains.
+ * What still needs the object awake: a pending command, or a committed wake
+ * (`Behavior.wakeAt`) at or before now. `Some` is the time to wake again.
+ */
+const due = (storage: DurableStorage, now: number): Option.Option<number> => {
+  const pending = Interop.exec(
+    storage.sql,
+    "SELECT 1 FROM commands WHERE revision IS NULL LIMIT 1",
+  );
+  if (pending.length > 0) {
+    return Option.some(now);
+  }
+  return Option.flatMap(
+    Interop.firstRow(Interop.exec(storage.sql, "SELECT wake_at FROM committed WHERE id = 1")),
+    (row) => Interop.numberColumn(row, "wake_at"),
+  );
+};
+
+/** How often the hold reads the tables, and how many reads one alarm makes. */
+const holdStep = "20 millis";
+const holdSteps = 1500;
+
+/**
+ * Opens the instance and holds the alarm until nothing is due.
  *
  * The wake has no caller, so it does not go through the public wire, where
  * every read is checked against a policy and a protected actor would refuse
  * it. It asks the host's own `Recovery`, which opens the instance and
- * returns nothing (#85). The drain bound keeps one alarm well inside the
- * transaction limit. Machine work the restart re-entered runs on its own
- * fibers after this returns; the drain only covers the commands that were
- * already admitted.
+ * returns nothing (#85). Opening restores the committed state, drains the
+ * admitted commands, and re-enters machine work on the actor's own fibers.
+ *
+ * The hold is what keeps that work alive (#101 §5): a runtime may evict an
+ * object with no request and no running alarm, and a machine's task or
+ * deadline would die with it. The hold ends when no command is pending and
+ * the committed wake is absent or later than now. The bound keeps one alarm
+ * well inside the runtime's limit; work still in flight at the bound arms
+ * the next alarm at once, so a task longer than one alarm continues. A wake
+ * still ahead is armed again, which the commit that stored it already did.
  */
 const wakeAndDrain = Effect.fn("FrameHost.wake")(function* (
   address: Address,
@@ -239,21 +269,26 @@ const wakeAndDrain = Effect.fn("FrameHost.wake")(function* (
   const recovery = yield* ActorHost.Recovery;
   const woken = yield* Effect.result(recovery.wake(address));
   if (Result.isFailure(woken)) {
-    // The recorded address names no hosted contract: there is nothing to drain.
+    // The recorded address names no hosted contract: there is nothing to run.
     return yield* Effect.logWarning("FrameHost.wake refused").pipe(
       Effect.annotateLogs({ contract: address.contract, reason: woken.failure._tag }),
     );
   }
+  const now = Effect.clockWith((clock) => clock.currentTimeMillis);
   const step = Effect.fn("FrameHost.wake.step")(function* () {
-    const rows = Interop.exec(
-      storage.sql,
-      "SELECT command_id FROM commands WHERE revision IS NULL LIMIT 1",
-    );
-    if (rows.length === 0) {
-      return true;
+    const at = yield* now;
+    const settled = Option.match(due(storage, at), {
+      onNone: () => true,
+      onSome: (wake) => wake > at,
+    });
+    if (!settled) {
+      yield* Effect.sleep(holdStep);
     }
-    yield* Effect.sleep("20 millis");
-    return false;
+    return settled;
   });
-  yield* Effect.repeat(step(), { until: (empty) => empty, times: 1000 });
+  yield* Effect.repeat(step(), { until: (settled) => settled, times: holdSteps });
+  const next = due(storage, yield* now);
+  if (Option.isSome(next)) {
+    yield* Interop.setAlarm(storage, Math.max(next.value, yield* now));
+  }
 });

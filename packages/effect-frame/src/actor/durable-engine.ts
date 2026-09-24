@@ -15,7 +15,7 @@ import {
 } from "effect";
 import * as Inspection from "../inspection.js";
 import type { Behavior } from "./behavior.js";
-import { refusalOf } from "./behavior.js";
+import { refusalOf, wakeOf } from "./behavior.js";
 import type { Committed } from "./engine-types.js";
 import type { PendingCommand, StoredReceipt } from "./mailbox-store.js";
 import { MailboxStore } from "./mailbox-store.js";
@@ -145,7 +145,7 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <
     const current = yield* SubscriptionRef.get(committed);
     const next = yield* turn.apply(current.state, message);
     const encoded = yield* Effect.orDie(encodeState(next));
-    const receipt = yield* store.commit(command.commandId, encoded);
+    const receipt = yield* store.commit(command.commandId, encoded, wakeOf(options.behavior, next));
     yield* Ref.set(lastEncoded, Option.some(encoded));
     yield* SubscriptionRef.set(committed, { revision: receipt.revision, state: next });
     yield* PubSub.publish(wake, receipt);
@@ -165,7 +165,7 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <
     if (Option.isSome(previous) && previous.value === encoded) {
       return;
     }
-    const advanced = yield* store.advance(encoded);
+    const advanced = yield* store.advance(encoded, wakeOf(options.behavior, changed));
     yield* Ref.set(lastEncoded, Option.some(encoded));
     yield* SubscriptionRef.set(committed, { revision: advanced.revision, state: changed });
   });

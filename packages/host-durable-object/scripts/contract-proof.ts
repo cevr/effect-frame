@@ -12,6 +12,13 @@
  *   f  Counter: the same ID with a different payload is a CommandConflict.
  *   g  Upload: machine work interrupted by SIGKILL runs again after a wake.
  *   h  changes: a revision arrives as an event over the wire.
+ *   i  Job: work in flight at SIGKILL finishes with no request (#101 §5).
+ *   j  Reminder: a deadline fires at its stored time with no request, even
+ *      when part of the wait passed while the node was down.
+ *
+ * Rows i and j observe with no request, so no request can have woken the
+ * object: workerd's objects are read on disk, and celld's output is read for
+ * the fixture's log lines, because its storage is not plain SQLite on disk.
  *
  * Nothing here runs in CI: it needs the binary and takes about a minute.
  * Run it with `bun run proof:contract`.
@@ -23,10 +30,18 @@
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Scope } from "effect";
-import { Duration, Effect, Fiber, Option, Schema, Stream } from "effect";
+import { Duration, Effect, Fiber, Option, Schedule, Schema, Stream } from "effect";
 import { CommandId, HttpTransport, ref } from "effect-frame/actor/client";
-import type { RemoteActorRef } from "effect-frame/actor/client";
-import { Counter, Upload, UploadEvent } from "../fixture-contract/index.js";
+import type { AnyContract, KeyOf, RemoteActorRef } from "effect-frame/actor/client";
+import {
+  Counter,
+  Job,
+  JobEvent,
+  Reminder,
+  ReminderEvent,
+  Upload,
+  UploadEvent,
+} from "../fixture-contract/index.js";
 import type { Node } from "./proof.js";
 import { freePort, makeReport, prepare, sleep } from "./proof.js";
 import { runtimeFromArgs } from "./runtimes.js";
@@ -301,6 +316,237 @@ const rowChangesStream = async (node: Node): Promise<void> => {
 };
 
 // ---------------------------------------------------------------------------
+// Rows i and j — a wake with no request
+// ---------------------------------------------------------------------------
+
+const runRef = <C extends AnyContract, A>(
+  port: number,
+  actor: C,
+  key: KeyOf<C>,
+  use: (handle: RemoteActorRef<C>) => Effect.Effect<A, never, Scope.Scope>,
+): Promise<A> =>
+  // oxlint-disable-next-line effect/noInlineProvide
+  Effect.runPromise(
+    Effect.scoped(
+      // Each proof step is its own entry point: one process, one transport, one scope.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(
+        Effect.flatMap(Effect.orDie(ref(actor, key)), use),
+        transportFor(port, actor.name, actor.version, String(key)),
+      ),
+    ),
+  );
+
+/**
+ * What an observer saw with no request: the committed row on disk, or the
+ * fixture's log line in the runtime's output. `wake` is the committed wake,
+ * known only on disk; `firedAt` is the reminder's fire time, when it has one.
+ */
+interface Seen {
+  readonly source: "disk" | "log";
+  readonly wake: Option.Option<Option.Option<number>>;
+  readonly firedAt: Option.Option<number>;
+}
+
+/** The columns a disk observer reads from one object's `committed` row. */
+const DiskRow = Schema.Struct({
+  wake_at: Schema.OptionFromNullOr(Schema.Finite),
+  state: Schema.fromJsonString(Schema.Struct({ firedAt: Schema.optionalKey(Schema.Finite) })),
+});
+const decodeDiskRow = Schema.decodeUnknownOption(DiskRow);
+
+const fromDisk = (row: unknown): Option.Option<Seen> =>
+  Option.map(decodeDiskRow(row), (decoded) => ({
+    source: "disk",
+    wake: Option.some(decoded.wake_at),
+    firedAt: Option.fromNullishOr(decoded.state.firedAt),
+  }));
+
+const fromLog = (found: RegExpExecArray): Seen => ({
+  source: "log",
+  wake: Option.none(),
+  firedAt: Option.map(Option.fromNullishOr(found.groups?.["firedAt"]), Number),
+});
+
+/**
+ * One look, with no request. A runtime with a disk reader (workerd) is read
+ * on disk: a committed state holds `tag`. One without (celld) is read in its
+ * output: the fixture's task logs `pattern` when its work ran.
+ */
+const lookOnce = (node: Node, tag: string, pattern: RegExp): Effect.Effect<Option.Option<Seen>> =>
+  Effect.sync(() =>
+    Option.match(Option.fromNullishOr(runtime.readObjects), {
+      onSome: (readObjects) =>
+        Option.flatMap(
+          Option.fromNullishOr(
+            readObjects(
+              proofDir,
+              `SELECT wake_at, state FROM committed WHERE state LIKE '%"_tag":"${tag}"%'`,
+            )[0],
+          ),
+          fromDisk,
+        ),
+      onNone: () => Option.map(Option.fromNullishOr(pattern.exec(node.logs.join(""))), fromLog),
+    }),
+  );
+
+/** Looks every 100 ms until the object reports progress or the wait runs out. */
+const observe = (
+  node: Node,
+  tag: string,
+  pattern: RegExp,
+  timeout: Duration.Input,
+): Promise<Option.Option<Seen>> =>
+  Effect.runPromise(
+    lookOnce(node, tag, pattern).pipe(
+      Effect.repeat({ until: Option.isSome, schedule: Schedule.spaced("100 millis") }),
+      Effect.timeoutOption(timeout),
+      Effect.map(Option.flatten),
+    ),
+  );
+
+const jobSteps = 5;
+const jobStepMillis = 1500;
+
+const rowJobFinishesAlone = async (node: Node): Promise<Node> => {
+  const key = "row-i";
+  const started = await runRef(node.port, Job, key, (job) =>
+    Effect.orDie(
+      job.call(JobEvent.Start({ total: jobSteps, stepMillis: jobStepMillis }), {
+        commandId: id("i1"),
+        timeout: "8 seconds",
+      }),
+    ),
+  );
+  const startedAt = started.revision.value;
+  report.check(
+    "i",
+    "the Start command commits Running",
+    started.state._tag === "Running",
+    `applied ${show(started)}`,
+  );
+
+  // Kill inside the second step: one step committed, one in flight.
+  await sleep(jobStepMillis + 700);
+  await node.crash();
+  const restarted = await runtime.start(proofDir, node.port);
+
+  const finished = await observe(
+    restarted,
+    "Finished",
+    new RegExp(`fixture\\.job step=${jobSteps} total=${jobSteps}`),
+    "30 seconds",
+  );
+  report.check(
+    "i",
+    "with no request after the restart, the job finishes on its own",
+    Option.isSome(finished),
+    `seen ${show(Option.getOrUndefined(finished))}`,
+  );
+  // Only a disk observer sees the committed wake.
+  const finishedWake = Option.flatMap(finished, (seen) => seen.wake);
+  if (Option.isSome(finishedWake)) {
+    report.check(
+      "i",
+      "the finished state names no wake",
+      Option.isNone(finishedWake.value),
+      `wake ${show(finishedWake.value)}`,
+    );
+  }
+
+  const settled = await runRef(restarted.port, Job, key, (job) =>
+    Effect.timeoutOption(
+      Stream.runHead(
+        Stream.filter(job.applied.changes, (committed) => committed.state._tag === "Finished"),
+      ),
+      Duration.seconds(30),
+    ),
+  );
+  const applied = Option.flatten(settled);
+  report.check(
+    "i",
+    "one revision per step: no committed step ran twice",
+    Option.isSome(applied) && applied.value.revision.value === startedAt + jobSteps,
+    `applied ${show(Option.getOrUndefined(applied))}, want revision ${startedAt + jobSteps}`,
+  );
+  return restarted;
+};
+
+const reminderLeadMillis = 6000;
+
+const rowReminderFiresOnTime = async (node: Node): Promise<Node> => {
+  const key = "row-j";
+  const at = Date.now() + reminderLeadMillis;
+  const scheduled = await runRef(node.port, Reminder, key, (reminder) =>
+    Effect.orDie(
+      reminder.call(ReminderEvent.Schedule({ at }), {
+        commandId: id("j1"),
+        timeout: "8 seconds",
+      }),
+    ),
+  );
+  report.check(
+    "j",
+    "the Schedule command commits Scheduled",
+    scheduled.state._tag === "Scheduled",
+    `applied ${show(scheduled)}`,
+  );
+
+  // The admission armed an alarm for now. Let it run and end before the
+  // kill: an admission alarm still armed at the kill would wake the object
+  // after the restart by itself, and the row would not show that the
+  // committed wake did. With `wakeAt` removed, this row fails.
+  await sleep(1000);
+  // Down for part of the wait: a restart that restarted the full delay
+  // would fire about this long after the stored time.
+  await node.crash();
+  await sleep(1500);
+  const restartedAt = Date.now();
+  const restarted = await runtime.start(proofDir, node.port);
+  const late = restartedAt + reminderLeadMillis - at;
+
+  const fired = await observe(
+    restarted,
+    "Fired",
+    new RegExp(`fixture\\.reminder at=${at} firedAt=(?<firedAt>\\d+)`),
+    "30 seconds",
+  );
+  const firedAt = Option.getOrElse(
+    Option.flatMap(fired, (seen) => seen.firedAt),
+    () => Number.NaN,
+  );
+  report.check(
+    "j",
+    "with no request after the restart, the reminder fires on its own",
+    Option.isSome(fired),
+    `seen ${show(Option.getOrUndefined(fired))}`,
+  );
+  report.check(
+    "j",
+    "it fires at the stored time, not a full wait after the restart",
+    firedAt >= at && firedAt - at < Math.min(1500, late - 500),
+    `fired ${firedAt - at} ms after the stored time; a restarted wait would be ${late} ms late`,
+  );
+
+  const settled = await runRef(restarted.port, Reminder, key, (reminder) =>
+    Effect.timeoutOption(
+      Stream.runHead(
+        Stream.filter(reminder.applied.changes, (committed) => committed.state._tag === "Fired"),
+      ),
+      Duration.seconds(30),
+    ),
+  );
+  const applied = Option.flatten(settled);
+  report.check(
+    "j",
+    "a client that reads afterwards sees Fired",
+    Option.isSome(applied) && applied.value.state._tag === "Fired",
+    `applied ${show(Option.getOrUndefined(applied))}`,
+  );
+  return restarted;
+};
+
+// ---------------------------------------------------------------------------
 // Entry
 // ---------------------------------------------------------------------------
 
@@ -317,6 +563,8 @@ const main = async (): Promise<number> => {
     await rowConflict(node);
     node = await rowMachineResumes(node);
     await rowChangesStream(node);
+    node = await rowJobFinishesAlone(node);
+    node = await rowReminderFiresOnTime(node);
   } finally {
     await node.stop();
   }

@@ -1,6 +1,8 @@
 import {
+  Clock,
   Context,
   Deferred,
+  Duration,
   Effect,
   Exit,
   Fiber,
@@ -101,6 +103,54 @@ const uploadOptions = {
   message: Schema.fromJsonString(uploadMachine.eventSchema),
 };
 
+// A machine that waits for a time its state carries (#101 §5). The task
+// sleeps until that time, not for a duration, so a reopened machine resumes
+// the wait where it stopped. `wakeAt` tells a durable host the same time.
+const ReminderState = State({
+  Idle: {},
+  Scheduled: { at: Schema.Finite },
+  Fired: { at: Schema.Finite },
+});
+
+const ReminderEvent = Event({
+  Schedule: { at: Schema.Finite },
+  Due: {},
+});
+
+const untilMillis = (at: number) =>
+  Effect.flatMap(Clock.currentTimeMillis, (now) =>
+    Effect.sleep(Duration.millis(Math.max(0, at - now))),
+  );
+
+const reminderMachine = Machine.make({
+  state: ReminderState,
+  event: ReminderEvent,
+  initial: ReminderState.Idle,
+})
+  .on(ReminderState.Idle, ReminderEvent.Schedule, ({ event }) =>
+    ReminderState.Scheduled({ at: event.at }),
+  )
+  .on(ReminderState.Scheduled, ReminderEvent.Due, ({ state }) =>
+    ReminderState.Fired({ at: state.at }),
+  )
+  .task(ReminderState.Scheduled, ({ state }) => untilMillis(state.at), {
+    onSuccess: () => ReminderEvent.Due,
+    onFailure: () => ReminderEvent.Due,
+  });
+
+const reminderOptions = {
+  behavior: Behavior.machine(reminderMachine, {
+    wakeAt: (state) => {
+      if (state._tag === "Scheduled") {
+        return Option.some(state.at);
+      }
+      return Option.none();
+    },
+  }),
+  state: Schema.fromJsonString(reminderMachine.stateSchema),
+  message: Schema.fromJsonString(reminderMachine.eventSchema),
+};
+
 // A machine with no task: every transition is a command's.
 const TallyState = State({ Counting: { count: Schema.Finite } });
 const TallyEvent = Event({ Increment: {} });
@@ -163,8 +213,8 @@ describe("durable actor", () => {
       // The receipt is in the store, but the engine has not yet published it.
       const store = MailboxStore.of({
         ...inner,
-        commit: (commandId, state) =>
-          Effect.tap(inner.commit(commandId, state), () => Deferred.await(hold)),
+        commit: (commandId, state, wake) =>
+          Effect.tap(inner.commit(commandId, state, wake), () => Deferred.await(hold)),
       });
       const counter = yield* durable(counterOptions).pipe(
         Effect.provideService(MailboxStore, store),
@@ -490,6 +540,37 @@ describe("durable actor", () => {
       const latest = yield* store.latest;
       expect(Option.map(latest, (committed) => committed.revision)).toEqual(Option.some(2));
       expect(yield* store.pending).toEqual([]);
+    }),
+  );
+
+  withStore("a machine's deadline is stored with its state and resumes at that time", () =>
+    Effect.gen(function* () {
+      const store = yield* MailboxStore;
+      const wake = Effect.map(store.latest, (latest) =>
+        Option.map(latest, (committed) => committed.wake),
+      );
+
+      const firstLife = yield* Scope.make();
+      const before = yield* durable(reminderOptions).pipe(Scope.provide(firstLife));
+      yield* before.call(ReminderEvent.Schedule({ at: 60_000 }), {
+        commandId: id("r1"),
+        timeout: "1 second",
+      });
+      expect(yield* wake).toEqual(Option.some(Option.some(60_000)));
+      // The first life ends 10 seconds into a 60-second wait.
+      yield* TestClock.adjust("10 seconds");
+      yield* Scope.close(firstLife, Exit.void);
+
+      const after = yield* durable(reminderOptions);
+      yield* TestClock.adjust("49 seconds");
+      expect((yield* after.state.get)._tag).toBe("Scheduled");
+      // It fires at the stored time, not a full wait after the reopen.
+      yield* TestClock.adjust("1 second");
+      const fired = yield* Stream.runHead(
+        Stream.filter(after.state.changes, (state) => state._tag === "Fired"),
+      );
+      expect(Option.map(fired, (state) => state._tag)).toEqual(Option.some("Fired"));
+      expect(yield* wake).toEqual(Option.some(Option.none()));
     }),
   );
 

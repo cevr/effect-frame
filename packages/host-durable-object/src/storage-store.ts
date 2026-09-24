@@ -9,14 +9,15 @@ import type {
 import { CommandConflict, CommandId, MailboxStore } from "effect-frame/actor";
 import type { StoreFactory } from "effect-frame/actor/testing";
 import * as Interop from "./interop.js";
-import type { DurableStorage, SqlRow, SqlStorage } from "./storage.js";
+import type { DurableStorage, SqlBinding, SqlRow, SqlStorage } from "./storage.js";
 
 const decodeCommandId = Schema.decodeSync(CommandId);
 
 /**
  * The tables one actor owns inside its object. `commands.admitted` is the
  * mailbox order. A row without a `revision` is still pending. `committed`
- * holds one row: the actor's latest revision and encoded state.
+ * holds one row: the actor's latest revision, encoded state, and the wake
+ * that state asked for (`Behavior.wakeAt`), NULL when it waits for nothing.
  */
 export const schema: ReadonlyArray<string> = [
   `CREATE TABLE IF NOT EXISTS commands (
@@ -30,9 +31,23 @@ export const schema: ReadonlyArray<string> = [
   `CREATE TABLE IF NOT EXISTS committed (
      id INTEGER PRIMARY KEY CHECK (id = 1),
      revision INTEGER,
-     state TEXT
+     state TEXT,
+     wake_at INTEGER NULL
    )`,
 ];
+
+/**
+ * An object whose `committed` table predates the wake column gains it. The
+ * column is nullable, so every row it already holds reads as no wake.
+ */
+const addWakeColumn = (sql: SqlStorage): void => {
+  const columns = Interop.exec(sql, "PRAGMA table_info(committed)");
+  if (
+    !columns.some((column) => Interop.stringColumn(column, "name").pipe(Option.contains("wake_at")))
+  ) {
+    Interop.exec(sql, "ALTER TABLE committed ADD COLUMN wake_at INTEGER NULL");
+  }
+};
 
 const number = (row: SqlRow, column: string): number =>
   Option.getOrElse(Interop.numberColumn(row, column), () => 0);
@@ -57,6 +72,7 @@ const toReceipt = (row: SqlRow): StoredReceipt => ({
 const toCommitted = (row: SqlRow): Committed => ({
   revision: number(row, "revision"),
   state: text(row, "state"),
+  wake: Interop.numberColumn(row, "wake_at"),
 });
 
 /** A command row, whether or not it carries a receipt yet. */
@@ -93,7 +109,9 @@ const readCommand = (sql: SqlStorage, commandId: CommandId): Option.Option<Comma
 
 const readCommitted = (sql: SqlStorage): Option.Option<Committed> =>
   Option.map(
-    Interop.firstRow(Interop.exec(sql, "SELECT revision, state FROM committed WHERE id = 1")),
+    Interop.firstRow(
+      Interop.exec(sql, "SELECT revision, state, wake_at FROM committed WHERE id = 1"),
+    ),
     toCommitted,
   );
 
@@ -103,14 +121,47 @@ const nextRevision = (sql: SqlStorage): number =>
     onSome: (committed) => committed.revision + 1,
   });
 
-const writeCommitted = (sql: SqlStorage, revision: number, state: string): void => {
-  Interop.exec(
-    sql,
-    `INSERT INTO committed (id, revision, state) VALUES (1, ?, ?)
-       ON CONFLICT (id) DO UPDATE SET revision = excluded.revision, state = excluded.state`,
-    revision,
-    state,
-  );
+/** The store binds no SQL NULL, so an absent wake writes the literal. */
+const writeCommitted = (
+  sql: SqlStorage,
+  revision: number,
+  state: string,
+  wake: Option.Option<number>,
+): void => {
+  const upsert = (wakeValue: string, ...bindings: ReadonlyArray<SqlBinding>) =>
+    Interop.exec(
+      sql,
+      `INSERT INTO committed (id, revision, state, wake_at) VALUES (1, ?, ?, ${wakeValue})
+         ON CONFLICT (id) DO UPDATE SET revision = excluded.revision,
+           state = excluded.state, wake_at = excluded.wake_at`,
+      revision,
+      state,
+      ...bindings,
+    );
+  Option.match(wake, {
+    onNone: () => upsert("NULL"),
+    onSome: (at) => upsert("?", at),
+  });
+};
+
+/**
+ * The alarm a commit leaves armed. A pending command wakes the object at
+ * once: its admission armed that, and a commit must not push it back to a
+ * later deadline. Otherwise the committed state's own wake is armed, never
+ * earlier than now: a runtime refuses an alarm in the past, and a wake that
+ * is already due means now. With neither, the commit leaves the alarm as it
+ * was: a stale alarm only opens the actor, which finds nothing due.
+ */
+const alarmAfterCommit = (
+  sql: SqlStorage,
+  wake: Option.Option<number>,
+  now: number,
+): Option.Option<number> => {
+  const pending = Interop.exec(sql, "SELECT 1 FROM commands WHERE revision IS NULL LIMIT 1");
+  if (pending.length > 0) {
+    return Option.some(now);
+  }
+  return Option.map(wake, (at) => Math.max(at, now));
 };
 
 /**
@@ -129,6 +180,8 @@ export const make = Effect.fn("HostDurableObject.storageStore")(function* (
       Interop.exec(storage.sql, statement);
     }),
   );
+  yield* Effect.sync(() => addWakeColumn(storage.sql));
+  const currentTime = Effect.clockWith((clock) => clock.currentTimeMillis);
 
   const append = Effect.fn("HostDurableObject.storageStore.append")(function* (input: AppendInput) {
     const existing = yield* Effect.sync(() => readCommand(storage.sql, input.commandId));
@@ -147,7 +200,7 @@ export const make = Effect.fn("HostDurableObject.storageStore")(function* (
         receipt: existing.value.receipt,
       } satisfies Appended;
     }
-    const now = yield* Effect.clockWith((clock) => clock.currentTimeMillis);
+    const now = yield* currentTime;
     const admitted = yield* Interop.admit(storage, {
       commandId: input.commandId,
       payload: input.payload,
@@ -174,14 +227,17 @@ export const make = Effect.fn("HostDurableObject.storageStore")(function* (
   const commit = Effect.fn("HostDurableObject.storageStore.commit")(function* (
     commandId: CommandId,
     state: string,
+    wake: Option.Option<number>,
   ) {
     const found = yield* Effect.sync(() => readCommand(storage.sql, commandId));
     if (Option.isNone(found)) {
       return yield* Effect.die(`MailboxStore.commit: unknown command ${commandId}`);
     }
-    const revision = yield* Interop.transact(storage, () =>
-      writeReceipt(storage.sql, commandId, state),
-    );
+    const now = yield* currentTime;
+    const revision = yield* Interop.transactArming(storage, () => ({
+      value: writeReceipt(storage.sql, commandId, state, wake),
+      alarm: alarmAfterCommit(storage.sql, wake, now),
+    }));
     return {
       commandId,
       admitted: found.value.admitted,
@@ -204,16 +260,28 @@ export const make = Effect.fn("HostDurableObject.storageStore")(function* (
 
   const latest = Effect.sync(() => readCommitted(storage.sql));
 
-  const advance = Effect.fn("HostDurableObject.storageStore.advance")(function* (state: string) {
-    const revision = yield* Interop.transact(storage, () => writeAdvance(storage.sql, state));
-    return { revision, state } satisfies Committed;
+  const advance = Effect.fn("HostDurableObject.storageStore.advance")(function* (
+    state: string,
+    wake: Option.Option<number>,
+  ) {
+    const now = yield* currentTime;
+    const revision = yield* Interop.transactArming(storage, () => ({
+      value: writeAdvance(storage.sql, state, wake),
+      alarm: alarmAfterCommit(storage.sql, wake, now),
+    }));
+    return { revision, state, wake } satisfies Committed;
   });
 
   return MailboxStore.of({ append, next, commit, receipt, pending, latest, advance });
 });
 
 /** Writes the receipt and the new committed revision together. */
-const writeReceipt = (sql: SqlStorage, commandId: CommandId, state: string): number => {
+const writeReceipt = (
+  sql: SqlStorage,
+  commandId: CommandId,
+  state: string,
+  wake: Option.Option<number>,
+): number => {
   const revision = nextRevision(sql);
   Interop.exec(
     sql,
@@ -222,14 +290,14 @@ const writeReceipt = (sql: SqlStorage, commandId: CommandId, state: string): num
     state,
     commandId,
   );
-  writeCommitted(sql, revision, state);
+  writeCommitted(sql, revision, state, wake);
   return revision;
 };
 
 /** Writes a committed state the behavior reached with no command. */
-const writeAdvance = (sql: SqlStorage, state: string): number => {
+const writeAdvance = (sql: SqlStorage, state: string, wake: Option.Option<number>): number => {
   const revision = nextRevision(sql);
-  writeCommitted(sql, revision, state);
+  writeCommitted(sql, revision, state, wake);
   return revision;
 };
 

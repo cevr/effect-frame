@@ -18,10 +18,14 @@ export interface StoredReceipt {
   readonly state: string;
 }
 
-/** The latest committed state and its revision. */
+/**
+ * The latest committed state and its revision. `wake` is when that state
+ * next needs the actor with no request (`Behavior.wakeAt`), stored with it.
+ */
 export interface Committed {
   readonly revision: number;
   readonly state: string;
+  readonly wake: Option.Option<number>;
 }
 
 export interface AppendInput {
@@ -60,13 +64,24 @@ export class MailboxStore extends Context.Service<
     readonly append: (input: AppendInput) => Effect.Effect<Appended, CommandConflict>;
     /** The oldest command without a receipt. */
     readonly next: Effect.Effect<Option.Option<PendingCommand>>;
-    /** Commit the next state and the receipt in one step and advance the revision. */
-    readonly commit: (commandId: CommandId, state: string) => Effect.Effect<StoredReceipt>;
+    /**
+     * Commit the next state, its wake, and the receipt in one step and
+     * advance the revision. A host that can wake an idle actor arms that
+     * wake in the same step, so a crash cannot keep the state and lose it.
+     */
+    readonly commit: (
+      commandId: CommandId,
+      state: string,
+      wake: Option.Option<number>,
+    ) => Effect.Effect<StoredReceipt>;
     readonly receipt: (commandId: CommandId) => Effect.Effect<Option.Option<StoredReceipt>>;
     readonly pending: Effect.Effect<ReadonlyArray<CommandId>>;
     readonly latest: Effect.Effect<Option.Option<Committed>>;
-    /** Commit a state the behavior reached on its own and advance the revision. No command, no receipt. */
-    readonly advance: (state: string) => Effect.Effect<Committed>;
+    /**
+     * Commit a state the behavior reached on its own, with its wake, and
+     * advance the revision. No command, no receipt.
+     */
+    readonly advance: (state: string, wake: Option.Option<number>) => Effect.Effect<Committed>;
   }
 >()("effect-frame/src/actor/mailbox-store/MailboxStore") {
   static readonly layerMemory: Layer.Layer<MailboxStore> = Layer.effect(MailboxStore, makeMemory());
@@ -121,6 +136,7 @@ const commitToLog = (
   log: Log,
   commandId: CommandId,
   state: string,
+  wake: Option.Option<number>,
 ): readonly [Option.Option<StoredReceipt>, Log] => {
   const index = log.entries.findIndex((entry) => entry.command.commandId === commandId);
   const entry = Option.fromNullishOr(log.entries[index]);
@@ -145,7 +161,7 @@ const commitToLog = (
       });
       return [
         Option.some(receipt),
-        { ...log, entries, committed: Option.some({ revision, state }) },
+        { ...log, entries, committed: Option.some({ revision, state, wake }) },
       ];
     },
   });
@@ -173,8 +189,11 @@ function makeMemory() {
     const commit = Effect.fn("MailboxStore.commit")(function* (
       commandId: CommandId,
       state: string,
+      wake: Option.Option<number>,
     ) {
-      const receipt = yield* Ref.modify(log, (current) => commitToLog(current, commandId, state));
+      const receipt = yield* Ref.modify(log, (current) =>
+        commitToLog(current, commandId, state, wake),
+      );
       return yield* Option.match(receipt, {
         onNone: () => Effect.die(`MailboxStore.commit: unknown command ${commandId}`),
         onSome: Effect.succeed,
@@ -199,13 +218,13 @@ function makeMemory() {
 
     const latest = Effect.map(Ref.get(log), (current) => current.committed);
 
-    const advance = (state: string) =>
+    const advance = (state: string, wake: Option.Option<number>) =>
       Ref.modify(log, (current): readonly [Committed, Log] => {
         const revision = Option.match(current.committed, {
           onNone: () => 1,
           onSome: (committed) => committed.revision + 1,
         });
-        const committed: Committed = { revision, state };
+        const committed: Committed = { revision, state, wake };
         return [committed, { ...current, committed: Option.some(committed) }];
       });
 

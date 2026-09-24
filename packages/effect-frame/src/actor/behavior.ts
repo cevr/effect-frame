@@ -57,7 +57,29 @@ export interface Behavior<State, Message, R = never, Refusal extends Refused = n
    * `Rejected(Refused)`. Absent: every message is accepted.
    */
   readonly refuse?: (message: Message) => Option.Option<Refusal>;
+  /**
+   * When this state next needs the actor running with no request, as epoch
+   * milliseconds (#101 §5). A durable host stores it in the same step as
+   * the state and wakes the actor at that time, so a deadline survives a
+   * restart or an eviction. A time at or before now means work is in
+   * flight: the host keeps the actor running until the state changes.
+   * Absent, or `None` for a state: the state waits for a message.
+   *
+   * The state must carry the time. A machine that waits sleeps until a time
+   * its state holds, not for a duration: a reopened machine re-enters its
+   * task, and only an absolute time resumes the wait where it stopped.
+   */
+  readonly wakeAt?: (state: State) => Option.Option<number>;
 }
+
+/**
+ * When a state next needs the actor, if the behavior names one.
+ */
+export const wakeOf = <State, Message, R, Refusal extends Refused>(
+  behavior: Behavior<State, Message, R, Refusal>,
+  state: State,
+): Option.Option<number> =>
+  Option.flatMap(Option.fromNullishOr(behavior.wakeAt), (wakeAt) => wakeAt(state));
 
 /**
  * The refusal of one message, if the behavior has a rule and it refuses.
@@ -143,9 +165,11 @@ interface Tagged {
  * requirements and real effects, so its next state is not a pure function a
  * client could run.
  */
-export interface MachineOptions<Event, Refusal extends Refused = never> {
+export interface MachineOptions<State, Event, Refusal extends Refused = never> {
   /** The events this behavior refuses. See `Behavior.refuse`. */
   readonly refuse?: (event: Event) => Option.Option<Refusal>;
+  /** When a state next needs the actor with no request. See `Behavior.wakeAt`. */
+  readonly wakeAt?: (state: State) => Option.Option<number>;
 }
 
 export const machine = <
@@ -158,12 +182,16 @@ export const machine = <
   Refusal extends Refused = never,
 >(
   definition: Machine.Machine<State, Event, R, StateDefinition, EventDefinition, void, Output>,
-  options: MachineOptions<Event, Refusal> = {},
+  options: MachineOptions<State, Event, Refusal> = {},
 ): Behavior<State, Event, R, Refusal> => ({
   initial: definition.initial,
   ...Option.match(Option.fromNullishOr(options.refuse), {
     onNone: () => ({}),
     onSome: (refuse) => ({ refuse }),
+  }),
+  ...Option.match(Option.fromNullishOr(options.wakeAt), {
+    onNone: () => ({}),
+    onSome: (wakeAt) => ({ wakeAt }),
   }),
   open: Effect.fn("Behavior.machine.open")(function* (state: State) {
     const actor = yield* Machine.spawn(definition, { hydrate: state });

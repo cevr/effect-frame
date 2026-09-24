@@ -42,6 +42,7 @@ import {
   Schema,
   Scope,
   Stream,
+  SubscriptionRef,
 } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
@@ -854,6 +855,86 @@ describe("readiness through context", () => {
         });
         expect(textOf(root, "#late-shown")).toBe("shown");
       }),
+  );
+
+  it.scoped("a change read before a late registration does not bring the content back", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const shown = yield* QueryState.fakeQuery<string, string>();
+      const late = yield* QueryState.fakeQuery<string, string>();
+      const rows = yield* SubscriptionRef.make<ReadonlyArray<string>>([]);
+
+      const LateCard = Effect.gen(function* () {
+        const value = yield* ready(late.source, "");
+        return <p id="late-card">{View.bind(value)}</p>;
+      });
+      const Page = () =>
+        Loading({
+          fallback: <p id="late-pending">loading</p>,
+          children: Effect.gen(function* () {
+            const value = yield* ready(shown.source, "");
+            const card = yield* View.list({
+              each: { get: SubscriptionRef.get(rows), changes: SubscriptionRef.changes(rows) },
+              keyBy: (name: string) => name,
+              row: () => LateCard,
+            });
+            return (
+              <section id="late-page">
+                <p id="late-shown">{View.bind(value)}</p>
+                {card}
+              </section>
+            );
+          }),
+        });
+
+      const page = yield* mountScoped(Page, root);
+      yield* page.act(shown.resolve("shown"), {
+        label: "first paint",
+        until: (actualRoot) => textAt(actualRoot, "#late-shown") === "shown",
+      });
+
+      // Every element connected under the root that is or holds the card.
+      const connected: Array<string> = [];
+      const note = (records: ReadonlyArray<MutationRecord>): void => {
+        for (const record of records) {
+          for (const added of Array.from(record.addedNodes)) {
+            if (
+              added instanceof HTMLElement &&
+              (added.id === "late-card" || has(added, "#late-card"))
+            ) {
+              connected.push(added.id || added.tagName);
+            }
+          }
+        }
+      };
+      const observer = new MutationObserver(note);
+      yield* Effect.acquireRelease(
+        Effect.sync(() => observer.observe(root, { childList: true, subtree: true })),
+        () => Effect.sync(() => observer.disconnect()),
+      );
+
+      // A registered query changes, and before the scope has read that
+      // change the card registers: the scope's read of the change, taken
+      // over the registrations it had, says settled.
+      yield* page.act(Effect.andThen(shown.refetch, SubscriptionRef.set(rows, ["late"])), {
+        label: "the late registration puts the fallback back",
+        until: (actualRoot) => hasAt(actualRoot, "#late-pending"),
+      });
+      yield* page.act(shown.resolve("fresh"), {
+        label: "the scope has read every change of the shown query",
+        until: (actualRoot) => hasAt(actualRoot, "#late-pending"),
+      });
+      yield* Effect.sync(() => note(observer.takeRecords()));
+      expect(connected).toEqual([]);
+      expect(has(root, "#late-card")).toBe(false);
+
+      yield* page.act(late.resolve("late"), {
+        label: "the late card lands with its value",
+        until: (actualRoot) =>
+          !hasAt(actualRoot, "#late-pending") && textAt(actualRoot, "#late-card") === "late",
+      });
+      expect(textOf(root, "#late-shown")).toBe("fresh");
+    }),
   );
 
   it.scoped.layer(readinessLayer)(

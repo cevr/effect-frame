@@ -322,26 +322,27 @@ const derive = <A,>(
     const compute = (entries: ReadonlyArray<Registration>): Effect.Effect<A> =>
       Effect.map(Effect.forEach(entries, contribution, { concurrency: 1 }), fold);
 
-    const entryChanges = Stream.switchMap(registry.entries.changes, (entries) =>
+    // One element per trigger. It carries nothing: the registrations it was
+    // raised over may already have grown by a late registration.
+    const triggers = Stream.switchMap(registry.entries.changes, (entries) =>
       Stream.merge(
-        Stream.succeed(entries),
-        Stream.map(
-          Stream.mergeAll(
-            entries.flatMap((entry): ReadonlyArray<Stream.Stream<void>> => [
-              Stream.map(entry.settled.changes, () => void 0),
-              Stream.map(entry.failure.changes, () => void 0),
-            ]),
-            { concurrency: "unbounded" },
-          ),
-          () => entries,
+        Stream.succeed(void 0),
+        Stream.mergeAll(
+          entries.flatMap((entry): ReadonlyArray<Stream.Stream<void>> => [
+            Stream.map(entry.settled.changes, () => void 0),
+            Stream.map(entry.failure.changes, () => void 0),
+          ]),
+          { concurrency: "unbounded" },
         ),
       ),
     );
 
     // Read now on every `get`: a server render reads it beside the seed (#22).
+    // Each trigger reads now as well, over the registrations there are now.
+    const current = Effect.flatMap(registry.entries.get, compute);
     return {
-      get: Effect.flatMap(registry.entries.get, compute),
-      changes: Stream.mapEffect(entryChanges, compute),
+      get: current,
+      changes: Stream.mapEffect(triggers, () => current),
     } satisfies Source<A>;
   });
 

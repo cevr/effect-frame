@@ -220,6 +220,13 @@ interface Owned<A> {
  */
 interface Tracker {
   readonly track: <A>(source: Source<A>) => Accessor<A>;
+  /**
+   * The source's value now, read synchronously as `track` reads it. A value
+   * `track` delivers was read on the subscription's fiber and may be older
+   * than a write made since; a decision that must not act on such a value
+   * reads again here.
+   */
+  readonly read: <A>(source: Source<A>) => A;
   /** Acquire a host resource and register its cleanup in the current scope. */
   readonly register: (acquire: () => Cleanup) => void;
   readonly owned: <A>(build: (scope: Scope.Scope) => A) => Owned<A>;
@@ -877,6 +884,7 @@ const makeTracker = Effect.fn("View.makeTracker")(function* (
 
   return {
     track,
+    read: (source) => source.get.pipe(runSync),
     register: (acquire: () => Cleanup) => {
       void runSync(
         Effect.acquireRelease(Effect.sync(acquire), (cleanup) => Effect.sync(cleanup)).pipe(
@@ -1180,7 +1188,11 @@ const planRetained = <HostNode>(
     // Every value of `when` arrives in a new box, so a value equal to the
     // last one the effect saw still runs `apply`: after the hold above hid
     // the content, `when` may go false and back to true before a flush.
-    createRenderEffect(wanted, (box) => apply(box.value), { defer: true });
+    // A delivered value only wakes the boundary; it applies `when` as it is
+    // now. A value read on the subscription's fiber before a late
+    // registration held the content would otherwise bring it back while
+    // that registration is still pending.
+    createRenderEffect(wanted, () => apply(renderer.tracker.read(node.when)), { defer: true });
   };
 };
 

@@ -7,6 +7,7 @@ import {
   SchemaIssue,
   SchemaTransformation,
 } from "effect";
+import type { MachineEventSchema } from "effect-machine";
 import type { AnyContract, KeyOf } from "./contract.js";
 import type { GeneratedTypeId } from "./generated.js";
 import { CommandId } from "./vocabulary.js";
@@ -358,12 +359,20 @@ type MemberRefusal<M> = M extends { readonly fields: infer Fields }
   ? { [K in keyof Fields]: FieldRefusal<Fields[K]> }[keyof Fields]
   : "a form message is a TaggedStruct or a union of them";
 
-/** Why a message schema has no form encoding. `never` when it has one. */
+/**
+ * Why a message schema has no form encoding. `never` when it has one. A
+ * Schema union names its members; an effect-machine event schema names its
+ * variants, one TaggedStruct each, so each is checked as a member would be.
+ * Only a machine's event schema qualifies: any other schema's `variants`
+ * says nothing about what it decodes.
+ */
 export type Refusal<S> = S extends { readonly members: ReadonlyArray<infer M> }
   ? M extends unknown
     ? MemberRefusal<M>
     : never
-  : MemberRefusal<S>;
+  : S extends MachineEventSchema<infer _Definition> & { readonly variants: infer V }
+    ? { [K in keyof V]: MemberRefusal<V[K]> }[keyof V]
+    : MemberRefusal<S>;
 
 /** `unknown` for a message with a form encoding; a named refusal otherwise. */
 export type Codable<S> = [Refusal<S>] extends [never]

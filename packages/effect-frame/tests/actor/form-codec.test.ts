@@ -1,6 +1,7 @@
 import { Form, contract } from "effect-frame/actor/client";
 import { Effect, Exit, Option, Random, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
+import { Event } from "effect-machine";
 import { AddTask, Tasks, TasksMessage, board } from "../plain-form-fixture.js";
 
 /**
@@ -24,7 +25,53 @@ const Board = contract("Board", {
 
 const fields = (entries: ReadonlyArray<readonly [string, string]>) => Form.fromEntries(entries);
 
+/** A machine contract: its message is the machine's event schema (#105). */
+const ApplyEvent = Event({
+  SetAbout: { name: Schema.String, age: Schema.FiniteFromString, subscribe: Form.Checkbox },
+  Submit: {},
+});
+
+const Application = contract("Application", {
+  version: 1,
+  policy: "public",
+  key: Schema.Struct({ id: Schema.String }),
+  snapshot: Schema.Finite,
+  message: ApplyEvent,
+});
+
 describe("form codec", () => {
+  it.effect("a machine contract's message decodes from a form, as its JSON does", () =>
+    Effect.gen(function* () {
+      const form = Form.codec(Application.raw.message);
+      const fromForm = yield* Schema.decodeEffect(form)(
+        fields([
+          ["_tag", "SetAbout"],
+          ["name", "Ada"],
+          ["age", "34"],
+        ]),
+      );
+      const fromJson = yield* Schema.decodeEffect(Application.message)(
+        '{"_tag":"SetAbout","name":"Ada","age":"34"}',
+      );
+      // `"34"` is 34, and an absent checkbox is `false`.
+      expect(fromForm).toEqual(ApplyEvent.SetAbout({ name: "Ada", age: 34, subscribe: false }));
+      expect(fromForm).toEqual(fromJson);
+      // An empty variant's constructor is a value with helpers: compare the data.
+      const submitted: unknown = yield* Schema.decodeEffect(form)(fields([["_tag", "Submit"]]));
+      expect(submitted).toEqual({ _tag: "Submit" });
+      const refused = yield* Effect.exit(
+        Schema.decodeEffect(form)(
+          fields([
+            ["_tag", "SetAbout"],
+            ["name", "Ada"],
+            ["age", "abc"],
+          ]),
+        ),
+      );
+      expect(Exit.isFailure(refused)).toBe(true);
+    }),
+  );
+
   it.effect("the same contract decodes a nested key and message from a flat field map", () =>
     Effect.gen(function* () {
       const form = Form.codec(Board.raw.message);

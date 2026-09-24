@@ -3,6 +3,7 @@ import type { MessageOf, RemoteActorRef } from "effect-frame/actor/client";
 import { View } from "effect-frame/view";
 import { Effect, Schema, SchemaTransformation } from "effect";
 import { describe, expect, test } from "bun:test";
+import { Event } from "effect-machine";
 import type { AddTask } from "../plain-form-fixture.js";
 import { Tasks, TasksMessage, board } from "../plain-form-fixture.js";
 
@@ -60,6 +61,33 @@ const Upload = Schema.Union([
 // @ts-expect-error a Uint8Array field has no form encoding
 const uploadCodec = () => Form.codec(Upload);
 
+// --- A machine's event schema is a form message too (#105) ---------------
+
+const ApplyEvent = Event({
+  SetAbout: { name: Schema.String, age: Schema.FiniteFromString, subscribe: Form.Checkbox },
+  Submit: {},
+});
+const machineCodec = Form.codec(ApplyEvent);
+const machineCodecYieldsTheEvent: Equals<
+  Schema.Schema.Type<typeof machineCodec>,
+  Schema.Schema.Type<typeof ApplyEvent>
+> = true;
+const UploadEvent = Event({
+  Named: { name: Schema.String },
+  Upload: { bytes: Schema.Uint8Array },
+});
+// @ts-expect-error a Uint8Array field in one machine event has no form encoding
+const uploadEventCodec = () => Form.codec(UploadEvent);
+
+// A schema that is not a machine's event schema gains nothing from a
+// `variants` property: the refusal reads the schema itself.
+const Posing = Object.assign(
+  Schema.TaggedStruct("Upload", { name: Schema.String, bytes: Schema.Uint8Array }),
+  { variants: { Upload: Schema.TaggedStruct("Upload", { name: Schema.String }) } },
+);
+// @ts-expect-error a `variants` property does not make a schema a machine's events
+const posingCodec = () => Form.codec(Posing);
+
 const BooleanFromOn = Schema.String.pipe(
   Schema.decodeTo(
     Schema.Boolean,
@@ -116,11 +144,12 @@ const generatedIsCovered = () =>
 
 describe("plain-form types", () => {
   test("the refusals above are compile-time claims", () => {
-    expect([bothCodecsYieldOneType, addInputOmitsId, addTypeKeepsIdRequired]).toEqual([
-      true,
-      true,
-      true,
-    ]);
+    expect([
+      bothCodecsYieldOneType,
+      addInputOmitsId,
+      addTypeKeepsIdRequired,
+      machineCodecYieldsTheEvent,
+    ]).toEqual([true, true, true, true]);
     const unused: ReadonlyArray<unknown> = [
       sendWithoutId,
       sendWithId,
@@ -134,8 +163,10 @@ describe("plain-form types", () => {
       uncoveredForm,
       generatedIsCovered,
       formCodec,
+      uploadEventCodec,
+      posingCodec,
     ];
-    expect(unused).toHaveLength(12);
+    expect(unused).toHaveLength(14);
     const message: MessageOf<typeof Tasks> = { _tag: "AddTask", id: "c1", title: "t", done: true };
     expect(message._tag).toBe("AddTask");
   });

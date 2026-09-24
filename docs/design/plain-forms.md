@@ -73,6 +73,9 @@ does all coercion, so a field name never carries a type.
   JSON wire too.
 - A message that has no form encoding does not build: a non-string encoded
   field, or a boolean without an optional encoded side.
+- The message is a TaggedStruct, a Schema union of them, or an
+  effect-machine event schema, whose variants are checked as members are
+  (#105). A machine contract's `raw.message` builds a form codec.
 - `View.form` takes `typed`, the fields that the form's own inputs carry.
   A member field that no input types, no mark generates, and no default
   fills does not compile.

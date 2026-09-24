@@ -12,13 +12,15 @@
  *   f  Counter: the same ID with a different payload is a CommandConflict.
  *   g  Upload: machine work interrupted by SIGKILL runs again after a wake.
  *   h  changes: a revision arrives as an event over the wire.
- *   i  Job: work in flight at SIGKILL finishes with no request (#101 §5).
+ *   i  Job: work in flight at SIGKILL finishes with no request (#101 §5),
+ *      across several of the host's alarm holds.
  *   j  Reminder: a deadline fires at its stored time with no request, even
  *      when part of the wait passed while the node was down.
  *
  * Rows i and j observe with no request, so no request can have woken the
  * object: workerd's objects are read on disk, and celld's output is read for
- * the fixture's log lines, because its storage is not plain SQLite on disk.
+ * the host's `FrameHost.wake settled` line, which follows the commit, because
+ * celld's storage is not plain SQLite on disk.
  *
  * Nothing here runs in CI: it needs the binary and takes about a minute.
  * Run it with `bun run proof:contract`.
@@ -362,18 +364,37 @@ const fromDisk = (row: unknown): Option.Option<Seen> =>
     firedAt: Option.fromNullishOr(decoded.state.firedAt),
   }));
 
-const fromLog = (found: RegExpExecArray): Seen => ({
+/** The reminder's fire time, which the fixture logs from its task. */
+const firedAtPattern = /fixture\.reminder at=\d+ firedAt=(?<firedAt>\d+)/;
+
+const fromLog = (logs: string): Seen => ({
   source: "log",
   wake: Option.none(),
-  firedAt: Option.map(Option.fromNullishOr(found.groups?.["firedAt"]), Number),
+  firedAt: Option.map(
+    Option.flatMap(Option.fromNullishOr(firedAtPattern.exec(logs)), (found) =>
+      Option.fromNullishOr(found.groups?.["firedAt"]),
+    ),
+    Number,
+  ),
 });
+
+/**
+ * The host's line when an alarm's hold ends with nothing due. The host reads
+ * the committed revision from storage for it, so it follows the commit.
+ */
+const settledLine = (contract: string, revision: number): RegExp =>
+  new RegExp(`FrameHost\\.wake settled contract=${contract} revision=${revision}\\b`);
+
+/** How many times the host re-armed a hold that ended with work still due. */
+const rearms = (node: Node, contract: string): number =>
+  node.logs.join("").split(`FrameHost.wake rearmed contract=${contract} `).length - 1;
 
 /**
  * One look, with no request. A runtime with a disk reader (workerd) is read
  * on disk: a committed state holds `tag`. One without (celld) is read in its
- * output: the fixture's task logs `pattern` when its work ran.
+ * output: the host logs `settled` once the commit left nothing due.
  */
-const lookOnce = (node: Node, tag: string, pattern: RegExp): Effect.Effect<Option.Option<Seen>> =>
+const lookOnce = (node: Node, tag: string, settled: RegExp): Effect.Effect<Option.Option<Seen>> =>
   Effect.sync(() =>
     Option.match(Option.fromNullishOr(runtime.readObjects), {
       onSome: (readObjects) =>
@@ -386,7 +407,13 @@ const lookOnce = (node: Node, tag: string, pattern: RegExp): Effect.Effect<Optio
           ),
           fromDisk,
         ),
-      onNone: () => Option.map(Option.fromNullishOr(pattern.exec(node.logs.join(""))), fromLog),
+      onNone: () => {
+        const logs = node.logs.join("");
+        return Option.map(
+          Option.liftPredicate(logs, (text) => settled.test(text)),
+          fromLog,
+        );
+      },
     }),
   );
 
@@ -394,11 +421,11 @@ const lookOnce = (node: Node, tag: string, pattern: RegExp): Effect.Effect<Optio
 const observe = (
   node: Node,
   tag: string,
-  pattern: RegExp,
+  settled: RegExp,
   timeout: Duration.Input,
 ): Promise<Option.Option<Seen>> =>
   Effect.runPromise(
-    lookOnce(node, tag, pattern).pipe(
+    lookOnce(node, tag, settled).pipe(
       Effect.repeat({ until: Option.isSome, schedule: Schedule.spaced("100 millis") }),
       Effect.timeoutOption(timeout),
       Effect.map(Option.flatten),
@@ -434,7 +461,7 @@ const rowJobFinishesAlone = async (node: Node): Promise<Node> => {
   const finished = await observe(
     restarted,
     "Finished",
-    new RegExp(`fixture\\.job step=${jobSteps} total=${jobSteps}`),
+    settledLine(Job.name, startedAt + jobSteps),
     "30 seconds",
   );
   report.check(
@@ -442,6 +469,14 @@ const rowJobFinishesAlone = async (node: Node): Promise<Node> => {
     "with no request after the restart, the job finishes on its own",
     Option.isSome(finished),
     `seen ${show(Option.getOrUndefined(finished))}`,
+  );
+  // The fixture's hold is 2 seconds and the job needs longer than that
+  // after the restart, so it finished only because a hold re-armed.
+  report.check(
+    "i",
+    "the job ran across a hold's end: the host re-armed and carried on",
+    rearms(restarted, Job.name) >= 1,
+    `${rearms(restarted, Job.name)} re-arms in the output`,
   );
   // Only a disk observer sees the committed wake.
   const finishedWake = Option.flatMap(finished, (seen) => seen.wake);
@@ -508,7 +543,7 @@ const rowReminderFiresOnTime = async (node: Node): Promise<Node> => {
   const fired = await observe(
     restarted,
     "Fired",
-    new RegExp(`fixture\\.reminder at=${at} firedAt=(?<firedAt>\\d+)`),
+    settledLine(Reminder.name, scheduled.revision.value + 1),
     "30 seconds",
   );
   const firedAt = Option.getOrElse(

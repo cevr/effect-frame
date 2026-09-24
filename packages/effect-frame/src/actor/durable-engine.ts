@@ -110,13 +110,29 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <
   // Decode only for a behavior that has a rule: most refuse nothing.
   const refuses = Option.isSome(Option.fromNullishOr(options.behavior.refuse));
 
+  /**
+   * The state a fresh actor starts from. It is not committed: a fresh actor
+   * does not spend a revision on it. The exception is an initial state that
+   * names a wake (`Behavior.wakeAt`): the host can wake the actor only for a
+   * wake it stored, so that state is committed as revision 1 with its wake
+   * before anything reads it.
+   */
+  const openInitial: Effect.Effect<Committed<State>> = Option.match(
+    wakeOf(options.behavior, options.behavior.initial),
+    {
+      onNone: () => Effect.succeed({ revision: 0, state: options.behavior.initial }),
+      onSome: (at) =>
+        Effect.gen(function* () {
+          const encoded = yield* Effect.orDie(encodeState(options.behavior.initial));
+          const advanced = yield* store.advance(encoded, Option.some(at));
+          return { revision: advanced.revision, state: options.behavior.initial };
+        }),
+    },
+  );
+
   const restored = yield* Effect.flatMap(store.latest, (latest) =>
     Option.match(latest, {
-      onNone: () =>
-        Effect.succeed<Committed<State>>({
-          revision: 0,
-          state: options.behavior.initial,
-        }),
+      onNone: () => openInitial,
       onSome: (committed) =>
         Effect.map(Effect.orDie(decodeState(committed.state)), (state): Committed<State> => ({
           revision: committed.revision,

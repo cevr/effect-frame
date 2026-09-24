@@ -106,7 +106,13 @@ the state. The storage store arms the alarm in that transaction: now while a
 command is pending, otherwise the wake, never earlier than now (workerd
 refuses a past alarm, and the commit with it). The alarm opens the actor and
 holds until no command is pending and the wake is absent or later than now;
-work still in flight at the hold's bound arms the next alarm at once. A
+work still in flight at the hold's bound (`alarmHold`, 30 seconds by default)
+arms the next alarm at once. The handler never writes a wake that is still
+ahead: that write would sit outside a transaction, and a command admitted in
+between would have its "now" alarm pushed back. A fresh actor whose initial
+state names a wake commits that state as revision 1 when it opens, because
+the host can wake it only for a stored wake; any other initial state still
+spends no revision. A
 waiting machine sleeps until the time its state carries, not for a duration,
 because a reopened machine re-enters its task from the start.
 

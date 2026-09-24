@@ -42,6 +42,7 @@ const FrameHost = defineFrameHost({
   layer: Layer.succeed(Policies, Policies.of({ public: Policy.allowAll })),
   principal: HttpServer.anonymous,
   pollInterval: Option.some("5 millis"),
+  alarmHold: Option.none(),
 });
 
 const address = { contract: "Counter", version: 1, key: JSON.stringify("alice") };
@@ -110,6 +111,7 @@ const GuardedHost = defineFrameHost({
   ),
   principal: memberPrincipal,
   pollInterval: Option.some("5 millis"),
+  alarmHold: Option.none(),
 });
 
 const guardedAddress = { contract: "Guarded", version: 1, key: JSON.stringify("vault") };
@@ -122,6 +124,42 @@ const read = Effect.fn("frameHost.read")(function* (response: Response) {
   const text = yield* Effect.promise(() => response.text());
   return yield* Effect.orDie(decodeWire(text));
 });
+
+// A counter whose state, once above zero, names a wake far ahead: the
+// alarm handler reads that wake but must not write it (#101 §5).
+const farAhead = 4_102_444_800_000;
+
+const Timed = contract("Timed", {
+  version: 1,
+  policy: "public",
+  key: Schema.String,
+  snapshot: Schema.Finite,
+  message: Schema.Union([Add]),
+});
+
+const timedBehavior: Behavior.Behavior<number, Add> = {
+  ...Behavior.reducer<number, Add>({
+    initial: 0,
+    reduce: (state, message) => state + message.amount,
+  }),
+  wakeAt: (state) =>
+    Option.as(
+      Option.liftPredicate(state, (total) => total > 0),
+      farAhead,
+    ),
+};
+
+const TimedLive = implementTransparent(Timed, timedBehavior);
+
+const TimedHost = defineFrameHost({
+  implementations: [TimedLive],
+  layer: Layer.succeed(Policies, Policies.of({ public: Policy.allowAll })),
+  principal: HttpServer.anonymous,
+  pollInterval: Option.some("5 millis"),
+  alarmHold: Option.none(),
+});
+
+const timedAddress = { contract: "Timed", version: 1, key: JSON.stringify("t") };
 
 describe("the generic frame host over durable-object storage", () => {
   it.scoped("snapshot and call cross the generic wire", () =>
@@ -230,6 +268,30 @@ describe("the generic frame host over durable-object storage", () => {
         host.fetch(post("/snapshot", { address: guardedAddress }, Option.none())),
       );
       expect(stranger.status).toBe(403);
+    }),
+  );
+
+  it.scoped("the alarm never writes a wake that is still ahead", () =>
+    Effect.gen(function* () {
+      const storage = yield* scopedFake;
+      const host = new TimedHost({ storage }, {});
+      yield* Effect.promise(() =>
+        host.fetch(
+          post("/call", {
+            address: timedAddress,
+            commandId: "t1",
+            payload: JSON.stringify({ _tag: "Add", amount: 1 }),
+            timeoutMillis: 2000,
+          }),
+        ),
+      );
+      // The commit armed its wake in its own transaction.
+      expect(storage.armed()).toEqual(Option.some(farAhead));
+      // A request admits a command while the alarm runs: it arms "now". The
+      // handler read the far wake before that; it must not write it back.
+      yield* Effect.promise(() => storage.setAlarm(1));
+      yield* Effect.promise(() => host.alarm());
+      expect(storage.armed()).toEqual(Option.some(1));
     }),
   );
 });

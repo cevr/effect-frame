@@ -149,20 +149,10 @@ const jobMachine = Machine.make({
     }
     return JobState.Running({ ...state, done: state.done + 1 });
   })
-  .task(
-    JobState.Running,
-    ({ state }) =>
-      // The log line is the proof's observer on a runtime whose disk it
-      // cannot read: it reaches the runtime's output with no request.
-      Effect.andThen(
-        Effect.sleep(Duration.millis(state.stepMillis)),
-        Effect.log(`fixture.job step=${state.done + 1} total=${state.total}`),
-      ),
-    {
-      onSuccess: () => JobEvent.Stepped,
-      onFailure: () => JobEvent.Stepped,
-    },
-  );
+  .task(JobState.Running, ({ state }) => Effect.sleep(Duration.millis(state.stepMillis)), {
+    onSuccess: () => JobEvent.Stepped,
+    onFailure: () => JobEvent.Stepped,
+  });
 
 export const Job = contract("Job", {
   version: 1,
@@ -203,7 +193,8 @@ export const ReminderEvent = Event({
 
 /**
  * Sleeps until the time the state holds, then reports when it woke. The log
- * line is the proof's observer on a runtime whose disk it cannot read.
+ * line carries that time to a proof that cannot read the runtime's disk; the
+ * host's own `FrameHost.wake settled` line shows the commit.
  */
 const until = (at: number) =>
   Effect.flatMap(Clock.currentTimeMillis, (now) =>
@@ -261,6 +252,8 @@ export const FrameHost = defineFrameHost({
   layer: Layer.succeed(Policies, Policies.of({ public: Policy.allowAll })),
   principal: HttpServer.anonymous,
   pollInterval: Option.some("20 millis"),
+  // Short, so the proof job runs across several holds and their re-arms.
+  alarmHold: Option.some("2 seconds"),
 });
 
 interface Env {

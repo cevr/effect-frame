@@ -1,5 +1,4 @@
-import type { Duration } from "effect";
-import { Effect, Layer, ManagedRuntime, Option, Result, Schema } from "effect";
+import { Duration, Effect, Layer, ManagedRuntime, Option, Result, Schema } from "effect";
 import type {
   ActorTransport,
   AnyImplementation,
@@ -124,6 +123,12 @@ export interface FrameHostOptions<R> {
   readonly principal: HttpServer.DerivePrincipal<ActorTransport | R | Policies>;
   /** How long `call` sleeps between receipt polls. A durable store polls fast. */
   readonly pollInterval: Option.Option<Duration.Input>;
+  /**
+   * How long one alarm holds the object while work is due (#101 §5). Work
+   * still due at the end arms the next alarm at once. `None` is 30 seconds,
+   * well inside the runtime's limit for one alarm.
+   */
+  readonly alarmHold: Option.Option<Duration.Input>;
 }
 
 /** What a Durable Object class must expose to celld and Cloudflare. */
@@ -154,6 +159,9 @@ export const defineFrameHost = <R>(options: FrameHostOptions<R>): FrameHostClass
     }),
   );
   const requirements = options.layer;
+  const hold = Duration.fromInputUnsafe(
+    Option.getOrElse<Duration.Input, Duration.Input>(options.alarmHold, () => "30 seconds"),
+  );
 
   return class FrameHost implements FrameHostInstance {
     readonly #storage: DurableStorage;
@@ -204,7 +212,7 @@ export const defineFrameHost = <R>(options: FrameHostOptions<R>): FrameHostClass
       if (Option.isNone(address)) {
         return;
       }
-      await this.#runtime.runPromise(wakeAndDrain(address.value, this.#storage));
+      await this.#runtime.runPromise(wakeAndDrain(address.value, this.#storage, hold));
     }
 
     async fetch(request: Request): Promise<Response> {
@@ -241,9 +249,15 @@ const due = (storage: DurableStorage, now: number): Option.Option<number> => {
   );
 };
 
-/** How often the hold reads the tables, and how many reads one alarm makes. */
-const holdStep = "20 millis";
-const holdSteps = 1500;
+/** How often the hold reads the tables. */
+const holdStep = Duration.millis(20);
+
+/** The committed revision, for the log line that closes a wake. */
+const committedRevision = (storage: DurableStorage): Option.Option<number> =>
+  Option.flatMap(
+    Interop.firstRow(Interop.exec(storage.sql, "SELECT revision FROM committed WHERE id = 1")),
+    (row) => Interop.numberColumn(row, "revision"),
+  );
 
 /**
  * Opens the instance and holds the alarm until nothing is due.
@@ -257,14 +271,20 @@ const holdSteps = 1500;
  * The hold is what keeps that work alive (#101 §5): a runtime may evict an
  * object with no request and no running alarm, and a machine's task or
  * deadline would die with it. The hold ends when no command is pending and
- * the committed wake is absent or later than now. The bound keeps one alarm
- * well inside the runtime's limit; work still in flight at the bound arms
- * the next alarm at once, so a task longer than one alarm continues. A wake
- * still ahead is armed again, which the commit that stored it already did.
+ * the committed wake is absent or later than now. The `hold` bound keeps one
+ * alarm inside the runtime's limit; work still due at the bound arms the
+ * next alarm at once, so a task longer than one alarm continues.
+ *
+ * A wake still ahead is never armed here. The commit that stored it armed it
+ * in its own transaction, and this write would sit outside one: a request can
+ * admit a command between the read and the write, and its "now" alarm would
+ * be pushed back to the later wake. Arming "now" can only bring a wake
+ * forward, so it is the one write this handler makes.
  */
 const wakeAndDrain = Effect.fn("FrameHost.wake")(function* (
   address: Address,
   storage: DurableStorage,
+  hold: Duration.Duration,
 ) {
   const recovery = yield* ActorHost.Recovery;
   const woken = yield* Effect.result(recovery.wake(address));
@@ -286,9 +306,16 @@ const wakeAndDrain = Effect.fn("FrameHost.wake")(function* (
     }
     return settled;
   });
-  yield* Effect.repeat(step(), { until: (settled) => settled, times: holdSteps });
-  const next = due(storage, yield* now);
-  if (Option.isSome(next)) {
-    yield* Interop.setAlarm(storage, Math.max(next.value, yield* now));
+  const steps = Math.ceil(Duration.toMillis(hold) / Duration.toMillis(holdStep));
+  yield* Effect.repeat(step(), { until: (settled) => settled, times: steps });
+  const at = yield* now;
+  const stillDue = Option.filter(due(storage, at), (wake) => wake <= at);
+  const revision = Option.getOrElse(committedRevision(storage), () => 0);
+  if (Option.isSome(stillDue)) {
+    yield* Interop.setAlarm(storage, at);
+    return yield* Effect.logInfo(
+      `FrameHost.wake rearmed contract=${address.contract} revision=${revision}`,
+    );
   }
+  yield* Effect.logInfo(`FrameHost.wake settled contract=${address.contract} revision=${revision}`);
 });

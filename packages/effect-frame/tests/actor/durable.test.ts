@@ -574,6 +574,20 @@ describe("durable actor", () => {
     }),
   );
 
+  withStore("an initial state that names a wake is stored with it when the actor opens", () =>
+    Effect.gen(function* () {
+      const store = yield* MailboxStore;
+      const running = yield* durable({
+        ...counterOptions,
+        behavior: { ...counterBehavior, wakeAt: () => Option.some(0) },
+      });
+      expect(Option.map(yield* store.latest, (latest) => [latest.revision, latest.wake])).toEqual(
+        Option.some([1, Option.some(0)]),
+      );
+      expect((yield* running.applied.get).revision.value).toBe(1);
+    }),
+  );
+
   withStore("a machine's initial state does not spend a revision", () =>
     Effect.gen(function* () {
       const store = yield* MailboxStore;

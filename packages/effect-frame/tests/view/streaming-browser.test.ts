@@ -1,4 +1,4 @@
-/* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNullish, effect/noThrowStatement, effect/noNewError, effect/noTryCatch, effect/noNodeBuiltinImport -- this proof drives real WebKit and Chrome pages through Bun.WebView against a real streaming Bun server. */
+/* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNullish, effect/noThrowStatement, effect/noNewError, effect/noTryCatch, effect/noNodeBuiltinImport, no-await-in-loop -- this proof drives real WebKit and Chrome pages through Bun.WebView against a real streaming Bun server. */
 /**
  * Streamed documents (#22), real-browser proofs. A Bun server streams the
  * page from `browser/streaming-page.tsx`; WebKit and Chrome parse it and run
@@ -15,7 +15,7 @@ import { Html } from "effect-frame/view";
 import type { Context } from "effect";
 import { Deferred, Effect, Exit, Layer, Scope, Stream } from "effect";
 import * as H from "../router/browser/harness.js";
-import { Label, Page } from "./browser/streaming-page.js";
+import { Label, Page, TallPage } from "./browser/streaming-page.js";
 
 const chrome = await H.capabilities("chrome");
 const webkit = await H.capabilities("webkit");
@@ -37,7 +37,7 @@ const bundleOnce = (): Promise<string> => {
   return bundled;
 };
 
-type Mode = "defer" | "async" | "cut" | "await-all" | "split";
+type Mode = "defer" | "async" | "cut" | "await-all" | "split" | "tall";
 
 /** The `split` label: a patch far larger than one parser step. */
 const largeLabel = "x".repeat(200_000);
@@ -56,7 +56,8 @@ interface PageServer {
 
 /**
  * One page server. The query `a` is held until the client reports it has
- * hydrated, except in `await-all`, which cannot send a byte before it settles.
+ * hydrated, except in `await-all`, which cannot send a byte before it settles,
+ * and in `tall`, where the test releases it with `POST /release`.
  */
 const servePage = async (mode: Mode): Promise<PageServer> => {
   const script = await bundleOnce();
@@ -89,11 +90,13 @@ const servePage = async (mode: Mode): Promise<PageServer> => {
     Effect.provideContext(HttpServer.make({ principal: HttpServer.anonymous }), context),
   );
   let bootstrap = '<script type="module" src="/client.js"></script>';
-  if (mode === "async" || mode === "split") {
+  if (mode === "async" || mode === "split" || mode === "tall") {
     bootstrap = '<script type="module" async src="/client.js"></script>';
   }
+  let main = '<main id="app">';
+  if (mode === "tall") main = '<main id="app" data-page="tall">';
   const frame: Html.Document = {
-    head: '<!doctype html><html><head><meta charset="utf-8"><title>streaming</title></head><body><main id="app">',
+    head: `<!doctype html><html><head><meta charset="utf-8"><title>streaming</title></head><body>${main}`,
     tail: "</main>",
     bootstrap,
     end: "</body></html>",
@@ -107,7 +110,8 @@ const servePage = async (mode: Mode): Promise<PageServer> => {
         context,
       );
     }
-    const streamed = Html.renderToStream(Page, { id: "a" }, frame, noLimit);
+    let streamed = Html.renderToStream(Page, { id: "a" }, frame, noLimit);
+    if (mode === "tall") streamed = Html.renderToStream(TallPage, { id: "a" }, frame, noLimit);
     // `split`: the patch goes out in two writes with a pause between, so the
     // parser appends the record's element before all of its text. `Closed`
     // waits longer, so a record read only when the next one arrives shows.
@@ -143,6 +147,10 @@ const servePage = async (mode: Mode): Promise<PageServer> => {
         return new Response(script, { headers: { "content-type": "text/javascript" } });
       }
       if (url.pathname === "/hydrated") {
+        if (mode !== "tall") Effect.runSync(Deferred.succeed(gate, void 0));
+        return new Response("ok");
+      }
+      if (url.pathname === "/release") {
         Effect.runSync(Deferred.succeed(gate, void 0));
         return new Response("ok");
       }
@@ -208,6 +216,21 @@ const withPage = async (
     view.close();
     await server.stop();
   }
+};
+
+/**
+ * Wait for `expression` while the document is still arriving. Chrome has no
+ * page to evaluate in until the navigation commits, so an early evaluate
+ * throws; that is a wait, not a failure.
+ */
+const openWhile = async (view: Bun.WebView, expression: string): Promise<void> => {
+  const until = performance.now() + 5_000;
+  while (performance.now() < until) {
+    const found = await view.evaluate<boolean>(`Boolean(${expression})`).catch(() => false);
+    if (found) return;
+    await Bun.sleep(20);
+  }
+  throw new Error(`timed out waiting for ${expression}`);
 };
 
 const proofs = (engine: H.Engine) => {
@@ -307,6 +330,49 @@ const proofs = (engine: H.Engine) => {
       }),
     30_000,
   );
+
+  // The reader scrolls while the boundary 4000 px down still shows its
+  // fallback, then the patch lands. In Chrome the client has hydrated and the
+  // patch settles the live scope; in WebKit the parser holds the client until
+  // the document ends, so hydration places the patched value. Either way the
+  // content fills in place and the viewport stays where the reader put it.
+  it("a late patch fills content in place and does not move the viewport", async () => {
+    const server = await servePage("tall");
+    const backend = H.backendOf(engine);
+    if (backend === undefined) throw new Error(`no ${engine} on this host`);
+    const view = new Bun.WebView({ backend });
+    try {
+      // The document is open until the query settles: do not wait for its load.
+      const loaded = view.navigate(`${server.origin}/`);
+      await openWhile(
+        view,
+        `document.getElementById("pending") && document.documentElement.scrollHeight > 5000`,
+      );
+      expect(await view.evaluate<number>("(scrollTo(0, 1000), scrollY)")).toBe(1000);
+      // Chrome runs the async client while the document streams: release the
+      // query only once it has hydrated, so the patch lands in a live scope.
+      if (engine === "chrome") {
+        await H.waitFor(view, "window.__stream && window.__stream.hydrated", "the client hydrated");
+      }
+      await fetch(`${server.origin}/release`, { method: "POST" });
+      await H.waitFor(view, "window.__stream && window.__stream.hydrated", "the client hydrated");
+      await H.waitFor(
+        view,
+        `document.querySelector("#label")?.textContent === "label 1"`,
+        "the late patch",
+      );
+      await loaded;
+      expect((await seen(view)).fallbackAtHydration).toBe(engine === "chrome");
+      expect(await exists(view, "#pending")).toBe(false);
+      expect(await view.evaluate<number>("scrollY")).toBe(1000);
+      // The value came from the patch, not from a second read.
+      expect(server.reads).toEqual(["a"]);
+      expect(server.calls).toEqual([]);
+    } finally {
+      view.close();
+      await server.stop();
+    }
+  }, 30_000);
 
   it(
     "an AwaitAll document writes no record channel and hydrates with no mismatch",

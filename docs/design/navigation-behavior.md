@@ -325,9 +325,11 @@ fake `navigation` test above proves finding 2.
 
 ## Limits
 
-- The streamed `Patch` of #22 is not in this tree. The late-settle proof
-  uses a client `Loading` settle, which is the same `Show` swap in place.
-  The row stays Open until a `Patch` drives the same fixture.
+- The late-settle proof here uses a client `Loading` settle, the same
+  `Show` swap in place. The streamed `Patch` is proven by its own fixture,
+  `packages/effect-frame/tests/view/streaming-browser.test.ts` — "a late
+  patch fills content in place and does not move the viewport", in Chrome
+  and WebKit.
 - `renderToStream` is not in this tree either. The server proof uses the
   server host render and a server bundle. The same test should render
   through `renderToStream` once #22 lands.

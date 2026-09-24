@@ -10,7 +10,7 @@ import { Dom, mount, render } from "effect-frame/view";
 import type { QueryFailure, QueryState } from "effect-frame/actor/client";
 import type { Dom as DomTypes } from "effect-frame/view";
 import { Effect, Layer, Option } from "effect";
-import { Label, Page } from "./streaming-page.js";
+import { Label, Page, TallPage } from "./streaming-page.js";
 
 export interface StreamWindow {
   hydrated: boolean;
@@ -49,7 +49,12 @@ const start = Effect.gen(function* () {
   const records = yield* Dom.readRecords;
   const resumed = yield* Streaming.resume(records);
   const hydration = Dom.hydrate(root);
-  yield* mount(Page, { id: "a" }, hydration.host, root);
+  // The server names the page on the root: an inline script cannot run here.
+  if (root.dataset["page"] === "tall") {
+    yield* mount(TallPage, { id: "a" }, hydration.host, root);
+  } else {
+    yield* mount(Page, { id: "a" }, hydration.host, root);
+  }
   yield* render;
   const report = yield* hydration.finish;
   yield* resumed.hydrated;

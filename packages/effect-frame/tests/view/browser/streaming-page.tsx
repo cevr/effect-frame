@@ -30,3 +30,21 @@ export const Page = (props: { readonly id: string }) =>
       </section>
     );
   });
+
+const tall = (height: number) => <div style={`height: ${String(height)}px`} />;
+
+/**
+ * The same boundary far below the fold, with a page's worth of content after
+ * it: the late patch lands where the reader is not looking (#31).
+ */
+export const TallPage = (props: { readonly id: string }) =>
+  Effect.gen(function* () {
+    const page = yield* Page(props);
+    return (
+      <article id="tall">
+        {tall(4000)}
+        {page}
+        {tall(4000)}
+      </article>
+    );
+  });

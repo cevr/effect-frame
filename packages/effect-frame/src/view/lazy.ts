@@ -143,7 +143,8 @@ export const lazy = <P, E, R>(load: () => Promise<Module<P, E, R>>): LazyView<P,
     // must not keep the first waiter's services (its Frame, query cache, or
     // router) alive.
     return Effect.sync(() => {
-      Effect.runFork(Effect.ignore(run(done)));
+      // A failure reaches every waiter through `done`, so it is not logged here.
+      Effect.runFork(Effect.ignore(run(done), { log: false }));
       return { token, done };
     });
   });

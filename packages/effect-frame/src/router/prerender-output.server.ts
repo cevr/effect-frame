@@ -106,7 +106,11 @@ export const lock = (
           ),
         ),
     ),
-    () => Effect.ignore(fs.remove(output.lock)),
+    () =>
+      Effect.ignore(fs.remove(output.lock), {
+        log: "Warn",
+        message: "Prerender: the build lock was not removed",
+      }),
   );
 
 /**
@@ -125,7 +129,10 @@ export const stage = (
       fs.makeTempDirectory({ directory: output.staging, prefix: `${String(builtAt)}-` }),
       (directory, exit) => {
         if (Exit.isFailure(exit)) {
-          return Effect.ignore(fs.remove(directory, { recursive: true }));
+          return Effect.ignore(fs.remove(directory, { recursive: true }), {
+            log: "Warn",
+            message: "Prerender: a failed build's staging directory was not removed",
+          });
         }
         return Effect.void;
       },
@@ -172,20 +179,34 @@ export const publish = (
             fs.makeDirectory(output.leases, { recursive: true }),
           ),
           fs.writeFileString(written, encodePointer({ generation: id })),
-        ).pipe(Effect.onError(() => Effect.ignore(fs.remove(written)))),
+        ).pipe(
+          Effect.onError(() =>
+            Effect.ignore(fs.remove(written), {
+              log: "Warn",
+              message: "Prerender: an unwritten pointer was not removed",
+            }),
+          ),
+        ),
       );
       // The commit: masked, so it ends as a known success or a known failure.
       yield* Effect.andThen(fs.rename(staged, generation), fs.rename(written, output.pointer)).pipe(
         Effect.onError(() =>
           Effect.andThen(
-            Effect.ignore(fs.remove(written)),
-            Effect.ignore(fs.remove(generation, { recursive: true })),
+            Effect.ignore(fs.remove(written), {
+              log: "Warn",
+              message: "Prerender: an uncommitted pointer was not removed",
+            }),
+            Effect.ignore(fs.remove(generation, { recursive: true }), {
+              log: "Warn",
+              message: "Prerender: an uncommitted generation was not removed",
+            }),
           ),
         ),
       );
       yield* restore(
         Effect.ignore(
           Effect.flatMap(leased(fs, output), (held) => clean(fs, path, output, [id, ...held])),
+          { log: "Warn", message: "Prerender: older generations were not cleaned" },
         ),
       );
       return generation;
@@ -217,7 +238,11 @@ const leaseOn = (fs: FileSystem.FileSystem, output: Output, generation: string) 
       fs.makeDirectory(output.leases, { recursive: true }),
       fs.makeTempDirectory({ directory: output.leases, prefix: `${generation}.` }),
     ),
-    (lease) => Effect.ignore(fs.remove(lease, { recursive: true })),
+    (lease) =>
+      Effect.ignore(fs.remove(lease, { recursive: true }), {
+        log: "Warn",
+        message: "Prerender: a generation lease was not released",
+      }),
   );
 
 /**

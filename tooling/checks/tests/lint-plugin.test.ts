@@ -84,6 +84,27 @@ describe("frame lint plugin", () => {
     }),
   );
 
+  it.effect("refuses an Effect.ignore that does not say whether it logs", () =>
+    Effect.sync(() => {
+      const found = lint(
+        "explicit-ignore",
+        [
+          'import { Effect } from "effect";',
+          "export const a = Effect.ignore(Effect.fail(1));",
+          "export const b = Effect.fail(1).pipe(Effect.ignore);",
+          'export const c = Effect.ignoreCause(Effect.fail(1), { message: "gone" });',
+          'export const d = Effect.ignore(Effect.fail(1), { log: "Warn", message: "gone" });',
+          "export const e = Effect.fail(1).pipe(Effect.ignore({ log: false }));",
+          "export const f = Effect.ignoreCause(Effect.die(1), { log: true });",
+        ].join("\n"),
+      );
+      expect(found).toHaveLength(3);
+      expect(found[0]).toContain("sample.ts:2:");
+      expect(found[1]).toContain("sample.ts:3:");
+      expect(found[2]).toContain("sample.ts:4:");
+    }),
+  );
+
   it.effect("refuses an Effect.fn span not named Area.operation", () =>
     Effect.sync(() => {
       const found = lint(

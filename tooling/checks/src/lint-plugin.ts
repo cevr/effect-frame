@@ -20,6 +20,11 @@ import { Option, Predicate } from "effect";
  *   beside a value, keyed by it, is found by no reader of the value: carry
  *   it on the value, or in an actor or a Scope. `.oxlintrc.json` turns it on
  *   for `packages/*\/src`.
+ * - `frame/explicit-ignore`: `Effect.ignore` and `Effect.ignoreCause` name
+ *   `log` in their options (`{ log: "Warn", message }`, or `{ log: false }`
+ *   when the failure is reported elsewhere). A failure dropped with no trace
+ *   leaves nothing to read when it matters; the option makes dropping it a
+ *   decision written where it is made.
  */
 
 /** The part of a node the rules read. */
@@ -44,6 +49,17 @@ interface CallExpression extends LintNode {
     readonly property?: LintNode & { readonly name?: string };
   };
   readonly arguments: ReadonlyArray<LintNode & { readonly value?: unknown }>;
+}
+
+interface MemberExpression extends LintNode {
+  readonly object: LintNode & { readonly name?: string };
+  readonly property: LintNode & { readonly name?: string };
+}
+
+interface ObjectExpression extends LintNode {
+  readonly properties: ReadonlyArray<
+    LintNode & { readonly key?: LintNode & { readonly name?: string; readonly value?: unknown } }
+  >;
 }
 
 interface Declarator extends LintNode {
@@ -142,6 +158,69 @@ const spanNameRule: Rule = {
   }),
 };
 
+/** The Effect combinators that drop a failure. */
+const ignoring: ReadonlySet<string> = new Set(["ignore", "ignoreCause"]);
+
+const isIgnore = (node: LintNode): node is MemberExpression => {
+  if (node.type !== "MemberExpression") {
+    return false;
+  }
+  const member: Partial<MemberExpression> = node;
+  return (
+    Option.exists(Option.fromNullishOr(member.object), (object) => object.name === "Effect") &&
+    Option.exists(
+      Option.flatMap(Option.fromNullishOr(member.property), (property) =>
+        Option.fromNullishOr(property.name),
+      ),
+      (name) => ignoring.has(name),
+    )
+  );
+};
+
+/** An object literal with a `log` property. */
+const namesLog = (node: LintNode): boolean => {
+  if (node.type !== "ObjectExpression") {
+    return false;
+  }
+  const options: Partial<ObjectExpression> = node;
+  return Option.getOrElse(Option.fromNullishOr(options.properties), () => []).some((property) =>
+    Option.exists(
+      Option.fromNullishOr(property.key),
+      (key) => key.name === "log" || key.value === "log",
+    ),
+  );
+};
+
+const explicitIgnore: Rule = {
+  create: (context) => {
+    // The `Effect.ignore` callees already judged as calls, so the member
+    // visitor reports only a bare `Effect.ignore` (`pipe(Effect.ignore)`).
+    const called = new WeakSet<LintNode>();
+    const report = (node: LintNode) =>
+      context.report({
+        node,
+        message:
+          'Say whether a dropped failure is logged: Effect.ignore(effect, { log: "Warn", message }), or { log: false } when it is reported elsewhere.',
+      });
+    return {
+      CallExpression: (node: CallExpression) => {
+        if (!isIgnore(node.callee)) {
+          return;
+        }
+        called.add(node.callee);
+        if (!node.arguments.some(namesLog)) {
+          report(node);
+        }
+      },
+      MemberExpression: (node: MemberExpression) => {
+        if (isIgnore(node) && !called.has(node)) {
+          report(node);
+        }
+      },
+    };
+  },
+};
+
 /** The collections whose top-level instance is mutable state. */
 const collections: ReadonlySet<string> = new Set(["Map", "Set", "WeakMap", "WeakSet"]);
 
@@ -216,6 +295,7 @@ const plugin = {
     "disable-reason": disableReason,
     "span-name": spanNameRule,
     "no-module-state": noModuleState,
+    "explicit-ignore": explicitIgnore,
   },
 };
 

@@ -61,6 +61,9 @@ The lint is strict and the rules are written down in `.oxlintrc.json`:
   without ` -- reason` fails `frame/disable-reason`.
 - An `Effect.fn` span is `Area.operation`, such as `Query.run`
   (`frame/span-name`).
+- `Effect.ignore` and `Effect.ignoreCause` say whether the failure is
+  logged: `{ log: "Warn", message }`, or `{ log: false }` when the failure
+  is reported elsewhere (`frame/explicit-ignore`).
 - File names are kebab case. No import cycles.
 - `Effect.provide` with a Layer appears only at an entry point, with
   `// @effect-diagnostics-next-line strictEffectProvide:off`.

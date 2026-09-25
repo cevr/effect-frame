@@ -26,6 +26,7 @@
     "frame/no-switch": "error",
     "frame/disable-reason": "error",
     "frame/span-name": "error",
+    "frame/explicit-ignore": "error",
     "node/no-process-env": "error",
     "no-unused-vars": [
       "error",

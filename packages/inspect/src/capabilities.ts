@@ -139,7 +139,7 @@ export const lock = Effect.fn("InspectCapabilities.lock")(function* (
         }
         return Effect.void;
       }),
-      Effect.ignore,
+      Effect.ignore({ log: "Warn", message: "Inspect: the gateway lock was not removed" }),
     ),
   );
 });
@@ -161,7 +161,10 @@ const writeOne = (path: string, token: string) =>
 
 const removeAll = (files: CapabilityFiles) =>
   Effect.forEach([files.attach, files.read], (path) =>
-    Effect.ignore(attempt(path, "remove the file", () => rm(path, { force: true }))),
+    Effect.ignore(
+      attempt(path, "remove the file", () => rm(path, { force: true })),
+      { log: "Warn", message: "Inspect: a capability file was not removed" },
+    ),
   );
 
 /**

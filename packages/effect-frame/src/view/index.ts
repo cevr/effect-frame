@@ -11,7 +11,6 @@ export {
   type ShowProps,
   type Tagged,
 } from "./control.js";
-export { mount, render } from "./runtime.js";
 export type {
   BoundaryMarks,
   Cleanup,
@@ -32,20 +31,12 @@ export * as Html from "./hosts/html-public.js";
 // The streamed host-operation wire (#15), client half. The server half is `effect-frame/view/driven`.
 export * as Remote from "./hosts/remote.js";
 
-// Readiness through context (#16).
+// Readiness through context (#16): the boundaries and `View.ready` are
+// members of `View`; the tag and the props types are flat.
 export {
   Await,
-  Errored,
-  ErroredScope,
-  Loading,
-  LoadingScope,
-  Query,
-  orErrored,
-  ready,
-  readyWithStale,
   type AwaitProps,
   type ErroredProps,
   type LoadingProps,
-  type QueryProps,
   type ReadyValue,
 } from "./readiness.js";

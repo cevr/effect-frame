@@ -15,7 +15,7 @@ import {
 } from "effect-frame/actor";
 import type { QueryFailure, QueryState } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
-import { Html, Loading, View } from "effect-frame/view";
+import { Html, View } from "effect-frame/view";
 import { Effect, Layer, Option, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import {
@@ -65,9 +65,9 @@ const labelOf = (state: QueryState<{ readonly label: string }, QueryFailure>): s
 
 const SecretPage = () =>
   Effect.gen(function* () {
-    const scope = yield* Loading({
+    const scope = yield* View.loading({
       fallback: <p id="pending">loading</p>,
-      children: Effect.gen(function* () {
+      content: Effect.gen(function* () {
         const entry = yield* useQuery(Secret, { id: "a" });
         return <p id="secret">{View.bind(entry.state, labelOf)}</p>;
       }),

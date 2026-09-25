@@ -4,7 +4,7 @@ registerDom();
 
 import { CommandId } from "effect-frame/actor";
 import { Form, Streaming, queryCacheLayer } from "effect-frame/actor/client";
-import { Dom, Html, mount, render } from "effect-frame/view";
+import { Dom, Html, View } from "effect-frame/view";
 import { Effect, Option, Random, Ref, Schedule, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import type { Wire } from "../plain-form-fixture.js";
@@ -228,8 +228,8 @@ describe("the command form binding", () => {
           });
           expect(Option.isSome(carried)).toBe(true);
           const hydration = Dom.hydrate(root);
-          yield* Form.provideIssues(carried)(mount(TasksPage, noProps, hydration.host, root));
-          yield* render;
+          yield* Form.provideIssues(carried)(View.mount(TasksPage, noProps, hydration.host, root));
+          yield* View.flush;
           const report = yield* hydration.finish;
 
           expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
@@ -298,8 +298,10 @@ describe("the command form binding", () => {
           const hydrate = Effect.gen(function* () {
             const resumed = yield* Streaming.resume(records);
             const hydration = Dom.hydrate(root);
-            yield* Form.provideIssues(carried)(mount(TasksPage, noProps, hydration.host, root));
-            yield* render;
+            yield* Form.provideIssues(carried)(
+              View.mount(TasksPage, noProps, hydration.host, root),
+            );
+            yield* View.flush;
             yield* resumed.closed;
             return yield* hydration.finish;
           });
@@ -322,8 +324,8 @@ describe("the command form binding", () => {
         const main = yield* install(html);
 
         const hydration = Dom.hydrate(main);
-        yield* mount(TasksPage, noProps, hydration.host, main);
-        yield* render;
+        yield* View.mount(TasksPage, noProps, hydration.host, main);
+        yield* View.flush;
         const report = yield* hydration.finish;
         expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
 
@@ -387,9 +389,9 @@ describe("the command form binding", () => {
           const main = yield* install(html);
           const hydration = Dom.hydrate(main);
           yield* Form.provideIssues(Option.some(lost))(
-            mount(VaultPage, noProps, hydration.host, main),
+            View.mount(VaultPage, noProps, hydration.host, main),
           );
-          yield* render;
+          yield* View.flush;
           expect(yield* hydration.finish).toEqual({
             mismatches: [],
             unclaimed: 0,

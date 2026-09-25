@@ -2,7 +2,7 @@ import type { RemoteActorRef } from "effect-frame/actor/client";
 import { Behavior, Source, Value, spawn } from "effect-frame/actor/client";
 import { Link, Router, link } from "effect-frame/router";
 import type { Route } from "effect-frame/router";
-import { For, View, orErrored, ready } from "effect-frame/view";
+import { For, View } from "effect-frame/view";
 import { Effect, Option, Scope } from "effect";
 import { dispatch, writeDraft } from "./commands.js";
 import type { Note } from "./contract.js";
@@ -138,7 +138,10 @@ const ListBody = (props: BodyProps) =>
 export const ListView = (props: ListProps) =>
   Effect.gen(function* () {
     // A failed read goes to the nearest `Errored`, and only that read does.
-    const counts = yield* ready(yield* orErrored(props.data.counts.state), { total: 0, done: 0 });
+    const counts = yield* View.ready(yield* View.orErrored(props.data.counts.state), {
+      total: 0,
+      done: 0,
+    });
     const filter = Source.select(props.search, (search) => Option.fromNullishOr(search.filter));
     // The route publishes its params and its reference together, so the pair
     // read here always names one list.

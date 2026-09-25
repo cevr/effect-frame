@@ -4,7 +4,7 @@ registerDom();
 
 import { Behavior, Value, spawn } from "effect-frame/actor";
 import type { QueryState, Source } from "effect-frame/actor";
-import { Dom, Errored, Loading, View, mount, orErrored, ready } from "effect-frame/view";
+import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import type { Host, Node as ViewNode } from "effect-frame/view";
 import { Effect, Option } from "effect";
@@ -32,18 +32,18 @@ const boundary = (
   content: Effect.Effect<ViewNode, never, Scope.Scope>,
 ): Effect.Effect<ViewNode, never, Scope.Scope> => {
   if (kind === "Loading") {
-    return Loading({
+    return View.loading({
       fallback: <p id={`${id}-fallback`}>{id}</p>,
-      children: Effect.gen(function* () {
-        yield* ready(state, "");
+      content: Effect.gen(function* () {
+        yield* View.ready(state, "");
         return yield* content;
       }),
     });
   }
-  return Errored({
+  return View.errored({
     fallback: () => <p id={`${id}-fallback`}>{id}</p>,
-    children: Effect.gen(function* () {
-      yield* orErrored(state);
+    content: Effect.gen(function* () {
+      yield* View.orErrored(state);
       return yield* content;
     }),
   });
@@ -167,7 +167,7 @@ describe("nested readiness presentation", () => {
           const page = yield* ViewTest.make({
             host: recordingHost(made),
             root,
-            setup: (host, mountRoot) => mount(Page, {}, host, mountRoot),
+            setup: (host, mountRoot) => View.mount(Page, {}, host, mountRoot),
           });
           const child = Option.getOrThrow(madeAt(made, "child"));
           const wrapper = madeAt(made, "wrapper");
@@ -268,7 +268,7 @@ describe("nested readiness presentation", () => {
         const page = yield* ViewTest.make({
           host: recordingHost(made, weak),
           root,
-          setup: (mountHost, mountRoot) => mount(Page, {}, mountHost, mountRoot),
+          setup: (mountHost, mountRoot) => View.mount(Page, {}, mountHost, mountRoot),
         });
         const wrapper = Option.getOrThrow(madeAt(made, "wrapper"));
         yield* page.waitFor({

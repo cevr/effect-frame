@@ -19,8 +19,9 @@ import type { Node, RetainedNode } from "./jsx-runtime.js";
  * A readiness scope is a region of a view that shows a fallback until every
  * query it was given has a first value, and afterwards keeps showing content
  * while values refresh. The scope is a service in the view's Effect context:
- * `ready` requires it, `Loading` provides it. A `ready` call with no `Loading`
- * above it is a missing service, which is a compile error, not a runtime one.
+ * `View.ready` requires it, `View.loading` provides it. A `View.ready` call
+ * with no `View.loading` above it is a missing service in `R`, which the
+ * application must provide, so it does not run by accident.
  *
  * Nothing is thrown and nothing is caught. Solid's `NotReadyError` and React's
  * Suspense both signal readiness by throwing; here the signal is a type.
@@ -65,7 +66,7 @@ interface Registry {
   readonly entries: Source<ReadonlyArray<Registration>>;
 }
 
-/** The registry a `Loading` builds for itself: it can also report a hold. */
+/** The registry a `loading` boundary builds for itself: it can also report a hold. */
 interface OwnRegistry extends Registry {
   /**
    * Hears, synchronously and before `register` returns, each registration
@@ -162,13 +163,18 @@ const boundaryAhead = Effect.gen(function* () {
  * and register it with the nearest `LoadingScope`.
  *
  * The returned source holds the last Ready value. Before the first one
- * arrives it reports `fallback`, and the surrounding `Loading` guarantees
- * nothing built from it is on screen yet. That is the whole trick: the value
- * source never has to represent absence, because the scope removes the
- * consumer from the tree until absence is over.
+ * arrives it reports `fallback`, and the surrounding `View.loading`
+ * guarantees nothing built from it is on screen yet. That is the whole
+ * trick: the value source never has to represent absence, because the scope
+ * removes the consumer from the tree until absence is over.
  *
- * `R` carries `LoadingScope`, so calling this outside a `Loading` does not
- * compile. Pair it with `orErrored` to route the failure as well.
+ * `R` carries `LoadingScope`, so a call outside a `View.loading` leaves it in
+ * the mount's `R`. Pair it with `View.orErrored` to route the failure as well.
+ *
+ * ```ts
+ * const title = yield* View.ready(post.state, "");
+ * return <h1>{View.bind(title)}</h1>;
+ * ```
  */
 export const ready: <Value, Error>(
   state: Source<QueryState<Value, Error>>,
@@ -185,11 +191,14 @@ export const ready: <Value, Error>(
  *
  * It is a separate call, not a second thing `ready` does, because the two
  * requirements are not the same promise. `ready` alone says "this view does
- * not draw until a value exists", which a `Loading` can keep by itself. Only
- * a query whose failure someone must show needs an `Errored` above it, and
- * making that the caller's word keeps `Loading` usable with no `Errored` in
- * the tree. The alternative — `ready` requiring both — made every `Loading`
- * leak `ErroredScope` to its own caller, which the compiler caught.
+ * not draw until a value exists", which a `View.loading` can keep by itself.
+ * Only a query whose failure someone must show needs a `View.errored` above
+ * it, and making that the caller's word keeps `View.loading` usable with no
+ * `View.errored` in the tree.
+ *
+ * ```ts
+ * const counts = yield* View.ready(yield* View.orErrored(entry.state), zero);
+ * ```
  */
 export const orErrored: <Value, Error>(
   state: Source<QueryState<Value, Error>>,
@@ -232,6 +241,11 @@ const registerLoading = Effect.fn("Readiness.registerLoading")(function* <Value,
  * `ready`, keeping the stale flag. The Refetch row says stale content stays
  * on screen and the flag is available; a view that wants to dim itself binds
  * this instead of losing the information.
+ *
+ * ```ts
+ * const shown = yield* View.readyWithStale(results.state, []);
+ * const dim = View.bind(shown, (one) => one.stale);
+ * ```
  */
 export const readyWithStale: <Value, Error>(
   state: Source<QueryState<Value, Error>>,
@@ -393,21 +407,35 @@ const retained = (
 };
 
 /**
- * Provide a `LoadingScope` to the children and show `fallback` until every
- * query registered under it has a first value. Afterwards the content stays,
- * whatever the queries do next.
+ * Provide a `LoadingScope` to `content` and show `fallback` until every
+ * query registered under it has a first value. A boundary with no
+ * registration has nothing to wait for and shows its content. Afterwards the
+ * content stays, whatever the queries do next.
  *
  * The runtime retains the content owner while a fallback is presented. Its
  * host writes are staged until the content is visible, so setup, keyed rows,
  * and their registrations can begin without leaking hidden output.
+ *
+ * It is an Effect, not a tag: it runs `content`'s setup with the scope
+ * provided and removes `LoadingScope` from `R`.
+ *
+ * ```ts
+ * const body = yield* View.loading({
+ *   fallback: <p>loading</p>,
+ *   content: Effect.gen(function* () {
+ *     const title = yield* View.ready(post.state, "");
+ *     return <h1>{View.bind(title)}</h1>;
+ *   }),
+ * });
+ * ```
  */
-export const Loading = <E, R>(
+export const loading = <E, R>(
   props: LoadingProps<E, R>,
 ): Effect.Effect<Node, E, Exclude<R, LoadingScope>> =>
   Effect.gen(function* () {
     const registry = yield* makeRegistry;
     const read = yield* boundaryAhead;
-    const content = yield* props.children.pipe(
+    const content = yield* props.content.pipe(
       Effect.provideService(LoadingScope, registry),
       Effect.provideService(ReadAhead, read.ahead),
     );
@@ -427,7 +455,7 @@ export const Loading = <E, R>(
 
 export interface LoadingProps<E, R> {
   readonly fallback: Node;
-  readonly children: Effect.Effect<Node, E, R>;
+  readonly content: Effect.Effect<Node, E, R>;
 }
 
 export interface ErroredProps<E, R> {
@@ -437,21 +465,28 @@ export interface ErroredProps<E, R> {
    * with different error types; the fallback narrows what it shows.
    */
   readonly fallback: (error: Source<Option.Option<unknown>>) => Node;
-  readonly children: Effect.Effect<Node, E, R>;
+  readonly content: Effect.Effect<Node, E, R>;
 }
 
 /**
- * Provide an `ErroredScope`. Symmetric with `Loading`: it shows its fallback
- * once a registered query has failed, and unlike `Loading` it stays showing
- * it, because a failure does not resolve itself.
+ * Provide an `ErroredScope` to `content`. Symmetric with `loading`: it shows
+ * its fallback once a registered query has failed, and unlike `loading` it
+ * stays showing it, because a failure does not resolve itself.
+ *
+ * ```ts
+ * const page = yield* View.errored({
+ *   fallback: () => <p>could not load</p>,
+ *   content: View.loading({ fallback: <p>loading</p>, content: body }),
+ * });
+ * ```
  */
-export const Errored = <E, R>(
+export const errored = <E, R>(
   props: ErroredProps<E, R>,
 ): Effect.Effect<Node, E, Exclude<R, ErroredScope>> =>
   Effect.gen(function* () {
     const registry = yield* makeRegistry;
     const read = yield* boundaryAhead;
-    const content = yield* props.children.pipe(
+    const content = yield* props.content.pipe(
       Effect.provideService(ErroredScope, registry),
       Effect.provideService(ReadAhead, read.ahead),
     );
@@ -471,10 +506,10 @@ export const Errored = <E, R>(
   });
 
 // ---------------------------------------------------------------------------
-// Query and Await
+// Await
 // ---------------------------------------------------------------------------
 
-export interface QueryProps<Value, Error> {
+export interface AwaitProps<Value, Error> {
   readonly state: Source<QueryState<Value, Error>>;
   readonly loading: Node;
   readonly failed: (error: Source<Error>) => Node;
@@ -484,13 +519,23 @@ export interface QueryProps<Value, Error> {
 
 /**
  * The other half of the pair: match the union yourself, with no scope in
- * context and no registration. `ready` inside `Loading` is the facade for
- * the common case, and `Query` is for a view that wants all three states
- * in one place. It is one `Match` over the three tags, so each branch reads
- * a source that exists only while its state holds: no placeholder value, no
- * cast, and nothing to name for a state that has not been reached.
+ * context and no registration. `View.ready` inside `View.loading` is the
+ * facade for the common case, and `Await` is a tag for a view that wants all
+ * three states in one place. It is one `Match` over the three tags, so each
+ * branch reads a source that exists only while its state holds: no
+ * placeholder value, no cast, and nothing to name for a state that has not
+ * been reached.
+ *
+ * ```tsx
+ * <Await
+ *   state={entry.state}
+ *   loading={<p>loading</p>}
+ *   failed={() => <p>could not load</p>}
+ *   ready={(value) => <p>{View.bind(value)}</p>}
+ * />
+ * ```
  */
-export const Query = <Value, Error>(props: QueryProps<Value, Error>): Node => (
+export const Await = <Value, Error>(props: AwaitProps<Value, Error>): Node => (
   <Match
     on={props.state}
     cases={{
@@ -504,33 +549,3 @@ export const Query = <Value, Error>(props: QueryProps<Value, Error>): Node => (
     }}
   />
 );
-
-export interface AwaitProps<Value, Error> {
-  readonly query: Source<QueryState<Value, Error>>;
-  readonly loading: Node;
-  readonly failed: (error: Source<Error>) => Node;
-  readonly ready: (value: Source<ReadyValue<Value>>) => Node;
-}
-
-/**
- * `Query` as a view, with the value and the stale flag as one `ReadyValue`
- * source. It requires nothing, as `Query` does.
- */
-export const Await = <Value, Error>(
-  props: AwaitProps<Value, Error>,
-): Effect.Effect<Node, never, never> =>
-  Effect.succeed(
-    <Query
-      state={props.query}
-      loading={props.loading}
-      failed={props.failed}
-      ready={(value, stale) =>
-        props.ready(
-          Source.select(Source.all({ value, stale }), (both) => ({
-            value: both.value,
-            stale: both.stale,
-          })),
-        )
-      }
-    />,
-  );

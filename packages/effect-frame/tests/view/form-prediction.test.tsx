@@ -5,7 +5,7 @@ registerDom();
 import { ActorHost, Behavior, Policies, Policy, implementTransparent } from "effect-frame/actor";
 import { ActorTransport, contract, ref } from "effect-frame/actor/client";
 import type { TransportService } from "effect-frame/actor/client";
-import { Dom, Html, View, mount, render } from "effect-frame/view";
+import { Dom, Html, View } from "effect-frame/view";
 import { Deferred, Effect, Layer, Option, Ref, Schedule, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import type { NoProps } from "../plain-form-fixture.js";
@@ -124,13 +124,13 @@ const sendsReach = (sent: Ref.Ref<ReadonlyArray<string>>, count: number) =>
         times: 200,
       }),
     ),
-    render,
+    View.flush,
   );
 
 /** Wait until the view shows `expected`. */
 const shows = (root: ParentNode, expected: string) =>
   Effect.andThen(
-    render,
+    View.flush,
     Effect.sync(() => textOf(root, "#shown")),
   ).pipe(
     Effect.repeat({
@@ -148,8 +148,8 @@ describe("form predictions follow who minted the command id (#67 §3)", () => {
       const host = yield* Layer.build(heldHost(gate, sent));
       yield* Effect.gen(function* () {
         const main = yield* install("");
-        yield* mount(ShelfPage, noProps, Dom.host, main);
-        yield* render;
+        yield* View.mount(ShelfPage, noProps, Dom.host, main);
+        yield* View.flush;
         expect(textOf(main, "#shown")).toBe("");
 
         yield* submitText(main, "first");
@@ -174,8 +174,8 @@ describe("form predictions follow who minted the command id (#67 §3)", () => {
           const html = yield* Effect.scoped(Html.renderToString(ShelfPage, noProps));
           const main = yield* install(html);
           const hydration = Dom.hydrate(main);
-          yield* mount(ShelfPage, noProps, hydration.host, main);
-          yield* render;
+          yield* View.mount(ShelfPage, noProps, hydration.host, main);
+          yield* View.flush;
           yield* hydration.finish;
 
           yield* submitText(main, "posted");

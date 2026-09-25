@@ -20,7 +20,7 @@ import type { TransportService } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import { Location, Route, hydrate, renderDocument } from "effect-frame/router";
 import type { AnyRoute, LocationService, NotFoundProps } from "effect-frame/router";
-import { For, Loading, View, ready } from "effect-frame/view";
+import { For, View } from "effect-frame/view";
 import * as Driven from "effect-frame/view/driven";
 import { Context, Deferred, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -163,11 +163,11 @@ const closed = Route.driven(
 );
 
 /** The layout's title: its query is held, so the document stays open until the test releases it. */
-const Title = Loading({
+const Title = View.loading({
   fallback: <p id="pending-title">loading</p>,
-  children: Effect.gen(function* () {
+  content: Effect.gen(function* () {
     const entry = yield* useQuery(Label, { id: "title" });
-    const value = yield* ready(entry.state, { label: "?" });
+    const value = yield* View.ready(entry.state, { label: "?" });
     return <h1 id="title">{View.bind(value, (found) => found.label)}</h1>;
   }),
 });

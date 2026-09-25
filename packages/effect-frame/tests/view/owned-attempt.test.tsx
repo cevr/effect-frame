@@ -14,7 +14,7 @@ import {
 } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
-import { Dom, Html, Loading, Query, Show, View, mount, ready, render } from "effect-frame/view";
+import { Dom, Html, Await, Show, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import type { Node as ViewNode } from "effect-frame/view";
 import * as Frame from "../../src/frame.js";
@@ -160,7 +160,7 @@ const mountPage = <E, R>(view: View.View<Record<string, never>, E, R>, root: HTM
   ViewTest.make({
     host: Dom.host,
     root,
-    setup: (host, mountRoot) => mount(view, {}, host, mountRoot),
+    setup: (host, mountRoot) => View.mount(view, {}, host, mountRoot),
   });
 
 const push = <A,>(ref: Ref.Ref<ReadonlyArray<A>>, value: A) =>
@@ -275,7 +275,7 @@ const unhandledRow = View.list({
 });
 
 // @effect-diagnostics missingEffectError:error
-const mountAttempted = () => mount(() => attemptedExpr, {}, Dom.host, document.body);
+const mountAttempted = () => View.mount(() => attemptedExpr, {}, Dom.host, document.body);
 const mountIsExact: Equals<
   ReturnType<typeof mountAttempted>,
   Effect.Effect<void, FallbackFailed, SetupService | FallbackService | Scope.Scope>
@@ -354,7 +354,7 @@ describe("private owned attempt", () => {
                       <li id={`row-${first.id}`}>
                         <span class="label">{View.bind(item, (row) => row.label)}</span>
                         <output class="actor">{View.bind(actor.state, String)}</output>
-                        <Query
+                        <Await
                           state={entry.state}
                           loading={<span class="value">loading</span>}
                           ready={(value) => <span class="value">{View.bind(value)}</span>}
@@ -778,12 +778,12 @@ describe("private owned attempt", () => {
               (rows) => <section>{rows}</section>,
             );
           const lifetime = yield* Scope.make();
-          yield* mount(Page, {}, Dom.host, root).pipe(Scope.provide(lifetime));
+          yield* View.mount(Page, {}, Dom.host, root).pipe(Scope.provide(lifetime));
           yield* Deferred.await(started);
           yield* Scope.close(lifetime, Exit.void);
           expect(yield* Ref.get(closed)).toBe(1);
           yield* Deferred.succeed(gate, void 0);
-          yield* render;
+          yield* View.flush;
           expect(root.childNodes.length).toBe(0);
           expect(yield* Ref.get(resumed)).toBe(false);
           expect(yield* Ref.get(closed)).toBe(1);
@@ -930,7 +930,7 @@ describe("private owned attempt", () => {
         const heldExit = yield* Deferred.await(heldAttemptExit);
         expect(Exit.isFailure(heldExit) && Cause.hasInterruptsOnly(heldExit.cause)).toBe(true);
         expect(yield* Ref.get(fallbackStarts)).toEqual(["r1", "r2", "r3"]);
-        yield* render;
+        yield* View.flush;
         expect(hasAt(root, "#row-held")).toBe(false);
         const afterHeld = yield* Frame.inspect;
         expect(pageActors(afterHeld).map((record) => record.id)).toEqual([parentActorId]);
@@ -1007,8 +1007,8 @@ describe("private owned attempt", () => {
                 }
                 const tenant = yield* useQuery(AttemptQuery, { id: `tenant-${route.tenant}` });
                 const post = yield* useQuery(AttemptQuery, { id: `post-${route.post}` });
-                const tenantName = yield* ready(tenant.state, "");
-                const title = yield* ready(post.state, "");
+                const tenantName = yield* View.ready(tenant.state, "");
+                const title = yield* View.ready(post.state, "");
                 return (
                   <article id={`child-${route.id}`}>
                     <h2>{View.bind(title)}</h2>
@@ -1029,9 +1029,9 @@ describe("private owned attempt", () => {
             Effect.gen(function* () {
               yield* Ref.update(layoutSetups, (count) => count + 1);
               const local = yield* spawnAtRevision(30);
-              const body = yield* Loading({
+              const body = yield* View.loading({
                 fallback: <p id="child-loading">loading child</p>,
-                children: Effect.map(props.outlet, (outlet) => <div id="outlet">{outlet}</div>),
+                content: Effect.map(props.outlet, (outlet) => <div id="outlet">{outlet}</div>),
               });
               return (
                 <section id="layout">
@@ -1263,7 +1263,7 @@ describe("private owned attempt", () => {
         const page = yield* mountPage(Page, root);
         yield* Deferred.await(lateStarted);
         yield* Deferred.await(failStarted);
-        yield* render;
+        yield* View.flush;
         expect(log).toEqual([]);
         expect(hasAt(root, "li")).toBe(false);
 
@@ -1349,18 +1349,19 @@ describe("private owned attempt", () => {
           ),
           () => Effect.succeed(<p>fallback</p>),
         );
-        const Empty = () => Loading({ fallback: <p id="fallback">loading</p>, children: owned });
+        const Empty = () =>
+          View.loading({ fallback: <p id="fallback">loading</p>, content: owned });
         const page = yield* mountPage(Empty, root);
-        yield* render;
+        yield* View.flush;
         expect(hasAt(root, "#fallback")).toBe(false);
         expect(hasAt(root, "#content")).toBe(true);
         expect(yield* Ref.get(setups)).toBe(1);
         yield* page.close;
 
         const Registered = () =>
-          Loading({
+          View.loading({
             fallback: <p id="fallback">loading</p>,
-            children: Effect.andThen(ready(settled, ""), owned),
+            content: Effect.andThen(View.ready(settled, ""), owned),
           });
         const second = yield* mountPage(Registered, root);
         yield* second.waitFor({

@@ -2,7 +2,7 @@ import type { RemoteActorRef } from "effect-frame/actor/client";
 import { Source } from "effect-frame/actor/client";
 import { Router } from "effect-frame/router";
 import type { Route } from "effect-frame/router";
-import { View, orErrored, ready } from "effect-frame/view";
+import { View } from "effect-frame/view";
 import { Effect } from "effect";
 import type { Slug } from "./contract.js";
 import { Heart, Reactions } from "./contract.js";
@@ -84,7 +84,7 @@ interface Opened {
 export const PostView = (props: PostProps) =>
   Effect.gen(function* () {
     // A failed read goes to the nearest `Errored`; a built page has none.
-    const body = yield* ready(yield* orErrored(props.data.body.state), empty);
+    const body = yield* View.ready(yield* View.orErrored(props.data.body.state), empty);
     const opened = (reactions: RemoteActorRef<typeof Reactions>) =>
       Effect.map(props.params.get, (params): ReadonlyArray<Opened> => [
         { slug: params.slug, reactions },

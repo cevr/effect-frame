@@ -19,7 +19,7 @@ import { QueryTest } from "effect-frame/actor/testing";
 import * as Frame from "effect-frame/frame";
 import { Location, Route, browserLocation, mount } from "effect-frame/router";
 import type { Source } from "effect-frame/actor";
-import { Dom, Loading, Query, View, readyWithStale } from "effect-frame/view";
+import { Dom, Await, View } from "effect-frame/view";
 import { Deferred, Effect, Fiber, Layer, Option, Schema } from "effect";
 import type { Scope } from "effect";
 // @ts-expect-error Effect keeps this scope counter runtime-only; the proof checks root scope growth.
@@ -120,13 +120,13 @@ export const start = (
       Effect.gen(function* () {
         const local = yield* spawn(Behavior.value("local"));
         const id = yield* props.params.get;
-        const held = yield* Loading({
+        const held = yield* View.loading({
           fallback: <p id="loading">loading</p>,
-          children: Effect.gen(function* () {
+          content: Effect.gen(function* () {
             const entry = yield* useQuery(HeldQuery, { id: id.id });
-            yield* readyWithStale(entry.state, "");
+            yield* View.readyWithStale(entry.state, "");
             return (
-              <Query
+              <Await
                 state={entry.state}
                 loading={<p id="query-loading">query-loading</p>}
                 ready={(value) => <p id="result">{View.bind(value)}</p>}

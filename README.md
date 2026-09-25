@@ -126,7 +126,7 @@ rendering mode for a whole tree: `Route.client`, `Route.ssr`,
 
 ```tsx
 import { Link, Route, link, mount } from "effect-frame/router";
-import { Loading, View } from "effect-frame/view";
+import { View } from "effect-frame/view";
 import { Effect, Schema } from "effect";
 
 // A flat route is the one-leaf shorthand of the same model.
@@ -172,7 +172,7 @@ const App = Route.client(
     (props) =>
       Effect.gen(function* () {
         const first = yield* link(post, { tenant: "t1", postId: "1" }, {});
-        const body = yield* Loading({ fallback: <p>loading</p>, children: props.outlet });
+        const body = yield* View.loading({ fallback: <p>loading</p>, content: props.outlet });
         return (
           <section>
             <Link link={first}>first post</Link>
@@ -293,7 +293,7 @@ const answer = renderDocument({
   declares, in parallel, before any view draws. It draws once and writes
   one seed script. The client hydrates with no read.
 - `Route.streamed`: the shell first, then one record per declared query
-  (see "Streamed documents"). Put a `Loading` boundary around what waits.
+  (see "Streamed documents"). Put a `View.loading` boundary around what waits.
 - `Route.awaitAll`: one document once every read settled.
 - `Route.client`: the document with an empty mount element. The server
   reads nothing.
@@ -481,7 +481,7 @@ reads and puts into its query cache.
 
 ```tsx
 import { Streaming } from "effect-frame/actor/client";
-import { Dom, Html, mount, render } from "effect-frame/view";
+import { Dom, Html, View } from "effect-frame/view";
 import { Effect, Stream } from "effect";
 
 // Server: the shell and its fallbacks first, then one patch per query.
@@ -498,8 +498,8 @@ new Response(Stream.toReadableStreamWith(Stream.encodeText(body), context), { he
 const start = Effect.gen(function* () {
   const resumed = yield* Streaming.resume(yield* Dom.readRecords);
   const hydration = Dom.hydrate(root);
-  yield* mount(App, props, hydration.host, root);
-  yield* render;
+  yield* View.mount(App, props, hydration.host, root);
+  yield* View.flush;
   const report = yield* hydration.finish; // report.resolvedAhead
   yield* resumed.hydrated; // seeds no view took are dropped, seeded reads start
 });
@@ -511,7 +511,7 @@ const start = Effect.gen(function* () {
   already due, and `bootstrap`. Then one `Patch` per query as it settles,
   then `Closed`.
 - `Html.renderAwaitAll(view, props, document, options)` keeps one drawing
-  live until every declared query has settled and no `Loading` boundary
+  live until every declared query has settled and no `View.loading` boundary
   shows its fallback, then writes one document with a seed script and no
   record channel. `Html.renderToString` is unchanged.
 - `options.closeWhen` is the time limit, and both calls require it

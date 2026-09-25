@@ -17,7 +17,7 @@ import {
   createRenderEffect,
   createRoot,
   createSignal,
-  flush,
+  flush as flushSolid,
   getOwner,
   onCleanup,
   runWithOwner,
@@ -1722,6 +1722,10 @@ const buildFor =
  * Mount one view on a host. The Scope owns everything: the view's setup
  * resources, the forked source subscriptions, the reactive root, and the host
  * nodes. Closing it runs every Effect finalizer and then removes the nodes.
+ *
+ * ```ts
+ * yield* View.mount(Counter, { start: 0 }, Dom.host, document.body);
+ * ```
  */
 export const mount = Effect.fn("View.mount")(function* <Props, E, R, HostNode>(
   view: View<Props, E, R>,
@@ -1773,12 +1777,12 @@ export const mount = Effect.fn("View.mount")(function* <Props, E, R, HostNode>(
         let dispose: Option.Option<() => void> = Option.none();
         const outcome = yield* Effect.exit(
           Effect.sync(() => {
-            flush();
+            flushSolid();
             return createRoot((disposeRoot) => {
               dispose = Option.some(disposeRoot);
               tracker.commit(() => {
                 plan({ host: trackedHost, tracker }, tree)(root, slot, () => {});
-                flush();
+                flushSolid();
               });
               return disposeRoot;
             });
@@ -1833,5 +1837,10 @@ export const mount = Effect.fn("View.mount")(function* <Props, E, R, HostNode>(
  * Flush reactive writes that have already reached Solid. Source delivery and
  * other asynchronous work may still be pending; use an observed host
  * condition or an explicit domain signal when a test needs completion.
+ *
+ * ```ts
+ * yield* count.call(Value.Set(2));
+ * yield* View.flush;
+ * ```
  */
-export const render: Effect.Effect<void> = Effect.sync(flush);
+export const flush: Effect.Effect<void> = Effect.sync(flushSolid);

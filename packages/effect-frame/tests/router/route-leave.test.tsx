@@ -17,7 +17,7 @@ import type { QueryCache, RemoteActorRef, Source, TransportService } from "effec
 import { QueryTest } from "effect-frame/actor/testing";
 import { Location, Route, mount as mountRouter } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
-import { Dom, Loading, View, ready } from "effect-frame/view";
+import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import * as Frame from "../../src/frame.js";
 import * as LeaveBranch from "../../src/router/leave-branch.js";
@@ -332,7 +332,7 @@ const PostView = (props: Route.PropsOf<typeof postSegment>) =>
       // Registered, then failed: the failed setup's Scope closes its check.
       return yield* PostFailed.make({ postId: first.postId });
     }
-    const title = yield* ready(props.data.post.state, "");
+    const title = yield* View.ready(props.data.post.state, "");
     return (
       <article id="post">
         <h2 id="post-title">{View.bind(title)}</h2>
@@ -371,9 +371,9 @@ const makeApp = () =>
             tenantSegment,
             check(`tenant:${params.tenant}`, () => true),
           );
-          const body = yield* Loading({
+          const body = yield* View.loading({
             fallback: <p id="child-loading">loading child</p>,
-            children: Effect.map(props.outlet, (outlet) => <div id="outlet">{outlet}</div>),
+            content: Effect.map(props.outlet, (outlet) => <div id="outlet">{outlet}</div>),
           });
           return (
             <section id="layout">

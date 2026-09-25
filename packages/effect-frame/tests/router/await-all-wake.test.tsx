@@ -5,7 +5,7 @@ registerDom();
 import { Source } from "effect-frame/actor/client";
 import { getOwner } from "@solidjs/signals";
 import { Route, renderDocument } from "effect-frame/router";
-import { Errored, Loading, View, orErrored, ready } from "effect-frame/view";
+import { View } from "effect-frame/view";
 import { Effect, Option, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { Label, frame, makeControl, release, sideOf } from "../view/streaming-fixture.js";
@@ -50,7 +50,9 @@ const tree = Route.prerender(
     [
       Route.leaf(post, (props) =>
         Effect.gen(function* () {
-          const value = yield* ready(yield* orErrored(props.data.post.state), { label: "" });
+          const value = yield* View.ready(yield* View.orErrored(props.data.post.state), {
+            label: "",
+          });
           const parts = yield* View.list({
             each: Source.select(value, (found) =>
               found.label.split(",").filter((part) => part !== ""),
@@ -71,9 +73,9 @@ const tree = Route.prerender(
     ],
     (props) =>
       Effect.map(
-        Errored({
+        View.errored({
           fallback: () => <p id="failed">failed</p>,
-          children: Loading({ fallback: <p id="pending">loading</p>, children: props.outlet }),
+          content: View.loading({ fallback: <p id="pending">loading</p>, content: props.outlet }),
         }),
         (body) => <main>{body}</main>,
       ),

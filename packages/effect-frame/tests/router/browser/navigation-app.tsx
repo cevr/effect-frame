@@ -19,7 +19,7 @@ import {
   followLinks,
   mount,
 } from "effect-frame/router";
-import { Dom, Loading, View, ready } from "effect-frame/view";
+import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import { Deferred, Duration, Effect, Exit, Layer, Option, Schema, SubscriptionRef } from "effect";
 import * as Receipt from "../../../src/router/receipt.js";
@@ -172,9 +172,9 @@ const start = (): void => {
       yield* ran("slow");
       // Never resolved: the response is still open while the shell shows.
       const query = yield* ViewTest.fakeQuery(QueryState.Loading<string, never>());
-      const body = yield* Loading({
+      const body = yield* View.loading({
         fallback: <p id="slow-fallback">loading</p>,
-        children: Effect.map(ready(query.source, ""), (value) => (
+        content: Effect.map(View.ready(query.source, ""), (value) => (
           <p id="slow-value">{View.bind(value)}</p>
         )),
       });
@@ -192,9 +192,9 @@ const start = (): void => {
       const query = yield* ViewTest.fakeQuery(QueryState.Loading<string, never>());
       const context = yield* Effect.context<never>();
       control.settle = () => Effect.runPromiseWith(context)(query.resolve("settled"));
-      const region = yield* Loading({
+      const region = yield* View.loading({
         fallback: <p id="late-fallback">loading</p>,
-        children: Effect.map(ready(query.source, ""), (value) => (
+        content: Effect.map(View.ready(query.source, ""), (value) => (
           <section id="late-content">
             <p>{View.bind(value)}</p>
             {tall(2000)}
@@ -236,9 +236,9 @@ const start = (): void => {
   const RowsView = (props: Route.PropsOf<typeof rows>) =>
     Effect.gen(function* () {
       yield* ran("rows");
-      const body = yield* Loading({
+      const body = yield* View.loading({
         fallback: <p id="rows-fallback">loading</p>,
-        children: Effect.map(ready(props.data.rows.state, { height: 0 }), (value) => (
+        content: Effect.map(View.ready(props.data.rows.state, { height: 0 }), (value) => (
           <div
             id="rows-content"
             style={View.bind(value, (one) => `height: ${String(one.height)}px`)}

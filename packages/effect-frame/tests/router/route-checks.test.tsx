@@ -20,7 +20,7 @@ import type { QueryCache, RemoteActorRef, Source, TransportService } from "effec
 import { QueryTest } from "effect-frame/actor/testing";
 import { Location, Route, mount as mountRouter } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
-import { Dom, Loading, Query, View, ready } from "effect-frame/view";
+import { Dom, Await, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import * as Frame from "../../src/frame.js";
 import * as Check from "../../src/router/check.js";
@@ -459,14 +459,14 @@ const makeApp = (probes: Probes) => {
         );
         return yield* PostFailed.make({ postId: first.postId });
       }
-      const title = yield* ready(props.data.post.state, "");
+      const title = yield* View.ready(props.data.post.state, "");
       yield* Deferred.succeed(probes.postBuilt, void 0);
       return (
         <article id="post">
           <h2 id="post-title">{View.bind(title)}</h2>
           <p id="post-param">{View.bind(props.params, (params) => params.postId)}</p>
           <output id="post-actor">{View.bind(local.state, String)}</output>
-          <Query
+          <Await
             state={props.data.comments.state}
             loading={<span id="comments">loading</span>}
             ready={(value) => <span id="comments">{View.bind(value)}</span>}
@@ -505,15 +505,15 @@ const makeApp = (probes: Probes) => {
           return yield* LayoutFailed.make({ tenant: params.tenant });
         }
         const local = yield* spawnAtRevision(LayoutRevision);
-        const body = yield* Loading({
+        const body = yield* View.loading({
           fallback: <p id="child-loading">loading child</p>,
-          children: Effect.map(props.outlet, (outlet) => <div id="outlet">{outlet}</div>),
+          content: Effect.map(props.outlet, (outlet) => <div id="outlet">{outlet}</div>),
         });
         return (
           <section id="layout">
             <output id="layout-actor">{View.bind(local.state, String)}</output>
             <p id="tenant-param">{View.bind(props.params, (value) => value.tenant)}</p>
-            <Query
+            <Await
               state={props.data.tenant.state}
               loading={<span id="tenant-name">loading</span>}
               ready={(value) => <span id="tenant-name">{View.bind(value)}</span>}

@@ -15,7 +15,7 @@ import {
 } from "effect";
 import { driveOnly, sendsNothing } from "../drive-transport.js";
 import type { Cleanup, EventHandler, Host, PropertyValue, StaticProps } from "../host.js";
-import { mount, render } from "../runtime.js";
+import { flush, mount } from "../runtime.js";
 import type { View } from "../view.js";
 
 /**
@@ -527,7 +527,7 @@ export const recorder = (options: RecorderOptions = {}): Recorder => {
         wake = Deferred.makeUnsafe<void>();
       }
       const signal = wake;
-      yield* render;
+      yield* flush;
       if (setups === 0) {
         return;
       }

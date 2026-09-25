@@ -4,7 +4,7 @@ registerDom();
 
 import { Location, Route, mount } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
-import { Dom, Html, render } from "effect-frame/view";
+import { Dom, Html, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import { Effect, Option, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -69,7 +69,7 @@ const serverHtml = (path: string) =>
       yield* mount({ routes: [app], notFound: NotFound, host: Html.host, root }).pipe(
         Effect.provideService(Location, locationAt(`http://site.test${path}`)),
       );
-      yield* render;
+      yield* View.flush;
       return Html.serializeChildren(root.children);
     }),
   );

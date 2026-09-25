@@ -1,7 +1,7 @@
 import type { Source } from "effect-frame/actor/client";
 import { Link, link } from "effect-frame/router";
 import type { NotFoundProps, Route } from "effect-frame/router";
-import { Errored, Loading, View, ready } from "effect-frame/view";
+import { View } from "effect-frame/view";
 import type { Node } from "effect-frame/view";
 import { Effect, Option, Predicate } from "effect";
 import type { PostSummary } from "./queries.js";
@@ -35,9 +35,9 @@ const failure = (first: Source<Option.Option<unknown>>): Node => (
 export const Chrome = <ChildR,>(props: Route.LayoutPropsOf<typeof chrome, ChildR>) =>
   Effect.gen(function* () {
     const home = yield* link(index, {}, {});
-    const body = yield* Errored({
+    const body = yield* View.errored({
       fallback: failure,
-      children: Loading({ fallback: skeleton, children: props.outlet }),
+      content: View.loading({ fallback: skeleton, content: props.outlet }),
     });
     return (
       <div id="chrome">
@@ -52,7 +52,7 @@ export const Chrome = <ChildR,>(props: Route.LayoutPropsOf<typeof chrome, ChildR
 /** Every post, newest first, each a link printed by the post route's own `href`. */
 export const IndexView = (props: Route.PropsOf<typeof index>) =>
   Effect.gen(function* () {
-    const posts = yield* ready(props.data.posts.state, []);
+    const posts = yield* View.ready(props.data.posts.state, []);
     const rows = yield* View.list({
       each: posts,
       keyBy: (summary: PostSummary) => summary.slug,

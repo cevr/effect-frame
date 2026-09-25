@@ -6,7 +6,7 @@ registerDom();
 import { HttpServer } from "effect-frame/actor";
 import { ActorTransport, Form, HttpTransport, ref } from "effect-frame/actor/client";
 import type { DurableReceipt, IdentifiedCommandHandle } from "effect-frame/actor/client";
-import { Dom, Html, View, mount, render } from "effect-frame/view";
+import { Dom, Html, View } from "effect-frame/view";
 import { Context, Deferred, Effect, Fiber, Layer, Option, Ref, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import type { TasksSnapshot, Wire } from "../plain-form-fixture.js";
@@ -223,8 +223,10 @@ const hydrate = (served: Served, html: string) =>
       onSome: (json) => Effect.map(Form.decodeIssues(json), Option.some),
     });
     const hydration = Dom.hydrate(root);
-    yield* Form.provideIssues(carried)(mount(AddPage, { sent: served.sent }, hydration.host, root));
-    yield* render;
+    yield* Form.provideIssues(carried)(
+      View.mount(AddPage, { sent: served.sent }, hydration.host, root),
+    );
+    yield* View.flush;
     const report = yield* hydration.finish;
     expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
     return element(root, "#add", HTMLFormElement);

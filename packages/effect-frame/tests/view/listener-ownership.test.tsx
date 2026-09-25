@@ -4,7 +4,7 @@ registerDom();
 
 import { Behavior, Value, modify, spawn } from "effect-frame/actor";
 import type { LocalActorRef, SetValue, Source } from "effect-frame/actor";
-import { Dom, For, Portal, Show, View, mount } from "effect-frame/view";
+import { Dom, For, Portal, Show, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import type { Host } from "effect-frame/view";
 import { Deferred, Effect, Exit, Option, Queue } from "effect";
@@ -82,7 +82,7 @@ const tree = jsx("button", {
   ),
   children: "start",
 });
-await Effect.runPromise(mount(() => Effect.succeed(tree), {}, Dom.host, root).pipe(Scope.provide(scope)));
+await Effect.runPromise(View.mount(() => Effect.succeed(tree), {}, Dom.host, root).pipe(Scope.provide(scope)));
 setTimeout(() => {
   console.log("timer ran");
   Effect.runSync(Scope.close(scope, Exit.void));
@@ -283,7 +283,7 @@ describe("view listener ownership", () => {
         host,
         root,
         setup: (observedHost, mountRoot) =>
-          mount(
+          View.mount(
             ShowPage,
             { open: open.state, events: events.state, record },
             observedHost,
@@ -372,7 +372,7 @@ describe("view listener ownership", () => {
         host,
         root,
         setup: (observedHost, mountRoot) =>
-          mount(
+          View.mount(
             ForPage,
             { tasks: tasks.state, events: events.state, record },
             observedHost,
@@ -466,7 +466,7 @@ describe("view listener ownership", () => {
         host,
         root,
         setup: (observedHost, mountRoot) =>
-          mount(
+          View.mount(
             ClosingShowPage,
             {
               open: open.state,
@@ -572,7 +572,7 @@ describe("view listener ownership", () => {
         host,
         root,
         setup: (observedHost, mountRoot) =>
-          mount(
+          View.mount(
             PortalPage,
             { open: open.state, into, events: events.state, record },
             observedHost,
@@ -653,7 +653,7 @@ describe("view listener ownership", () => {
         ViewTest.make({
           host,
           root,
-          setup: (observedHost, mountRoot) => mount(Broken, {}, observedHost, mountRoot),
+          setup: (observedHost, mountRoot) => View.mount(Broken, {}, observedHost, mountRoot),
         }),
       );
       expect(Exit.isFailure(outcome)).toBe(true);

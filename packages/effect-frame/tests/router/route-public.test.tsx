@@ -10,9 +10,9 @@ import { QueryTest } from "effect-frame/actor/testing";
 import * as Frame from "effect-frame/frame";
 import { Link, Location, Route, Router, link, mount as mountRouter } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
-import { Dom, Loading, View, ready, render } from "effect-frame/view";
+import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
-import type { LazyModule, LoadingScope, Node } from "effect-frame/view";
+import type { LazyModule, Node } from "effect-frame/view";
 import {
   Context,
   Deferred,
@@ -150,8 +150,8 @@ const makePostView = (probes: Probes) => (props: Route.PropsOf<typeof post>) =>
     if (first.postId.startsWith("slow")) {
       yield* Deferred.await(probes.slow);
     }
-    const body = yield* ready(props.data.post.state, "");
-    const tenantName = yield* ready(props.data.tenant.state, "");
+    const body = yield* View.ready(props.data.post.state, "");
+    const tenantName = yield* View.ready(props.data.tenant.state, "");
     yield* Queue.offer(probes.built, first.postId);
     return (
       <article id="post">
@@ -233,9 +233,9 @@ const makeApp = (probes: Probes, importer: Importer) =>
             { tenant: current.tenant, postId: "1" },
             { mode: "read" },
           );
-          const body = yield* Loading({
+          const body = yield* View.loading({
             fallback: <p id="child-loading">loading</p>,
-            children: Effect.map(props.outlet, (outlet) => <div id="outlet">{outlet}</div>),
+            content: Effect.map(props.outlet, (outlet) => <div id="outlet">{outlet}</div>),
           });
           return (
             <section id="layout">
@@ -478,7 +478,7 @@ const missingService = (root: HTMLElement) =>
 // @effect-diagnostics missingEffectContext:error
 /** A layout that yields its outlet outside `Loading` keeps `LoadingScope`. */
 const ReadingChild = (props: Route.PropsOf<typeof post>) =>
-  Effect.map(ready(props.data.post.state, ""), (body): Node => <p>{View.bind(body)}</p>);
+  Effect.map(View.ready(props.data.post.state, ""), (body): Node => <p>{View.bind(body)}</p>);
 const leakyApp = Route.client(
   "leaky",
   Route.layout(tenant, [Route.leaf(post, ReadingChild)], (props) =>
@@ -487,7 +487,7 @@ const leakyApp = Route.client(
 );
 const leakyServices: Equals<
   RouteServices<typeof leakyApp>,
-  QueryCache | ActorTransport | Access | LoadingScope
+  QueryCache | ActorTransport | Access | View.LoadingScope
 > = true;
 
 // 5. Missing typed fallback.
@@ -634,7 +634,7 @@ describe("public nested routes", () => {
           until: (actual) => hasAt(actual, "#outlet") && !hasAt(actual, "#child-loading"),
         });
         yield* TestClock.adjust("99 millis");
-        yield* render;
+        yield* View.flush;
         expect(hasAt(root, "#post-pending")).toBe(false);
         yield* TestClock.adjust("1 millis");
         yield* page.waitFor({
@@ -644,7 +644,7 @@ describe("public nested routes", () => {
         yield* Queue.offer(importer.outcomes, "ok");
         expect(yield* Queue.take(probes.built)).toBe("1");
         yield* TestClock.adjust("299 millis");
-        yield* render;
+        yield* View.flush;
         expect(hasAt(root, "#post")).toBe(false);
         yield* TestClock.adjust("1 millis");
         yield* page.waitFor({

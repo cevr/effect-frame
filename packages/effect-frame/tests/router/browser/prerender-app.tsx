@@ -7,7 +7,7 @@
  */
 import { HttpTransport, queryCacheLayer } from "effect-frame/actor/client";
 import { Location, browserLocation, mount } from "effect-frame/router";
-import { Dom, render } from "effect-frame/view";
+import { Dom, View } from "effect-frame/view";
 import type { Dom as DomTypes } from "effect-frame/view";
 import { Effect, Layer, Option, Schema } from "effect";
 import { Baked, NotFound, Resume, bakedId, noteRoute } from "./prerender-page.js";
@@ -45,7 +45,7 @@ const start = Effect.gen(function* () {
     Effect.provideService(Location, browserLocation),
     Effect.provideService(Baked, Option.some(baked)),
   );
-  yield* render;
+  yield* View.flush;
   const report = yield* hydration.finish;
   window.__prerender = {
     hydrated: true,

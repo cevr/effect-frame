@@ -1,5 +1,5 @@
 import { Streaming } from "effect-frame/actor/client";
-import { Dom, render } from "effect-frame/view";
+import { Dom, View } from "effect-frame/view";
 import { Deferred, Effect, Option } from "effect";
 import type { OpWireService } from "./driven.js";
 import { WireGate } from "./driven.js";
@@ -38,7 +38,7 @@ export const hydrate = <R, N = R>(options: HydrateOptions<R, N>) =>
       onSome: (wire) =>
         Effect.provideService(mounting, WireGate, { wire, over: Deferred.await(over) }),
     });
-    yield* render;
+    yield* View.flush;
     const report = yield* hydration.finish;
     // Seeds that no view took are dropped now; a later declaration reads fresh.
     yield* resumed.hydrated;

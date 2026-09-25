@@ -27,9 +27,8 @@ import type {
 import { QueryTest } from "effect-frame/actor/testing";
 import { Location, Route, mount as mountRouter } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
-import { Dom, Html, Loading, Query, View, ready, render } from "effect-frame/view";
+import { Dom, Html, Await, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
-import type { LoadingScope } from "effect-frame/view";
 import * as Frame from "../../src/frame.js";
 import {
   Context,
@@ -384,9 +383,9 @@ const makeTree = (probes: Probes) => {
       const local = yield* spawnAtRevision(PostRevision);
       // A control that captured the ref at setup keeps that address.
       const draftAtSetup = yield* props.data.draft.get;
-      const title = yield* ready(props.data.post.state, "");
-      const comments = yield* ready(props.data.comments.state, "");
-      const tenant = yield* ready(props.data.tenant.state, "");
+      const title = yield* View.ready(props.data.post.state, "");
+      const comments = yield* View.ready(props.data.comments.state, "");
+      const tenant = yield* View.ready(props.data.tenant.state, "");
       yield* Deferred.succeed(probes.postBuilt, void 0);
       return (
         <article id="post">
@@ -427,7 +426,7 @@ const makeTree = (probes: Probes) => {
     Effect.gen(function* () {
       const first = yield* props.params.get;
       yield* Ref.update(probes.editSetups, (all) => [...all, first.postId]);
-      const title = yield* ready(props.data.post.state, "");
+      const title = yield* View.ready(props.data.post.state, "");
       return (
         <article id="edit">
           <h2 id="edit-title">{View.bind(title)}</h2>
@@ -436,7 +435,7 @@ const makeTree = (probes: Probes) => {
     });
 
   const PairView = (props: Route.PropsOf<typeof pairSegment>) =>
-    Effect.map(ready(props.data.post.state, ""), (title) => (
+    Effect.map(View.ready(props.data.post.state, ""), (title) => (
       <article id="pair">
         <h2 id="pair-title">{View.bind(title)}</h2>
         <p id="pair-param">{View.bind(props.params, (params) => params.postId)}</p>
@@ -461,15 +460,15 @@ const makeTree = (probes: Probes) => {
         );
         const local = yield* spawnAtRevision(LayoutRevision);
         // The outlet is yielded inside Loading, so the child's reads register here.
-        const body = yield* Loading({
+        const body = yield* View.loading({
           fallback: <p id="child-loading">loading child</p>,
-          children: Effect.map(props.outlet, (outlet) => <div id="outlet">{outlet}</div>),
+          content: Effect.map(props.outlet, (outlet) => <div id="outlet">{outlet}</div>),
         });
         return (
           <section id="layout">
             <output id="layout-actor">{View.bind(local.state, String)}</output>
             <p id="tenant-param">{View.bind(props.params, (params) => params.tenant)}</p>
-            <Query
+            <Await
               state={props.data.tenant.state}
               loading={<span id="tenant-name">loading</span>}
               ready={(value) => <span id="tenant-name">{View.bind(value)}</span>}
@@ -626,7 +625,7 @@ type PostData = Route.PropsOf<typeof postSegment>["data"];
 
 type TypedApp = ReturnType<typeof makeTree>;
 
-/** The layout's Loading consumes the child's LoadingScope; only data services remain. */
+/** The layout's Loading consumes the child's View.LoadingScope; only data services remain. */
 const routeServices: Equals<RouteServices<TypedApp>, QueryCache | ActorTransport> = true;
 const inheritedTenant: Equals<PostData["tenant"], FollowedQuery<string, QueryFailure>> = true;
 const ownPost: Equals<PostData["post"], FollowedQuery<string, QueryFailure>> = true;
@@ -636,14 +635,14 @@ const postParams: Equals<
   { readonly tenant: string; readonly postId: string }
 > = true;
 
-/** A layout that places the outlet outside Loading leaks the child's LoadingScope. */
+/** A layout that places the outlet outside Loading leaks the child's View.LoadingScope. */
 const leaky = Route.client(
   "leaky",
   Route.layout(
     tenantSegment,
     [
       Route.leaf(editSegment, (props) =>
-        Effect.map(ready(props.data.post.state, ""), (title) => <h2>{View.bind(title)}</h2>),
+        Effect.map(View.ready(props.data.post.state, ""), (title) => <h2>{View.bind(title)}</h2>),
       ),
     ],
     (props) => Effect.map(props.outlet, (outlet) => <div>{outlet}</div>),
@@ -651,13 +650,13 @@ const leaky = Route.client(
 );
 const leakyServices: Equals<
   RouteServices<typeof leaky>,
-  QueryCache | ActorTransport | LoadingScope
+  QueryCache | ActorTransport | View.LoadingScope
 > = true;
 
 // Negative fixtures below are TypeScript errors by design. The Effect language
 // service reports the same mismatch separately, so it is paused for them only.
 // @effect-diagnostics missingEffectError:off
-// @ts-expect-error The leaked LoadingScope is part of the route's requirements.
+// @ts-expect-error The leaked View.LoadingScope is part of the route's requirements.
 const leakyWithoutScope: Equals<RouteServices<typeof leaky>, QueryCache | ActorTransport> = true;
 
 const collision = Route.child(tenantSegment, "collision", {
@@ -1146,7 +1145,7 @@ describe("private nested transition", () => {
           host: Html.host,
           root: htmlRoot,
         }).pipe(Effect.provideService(Location, location), Scope.provide(scope));
-        yield* render;
+        yield* View.flush;
         const html = Html.serializeChildren(htmlRoot.children);
         yield* Deferred.await(postHeld.started);
         yield* Scope.close(scope, Exit.void);

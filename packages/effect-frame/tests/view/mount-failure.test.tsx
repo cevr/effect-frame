@@ -4,7 +4,7 @@ registerDom();
 
 import { Behavior, Value, spawn } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
-import { Dom, For, Portal, Show, View, mount } from "effect-frame/view";
+import { Dom, For, Portal, Show, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import type { Host } from "effect-frame/view";
 import { Deferred, Effect, Exit, Fiber, Option, Scope } from "effect";
@@ -122,7 +122,7 @@ describe("mount failure ownership", () => {
       };
 
       const outcome = yield* Effect.exit(
-        mount(Composite, { tasks: tasks.state, into }, host, root),
+        View.mount(Composite, { tasks: tasks.state, into }, host, root),
       );
 
       expect(Exit.isFailure(outcome)).toBe(true);
@@ -156,7 +156,7 @@ describe("mount failure ownership", () => {
         host,
         root,
         setup: (observedHost, mountRoot) =>
-          mount(Turnover, { open: open.state, tasks: tasks.state }, observedHost, mountRoot),
+          View.mount(Turnover, { open: open.state, tasks: tasks.state }, observedHost, mountRoot),
       });
 
       yield* page.waitFor({
@@ -212,7 +212,7 @@ describe("mount failure ownership", () => {
         const caller = yield* Scope.make();
         const root = document.createElement("main");
         const outcome = yield* Scope.provide(
-          Effect.exit(mount(Broken, {}, Dom.host, root)),
+          Effect.exit(View.mount(Broken, {}, Dom.host, root)),
           caller,
         );
 
@@ -243,7 +243,7 @@ describe("mount failure ownership", () => {
         const caller = yield* Scope.make();
         const root = document.createElement("main");
         const fiber = yield* Effect.forkChild(
-          mount(Blocked, {}, Dom.host, root).pipe(Scope.provide(caller)),
+          View.mount(Blocked, {}, Dom.host, root).pipe(Scope.provide(caller)),
         );
         yield* Deferred.await(started);
         yield* Fiber.interrupt(fiber);

@@ -4,7 +4,7 @@ registerDom();
 
 import { Behavior, spawn } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
-import { Dom, View, mount } from "effect-frame/view";
+import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import { Deferred, Effect } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -71,7 +71,7 @@ describe("attached behaviours in rows and at the top", () => {
       const page = yield* ViewTest.make({
         host: Dom.host,
         root,
-        setup: (host, mountRoot) => mount(Top, { log, attached }, host, mountRoot),
+        setup: (host, mountRoot) => View.mount(Top, { log, attached }, host, mountRoot),
       });
       yield* Deferred.await(attached);
       yield* page.waitFor({
@@ -95,7 +95,7 @@ describe("attached behaviours in rows and at the top", () => {
         host: Dom.host,
         root,
         setup: (host, mountRoot) =>
-          mount(Rows, { items: items.state, log, gate, attached }, host, mountRoot),
+          View.mount(Rows, { items: items.state, log, gate, attached }, host, mountRoot),
       });
       expect(log).toEqual([]);
       yield* Deferred.succeed(gate, true);

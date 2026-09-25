@@ -1,7 +1,7 @@
 import { Behavior, Form, Value, spawn, Source } from "effect-frame/actor/client";
 import { Link, link } from "effect-frame/router";
 import type { NotFoundProps, Route } from "effect-frame/router";
-import { Errored, Loading, View, orErrored, readyWithStale } from "effect-frame/view";
+import { View } from "effect-frame/view";
 import type { Node } from "effect-frame/view";
 import { Effect, Option, Predicate } from "effect";
 import { sender, writeMemo } from "./commands.js";
@@ -82,13 +82,13 @@ const MemoCard = (memo: MemoCommands) =>
  * `Loading`, so the first frame is either the skeleton or the whole page.
  */
 export const DashShell = <ChildR,>(props: Route.LayoutPropsOf<typeof dash, ChildR>) =>
-  Errored({
+  View.errored({
     fallback: failure,
-    children: Loading({
+    content: View.loading({
       fallback: skeleton,
-      children: Effect.gen(function* () {
+      content: Effect.gen(function* () {
         // Held while stale: an ack's override, or a command's refresh in flight.
-        const header = yield* readyWithStale(yield* orErrored(props.data.tenant.state), {
+        const header = yield* View.readyWithStale(yield* View.orErrored(props.data.tenant.state), {
           name: "",
           plan: "",
           alerts: 0,

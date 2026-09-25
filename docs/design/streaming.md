@@ -549,7 +549,7 @@ once"). But either pair keeps the hydration fault this section fixes. A
 deploy that serves HTML from one build and assets from another is out of
 scope.
 
-**Remaining limit.** A boundary over a derived source (`ready(Source.select(...))`)
+**Remaining limit.** A boundary over a derived source (`View.ready(Source.select(...))`)
 cannot read ahead: it claims its fallback and draws the content once
 hydration is done. It reports no mismatch. `resolvedAhead` does not count
 it.

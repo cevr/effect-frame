@@ -1,7 +1,7 @@
 /* oxlint-disable effect/noGlobals, effect/noNullish, effect/noRuntimeTypeof, effect/noTernary -- this browser fixture is the benchmark boundary: it must use DOM globals, nullable DOM state, and the canonical imperative callback shape. */
 
 import { Behavior, Value, spawn, Source } from "effect-frame/actor/client";
-import { Dom, View, mount, render } from "effect-frame/view";
+import { Dom, View } from "effect-frame/view";
 import { Effect } from "effect";
 import {
   apply,
@@ -195,8 +195,8 @@ const start = Effect.gen(function* () {
   if (!(root instanceof HTMLElement)) {
     return yield* Effect.die("effect-frame benchmark: no #main root");
   }
-  yield* mount(Benchmark, { root }, Dom.host, root);
-  yield* render;
+  yield* View.mount(Benchmark, { root }, Dom.host, root);
+  yield* View.flush;
   yield* Effect.sync(() => {
     window.__benchReady = true;
   });

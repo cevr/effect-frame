@@ -13,7 +13,7 @@ import {
 import type { KeyOf, TransportService } from "effect-frame/actor/client";
 import { ActorTransport, contract, ref, Source } from "effect-frame/actor/client";
 import type { Host } from "effect-frame/view";
-import { Dom, For, Html, Remote, View, mount } from "effect-frame/view";
+import { Dom, For, Html, Remote, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import * as Driven from "effect-frame/view/driven";
 import {
@@ -705,7 +705,7 @@ describe("reconnect over the op wire (#27)", () => {
       const page = yield* ViewTest.make({
         host: Dom.host,
         root: reference,
-        setup: (host, node) => mount(NotesPage, { key: "r6" }, host, node),
+        setup: (host, node) => View.mount(NotesPage, { key: "r6" }, host, node),
       });
       yield* page.waitFor({
         label: "the reference host shows the latest revision",
@@ -730,7 +730,7 @@ describe("reconnect over the op wire (#27)", () => {
       // A recorder mounted against the live actor at the same revision draws
       // the same operations: the drawing the session drops is the client's.
       const live = Remote.recorder();
-      yield* mount(NotesPage, { key: "r7" }, live.host, Remote.root);
+      yield* View.mount(NotesPage, { key: "r7" }, live.host, Remote.root);
       yield* live.settled;
       expect(yield* encoded(live.drain())).toBe(yield* encoded(once));
     }),

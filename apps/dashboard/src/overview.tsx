@@ -1,7 +1,7 @@
 import { Behavior, Source, Value, spawn } from "effect-frame/actor/client";
 import { Link, link } from "effect-frame/router";
 import type { Route } from "effect-frame/router";
-import { For, Loading, View, orErrored, ready, readyWithStale } from "effect-frame/view";
+import { For, View } from "effect-frame/view";
 import { Effect, Option } from "effect";
 import { ack, fulfil, sender } from "./commands.js";
 import type { OrdersCommands } from "./commands.js";
@@ -26,7 +26,7 @@ const total = (points: ReadonlyArray<Point>): number =>
 /** Revenue, dimmed while a command on the order book is unsettled (#17). */
 const RevenueCard = (props: OverviewProps) =>
   Effect.gen(function* () {
-    const revenue = yield* readyWithStale(yield* orErrored(props.data.revenue.state), {
+    const revenue = yield* View.readyWithStale(yield* View.orErrored(props.data.revenue.state), {
       points: [],
     });
     return (
@@ -50,7 +50,7 @@ const RevenueCard = (props: OverviewProps) =>
 /** The orders in the window, and how many of them are open. An open one can be fulfilled here. */
 const OrdersCard = (props: OverviewProps, book: OrdersCommands) =>
   Effect.gen(function* () {
-    const shown = yield* ready(yield* orErrored(props.data.orders.state), { rows: [] });
+    const shown = yield* View.ready(yield* View.orErrored(props.data.orders.state), { rows: [] });
     const rows = Source.select(shown, (result) => result.rows);
     return (
       <section id="orders-card" class="card">
@@ -83,7 +83,7 @@ const OrdersCard = (props: OverviewProps, book: OrdersCommands) =>
 /** The funnel. It mounts when its tab is revealed, after the page has painted. */
 const FunnelCard = (props: OverviewProps) =>
   Effect.gen(function* () {
-    const shown = yield* ready(yield* orErrored(props.data.funnel.state), { stages: [] });
+    const shown = yield* View.ready(yield* View.orErrored(props.data.funnel.state), { stages: [] });
     return (
       <section id="funnel-card" class="card">
         <h2>funnel</h2>
@@ -98,10 +98,12 @@ const FunnelCard = (props: OverviewProps) =>
 
 /** The slowest endpoints: the deliberately slow read, under its own `Loading`. */
 const SlowestCard = (props: OverviewProps) =>
-  Loading({
+  View.loading({
     fallback: <p id="slowest-loading">measuring</p>,
-    children: Effect.gen(function* () {
-      const shown = yield* ready(yield* orErrored(props.data.slowest.state), { rows: [] });
+    content: Effect.gen(function* () {
+      const shown = yield* View.ready(yield* View.orErrored(props.data.slowest.state), {
+        rows: [],
+      });
       return (
         <section id="slowest-card" class="card">
           <h2>slowest</h2>

@@ -14,19 +14,7 @@ import {
 import type { QueryEntry } from "effect-frame/actor";
 import { Behavior, QueryState, Value, spawn, Source } from "effect-frame/actor/client";
 import { QueryTest } from "effect-frame/actor/testing";
-import {
-  Await,
-  Dom,
-  Errored,
-  Html,
-  Loading,
-  Query,
-  View,
-  mount,
-  orErrored,
-  ready,
-  readyWithStale,
-} from "effect-frame/view";
+import { Await, Dom, Html, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import type { Bound, ReadyValue } from "effect-frame/view";
 import {
@@ -99,7 +87,7 @@ const mountScoped = <E, R>(view: View.View<Record<string, never>, E, R>, root: H
   ViewTest.make({
     host: Dom.host,
     root,
-    setup: (host, mountRoot) => mount(view, {}, host, mountRoot),
+    setup: (host, mountRoot) => View.mount(view, {}, host, mountRoot),
   });
 
 /**
@@ -210,11 +198,11 @@ describe("readiness through context", () => {
         yield* setResponse(fixtures, "title", pendingResponse(gate, "Alpha"));
 
         const Page = () =>
-          Loading({
+          View.loading({
             fallback: <p id="pending">loading</p>,
-            children: Effect.gen(function* () {
+            content: Effect.gen(function* () {
               const entry = yield* useQuery(ReadinessQuery, { id: "title" });
-              const title = yield* ready(entry.state, "");
+              const title = yield* View.ready(entry.state, "");
               return <h1 id="title">{View.bind(title)}</h1>;
             }),
           });
@@ -243,12 +231,12 @@ describe("readiness through context", () => {
       const entryReady = yield* Deferred.make<QueryEntry<string, QueryFailure>>();
 
       const Page = () =>
-        Loading({
+        View.loading({
           fallback: <p id="pending">loading</p>,
-          children: Effect.gen(function* () {
+          content: Effect.gen(function* () {
             const entry = yield* useQuery(ReadinessQuery, { id: "title" });
             yield* Deferred.succeed(entryReady, entry);
-            const title = yield* readyWithStale(entry.state, "");
+            const title = yield* View.readyWithStale(entry.state, "");
             return (
               <section>
                 <h1 id="title">{View.bind(title, (state: ReadyValue<string>) => state.value)}</h1>
@@ -305,9 +293,9 @@ describe("readiness through context", () => {
         yield* setResponse(fixtures, "right", pendingResponse(rightGate, "two"));
 
         const Page = () =>
-          Loading({
+          View.loading({
             fallback: <p id="pending">loading</p>,
-            children: Effect.gen(function* () {
+            content: Effect.gen(function* () {
               const left = yield* useQuery(ReadinessQuery, { id: "left" });
               const right = yield* useQuery(ReadinessQuery, { id: "right" });
               yield* Effect.forkChild(
@@ -315,8 +303,8 @@ describe("readiness through context", () => {
                   Stream.filter(left.state.changes, (state) => state._tag !== "Loading"),
                 ).pipe(Effect.andThen(Deferred.succeed(leftObserved, void 0).pipe(Effect.asVoid))),
               );
-              const a = yield* ready(left.state, "");
-              const b = yield* ready(right.state, "");
+              const a = yield* View.ready(left.state, "");
+              const b = yield* View.ready(right.state, "");
               return (
                 <section>
                   <span id="a">{View.bind(a)}</span>
@@ -370,15 +358,15 @@ describe("readiness through context", () => {
         // #26 made this order leave content behind; a shown branch now owns
         // its nodes, so either order holds.
         const Page = () =>
-          Errored({
+          View.errored({
             fallback: (error) => <p id="failed">{bound(error, errorText)}</p>,
-            children: Effect.gen(function* () {
+            content: Effect.gen(function* () {
               const entry = yield* useQuery(ReadinessQuery, { id: "failure" });
               yield* Deferred.succeed(entryReady, entry);
-              const inner = Loading({
+              const inner = View.loading({
                 fallback: <p id="pending">loading</p>,
-                children: Effect.gen(function* () {
-                  const title = yield* ready(yield* orErrored(entry.state), "");
+                content: Effect.gen(function* () {
+                  const title = yield* View.ready(yield* View.orErrored(entry.state), "");
                   return <h1 id="title">{View.bind(title)}</h1>;
                 }),
               });
@@ -435,17 +423,17 @@ describe("readiness through context", () => {
       const controlled = yield* ViewTest.fakeQuery(QueryState.Loading<string, string>());
 
       const Page = () =>
-        Errored({
+        View.errored({
           fallback: (error) => (
             <p id="controlled-failed">
               {bound(error, (found) => Option.getOrElse(found, () => "?"))}
             </p>
           ),
-          children: Effect.gen(function* () {
-            const inner = Loading({
+          content: Effect.gen(function* () {
+            const inner = View.loading({
               fallback: <p id="controlled-pending">loading</p>,
-              children: Effect.gen(function* () {
-                const title = yield* ready(yield* orErrored(controlled.source), "");
+              content: Effect.gen(function* () {
+                const title = yield* View.ready(yield* View.orErrored(controlled.source), "");
                 return <h1 id="controlled-title">{View.bind(title)}</h1>;
               }),
             });
@@ -489,16 +477,16 @@ describe("readiness through context", () => {
       yield* setResponse(fixtures, "inner", pendingResponse(innerGate, "Body"));
 
       const Page = () =>
-        Loading({
+        View.loading({
           fallback: <p id="outer-pending">outer</p>,
-          children: Effect.gen(function* () {
+          content: Effect.gen(function* () {
             const outer = yield* useQuery(ReadinessQuery, { id: "outer" });
-            const header = yield* ready(outer.state, "");
-            const nested = Loading({
+            const header = yield* View.ready(outer.state, "");
+            const nested = View.loading({
               fallback: <p id="inner-pending">inner</p>,
-              children: Effect.gen(function* () {
+              content: Effect.gen(function* () {
                 const inner = yield* useQuery(ReadinessQuery, { id: "inner" });
-                const body = yield* ready(inner.state, "");
+                const body = yield* View.ready(inner.state, "");
                 return <p id="body">{View.bind(body)}</p>;
               }),
             });
@@ -550,7 +538,7 @@ describe("readiness through context", () => {
       const controlled = yield* ViewTest.fakeQuery(QueryState.Loading<string, string>());
       const Page = () =>
         Effect.succeed(
-          <Query
+          <Await
             state={controlled.source}
             loading={<p id="q-loading">loading</p>}
             ready={(value, stale) => (
@@ -593,23 +581,26 @@ describe("readiness through context", () => {
   );
 
   // Await also consumes a source directly, so this test stays at the view
-  // union boundary instead of manufacturing a transport for it.
+  // union boundary instead of manufacturing a transport for it. It is a tag,
+  // so a view calls it with no scope in context.
   it.scoped("Await matches the union to one of three views, with no scope", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const controlled = yield* ViewTest.fakeQuery(QueryState.Loading<string, string>());
 
-      const Page = () =>
-        Await({
-          query: controlled.source,
-          loading: <p id="await-loading">loading</p>,
-          ready: (value: Source<ReadyValue<string>>) => (
-            <h1 id="await-ready">{bound(value, (state) => state.value)}</h1>
-          ),
-          failed: (error: Source<string>) => (
-            <p id="await-failed">{bound(error, (text) => text)}</p>
-          ),
-        });
+      const Page = (_props: Record<string, never>) =>
+        Effect.succeed(
+          Await({
+            state: controlled.source,
+            loading: <p id="await-loading">loading</p>,
+            ready: (value: Source<string>) => (
+              <h1 id="await-ready">{bound(value, (text) => text)}</h1>
+            ),
+            failed: (error: Source<string>) => (
+              <p id="await-failed">{bound(error, (text) => text)}</p>
+            ),
+          }),
+        );
 
       const page = yield* mountScoped(Page, root);
       expect(textOf(root, "#await-loading")).toBe("loading");
@@ -641,14 +632,14 @@ describe("readiness through context", () => {
         yield* setResponse(fixtures, "second", pendingResponse(secondGate, "two"));
 
         const Page = () =>
-          Loading({
+          View.loading({
             fallback: <p id="pending">loading</p>,
-            children: Effect.gen(function* () {
+            content: Effect.gen(function* () {
               const first = yield* useQuery(ReadinessQuery, { id: "first" });
-              const a = yield* ready(first.state, "");
+              const a = yield* View.ready(first.state, "");
               // A second query registers after the first already had a value.
               const second = yield* useQuery(ReadinessQuery, { id: "second" });
-              const b = yield* ready(second.state, "");
+              const b = yield* View.ready(second.state, "");
               return (
                 <section>
                   <span id="a">{View.bind(a)}</span>
@@ -688,13 +679,13 @@ describe("readiness through context", () => {
         yield* setResponse(fixtures, "pending", pendingResponse(pendingGate, "pending"));
 
         const Page = () =>
-          Loading({
+          View.loading({
             fallback: <p id="pending-fallback">loading</p>,
-            children: Effect.gen(function* () {
+            content: Effect.gen(function* () {
               const sibling = yield* useQuery(ReadinessQuery, { id: "sibling" });
               const pending = yield* useQuery(ReadinessQuery, { id: "pending" });
-              const siblingValue = yield* ready(sibling.state, "");
-              const pendingValue = yield* Scope.provide(ready(pending.state, ""), owner);
+              const siblingValue = yield* View.ready(sibling.state, "");
+              const pendingValue = yield* Scope.provide(View.ready(pending.state, ""), owner);
               return (
                 <section>
                   <p id="sibling-value">{View.bind(siblingValue)}</p>
@@ -739,11 +730,11 @@ describe("readiness through context", () => {
         yield* setResponse(fixtures, "failed", failedResponse("boom"));
 
         const Page = () =>
-          Errored({
+          View.errored({
             fallback: (error) => <p id="failed-owner-error">{bound(error, errorText)}</p>,
-            children: Effect.gen(function* () {
+            content: Effect.gen(function* () {
               const entry = yield* useQuery(ReadinessQuery, { id: "failed" });
-              yield* Scope.provide(orErrored(entry.state), owner);
+              yield* Scope.provide(View.orErrored(entry.state), owner);
               return <p id="failed-owner-content">content</p>;
             }),
           });
@@ -779,15 +770,15 @@ describe("readiness through context", () => {
 
         const LateCard = Effect.gen(function* () {
           const entry = yield* useQuery(ReadinessQuery, { id: "late" });
-          const value = yield* ready(entry.state, "");
+          const value = yield* View.ready(entry.state, "");
           return <p id="late-card">{View.bind(value)}</p>;
         });
         const Page = () =>
-          Loading({
+          View.loading({
             fallback: <p id="late-pending">loading</p>,
-            children: Effect.gen(function* () {
+            content: Effect.gen(function* () {
               const entry = yield* useQuery(ReadinessQuery, { id: "shown" });
-              const value = yield* ready(entry.state, "");
+              const value = yield* View.ready(entry.state, "");
               const revealed = yield* spawn(Behavior.value(false));
               yield* Deferred.succeed(reveal, Effect.asVoid(revealed.send(Value.Set(true))));
               const late = yield* View.list({
@@ -864,14 +855,14 @@ describe("readiness through context", () => {
       const rows = yield* SubscriptionRef.make<ReadonlyArray<string>>([]);
 
       const LateCard = Effect.gen(function* () {
-        const value = yield* ready(late.source, "");
+        const value = yield* View.ready(late.source, "");
         return <p id="late-card">{View.bind(value)}</p>;
       });
       const Page = () =>
-        Loading({
+        View.loading({
           fallback: <p id="late-pending">loading</p>,
-          children: Effect.gen(function* () {
-            const value = yield* ready(shown.source, "");
+          content: Effect.gen(function* () {
+            const value = yield* View.ready(shown.source, "");
             const card = yield* View.list({
               each: { get: SubscriptionRef.get(rows), changes: SubscriptionRef.changes(rows) },
               keyBy: (name: string) => name,
@@ -947,11 +938,11 @@ describe("readiness through context", () => {
         const boundary = yield* Scope.make();
 
         const Page = () =>
-          Loading({
+          View.loading({
             fallback: <p id="boundary-pending">loading</p>,
-            children: Effect.gen(function* () {
+            content: Effect.gen(function* () {
               const entry = yield* useQuery(ReadinessQuery, { id: "boundary" });
-              const value = yield* ready(entry.state, "");
+              const value = yield* View.ready(entry.state, "");
               return <p id="boundary-value">{View.bind(value)}</p>;
             }),
           });
@@ -975,9 +966,9 @@ describe("readiness on the server", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const Page = (_props: Record<string, never>) =>
-        Loading({
+        View.loading({
           fallback: <p id="pending">loading</p>,
-          children: Effect.succeed(<p id="static">nothing to wait for</p>),
+          content: Effect.succeed(<p id="static">nothing to wait for</p>),
         });
 
       const page = yield* mountScoped(Page, root);
@@ -995,10 +986,10 @@ describe("readiness on the server", () => {
     Effect.gen(function* () {
       const controlled = yield* ViewTest.fakeQuery(QueryState.Loading<string, string>());
       const Page = () =>
-        Loading({
+        View.loading({
           fallback: <p id="pending">loading</p>,
-          children: Effect.gen(function* () {
-            const title = yield* ready(controlled.source, "");
+          content: Effect.gen(function* () {
+            const title = yield* View.ready(controlled.source, "");
             return <h1 id="title">{View.bind(title)}</h1>;
           }),
         });
@@ -1017,10 +1008,10 @@ describe("readiness on the server", () => {
         QueryState.Ready<string, string>("Alpha", false),
       );
       const Page = () =>
-        Loading({
+        View.loading({
           fallback: <p id="pending">loading</p>,
-          children: Effect.gen(function* () {
-            const title = yield* ready(controlled.source, "");
+          content: Effect.gen(function* () {
+            const title = yield* View.ready(controlled.source, "");
             return <h1 id="title">{View.bind(title)}</h1>;
           }),
         });
@@ -1035,16 +1026,16 @@ describe("readiness on the server", () => {
     Effect.gen(function* () {
       const controlled = yield* ViewTest.fakeQuery(QueryState.Failed<string, string>("boom"));
       const Page = () =>
-        Errored({
+        View.errored({
           fallback: (error) => (
             <p id="error">
               {bound(error, (value) => Option.match(value, { onNone: () => "", onSome: String }))}
             </p>
           ),
-          children: Loading({
+          content: View.loading({
             fallback: <p id="pending">loading</p>,
-            children: Effect.gen(function* () {
-              yield* orErrored(controlled.source);
+            content: Effect.gen(function* () {
+              yield* View.orErrored(controlled.source);
               return <p id="content">wrong content</p>;
             }),
           }),

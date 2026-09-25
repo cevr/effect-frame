@@ -12,7 +12,7 @@ import {
 } from "effect-frame/actor";
 import { contract, ref, resumeCodec } from "effect-frame/actor/client";
 import type { Applied, KeyOf, SnapshotOf } from "effect-frame/actor/client";
-import { Dom, Html, View, mount } from "effect-frame/view";
+import { Dom, Html, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import { Deferred, Effect, Exit, Layer, Match, Option, Ref, Schema, Scope } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -143,7 +143,7 @@ const hydrate = (main: HTMLElement, key: string, onClose: Effect.Effect<void> = 
     const page = yield* ViewTest.make({
       host: hydration.host,
       root: main,
-      setup: (host, root) => mount(NotePage, { key, resume, onClose }, host, root),
+      setup: (host, root) => View.mount(NotePage, { key, resume, onClose }, host, root),
     });
     const report = yield* hydration.finish;
     return { page, report };

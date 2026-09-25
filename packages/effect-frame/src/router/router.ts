@@ -1,6 +1,6 @@
 import { Source } from "effect-frame/actor/client";
-import type { Host, View } from "effect-frame/view";
-import { mount as mountView, render } from "effect-frame/view";
+import type { Host } from "effect-frame/view";
+import { View } from "effect-frame/view";
 import { read as readInspection, register as registerInspection } from "./route-inspection.js";
 import type { Duration } from "effect";
 import {
@@ -612,7 +612,7 @@ export const mount: <R, HostNode, N = R>(
                 UrlStateRuntime,
                 urlStateRuntime,
               );
-            let mountedPage = mountView(page, {}, drawing.host, options.root);
+            let mountedPage = View.mount(page, {}, drawing.host, options.root);
             if (Option.isSome(routeOwner)) {
               mountedPage = Effect.provideService(mountedPage, Inspection.Owner, routeOwner.value);
             }
@@ -702,7 +702,7 @@ export const mount: <R, HostNode, N = R>(
       // The row that drew the last view builds its nodes on its own fiber
       // right after its setup returned: let it finish, then flush.
       yield* Effect.yieldNow;
-      yield* render;
+      yield* View.flush;
       let focus = Effect.succeed(Option.none<unknown>());
       if (shell.entered) {
         focus = shell.root;
@@ -1209,7 +1209,7 @@ const drawingOf = <HostNode>(host: Host<HostNode>): Drawing<HostNode> => {
           one.catchUp();
         }
       }),
-      render,
+      View.flush,
     ),
   };
 };

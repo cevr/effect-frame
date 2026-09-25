@@ -1,7 +1,7 @@
 import { Behavior, spawn, Source } from "effect-frame/actor/client";
 import { Link, link } from "effect-frame/router";
 import type { NotFoundProps, Route } from "effect-frame/router";
-import { Errored, For, Loading, View, ready } from "effect-frame/view";
+import { For, View } from "effect-frame/view";
 import type { Node } from "effect-frame/view";
 import { Effect, Option, Predicate } from "effect";
 import { writeDraft } from "./commands.js";
@@ -56,9 +56,9 @@ const chrome = (body: Node) =>
  */
 export const Shell = <ChildR,>(props: Route.LayoutPropsOf<typeof shell, ChildR>) =>
   Effect.flatMap(
-    Errored({
+    View.errored({
       fallback: failure,
-      children: Loading({ fallback: skeleton, children: props.outlet }),
+      content: View.loading({ fallback: skeleton, content: props.outlet }),
     }),
     chrome,
   );
@@ -73,7 +73,7 @@ export const BareShell = <ChildR,>(props: Route.LayoutPropsOf<typeof shell, Chil
 /** Every list's name, beside whichever list page the outlet holds. */
 export const ListsView = <ChildR,>(props: Route.LayoutPropsOf<typeof lists, ChildR>) =>
   Effect.gen(function* () {
-    const names = yield* ready(props.data.names.state, []);
+    const names = yield* View.ready(props.data.names.state, []);
     const outlet = yield* props.outlet;
     const rows = yield* View.list({
       each: names,
@@ -101,7 +101,7 @@ export const ListsView = <ChildR,>(props: Route.LayoutPropsOf<typeof lists, Chil
 /** The list names that match the search box. Typing moves the URL, not the page. */
 export const IndexView = (props: Route.PropsOf<typeof index>) =>
   Effect.gen(function* () {
-    const found = yield* ready(props.data.found.state, []);
+    const found = yield* View.ready(props.data.found.state, []);
     const q = Source.select(props.search, (search) =>
       Option.getOrElse(Option.fromNullishOr(search.q), () => ""),
     );

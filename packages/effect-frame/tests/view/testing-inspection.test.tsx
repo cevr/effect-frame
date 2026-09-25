@@ -21,7 +21,7 @@ import {
   type LocationService,
   type NotFoundProps,
 } from "effect-frame/router";
-import { Dom, Loading, Query, View, mount, readyWithStale } from "effect-frame/view";
+import { Dom, Await, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import * as Frame from "../../src/frame.js";
 // @ts-expect-error Effect keeps this pinned scope counter runtime-only; this test checks scope ownership.
@@ -73,13 +73,13 @@ const BlockedLive = implementQuery(BlockedQuery, () =>
 );
 
 const SearchPage = () =>
-  Loading({
+  View.loading({
     fallback: <p id="loading">loading</p>,
-    children: Effect.gen(function* () {
+    content: Effect.gen(function* () {
       const entry = yield* useQuery(BlockedQuery, {});
-      yield* readyWithStale(entry.state, "");
+      yield* View.readyWithStale(entry.state, "");
       return (
-        <Query
+        <Await
           state={entry.state}
           loading={<p id="query-loading">query-loading</p>}
           ready={(value) => <p id="result">{View.bind(value)}</p>}
@@ -173,7 +173,7 @@ describe("ViewTest Frame inspection", () => {
         host: Dom.host,
         root,
         rootId: "view-test-root",
-        setup: (host, mountRoot) => mount(() => InspectionPage(local), {}, host, mountRoot),
+        setup: (host, mountRoot) => View.mount(() => InspectionPage(local), {}, host, mountRoot),
       });
 
       yield* Deferred.await(control.started);
@@ -244,7 +244,7 @@ describe("ViewTest Frame inspection", () => {
             ViewTest.make({
               host: Dom.host,
               root,
-              setup: (host, mountRoot) => mount(SearchPage, {}, host, mountRoot),
+              setup: (host, mountRoot) => View.mount(SearchPage, {}, host, mountRoot),
             }),
             context,
           ),
@@ -304,7 +304,7 @@ describe("ViewTest Frame inspection", () => {
           host: Dom.host,
           root,
           setup: (host, mountRoot) =>
-            mount(() => Effect.succeed(<p id="ready">ready</p>), {}, host, mountRoot),
+            View.mount(() => Effect.succeed(<p id="ready">ready</p>), {}, host, mountRoot),
         }),
         Frame.Service,
         frame,
@@ -333,7 +333,7 @@ describe("ViewTest Frame inspection", () => {
           host: Dom.host,
           root: document.createElement("main"),
           setup: (host, mountRoot) =>
-            mount(() => Effect.succeed(<p id="never">never</p>), {}, host, mountRoot),
+            View.mount(() => Effect.succeed(<p id="never">never</p>), {}, host, mountRoot),
         }),
         Frame.Service,
         frame,
@@ -364,7 +364,12 @@ describe("ViewTest Frame inspection", () => {
           root,
           setup: (host, mountRoot) =>
             Effect.gen(function* () {
-              yield* mount(() => Effect.succeed(<p id="stable">stable</p>), {}, host, mountRoot);
+              yield* View.mount(
+                () => Effect.succeed(<p id="stable">stable</p>),
+                {},
+                host,
+                mountRoot,
+              );
               return yield* Effect.scope;
             }),
         });
@@ -405,7 +410,12 @@ describe("ViewTest Frame inspection", () => {
           host: Dom.host,
           root: document.createElement("main"),
           setup: (host, mountRoot) =>
-            mount(() => Effect.succeed(<p id="construction-clock">clock</p>), {}, host, mountRoot),
+            View.mount(
+              () => Effect.succeed(<p id="construction-clock">clock</p>),
+              {},
+              host,
+              mountRoot,
+            ),
         }),
         Context.add(constructionContext, Frame.Service, frame),
       );
@@ -488,7 +498,7 @@ describe("ViewTest Frame inspection", () => {
           host: Dom.host,
           root: document.createElement("main"),
           setup: (host, mountRoot) =>
-            mount(() => Effect.succeed(<p id="defect">defect</p>), {}, host, mountRoot),
+            View.mount(() => Effect.succeed(<p id="defect">defect</p>), {}, host, mountRoot),
         }),
         Frame.Service,
         frame,
@@ -519,7 +529,7 @@ describe("ViewTest Frame inspection", () => {
           host: Dom.host,
           root,
           setup: (host, mountRoot) =>
-            mount(() => Effect.succeed(<p id="close">close</p>), {}, host, mountRoot),
+            View.mount(() => Effect.succeed(<p id="close">close</p>), {}, host, mountRoot),
         }),
         Frame.Service,
         frame,

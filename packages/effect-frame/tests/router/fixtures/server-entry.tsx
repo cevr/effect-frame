@@ -5,7 +5,7 @@
  */
 import type { LocationService } from "effect-frame/router";
 import { Location, NavigationBehavior, Route, mount } from "effect-frame/router";
-import { Html, View, render } from "effect-frame/view";
+import { Html, View } from "effect-frame/view";
 import { Effect, Schema, Stream } from "effect";
 
 const site = Route.segment("site", { path: "/site", params: Schema.Struct({}) });
@@ -47,7 +47,7 @@ export const renderUrl = (href: string) =>
         host: Html.host,
         root,
       }).pipe(Effect.provideService(Location, location));
-      yield* render;
+      yield* View.flush;
       return Html.serializeChildren(root.children);
     }),
   );

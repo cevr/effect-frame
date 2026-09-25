@@ -17,7 +17,7 @@ import type { QueryCache, TransportService } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import { Location, Route, mount as mountRouter, renderDocument } from "effect-frame/router";
 import type { AnyRoute, LocationService, NotFoundProps } from "effect-frame/router";
-import { Dom, View, render as renderFrame } from "effect-frame/view";
+import { Dom, View } from "effect-frame/view";
 import { Context, Deferred, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import {
@@ -428,7 +428,7 @@ describe("a route actor is seeded into the document (#37)", () => {
         yield* mountRouter({ routes: [app], notFound: NotFound, host: Dom.host, root }).pipe(
           Effect.provideService(Location, location),
         );
-        yield* renderFrame;
+        yield* View.flush;
       }).pipe(Effect.provideContext(client));
       yield* eventually("the current count", () => textOf("#count") === "5");
       expect(reads).toEqual(['{"id":"z"}']);

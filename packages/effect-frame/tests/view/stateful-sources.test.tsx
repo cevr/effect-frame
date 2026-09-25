@@ -1,3 +1,4 @@
+import { View } from "effect-frame/view";
 import { registerDom } from "./dom-setup.js";
 
 registerDom();
@@ -5,7 +6,6 @@ registerDom();
 import { QueryCache, followQuery } from "effect-frame/actor";
 import type { QueryCacheService, QueryFailure, ResultOf, Source } from "effect-frame/actor";
 import { QueryState } from "effect-frame/actor/client";
-import { LoadingScope, ready } from "effect-frame/view";
 import { Effect, Equal, Match, Option, Queue, Schema, Stream, SubscriptionRef } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { Label, makeControl, sideOf } from "./streaming-fixture.js";
@@ -182,8 +182,8 @@ describe("ready with deliveries held back", () => {
   it.scopedLive("a late delivery never undoes a value a read showed", () =>
     Effect.gen(function* () {
       const upstream = yield* heldOf(readyOf("A"));
-      const value = yield* ready(sourceOf(upstream), { label: "?" }).pipe(
-        Effect.provideService(LoadingScope, noScope),
+      const value = yield* View.ready(sourceOf(upstream), { label: "?" }).pipe(
+        Effect.provideService(View.LoadingScope, noScope),
       );
       const seen = yield* recording(Stream.map(value.changes, (found) => found.label));
       expect((yield* value.get).label).toBe("A");

@@ -6,7 +6,7 @@
  * server it has hydrated, which is the server's cue to settle a held query.
  */
 import { HttpTransport, QueryCache, Streaming, queryCacheLayer } from "effect-frame/actor/client";
-import { Dom, mount, render } from "effect-frame/view";
+import { Dom, View } from "effect-frame/view";
 import type { QueryFailure, QueryState } from "effect-frame/actor/client";
 import type { Dom as DomTypes } from "effect-frame/view";
 import { Effect, Layer, Option } from "effect";
@@ -51,11 +51,11 @@ const start = Effect.gen(function* () {
   const hydration = Dom.hydrate(root);
   // The server names the page on the root: an inline script cannot run here.
   if (root.dataset["page"] === "tall") {
-    yield* mount(TallPage, { id: "a" }, hydration.host, root);
+    yield* View.mount(TallPage, { id: "a" }, hydration.host, root);
   } else {
-    yield* mount(Page, { id: "a" }, hydration.host, root);
+    yield* View.mount(Page, { id: "a" }, hydration.host, root);
   }
-  yield* render;
+  yield* View.flush;
   const report = yield* hydration.finish;
   yield* resumed.hydrated;
   const cache = yield* QueryCache;

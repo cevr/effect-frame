@@ -18,7 +18,7 @@ import {
 } from "effect-frame/actor";
 import type { QueryEntry, QueryFailure, QueryState, Source } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
-import { Dom, Loading, Query, View, mount, readyWithStale } from "effect-frame/view";
+import { Dom, Await, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import { Deferred, Effect, Layer, Exit, Fiber, Option, Schema, Scope, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -132,14 +132,14 @@ describe("local query test transport", () => {
       const entryReady =
         yield* Deferred.make<QueryEntry<{ readonly count: number }, QueryFailure>>();
       const Page = () =>
-        Loading({
+        View.loading({
           fallback: <p id="loading">loading</p>,
-          children: Effect.gen(function* () {
+          content: Effect.gen(function* () {
             const entry = yield* useQuery(Count, key);
             yield* Deferred.succeed(entryReady, entry);
-            const state = yield* readyWithStale(entry.state, { count: -1 });
+            const state = yield* View.readyWithStale(entry.state, { count: -1 });
             return (
-              <Query
+              <Await
                 state={entry.state}
                 loading={<p id="query-loading">loading</p>}
                 ready={(value, stale) => (
@@ -158,7 +158,7 @@ describe("local query test transport", () => {
       const page = yield* ViewTest.make({
         host: Dom.host,
         root,
-        setup: (host, mountRoot) => mount(Page, {}, host, mountRoot),
+        setup: (host, mountRoot) => View.mount(Page, {}, host, mountRoot),
       });
       expect(root.querySelector("#loading")?.textContent).toBe("loading");
       yield* page.waitFor({

@@ -14,18 +14,7 @@ import {
 } from "effect-frame/actor";
 import type { QueryEntry, QueryFailure, QueryState, Source } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
-import {
-  Dom,
-  Errored,
-  Html,
-  Loading,
-  Portal,
-  View,
-  mount,
-  orErrored,
-  ready,
-  render,
-} from "effect-frame/view";
+import { Dom, Html, Portal, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import type { Host } from "effect-frame/view";
 import { make as makeTuiHost } from "effect-frame/view/opentui";
@@ -148,7 +137,7 @@ const mountPage = <E, R>(view: View.View<Record<string, never>, E, R>, root: HTM
   ViewTest.make({
     host: Dom.host,
     root,
-    setup: (host, mountRoot) => mount(view, {}, host, mountRoot),
+    setup: (host, mountRoot) => View.mount(view, {}, host, mountRoot),
   });
 
 const textAt = (root: Node, selector: string): string => {
@@ -188,9 +177,9 @@ const rowPage = (
   closed: Ref.Ref<ReadonlyArray<string>>,
   started: Deferred.Deferred<void>,
 ) =>
-  Loading({
+  View.loading({
     fallback: <p id="fallback">loading</p>,
-    children: Effect.gen(function* () {
+    content: Effect.gen(function* () {
       const rows = yield* View.list({
         each: items,
         keyBy: (id) => id,
@@ -201,7 +190,7 @@ const rowPage = (
             yield* Deferred.succeed(started, void 0);
             yield* Effect.addFinalizer(() => Ref.update(closed, (all) => [...all, id]));
             const entry = yield* useQuery(OwnershipQuery, { id });
-            const value = yield* ready(entry.state, "");
+            const value = yield* View.ready(entry.state, "");
             return <li id={`row-${id}`}>{View.bind(value)}</li>;
           }),
       });
@@ -338,9 +327,9 @@ describe("readiness ownership", () => {
         changes: Stream.empty,
       };
       const Page = () =>
-        Loading({
+        View.loading({
           fallback: <p id="fallback">loading</p>,
-          children: Effect.gen(function* () {
+          content: Effect.gen(function* () {
             const rows = yield* View.list({
               each: items,
               keyBy: (id) => id,
@@ -356,7 +345,7 @@ describe("readiness ownership", () => {
           }),
         });
       const lifetime = yield* Scope.make();
-      yield* mount(Page, {}, Dom.host, root).pipe(Scope.provide(lifetime));
+      yield* View.mount(Page, {}, Dom.host, root).pipe(Scope.provide(lifetime));
       yield* Deferred.await(started);
       // Nothing registered: the boundary shows its content, and the row is not drawn yet.
       expect(root.querySelector("#fallback")).toBeNull();
@@ -378,11 +367,11 @@ describe("readiness ownership", () => {
         const closed = yield* Ref.make(0);
         yield* setResponse(fixtures, "failed", failedResponse("boom"));
         const Page = () =>
-          Errored({
+          View.errored({
             fallback: () => <p id="error">error</p>,
-            children: Loading({
+            content: View.loading({
               fallback: <p id="loading">loading</p>,
-              children: Effect.gen(function* () {
+              content: Effect.gen(function* () {
                 const rows = yield* View.list({
                   each: {
                     get: Effect.succeed(["failed"]),
@@ -395,8 +384,8 @@ describe("readiness ownership", () => {
                       yield* Effect.addFinalizer(() => Ref.update(closed, (count) => count + 1));
                       const entry = yield* useQuery(OwnershipQuery, { id: "failed" });
                       yield* Deferred.succeed(entryReady, entry);
-                      const failed = yield* orErrored(entry.state);
-                      const value = yield* ready(failed, "");
+                      const failed = yield* View.orErrored(entry.state);
+                      const value = yield* View.ready(failed, "");
                       return <p id="failed-row">{View.bind(value)}</p>;
                     }),
                 });
@@ -452,11 +441,11 @@ describe("readiness ownership", () => {
         );
         document.body.appendChild(root);
         const Page = () =>
-          Loading({
+          View.loading({
             fallback: <p id="fallback">loading</p>,
-            children: Effect.gen(function* () {
+            content: Effect.gen(function* () {
               const entry = yield* useQuery(OwnershipQuery, { id: "portal" });
-              const value = yield* ready(entry.state, "");
+              const value = yield* View.ready(entry.state, "");
               return (
                 <Portal into={target}>
                   <p
@@ -504,16 +493,16 @@ describe("readiness ownership", () => {
         changes: Stream.empty,
       };
       const Page = () =>
-        Loading({
+        View.loading({
           fallback: <p id="fallback">loading</p>,
-          children: Effect.gen(function* () {
+          content: Effect.gen(function* () {
             const rows = yield* View.list({
               each: items,
               keyBy: (id) => id,
               row: () =>
                 Effect.gen(function* () {
                   setups += 1;
-                  const value = yield* ready(state, "");
+                  const value = yield* View.ready(state, "");
                   return <li id="html-row">{View.bind(value)}</li>;
                 }),
             });
@@ -540,10 +529,10 @@ describe("readiness ownership", () => {
           );
           const Page = () =>
             Effect.gen(function* () {
-              const boundary = yield* Loading({
+              const boundary = yield* View.loading({
                 fallback: <p id="fallback">loading</p>,
-                children: Effect.gen(function* () {
-                  yield* ready(loadingState.state, "");
+                content: Effect.gen(function* () {
+                  yield* View.ready(loadingState.state, "");
                   if (tag === "section") {
                     return <section id="hidden">secret</section>;
                   }
@@ -566,7 +555,7 @@ describe("readiness ownership", () => {
           const page = yield* ViewTest.make({
             host: hydration.host,
             root,
-            setup: (host, mountRoot) => mount(Page, {}, host, mountRoot),
+            setup: (host, mountRoot) => View.mount(Page, {}, host, mountRoot),
           });
           const report = yield* hydration.finish;
 
@@ -603,10 +592,10 @@ describe("readiness ownership", () => {
       };
       const Page = () =>
         Effect.gen(function* () {
-          const boundary = yield* Loading({
+          const boundary = yield* View.loading({
             fallback: <p id="fallback">loading</p>,
-            children: Effect.gen(function* () {
-              const value = yield* ready(readyState, "");
+            content: Effect.gen(function* () {
+              const value = yield* View.ready(readyState, "");
               return <section id="visible">{View.bind(value)}</section>;
             }),
           });
@@ -630,7 +619,7 @@ describe("readiness ownership", () => {
       const page = yield* ViewTest.make({
         host: hydration.host,
         root,
-        setup: (host, mountRoot) => mount(Page, {}, host, mountRoot),
+        setup: (host, mountRoot) => View.mount(Page, {}, host, mountRoot),
       });
       const report = yield* hydration.finish;
 
@@ -653,10 +642,10 @@ describe("readiness ownership", () => {
         const state = yield* spawn(Behavior.value<QueryState<string, string>>({ _tag: "Loading" }));
         const Page = () =>
           Effect.gen(function* () {
-            const boundary = yield* Loading({
+            const boundary = yield* View.loading({
               fallback: <text>loading</text>,
-              children: Effect.gen(function* () {
-                const value = yield* ready(state.state, "");
+              content: Effect.gen(function* () {
+                const value = yield* View.ready(state.state, "");
                 return <text>{View.bind(value)}</text>;
               }),
             });
@@ -665,9 +654,9 @@ describe("readiness ownership", () => {
         const page = yield* ViewTest.make({
           host: makeTuiHost(setup.renderer),
           root: setup.renderer.root,
-          setup: (host, root) => mount(Page, {}, host, root),
+          setup: (host, root) => View.mount(Page, {}, host, root),
         });
-        yield* render;
+        yield* View.flush;
         yield* Effect.promise(() => setup.renderOnce());
         expect(setup.captureCharFrame()).toContain("loading");
 
@@ -675,12 +664,12 @@ describe("readiness ownership", () => {
           label: "OpenTUI retained content appears",
           until: (root) => terminalText(root).includes("ready"),
         });
-        yield* render;
+        yield* View.flush;
         yield* Effect.promise(() => setup.renderOnce());
         expect(setup.captureCharFrame()).toContain("ready");
 
         yield* page.close;
-        yield* render;
+        yield* View.flush;
         yield* Effect.promise(() => setup.renderOnce());
         expect(setup.captureCharFrame()).not.toContain("ready");
       }),

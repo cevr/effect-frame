@@ -4,17 +4,7 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import { QueryCache, Streaming, useQuery } from "effect-frame/actor";
-import {
-  Dom,
-  Errored,
-  Html,
-  Loading,
-  View,
-  mount,
-  orErrored,
-  ready,
-  render,
-} from "effect-frame/view";
+import { Dom, Html, View } from "effect-frame/view";
 import { Deferred, Effect, Fiber, Option, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
@@ -399,23 +389,23 @@ describe("a duplicate patch in the document", () => {
  * boundary whose fallback the server drew replaces it.
  */
 const Nested = () =>
-  Errored({
+  View.errored({
     fallback: () => <p id="failed">failed</p>,
-    children: Loading({
+    content: View.loading({
       fallback: <p id="pending-outer">outer</p>,
-      children: Effect.gen(function* () {
+      content: Effect.gen(function* () {
         const outer = yield* useQuery(Label, { id: "outer" });
         yield* outer.state.changes.pipe(
           Stream.filter((state) => state._tag !== "Loading"),
           Stream.take(1),
           Stream.runDrain,
         );
-        const outerValue = yield* ready(yield* orErrored(outer.state), { label: "?" });
-        const inner = yield* Loading({
+        const outerValue = yield* View.ready(yield* View.orErrored(outer.state), { label: "?" });
+        const inner = yield* View.loading({
           fallback: <p id="pending-inner">inner</p>,
-          children: Effect.gen(function* () {
+          content: Effect.gen(function* () {
             const entry = yield* useQuery(Label, { id: "inner" });
-            const value = yield* ready(entry.state, { label: "?" });
+            const value = yield* View.ready(entry.state, { label: "?" });
             return <p id="label-inner">{View.bind(value, (found) => found.label)}</p>;
           }),
         });
@@ -454,8 +444,8 @@ describe("a streamed document with nested boundaries", () => {
       const report = yield* Effect.gen(function* () {
         yield* Streaming.resume(yield* Dom.readRecords);
         const hydration = Dom.hydrate(root);
-        yield* mount(Nested, {}, hydration.host, root);
-        yield* render;
+        yield* View.mount(Nested, {}, hydration.host, root);
+        yield* View.flush;
         return yield* hydration.finish;
       }).pipe(Effect.provideContext(client));
       expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 1 });
@@ -491,7 +481,7 @@ describe("a streamed document that ends early", () => {
         const seen: Array<Effect.Success<ReturnType<typeof stateOf>>> = [];
         const { resumed } = yield* hydrateWith(client, (host, root) =>
           Effect.gen(function* () {
-            yield* mount(Page, { ids: ["a"] }, host, root);
+            yield* View.mount(Page, { ids: ["a"] }, host, root);
             const cache = yield* QueryCache;
             const entry = yield* cache.open(Label, { id: "a" });
             yield* Effect.forkScoped(

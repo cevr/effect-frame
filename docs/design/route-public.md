@@ -446,7 +446,7 @@ In `tests/router/route-public.test.tsx`, with public imports only:
    compile as a leaf's view.
 4. Missing services: `mount` of a tree whose view needs a service the
    layers do not provide does not compile when run; a layout that yields its
-   outlet outside `Loading` keeps `LoadingScope` in the route's services.
+   outlet outside `View.loading` keeps `View.LoadingScope` in the route's services.
 5. Missing typed fallback: a leaf whose view can fail, a lazy view
    included, does not compile without `errored`; a handler for another `E`
    does not compile.

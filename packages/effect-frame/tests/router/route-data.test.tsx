@@ -30,7 +30,7 @@ import type {
   NotFoundProps,
   RenderedDocument,
 } from "effect-frame/router";
-import { Dom, Loading, View, ready, render } from "effect-frame/view";
+import { Dom, View } from "effect-frame/view";
 import {
   Context,
   Deferred,
@@ -164,8 +164,8 @@ const streamBranch = Route.layout(
   [
     Route.leaf(postSegment, (props) =>
       Effect.gen(function* () {
-        const tenant = yield* ready(props.data.tenant.state, { label: "?" });
-        const post = yield* ready(props.data.post.state, { label: "?" });
+        const tenant = yield* View.ready(props.data.tenant.state, { label: "?" });
+        const post = yield* View.ready(props.data.post.state, { label: "?" });
         return (
           <article id="post">
             {View.bind(tenant, (value) => value.label)}: {View.bind(post, (value) => value.label)}
@@ -176,7 +176,7 @@ const streamBranch = Route.layout(
   ],
   (props) =>
     Effect.gen(function* () {
-      const body = yield* Loading({ fallback: <p id="wait">wait</p>, children: props.outlet });
+      const body = yield* View.loading({ fallback: <p id="wait">wait</p>, content: props.outlet });
       return <section id="layout">{body}</section>;
     }),
 );
@@ -381,7 +381,7 @@ describe("declared data on the server (#18 §3.3)", () => {
           ),
         );
         yield* resumed.closed;
-        yield* render;
+        yield* View.flush;
         // The whole stream is in the document before hydration, so every patch
         // arrived ahead of it: the client's first frame draws the patched
         // values, and replaces the server's fallback with them (#22).
@@ -953,7 +953,7 @@ describe("nesting and inheritance (#18 §2.2, §3.2)", () => {
           );
           yield* eventuallyEffect(
             "every view shows the org",
-            Effect.map(render, () => root.textContent === "Org OneOrg Oneo1/t2/m3Org One"),
+            Effect.map(View.flush, () => root.textContent === "Org OneOrg Oneo1/t2/m3Org One"),
           );
           expect(clientControl.calls).toEqual(["org-o1"]);
           expect(yield* activeIds).toEqual(["org-o1"]);
@@ -1039,7 +1039,7 @@ describe("an exited segment releases its scope and its unshared keys (#18 §4.3)
         }).pipe(Effect.provideService(Location, yield* locationAt(`${origin}/lists/inbox`)));
         yield* eventuallyEffect(
           "the counts",
-          Effect.map(render, () => root.textContent === "3"),
+          Effect.map(View.flush, () => root.textContent === "3"),
         );
         expect(yield* activeIds).toEqual(["counts-inbox", "shared"]);
 

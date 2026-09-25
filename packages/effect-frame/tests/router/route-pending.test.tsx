@@ -15,9 +15,9 @@ import type { ActorTransport, QueryCache, Source } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import { Location, Route, mount as mountRouter } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
-import { Dom, Html, Loading, View, ready, render } from "effect-frame/view";
+import { Dom, Html, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
-import type { LazyModule, LoadingScope, Node } from "effect-frame/view";
+import type { LazyModule, Node } from "effect-frame/view";
 import * as Frame from "../../src/frame.js";
 import * as Receipt from "../../src/router/receipt.js";
 import {
@@ -328,7 +328,7 @@ const makePostView = (probes: Probes) => (props: Route.PropsOf<typeof postSegmen
     if (first.postId.endsWith("-boom")) {
       return yield* Effect.die("post setup defect");
     }
-    const tenant = yield* ready(props.data.tenant.state, "");
+    const tenant = yield* View.ready(props.data.tenant.state, "");
     yield* Queue.offer(probes.postBuilt, first.postId);
     return (
       <article id="post">
@@ -378,9 +378,9 @@ const makeApp = (probes: Probes, importer: Importer, events: Ref.Ref<ReadonlyArr
     ],
     (props) =>
       Effect.gen(function* () {
-        const body = yield* Loading({
+        const body = yield* View.loading({
           fallback: <p id="child-loading">loading child</p>,
-          children: Effect.map(props.outlet, (outlet) => <div id="outlet">{outlet}</div>),
+          content: Effect.map(props.outlet, (outlet) => <div id="outlet">{outlet}</div>),
         });
         return (
           <section id="layout">
@@ -408,9 +408,9 @@ const makePlainApp = (probes: Probes, events: Ref.Ref<ReadonlyArray<string>>) =>
     (props) =>
       Effect.gen(function* () {
         yield* Ref.update(events, (all) => [...all, "layout"]);
-        const body = yield* Loading({
+        const body = yield* View.loading({
           fallback: <p id="child-loading">loading child</p>,
-          children: Effect.map(props.outlet, (outlet) => <div id="outlet">{outlet}</div>),
+          content: Effect.map(props.outlet, (outlet) => <div id="outlet">{outlet}</div>),
         });
         return <section id="layout">{body}</section>;
       }),
@@ -668,7 +668,7 @@ const FixturePostView = (props: Route.PropsOf<typeof postSegment>) =>
     if (params.postId === "bad") {
       return yield* PostFailed.make({ postId: params.postId });
     }
-    const tenant = yield* ready(props.data.tenant.state, "");
+    const tenant = yield* View.ready(props.data.tenant.state, "");
     return <p>{View.bind(tenant)}</p>;
   });
 
@@ -694,7 +694,7 @@ const lazyServices: Equals<
 > = true;
 const lazyServicesExact: Equals<
   Effect.Services<ReturnType<LazyFixture>>,
-  LoadingScope | ScopeType.Scope
+  View.LoadingScope | ScopeType.Scope
 > = true;
 const lazyLeaf = Route.leaf(postSegment, lazyFixture, {
   errored: (failure) => <p>{View.bind(failure, describeFailure)}</p>,
@@ -791,7 +791,7 @@ describe("private route pending and lazy views", () => {
         // Before `after`: the region is live, and the fallback is not shown.
         yield* regionLive(page);
         yield* TestClock.adjust("99 millis");
-        yield* render;
+        yield* View.flush;
         expect(hasAt(root, "#post-pending")).toBe(false);
         expect(probes.pendingShown).toEqual([]);
 
@@ -805,7 +805,7 @@ describe("private route pending and lazy views", () => {
         yield* Queue.offer(importer.outcomes, "ok");
         expect(yield* Queue.take(probes.postBuilt)).toBe("1");
         yield* TestClock.adjust("299 millis");
-        yield* render;
+        yield* View.flush;
         expect(hasAt(root, "#post-pending")).toBe(true);
         expect(hasAt(root, "#post")).toBe(false);
         yield* TestClock.adjust("1 millis");
@@ -976,7 +976,7 @@ describe("private route pending and lazy views", () => {
         yield* Queue.offer(importer.outcomes, "ok");
         expect(yield* Queue.take(importer.settled)).toBe(1);
         yield* TestClock.adjust("1 second");
-        yield* render;
+        yield* View.flush;
         expect(yield* setupsOf(probes)).toEqual([]);
         expect(hasAt(root, "#post")).toBe(false);
         const exited = yield* Frame.inspect;
@@ -1006,7 +1006,7 @@ describe("private route pending and lazy views", () => {
         expect(yield* Queue.take(probes.postClosed)).toBe("slow-2");
         yield* Deferred.succeed(probes.slow, void 0);
         yield* TestClock.adjust("1 second");
-        yield* render;
+        yield* View.flush;
         expect(hasAt(root, "#post")).toBe(false);
         expect(hasAt(root, "#post-pending")).toBe(false);
         const closed = yield* Frame.inspect;
@@ -1119,7 +1119,7 @@ describe("private route pending and lazy views", () => {
         yield* Fiber.join(mounting);
         // The post's setup started before the shell returned.
         expect(yield* setupsOf(probes)).toEqual(["1"]);
-        yield* render;
+        yield* View.flush;
         const html = Html.serializeChildren(htmlRoot.children);
         yield* Scope.close(scope, Exit.void);
 
@@ -1220,7 +1220,7 @@ describe("private route pending and lazy views", () => {
       yield* parentDrawn;
       // The child's presentation starts only now, long after the
       // transition entered it. Its fallback has not been drawn.
-      yield* render;
+      yield* View.flush;
       expect(shown.child).toEqual([]);
       expect(hasAt(root, "#child-pending")).toBe(false);
       if (kind === "prompt") {
@@ -1237,7 +1237,7 @@ describe("private route pending and lazy views", () => {
       // `after` counts from when the child's presentation started, and
       // `atLeast` from when its fallback was drawn.
       yield* TestClock.adjust("99 millis");
-      yield* render;
+      yield* View.flush;
       expect(shown.child).toEqual([]);
       yield* TestClock.adjust("1 millis");
       yield* page.waitFor({
@@ -1248,7 +1248,7 @@ describe("private route pending and lazy views", () => {
       yield* Queue.offer(childImporter.outcomes, "ok");
       expect(yield* Queue.take(childImporter.settled)).toBe(1);
       yield* TestClock.adjust("299 millis");
-      yield* render;
+      yield* View.flush;
       expect(hasAt(root, "#child-pending")).toBe(true);
       expect(hasAt(root, "#child")).toBe(false);
       yield* TestClock.adjust("1 millis");

@@ -1,3 +1,4 @@
+import { View } from "effect-frame/view";
 import { registerDom } from "./dom-setup.js";
 
 registerDom();
@@ -5,7 +6,6 @@ registerDom();
 import { QueryFailed } from "effect-frame/actor/client";
 import { Route } from "effect-frame/router";
 import type { Route as RouteTypes } from "effect-frame/router";
-import { Errored, Loading } from "effect-frame/view";
 import { Effect } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { ListView } from "../src/page.js";
@@ -26,9 +26,9 @@ const inbox = `${origin}/lists/inbox`;
 /** The app's shell turned inside out: `Loading` outside `Errored`. */
 const ReversedShell = <ChildR,>(props: RouteTypes.LayoutPropsOf<typeof shell, ChildR>) =>
   Effect.map(
-    Loading({
+    View.loading({
       fallback: skeleton,
-      children: Errored({ fallback: failure, children: props.outlet }),
+      content: View.errored({ fallback: failure, content: props.outlet }),
     }),
     (body) => (
       <div id="shell">
@@ -48,7 +48,7 @@ const reversed = Route.client(
 );
 
 const orders = [
-  { name: "Errored outside Loading (the app's shell)", routes },
+  { name: "Errored outside View.loading (the app's shell)", routes },
   { name: "Loading outside Errored", routes: [reversed] },
 ];
 

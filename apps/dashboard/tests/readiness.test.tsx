@@ -1,9 +1,9 @@
+import { View } from "effect-frame/view";
 import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
 import { Effect } from "effect";
-import { render } from "effect-frame/view";
 import { describe, expect, it } from "effect-bun-test";
 import { routes } from "../src/routes.js";
 import { click, has, mountApp, settle, tappedHost, textOf } from "./fixture.js";
@@ -113,7 +113,7 @@ describe("readiness on the overview (#16)", () => {
         expect(has(app.root, "#funnel-card")).toBe(false);
         // It stays pending while the funnel's read is held.
         yield* Effect.sleep("150 millis");
-        yield* render;
+        yield* View.flush;
         expect([has(app.root, "#skeleton"), has(app.root, "#shell")]).toEqual([true, false]);
         // The card was built while the scope was pending: it never reached the page.
         yield* Effect.sync(() => note(observer.takeRecords()));

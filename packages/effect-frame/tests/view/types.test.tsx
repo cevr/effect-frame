@@ -1,11 +1,12 @@
 import type { QueryState } from "effect-frame/actor";
-import type { ErroredScope, Host, LoadingScope } from "effect-frame/view";
+import type { Host, Node as ViewNode } from "effect-frame/view";
 import type { MatchNode } from "../../src/view/jsx-runtime.js";
-import { For, Loading, Match, View, mount, orErrored, ready } from "effect-frame/view";
+import { For, Match, View } from "effect-frame/view";
 import { Source } from "effect-frame/actor";
 import type { Scope } from "effect";
 import { Context, Effect, Schema } from "effect";
 import { describe, expect, test } from "bun:test";
+import type * as ViewEntryModule from "effect-frame/view";
 
 /**
  * Compile-time checks. A view's setup is an ordinary Effect, so what it can
@@ -45,9 +46,9 @@ const NeedsClock = (_props: NoProps) =>
 
 const MayFail = (_props: NoProps) => Effect.fail(Offline.make());
 
-const mountPlain = () => mount(Plain, noProps, host, "root");
-const mountNeedsClock = () => mount(NeedsClock, noProps, host, "root");
-const mountMayFail = () => mount(MayFail, noProps, host, "root");
+const mountPlain = () => View.mount(Plain, noProps, host, "root");
+const mountNeedsClock = () => View.mount(NeedsClock, noProps, host, "root");
+const mountMayFail = () => View.mount(MayFail, noProps, host, "root");
 
 /** A plain view needs only the Scope that owns its nodes. */
 const plainNeedsOnlyScope: Equals<
@@ -86,17 +87,17 @@ describe("view types", () => {
  */
 const readyOutsideAScope = (_props: NoProps) =>
   Effect.gen(function* () {
-    const title = yield* ready(query, "");
+    const title = yield* View.ready(query, "");
     return <h1>{View.bind(title)}</h1>;
   });
 
 /** Mounting it demands `LoadingScope`, which `mount` does not provide. */
 const readyNeedsLoadingScope: Equals<
   ReturnType<typeof mountReadyOutside>,
-  Effect.Effect<void, never, LoadingScope | Scope.Scope>
+  Effect.Effect<void, never, View.LoadingScope | Scope.Scope>
 > = true;
 
-const mountReadyOutside = () => mount(readyOutsideAScope, noProps, host, "root");
+const mountReadyOutside = () => View.mount(readyOutsideAScope, noProps, host, "root");
 
 /**
  * The ticket's central claim, stated as a type rather than as a suppressed
@@ -118,10 +119,10 @@ const readyOutsideIsNotRunnable: Equals<
 > = true;
 
 /** `Loading` discharges the scope it provides, and leaks nothing. */
-const wrapped = Loading({
+const wrapped = View.loading({
   fallback: <p>loading</p>,
-  children: Effect.gen(function* () {
-    const title = yield* ready(query, "");
+  content: Effect.gen(function* () {
+    const title = yield* View.ready(query, "");
     return <h1>{View.bind(title)}</h1>;
   }),
 });
@@ -131,27 +132,27 @@ const loadingDischargesItsScope: Equals<
   Effect.Effect<void, never, Scope.Scope>
 > = true;
 
-const mountWrapped = () => mount(() => wrapped, {}, host, "root");
+const mountWrapped = () => View.mount(() => wrapped, {}, host, "root");
 
 /**
  * `orErrored` requires `ErroredScope` separately, so a `Loading` with no
  * `Errored` above it still compiles. Only a query whose failure someone must
  * show pays for an error boundary.
  */
-const wrappedWithError = Loading({
+const wrappedWithError = View.loading({
   fallback: <p>loading</p>,
-  children: Effect.gen(function* () {
-    const title = yield* ready(yield* orErrored(query), "");
+  content: Effect.gen(function* () {
+    const title = yield* View.ready(yield* View.orErrored(query), "");
     return <h1>{View.bind(title)}</h1>;
   }),
 });
 
 const orErroredKeepsItsOwnRequirement: Equals<
   ReturnType<typeof mountWrappedWithError>,
-  Effect.Effect<void, never, ErroredScope | Scope.Scope>
+  Effect.Effect<void, never, View.ErroredScope | Scope.Scope>
 > = true;
 
-const mountWrappedWithError = () => mount(() => wrappedWithError, {}, host, "root");
+const mountWrappedWithError = () => View.mount(() => wrappedWithError, {}, host, "root");
 
 describe("readiness types", () => {
   test("ready requires a scope the compiler must see provided", () => {
@@ -219,3 +220,39 @@ const inlineSelect = () => (
   </For>
 );
 void inlineSelect;
+
+// ---------------------------------------------------------------------------
+// The kind rule of effect-frame/view
+// ---------------------------------------------------------------------------
+
+type ViewEntry = typeof ViewEntryModule;
+
+/** The namespaces of the entry: every function and Effect lives in one. */
+type EntryNamespaces = "View" | "Dom" | "Html" | "Remote";
+
+type ValueKeys = keyof ViewEntry & string;
+
+/** A flat lowercase value would be a function outside a namespace. */
+type LowercaseKeys = { [K in ValueKeys]: K extends Capitalize<K> ? never : K }[ValueKeys];
+
+/** Every other flat PascalCase value must be a JSX tag: sync, returns a `Node`. */
+type TagKeys = Exclude<ValueKeys, LowercaseKeys | EntryNamespaces>;
+
+type IsTag<F> = F extends (props: never) => infer Out
+  ? [Out] extends [ViewNode]
+    ? true
+    : false
+  : false;
+
+const noFlatFunction: Equals<LowercaseKeys, never> = true;
+const everyFlatValueIsATag: Equals<{ [K in TagKeys]: IsTag<ViewEntry[K]> }[TagKeys], true> = true;
+/** The tags, named, so a new flat value is a decision this file records. */
+const theTags: Equals<TagKeys, "Await" | "For" | "Match" | "Portal" | "Show"> = true;
+
+describe("the view entry's kind rule", () => {
+  test("a flat PascalCase value is a tag or a namespace; functions live in View", () => {
+    expect(noFlatFunction).toBe(true);
+    expect(everyFlatValueIsATag).toBe(true);
+    expect(theTags).toBe(true);
+  });
+});

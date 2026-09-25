@@ -4,7 +4,7 @@ registerDom();
 
 import { Behavior, implementTransparent } from "effect-frame/actor";
 import { Generated, contract, ref } from "effect-frame/actor/client";
-import { Dom, Html, View, mount, render } from "effect-frame/view";
+import { Dom, Html, View } from "effect-frame/view";
 import {
   Deferred,
   Effect,
@@ -128,8 +128,8 @@ const hydrated = (page: (props: NoProps) => ReturnType<ReturnType<typeof heldFor
     const html = yield* Effect.scoped(Html.renderToString(page, noProps));
     const main = yield* install(html);
     const hydration = Dom.hydrate(main);
-    yield* mount(page, noProps, hydration.host, main);
-    yield* render;
+    yield* View.mount(page, noProps, hydration.host, main);
+    yield* View.flush;
     expect(yield* hydration.finish).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
     return {
       rendered: hiddenValue(html, "note", "$command"),

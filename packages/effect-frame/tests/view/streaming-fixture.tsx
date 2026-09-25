@@ -10,7 +10,7 @@ import {
 } from "effect-frame/actor";
 import type { ActorTransport, QueryFailure, QueryState } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
-import { Dom, Html, Loading, View, mount, ready, render } from "effect-frame/view";
+import { Dom, Html, View } from "effect-frame/view";
 import type { Context, Scope } from "effect";
 import { Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
 
@@ -92,9 +92,9 @@ export interface PageProps {
 export const Page = (props: PageProps) =>
   Effect.gen(function* () {
     const scopes = yield* Effect.forEach(props.ids, (id) =>
-      Loading({
+      View.loading({
         fallback: <p id={`pending-${id}`}>{`loading ${id}`}</p>,
-        children: Effect.gen(function* () {
+        content: Effect.gen(function* () {
           const entry = yield* useQuery(Label, { id });
           if ((props.awaited ?? []).includes(id)) {
             yield* entry.state.changes.pipe(
@@ -103,7 +103,7 @@ export const Page = (props: PageProps) =>
               Stream.runDrain,
             );
           }
-          const value = yield* ready(entry.state, { label: "?" });
+          const value = yield* View.ready(entry.state, { label: "?" });
           return <p id={`label-${id}`}>{View.bind(value, (found) => found.label)}</p>;
         }),
       }),
@@ -255,7 +255,7 @@ export const hydrateWith = (client: Side, mounting: Mounting) =>
     const resumed = yield* Streaming.resume(records);
     const hydration = Dom.hydrate(root);
     yield* mounting(hydration.host, root);
-    yield* render;
+    yield* View.flush;
     const report = yield* hydration.finish;
     // As the documented client does: a read a seed calls for starts now.
     yield* resumed.hydrated;
@@ -267,7 +267,7 @@ export const hydrateClient = (
   client: Side,
   ids: ReadonlyArray<string>,
   awaited: ReadonlyArray<string> = [],
-) => hydrateWith(client, (host, root) => mount(Page, { ids, awaited }, host, root));
+) => hydrateWith(client, (host, root) => View.mount(Page, { ids, awaited }, host, root));
 
 /** The client cache's state for one id, through the entry the view declared. */
 export const stateOf = (client: Side, id: string) =>
@@ -337,11 +337,11 @@ export const Moving = (props: { readonly mover: Mover }) =>
       }),
       changes: Stream.never,
     };
-    const held = yield* Loading({
+    const held = yield* View.loading({
       fallback: <p id="held-pending">loading</p>,
-      children: Effect.gen(function* () {
+      content: Effect.gen(function* () {
         const found = yield* useQuery(Label, { id: "held" });
-        const value = yield* ready(found.state, { label: "?" });
+        const value = yield* View.ready(found.state, { label: "?" });
         return <p id="held">{View.bind(value, (one) => one.label)}</p>;
       }),
     });

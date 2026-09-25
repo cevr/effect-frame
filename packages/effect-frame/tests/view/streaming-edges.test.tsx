@@ -13,7 +13,7 @@ import {
 import type { ActorTransport } from "effect-frame/actor";
 import type { Node } from "effect-frame/view";
 import type { Scope } from "effect";
-import { Errored, Html, Loading, View, mount, orErrored, ready } from "effect-frame/view";
+import { Html, View } from "effect-frame/view";
 import { Deferred, Effect, Fiber, Option, Schema, Stream, SubscriptionRef } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import {
@@ -65,7 +65,7 @@ const labelOf = (id: string, awaited: boolean) =>
     if (awaited) {
       entry = yield* settled(id);
     }
-    const value = yield* ready(entry.state, { label: "?" });
+    const value = yield* View.ready(entry.state, { label: "?" });
     return <p id={`label-${id}`}>{View.bind(value, (found) => found.label)}</p>;
   });
 
@@ -137,10 +137,10 @@ describe("a declaration the render releases before it settles", () => {
 /** Two boundaries side by side, then a footer. The first one's fallback draws nothing. */
 const EmptyFallback = () =>
   Effect.gen(function* () {
-    const first = yield* Loading({ fallback: <></>, children: labelOf("a", false) });
-    const second = yield* Loading({
+    const first = yield* View.loading({ fallback: <></>, content: labelOf("a", false) });
+    const second = yield* View.loading({
       fallback: <p id="pending-b">loading b</p>,
-      children: labelOf("b", false),
+      content: labelOf("b", false),
     });
     return (
       <section>
@@ -154,17 +154,17 @@ const EmptyFallback = () =>
 /** Two boundaries side by side. The first one's content draws nothing. */
 const EmptyContent = () =>
   Effect.gen(function* () {
-    const first = yield* Loading({
+    const first = yield* View.loading({
       fallback: <p id="pending-a">loading a</p>,
-      children: Effect.gen(function* () {
+      content: Effect.gen(function* () {
         const entry = yield* settled("a");
-        yield* ready(entry.state, { label: "?" });
+        yield* View.ready(entry.state, { label: "?" });
         return <></>;
       }),
     });
-    const second = yield* Loading({
+    const second = yield* View.loading({
       fallback: <p id="pending-b">loading b</p>,
-      children: labelOf("b", false),
+      content: labelOf("b", false),
     });
     return (
       <section>
@@ -184,7 +184,7 @@ describe("boundaries side by side", () => {
       yield* append(lateRecord(idOf("a"), "Alpha"));
       const client = yield* sideOf(makeControl({}));
       const { report, root } = yield* hydrateWith(client, (host, at) =>
-        mount(EmptyFallback, {}, host, at),
+        View.mount(EmptyFallback, {}, host, at),
       );
       expect(sectionOf(root)).toBe(
         '<p id="label-a">Alpha</p><p id="pending-b">loading b</p><footer id="foot">foot</footer>',
@@ -198,7 +198,7 @@ describe("boundaries side by side", () => {
       yield* firstChunkOf(streamed(EmptyContent), { a: "Alpha", b: "Beta" }, ["b"]);
       const client = yield* sideOf(makeControl({}));
       const { report, root } = yield* hydrateWith(client, (host, at) =>
-        mount(EmptyContent, {}, host, at),
+        View.mount(EmptyContent, {}, host, at),
       );
       expect(sectionOf(root)).toBe(
         '<p id="pending-b">loading b</p><footer id="foot">foot</footer>',
@@ -211,12 +211,12 @@ describe("boundaries side by side", () => {
 /** A boundary whose whole fallback is another boundary, which shows its content. */
 const FallbackIsBoundary = () =>
   Effect.gen(function* () {
-    const outer = yield* Loading({
-      fallback: yield* Loading({
+    const outer = yield* View.loading({
+      fallback: yield* View.loading({
         fallback: <p id="pending-inner">inner</p>,
-        children: labelOf("inner", true),
+        content: labelOf("inner", true),
       }),
-      children: labelOf("outer", false),
+      content: labelOf("outer", false),
     });
     return (
       <section>
@@ -229,18 +229,18 @@ const FallbackIsBoundary = () =>
 /** A boundary whose fallback is a node, then another boundary. */
 const FallbackHoldsBoundary = () =>
   Effect.gen(function* () {
-    const inner = yield* Loading({
+    const inner = yield* View.loading({
       fallback: <p id="pending-inner">inner</p>,
-      children: labelOf("inner", false),
+      content: labelOf("inner", false),
     });
-    const outer = yield* Loading({
+    const outer = yield* View.loading({
       fallback: (
         <>
           <p id="x">x</p>
           {inner}
         </>
       ),
-      children: labelOf("outer", false),
+      content: labelOf("outer", false),
     });
     return (
       <section>
@@ -259,7 +259,7 @@ describe("a boundary inside a fallback", () => {
       yield* append(lateRecord(idOf("outer"), "Outer"));
       const client = yield* sideOf(makeControl({}));
       const { report, root } = yield* hydrateWith(client, (host, at) =>
-        mount(FallbackIsBoundary, {}, host, at),
+        View.mount(FallbackIsBoundary, {}, host, at),
       );
       expect(sectionOf(root)).toBe('<p id="label-outer">Outer</p><footer id="foot">foot</footer>');
       expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 1 });
@@ -275,7 +275,7 @@ describe("a boundary inside a fallback", () => {
       yield* append(lateRecord(idOf("outer"), "Outer"));
       const client = yield* sideOf(makeControl({}));
       const { report, root } = yield* hydrateWith(client, (host, at) =>
-        mount(FallbackHoldsBoundary, {}, host, at),
+        View.mount(FallbackHoldsBoundary, {}, host, at),
       );
       expect(sectionOf(root)).toBe('<p id="label-outer">Outer</p><footer id="foot">foot</footer>');
       expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 1 });
@@ -292,7 +292,7 @@ describe("a boundary inside a fallback", () => {
       yield* append(lateRecord(idOf("inner"), "Inner"));
       const client = yield* sideOf(makeControl({}, ["outer"]));
       const { report, root } = yield* hydrateWith(client, (host, at) =>
-        mount(FallbackHoldsBoundary, {}, host, at),
+        View.mount(FallbackHoldsBoundary, {}, host, at),
       );
       expect(sectionOf(root)).toBe(
         '<p id="x">x</p><p id="label-inner">Inner</p><footer id="foot">foot</footer>',
@@ -305,9 +305,9 @@ describe("a boundary inside a fallback", () => {
 /** One boundary for `a`. The document also carries a settled `c` no view declares. */
 const OnlyA = () =>
   Effect.gen(function* () {
-    const boundary = yield* Loading({
+    const boundary = yield* View.loading({
       fallback: <p id="pending-a">loading a</p>,
-      children: labelOf("a", false),
+      content: labelOf("a", false),
     });
     return <section>{boundary}</section>;
   });
@@ -321,7 +321,7 @@ describe("a seed no view took", () => {
       yield* append(lateRecord(idOf("c"), "Old"));
       const clientControl = makeControl({ c: "Fresh" });
       const client = yield* sideOf(clientControl);
-      const { resumed } = yield* hydrateWith(client, (host, at) => mount(OnlyA, {}, host, at));
+      const { resumed } = yield* hydrateWith(client, (host, at) => View.mount(OnlyA, {}, host, at));
       yield* resumed.hydrated;
       expect(clientControl.calls).toEqual([]);
 
@@ -350,13 +350,13 @@ describe("a seed failure", () => {
     Effect.gen(function* () {
       const TwoLabels = () =>
         Effect.gen(function* () {
-          const first = yield* Loading({
+          const first = yield* View.loading({
             fallback: <p id="pending-a">a</p>,
-            children: labelOf("a", false),
+            content: labelOf("a", false),
           });
-          const second = yield* Loading({
+          const second = yield* View.loading({
             fallback: <p id="pending-b">b</p>,
-            children: labelOf("b", false),
+            content: labelOf("b", false),
           });
           return (
             <section>
@@ -382,7 +382,7 @@ describe("a seed failure", () => {
       });
       const clientControl = makeControl({ a: "Alpha", b: "Beta" });
       const client = yield* sideOf(clientControl);
-      yield* hydrateWith(client, (host, at) => mount(TwoLabels, {}, host, at));
+      yield* hydrateWith(client, (host, at) => View.mount(TwoLabels, {}, host, at));
       yield* eventually("a read again", () => textOf("#label-a") === "Alpha");
       expect(clientControl.calls).toEqual(["a"]);
       const b = yield* stateOf(client, "b");
@@ -406,7 +406,9 @@ describe("an AwaitAll document with a time limit", () => {
         const clientControl = makeControl({ a: "Alpha, read by the client" });
         const client = yield* sideOf(clientControl);
         yield* install(html);
-        const { report } = yield* hydrateWith(client, (host, at) => mount(OnlyA, {}, host, at));
+        const { report } = yield* hydrateWith(client, (host, at) =>
+          View.mount(OnlyA, {}, host, at),
+        );
         expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
         yield* eventually(
           "the client read",
@@ -420,14 +422,16 @@ describe("an AwaitAll document with a time limit", () => {
 /** A boundary whose query stays open on both sides, holding a boundary in its content; then `c`. */
 const HiddenInner = () =>
   Effect.gen(function* () {
-    const outer = yield* Loading({
+    const outer = yield* View.loading({
       fallback: <p id="pending-o">loading o</p>,
-      children: Effect.gen(function* () {
-        const inner = yield* Loading({
+      content: Effect.gen(function* () {
+        const inner = yield* View.loading({
           fallback: <p id="pending-i">loading i</p>,
-          children: labelOf("i", false),
+          content: labelOf("i", false),
         });
-        const value = yield* ready((yield* useQuery(Label, { id: "o" })).state, { label: "?" });
+        const value = yield* View.ready((yield* useQuery(Label, { id: "o" })).state, {
+          label: "?",
+        });
         return (
           <div>
             <p id="label-o">{View.bind(value, (found) => found.label)}</p>
@@ -436,9 +440,9 @@ const HiddenInner = () =>
         );
       }),
     });
-    const last = yield* Loading({
+    const last = yield* View.loading({
       fallback: <p id="pending-c">loading c</p>,
-      children: labelOf("c", false),
+      content: labelOf("c", false),
     });
     return (
       <section>
@@ -457,7 +461,7 @@ describe("a boundary inside hidden content", () => {
       yield* append(lateRecord(idOf("c"), "C"));
       const client = yield* sideOf(makeControl({}, ["o", "i"]));
       const { report, root } = yield* hydrateWith(client, (host, at) =>
-        mount(HiddenInner, {}, host, at),
+        View.mount(HiddenInner, {}, host, at),
       );
       expect(sectionOf(root)).toBe(
         '<p id="pending-o">loading o</p><p id="label-c">C</p><footer id="foot">foot</footer>',
@@ -470,13 +474,13 @@ describe("a boundary inside hidden content", () => {
 /** A loading boundary inside an error boundary, over one query. */
 const Guarded = () =>
   Effect.gen(function* () {
-    const boundary = yield* Errored({
+    const boundary = yield* View.errored({
       fallback: () => <p id="error">error</p>,
-      children: Loading({
+      content: View.loading({
         fallback: <p id="pending">loading</p>,
-        children: Effect.gen(function* () {
+        content: Effect.gen(function* () {
           const entry = yield* useQuery(Label, { id: "a" });
-          const value = yield* ready(yield* orErrored(entry.state), { label: "?" });
+          const value = yield* View.ready(yield* View.orErrored(entry.state), { label: "?" });
           return <p id="label-a">{View.bind(value, (found) => found.label)}</p>;
         }),
       }),
@@ -503,7 +507,7 @@ describe("an error the document settled before hydration", () => {
       });
       const client = yield* sideOf(makeControl({}));
       const { report, root } = yield* hydrateWith(client, (host, at) =>
-        mount(Guarded, {}, host, at),
+        View.mount(Guarded, {}, host, at),
       );
       expect(sectionOf(root)).toBe('<p id="error">error</p><footer id="foot">foot</footer>');
       expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 1 });
@@ -517,7 +521,7 @@ describe("a seed that settles after a client read", () => {
       yield* firstChunkOf(streamed(OnlyA), { a: "Alpha" }, ["a"]);
       const clientControl = makeControl({ a: "Fresh" });
       const client = yield* sideOf(clientControl);
-      const { resumed } = yield* hydrateWith(client, (host, at) => mount(OnlyA, {}, host, at));
+      const { resumed } = yield* hydrateWith(client, (host, at) => View.mount(OnlyA, {}, host, at));
       // The client reads `a` itself while the document still holds it open.
       yield* Effect.gen(function* () {
         const cache = yield* QueryCache;
@@ -539,13 +543,13 @@ describe("a seed that settles after a client read", () => {
 /** Two boundaries, over `a` and `b`. */
 const TwoLabels = () =>
   Effect.gen(function* () {
-    const first = yield* Loading({
+    const first = yield* View.loading({
       fallback: <p id="pending-a">a</p>,
-      children: labelOf("a", false),
+      content: labelOf("a", false),
     });
-    const second = yield* Loading({
+    const second = yield* View.loading({
       fallback: <p id="pending-b">b</p>,
-      children: labelOf("b", false),
+      content: labelOf("b", false),
     });
     return (
       <section>
@@ -561,7 +565,9 @@ describe("Resumed.closed", () => {
       yield* firstChunkOf(streamed(TwoLabels), { a: "Alpha", b: "Beta" }, ["a", "b"]);
       // The client's own read of `b` is held, so `StreamEnded` is what it shows.
       const client = yield* sideOf(makeControl({ b: "Beta" }, ["b"]));
-      const { resumed } = yield* hydrateWith(client, (host, at) => mount(TwoLabels, {}, host, at));
+      const { resumed } = yield* hydrateWith(client, (host, at) =>
+        View.mount(TwoLabels, {}, host, at),
+      );
       yield* append(lateRecord(idOf("a"), "Alpha"));
       yield* append({ _tag: "Closed", patched: [idOf("a")] });
       yield* resumed.closed;
@@ -576,9 +582,9 @@ describe("Resumed.closed", () => {
 /** A boundary over a list whose rows each read a query. */
 const Listed = () =>
   Effect.gen(function* () {
-    const boundary = yield* Loading({
+    const boundary = yield* View.loading({
       fallback: <p id="pending">loading</p>,
-      children: Effect.gen(function* () {
+      content: Effect.gen(function* () {
         const rows = yield* View.list({
           each: { get: Effect.succeed(["a", "b"]), changes: Stream.empty },
           keyBy: (id) => id,
@@ -586,7 +592,7 @@ const Listed = () =>
             Effect.gen(function* () {
               const id = yield* item.get;
               const entry = yield* useQuery(Label, { id });
-              const value = yield* ready(entry.state, { label: "?" });
+              const value = yield* View.ready(entry.state, { label: "?" });
               return <li id={`label-${id}`}>{View.bind(value, (found) => found.label)}</li>;
             }),
         });
@@ -681,7 +687,9 @@ describe("a list row whose setup ends after the frame", () => {
 
       const clientControl = makeControl({ b: "Beta" });
       const client = yield* sideOf(clientControl);
-      const { report } = yield* hydrateWith(client, (host, at) => mount(LateRow, {}, host, at));
+      const { report } = yield* hydrateWith(client, (host, at) =>
+        View.mount(LateRow, {}, host, at),
+      );
       expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
       yield* eventually("the late row", () => textOf("#row-b") === "Ready");
       expect(clientControl.calls).toEqual(["b"]);

@@ -9,7 +9,7 @@ import {
 } from "effect-frame/actor/client";
 import { Location, mount } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
-import { Dom, render } from "effect-frame/view";
+import { Dom, View } from "effect-frame/view";
 import { Context, Deferred, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
 import { hostWith } from "../src/host.server.js";
 import { ScanTime, queries } from "../src/queries.server.js";
@@ -331,7 +331,7 @@ export const mountApp = Effect.fn("test.mountApp")(function* <R>(options: {
     host: Dom.host,
     root,
   }).pipe(Effect.provideService(Location, location), Effect.provideContext(client));
-  yield* render;
+  yield* View.flush;
   const run = <A, E, R2>(
     effect: Effect.Effect<A, E, R2>,
   ): Effect.Effect<A, E, Exclude<R2, QueryCache | ActorTransport>> =>
@@ -360,7 +360,7 @@ export const settle = Effect.fn("test.settle")(function* (
   check: Effect.Effect<boolean>,
   what = "the awaited state",
 ) {
-  yield* Effect.repeat(Effect.andThen(Effect.sleep("25 millis"), render), {
+  yield* Effect.repeat(Effect.andThen(Effect.sleep("25 millis"), View.flush), {
     while: () => Effect.map(check, (done) => !done),
     times: 80,
   });

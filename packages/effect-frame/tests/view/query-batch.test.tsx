@@ -18,7 +18,7 @@ import {
 } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
 import { HttpTransport } from "effect-frame/actor/client";
-import { Dom, View, mount } from "effect-frame/view";
+import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import { Deferred, Effect, Exit, Layer, Option, Ref, Schema, Sink, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -215,7 +215,7 @@ describe("View.list and declared query batches", () => {
         host: Dom.host,
         root,
         setup: (host, mountRoot) =>
-          mount(Rows, { items: items.state, disposal: Option.none() }, host, mountRoot),
+          View.mount(Rows, { items: items.state, disposal: Option.none() }, host, mountRoot),
       });
       yield* Deferred.await(started);
       expect(batchRequests).toBe(1);
@@ -264,7 +264,7 @@ describe("View.list and declared query batches", () => {
               host: Dom.host,
               root,
               setup: (host, mountRoot) =>
-                mount(
+                View.mount(
                   Rows,
                   { items: items.state, disposal: Option.some({ disposed, allDisposed }) },
                   host,

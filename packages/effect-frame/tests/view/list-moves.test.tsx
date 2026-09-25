@@ -5,7 +5,7 @@ registerDom();
 import { Behavior, Value, spawn } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
 import type { Host } from "effect-frame/view";
-import { Dom, For, Html, View, mount, render } from "effect-frame/view";
+import { Dom, For, Html, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import { Deferred, Effect, Option, Stream, SubscriptionRef } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -114,7 +114,7 @@ describe("a keyed list moves only what moved", () => {
         host,
         root,
         setup: (wrappedHost, mountRoot) =>
-          mount(LabeledKeyed, { items: items.state }, wrappedHost, mountRoot),
+          View.mount(LabeledKeyed, { items: items.state }, wrappedHost, mountRoot),
       });
       expect(idsIn(root)).toEqual(["alpha", "beta", "gamma"]);
       const before = Array.from(root.querySelectorAll("li"));
@@ -165,7 +165,7 @@ describe("a keyed list moves only what moved", () => {
         host,
         root,
         setup: (wrappedHost, mountRoot) =>
-          mount(Keyed, { items: items.state }, wrappedHost, mountRoot),
+          View.mount(Keyed, { items: items.state }, wrappedHost, mountRoot),
       });
       const before = Array.from(root.querySelectorAll("li"));
 
@@ -193,7 +193,7 @@ describe("a keyed list moves only what moved", () => {
         host,
         root,
         setup: (wrappedHost, mountRoot) =>
-          mount(Labeled, { items: items.state }, wrappedHost, mountRoot),
+          View.mount(Labeled, { items: items.state }, wrappedHost, mountRoot),
       });
       const before = new Map(Array.from(root.querySelectorAll("li")).map((li) => [li.id, li]));
       inserted.length = 0;
@@ -220,7 +220,7 @@ describe("a keyed list moves only what moved", () => {
         host: Dom.host,
         root,
         setup: (wrappedHost, mountRoot) =>
-          mount(Labeled, { items: items.state }, wrappedHost, mountRoot),
+          View.mount(Labeled, { items: items.state }, wrappedHost, mountRoot),
       });
       const nodes = new Map(Array.from(root.querySelectorAll("li")).map((li) => [li.id, li]));
 
@@ -264,7 +264,7 @@ describe("a keyed list moves only what moved", () => {
         host: Dom.host,
         root,
         setup: (wrappedHost, mountRoot) =>
-          mount(Followed, { items: items.state }, wrappedHost, mountRoot),
+          View.mount(Followed, { items: items.state }, wrappedHost, mountRoot),
       });
 
       yield* page.act(items.call(Value.Set(["b", "c", "a"])), {
@@ -284,7 +284,7 @@ describe("a keyed list moves only what moved", () => {
         host,
         root,
         setup: (wrappedHost, mountRoot) =>
-          mount(Rows, { items: items.state }, wrappedHost, mountRoot),
+          View.mount(Rows, { items: items.state }, wrappedHost, mountRoot),
       });
       const b = Array.from(root.querySelectorAll("li"))[1];
 
@@ -329,9 +329,9 @@ describe("a mount never adopts another view's rows", () => {
           Effect.when(Deferred.succeed(delivered, value), Effect.succeed(value.length === 2)),
         ),
       };
-      yield* mount(LabeledKeyed, { items: source }, Dom.host, root);
+      yield* View.mount(LabeledKeyed, { items: source }, Dom.host, root);
       yield* settle;
-      yield* render;
+      yield* View.flush;
 
       // The list update is pending in Solid when another view mounts and
       // closes: a server render, for one. That mount's flush must not run the

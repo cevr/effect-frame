@@ -1,7 +1,7 @@
 import { Source } from "effect-frame/actor/client";
 import type { QueryState } from "effect-frame/actor/client";
 import type { Route } from "effect-frame/router";
-import { For, View, orErrored, ready } from "effect-frame/view";
+import { For, View } from "effect-frame/view";
 import { Effect, Option } from "effect";
 import { cancel, fulfil, sender } from "./commands.js";
 import type { TenantInfoValue } from "./commands.js";
@@ -35,7 +35,7 @@ const statusOf = (id: string, rows: ReadonlyArray<Order>): string =>
 export const OrdersLayout = <ChildR,>(props: Route.LayoutPropsOf<typeof orders, ChildR>) =>
   Effect.gen(function* () {
     const book = yield* sender(Orders, props.params, (now) => ({ tenant: now.tenant }));
-    const all = yield* ready(yield* orErrored(props.data.orders.state), { rows: [] });
+    const all = yield* View.ready(yield* View.orErrored(props.data.orders.state), { rows: [] });
     const outlet = yield* props.outlet;
     return (
       <article id="orders-page">
@@ -75,7 +75,7 @@ export const OrdersLayout = <ChildR,>(props: Route.LayoutPropsOf<typeof orders, 
 /** The open orders, oldest first. */
 export const OrdersIndex = (props: Route.PropsOf<typeof ordersIndex>) =>
   Effect.gen(function* () {
-    const detail = yield* ready(yield* orErrored(props.data.detail.state), { rows: [] });
+    const detail = yield* View.ready(yield* View.orErrored(props.data.detail.state), { rows: [] });
     return (
       <ul id="detail">
         <For each={Source.select(detail, (result) => result.rows)} keyBy={(row) => row.id}>
@@ -91,12 +91,12 @@ export const OrdersIndex = (props: Route.PropsOf<typeof ordersIndex>) =>
  */
 export const OrderView = (props: Route.PropsOf<typeof order>) =>
   Effect.gen(function* () {
-    const info = yield* ready(yield* orErrored(props.data.info.state), {
+    const info = yield* View.ready(yield* View.orErrored(props.data.info.state), {
       name: "",
       plan: "",
       alerts: 0,
     });
-    const all = yield* ready(yield* orErrored(props.data.orders.state), { rows: [] });
+    const all = yield* View.ready(yield* View.orErrored(props.data.orders.state), { rows: [] });
     const status = Source.zip(props.params, all, (now, result) => statusOf(now.order, result.rows));
     return (
       <section id="order">

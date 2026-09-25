@@ -1,5 +1,5 @@
+import { View } from "effect-frame/view";
 import { HttpTransport } from "effect-frame/actor/client";
-import { mount, render } from "effect-frame/view";
 import { make as makeHost } from "effect-frame/view/opentui";
 import type { BaseRenderable } from "@opentui/core";
 import { InputRenderable, createCliRenderer } from "@opentui/core";
@@ -34,8 +34,13 @@ const renderer = Effect.acquireRelease(
 
 const start = Effect.gen(function* () {
   const cli = yield* renderer;
-  yield* mount(NotesTerminal, { key: demoKey, resume: Option.none() }, makeHost(cli), cli.root);
-  yield* render;
+  yield* View.mount(
+    NotesTerminal,
+    { key: demoKey, resume: Option.none() },
+    makeHost(cli),
+    cli.root,
+  );
+  yield* View.flush;
   // A terminal input only receives keys while it holds focus.
   yield* Effect.sync(() => void focusInput(cli.root));
   return yield* Effect.never;

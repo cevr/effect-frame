@@ -1,6 +1,6 @@
 import { Behavior, Value, modify, spawn, Source } from "effect-frame/actor";
 import type { LocalActorRef, SetValue } from "effect-frame/actor";
-import { View, mount, render } from "effect-frame/view";
+import { View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import { make as makeHost } from "effect-frame/view/opentui";
 import { InputRenderable, TextNodeRenderable, TextRenderable } from "@opentui/core";
@@ -21,7 +21,7 @@ const makeTerminal = Effect.fn("test.makeTerminal")(function* () {
 
 /** Flush the reactive graph, draw one frame, and read it back. */
 const draw = Effect.fn("test.draw")(function* (setup: TestRendererSetup) {
-  yield* render;
+  yield* View.flush;
   yield* Effect.promise(() => setup.renderOnce());
   return setup.captureCharFrame();
 });
@@ -72,7 +72,7 @@ describe("terminal view", () => {
       const page = yield* ViewTest.make({
         host: makeHost(setup.renderer),
         root: setup.renderer.root,
-        setup: (host, root) => mount(Counter, { count }, host, root),
+        setup: (host, root) => View.mount(Counter, { count }, host, root),
       });
 
       expect(yield* draw(setup)).toContain("count 0");
@@ -92,7 +92,7 @@ describe("terminal view", () => {
     Effect.gen(function* () {
       const setup = yield* makeTerminal();
       const draft = yield* spawn(Behavior.value(""));
-      yield* mount(Composer, { draft }, makeHost(setup.renderer), setup.renderer.root);
+      yield* View.mount(Composer, { draft }, makeHost(setup.renderer), setup.renderer.root);
 
       // A terminal input only receives keys while it holds focus.
       yield* Effect.sync(() => {

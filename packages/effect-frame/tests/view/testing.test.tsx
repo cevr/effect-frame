@@ -16,7 +16,7 @@ import {
 } from "effect-frame/actor";
 import type { QueryState, Source as SourceType } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
-import { Dom, Loading, Query, View, mount, readyWithStale } from "effect-frame/view";
+import { Dom, Await, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import {
   Cause,
@@ -161,7 +161,7 @@ describe("scoped view test harness", () => {
           root,
           setup: (host, mountRoot) =>
             Effect.gen(function* () {
-              yield* mount(
+              yield* View.mount(
                 () => Effect.succeed(<p id="failed-setup">temporary</p>),
                 {},
                 host,
@@ -195,7 +195,7 @@ describe("scoped view test harness", () => {
       const page = yield* ViewTest.make({
         host: Dom.host,
         root,
-        setup: (host, mountRoot) => mount(CountPage, { count: count.state }, host, mountRoot),
+        setup: (host, mountRoot) => View.mount(CountPage, { count: count.state }, host, mountRoot),
       });
 
       expect(countText(root)).toBe("0");
@@ -235,7 +235,7 @@ describe("scoped view test harness", () => {
       }
       const AsyncCountPage = () =>
         Effect.succeed(
-          <Query
+          <Await
             state={source}
             loading={<output id="count">loading</output>}
             ready={(value) => <output id="count">{View.bind(value, String)}</output>}
@@ -245,7 +245,7 @@ describe("scoped view test harness", () => {
       const page = yield* ViewTest.make({
         host: Dom.host,
         root,
-        setup: (host, mountRoot) => mount(AsyncCountPage, {}, host, mountRoot),
+        setup: (host, mountRoot) => View.mount(AsyncCountPage, {}, host, mountRoot),
       });
 
       yield* page.waitFor({
@@ -271,7 +271,7 @@ describe("scoped view test harness", () => {
       const page = yield* ViewTest.make({
         host: Dom.host,
         root,
-        setup: (host, mountRoot) => mount(CountPage, { count: count.state }, host, mountRoot),
+        setup: (host, mountRoot) => View.mount(CountPage, { count: count.state }, host, mountRoot),
       });
 
       yield* page.act(
@@ -302,7 +302,7 @@ describe("scoped view test harness", () => {
         root,
         setup: (host, mountRoot) => {
           observedHost = Option.some(host);
-          return mount(
+          return View.mount(
             CountPage,
             { count: { get: Effect.succeed(0), changes: Stream.empty } },
             host,
@@ -367,13 +367,13 @@ describe("scoped view test harness", () => {
       searchGate = Option.some(gate);
       searchResolved = Option.some(resolved);
       const SearchPage = () =>
-        Loading({
+        View.loading({
           fallback: <p id="loading">loading</p>,
-          children: Effect.gen(function* () {
+          content: Effect.gen(function* () {
             const entry = yield* useQuery(Search, {});
-            yield* readyWithStale(entry.state, "");
+            yield* View.readyWithStale(entry.state, "");
             return (
-              <Query
+              <Await
                 state={entry.state}
                 loading={<p id="query-loading">query-loading</p>}
                 ready={(value) => <p id="result">{View.bind(value)}</p>}
@@ -385,7 +385,7 @@ describe("scoped view test harness", () => {
       const page = yield* ViewTest.make({
         host: Dom.host,
         root,
-        setup: (host, mountRoot) => mount(SearchPage, {}, host, mountRoot),
+        setup: (host, mountRoot) => View.mount(SearchPage, {}, host, mountRoot),
       });
 
       yield* page.waitFor({
@@ -418,7 +418,7 @@ describe("scoped view test harness", () => {
       const page = yield* ViewTest.make({
         host: Dom.host,
         root,
-        setup: (host, mountRoot) => mount(CountPage, { count: count.state }, host, mountRoot),
+        setup: (host, mountRoot) => View.mount(CountPage, { count: count.state }, host, mountRoot),
       });
       const action = Effect.gen(function* () {
         yield* Deferred.succeed(started, void 0);
@@ -454,7 +454,7 @@ describe("scoped view test harness", () => {
         host: Dom.host,
         root,
         setup: (host, mountRoot) =>
-          mount(() => Effect.succeed(<p id="closed">closed</p>), {}, host, mountRoot),
+          View.mount(() => Effect.succeed(<p id="closed">closed</p>), {}, host, mountRoot),
       });
       yield* page.close;
 
@@ -501,7 +501,7 @@ describe("scoped view test harness", () => {
           host: Dom.host,
           root,
           setup: (host, mountRoot) =>
-            mount(() => Effect.succeed(<p id="parent-closed">closed</p>), {}, host, mountRoot),
+            View.mount(() => Effect.succeed(<p id="parent-closed">closed</p>), {}, host, mountRoot),
         }),
         parent,
       );
@@ -565,7 +565,7 @@ describe("scoped view test harness", () => {
       const page = yield* ViewTest.make({
         host: Dom.host,
         root,
-        setup: (host, mountRoot) => mount(EventPage, {}, host, mountRoot),
+        setup: (host, mountRoot) => View.mount(EventPage, {}, host, mountRoot),
       });
 
       yield* page.act(
@@ -606,7 +606,7 @@ describe("scoped view test harness", () => {
         host: trackedHost,
         root,
         setup: (host, mountRoot) =>
-          mount(
+          View.mount(
             () =>
               Effect.succeed(
                 <button id="listener" onClick={View.event(() => Effect.void)}>
@@ -652,7 +652,7 @@ describe("scoped view test harness", () => {
         root,
         setup: (host, mountRoot) =>
           Effect.gen(function* () {
-            const mounted = yield* mount(
+            const mounted = yield* View.mount(
               () => Effect.succeed(<p id="still-mounted">still mounted</p>),
               {},
               host,
@@ -718,7 +718,7 @@ describe("scoped view test harness", () => {
         root,
         setup: (host, mountRoot) => {
           wrapped = Option.some(host);
-          return mount(CountPage, { count: count.state }, host, mountRoot);
+          return View.mount(CountPage, { count: count.state }, host, mountRoot);
         },
       });
 
@@ -741,7 +741,7 @@ describe("scoped view test harness", () => {
         host: Dom.host,
         root,
         setup: (host, mountRoot) =>
-          mount(
+          View.mount(
             CountPage,
             { count: { get: Effect.succeed(0), changes: Stream.empty } },
             host,
@@ -773,7 +773,7 @@ describe("scoped view test harness", () => {
         host: Dom.host,
         root,
         setup: (host, mountRoot) =>
-          mount(
+          View.mount(
             CountPage,
             { count: { get: Effect.succeed(0), changes: Stream.empty } },
             host,
@@ -808,7 +808,7 @@ describe("scoped view test harness", () => {
         root,
         rootId: "no-spin",
         summarizeRoot: () => "x".repeat(4096),
-        setup: (host, mountRoot) => mount(CountPage, { count: count.state }, host, mountRoot),
+        setup: (host, mountRoot) => View.mount(CountPage, { count: count.state }, host, mountRoot),
       });
       const exit = yield* Effect.exit(
         page.waitFor({
@@ -851,7 +851,7 @@ describe("scoped view test harness", () => {
         host: Dom.host,
         root,
         setup: (host, mountRoot) =>
-          mount(
+          View.mount(
             CountPage,
             { count: { get: Effect.succeed(0), changes: Stream.empty } },
             host,
@@ -879,7 +879,7 @@ describe("scoped view test harness", () => {
       const page = yield* ViewTest.make({
         host: Dom.host,
         root,
-        setup: (host, mountRoot) => mount(CountPage, { count: count.state }, host, mountRoot),
+        setup: (host, mountRoot) => View.mount(CountPage, { count: count.state }, host, mountRoot),
       });
       const exit = yield* Effect.exit(
         page.act(Effect.ensuring(Effect.never, Deferred.succeed(interrupted, void 0)), {
@@ -914,12 +914,12 @@ describe("scoped view test harness", () => {
       const firstPage = yield* ViewTest.make({
         host: Dom.host,
         root: firstRoot,
-        setup: (host, mountRoot) => mount(CountPage, { count: first.state }, host, mountRoot),
+        setup: (host, mountRoot) => View.mount(CountPage, { count: first.state }, host, mountRoot),
       });
       const secondPage = yield* ViewTest.make({
         host: Dom.host,
         root: secondRoot,
-        setup: (host, mountRoot) => mount(CountPage, { count: second.state }, host, mountRoot),
+        setup: (host, mountRoot) => View.mount(CountPage, { count: second.state }, host, mountRoot),
       });
       const waiting = yield* firstPage
         .waitFor({
@@ -959,7 +959,8 @@ describe("scoped view test harness", () => {
         const page = yield* ViewTest.make({
           host: Dom.host,
           root,
-          setup: (host, mountRoot) => mount(CountPage, { count: count.state }, host, mountRoot),
+          setup: (host, mountRoot) =>
+            View.mount(CountPage, { count: count.state }, host, mountRoot),
         });
         const before = yield* Clock.currentTimeMillis;
         const exit = yield* Effect.exit(
@@ -1019,7 +1020,7 @@ describe("scoped view test harness", () => {
         const page = yield* ViewTest.make({
           host: Dom.host,
           root,
-          setup: (host, mountRoot) => mount(Page, {}, host, mountRoot),
+          setup: (host, mountRoot) => View.mount(Page, {}, host, mountRoot),
         });
 
         yield* input.set(1);

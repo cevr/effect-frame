@@ -29,7 +29,7 @@ const post = Branch.child(tenant, "post", {
 });
 const tree = Branch.layout(tenant, [Branch.leaf(post, PostView)], (props) =>
   Effect.gen(function* () {
-    const body = yield* Loading({ fallback, children: props.outlet });
+    const body = yield* View.loading({ fallback, content: props.outlet });
     return <section>{body}</section>;
   }),
 );
@@ -50,7 +50,7 @@ const app = Branch.route("app", tree); // one AnyRoute for mountRouter
 - `props.outlet` is an `Effect<Node, never, ChildR>`. It is a delayed setup.
   The layout yields it where the child must be owned. If the layout yields it
   inside `Loading`, the child's `ready` reads register with that Loading. If
-  the layout yields it outside `Loading`, `LoadingScope` stays in the route's
+  the layout yields it outside `View.loading`, `View.LoadingScope` stays in the route's
   requirements and the route does not mount (type fixture).
 - The route's requirement type is the union of every view's requirements and
   `QueryCache | ActorTransport` for the declarations. `Scope` is removed.

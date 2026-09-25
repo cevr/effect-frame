@@ -25,7 +25,7 @@ Root or key removal closes the existing owner and clears its staged writes.
 Ordinary `Show` continues to close its branch on hide.
 
 The boundary keeps the existing type channels. `Loading` and `Errored` still
-return `Effect<Node, E, Exclude<R, LoadingScope | ErroredScope>>`. `ready`,
+return `Effect<Node, E, Exclude<R, LoadingScope | ErroredScope>>` (`View.loading`, `View.errored`). `View.ready`,
 `orErrored`, and `View.list` keep their existing `R` and `Scope` requirements.
 No public retained constructor was added. The optional detached host
 capability is part of the generic `Host` contract and is preserved by the

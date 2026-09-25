@@ -1,10 +1,10 @@
+import { View } from "effect-frame/view";
 import { platformFetch, registerDom } from "./dom-setup.js";
 
 registerDom();
 
 import { serverOnly } from "effect-frame/actor";
 import { CommandId, Form, ref } from "effect-frame/actor/client";
-import { mount, render } from "effect-frame/view";
 import { make as makeTuiHost } from "effect-frame/view/opentui";
 import type { TestRendererSetup } from "@opentui/core/testing";
 import { createTestRenderer } from "@opentui/core/testing";
@@ -41,7 +41,7 @@ const inbox = "/lists/inbox/print";
 
 /** Flush the reactive graph, draw one terminal frame, and read it back. */
 const draw = Effect.fn("test.draw")(function* (setup: TestRendererSetup) {
-  yield* render;
+  yield* View.flush;
   yield* Effect.promise(() => setup.renderOnce());
   return setup.captureCharFrame();
 });
@@ -110,7 +110,7 @@ describe("notes end to end", () => {
 
       const terminal = yield* (yield* clientOf(server.url))(
         Effect.andThen(
-          mount(
+          View.mount(
             NotesTerminal,
             { key: demoKey, resume: Option.none() },
             makeTuiHost(setup.renderer),

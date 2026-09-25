@@ -6,7 +6,7 @@ import { Streaming, followQuery, useQuery } from "effect-frame/actor";
 import type { ActorTransport, QueryCache, QueryFailure, QueryState } from "effect-frame/actor";
 import { Source } from "effect-frame/actor/client";
 import type { Node } from "effect-frame/view";
-import { Html, Loading, View, mount, ready, readyWithStale } from "effect-frame/view";
+import { Html, View } from "effect-frame/view";
 import type { Scope } from "effect";
 import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -86,11 +86,11 @@ const Following = (props: { readonly waits: boolean }): Drawn =>
 
 /** A `Loading` boundary whose value goes through three steps each side of `ready`. */
 const Bounded = (): Drawn =>
-  Loading({
+  View.loading({
     fallback: <p id="pending">loading</p>,
-    children: Effect.gen(function* () {
+    content: Effect.gen(function* () {
       const followed = yield* followQuery(Label, constant(Option.some({ id: "a" })));
-      const value = yield* ready(through(followed.state, 3), { label: "?" });
+      const value = yield* View.ready(through(followed.state, 3), { label: "?" });
       return <p id="state">{View.bind(through(value, 3), (found) => found.label)}</p>;
     }),
   });
@@ -119,7 +119,7 @@ describe("an AwaitAll drawing and its seed", () => {
         const client = yield* sideOf(clientControl);
         yield* install(html);
         const { report, resumed } = yield* hydrateWith(client, (host, root) =>
-          mount(Following, { waits: false }, host, root),
+          View.mount(Following, { waits: false }, host, root),
         );
         yield* resumed.closed;
         expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
@@ -158,7 +158,7 @@ describe("an AwaitAll drawing and its seed", () => {
         const client = yield* sideOf(makeControl({}));
         yield* install(html);
         const { report } = yield* hydrateWith(client, (host, root) =>
-          mount(Bounded, {}, host, root),
+          View.mount(Bounded, {}, host, root),
         );
         expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
       }),
@@ -186,7 +186,7 @@ describe("a streamed shell and its settled patches", () => {
         yield* parsing;
         yield* install(first);
         const { report } = yield* hydrateWith(client, (host, root) =>
-          mount(Following, { waits: true }, host, root),
+          View.mount(Following, { waits: true }, host, root),
         );
         expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
       }),
@@ -199,7 +199,7 @@ describe("an SSR drawing and its seed", () => {
       const server = yield* sideOf(makeControl({ a: "Alpha" }));
       const html = yield* Effect.provideContext(
         renderSeeded(
-          (host, root) => mount(Following, { waits: true }, host, root),
+          (host, root) => View.mount(Following, { waits: true }, host, root),
           frame,
           { closeWhen: Effect.never },
           requestCache,
@@ -218,9 +218,9 @@ describe("an SSR drawing and its seed", () => {
  * round 1, finding 2).
  */
 const Overridden = (props: { readonly server: boolean; readonly pause?: boolean }): Drawn =>
-  Loading({
+  View.loading({
     fallback: <p id="pending">loading</p>,
-    children: Effect.gen(function* () {
+    content: Effect.gen(function* () {
       yield* settled("a");
       const entry = yield* useQuery(Label, { id: "a" });
       if (props.server) {
@@ -230,7 +230,7 @@ const Overridden = (props: { readonly server: boolean; readonly pause?: boolean 
       if (props.pause === true) {
         yield* Effect.sleep("30 millis");
       }
-      const value = yield* readyWithStale(entry.state, { label: "?" });
+      const value = yield* View.readyWithStale(entry.state, { label: "?" });
       return (
         <p id="state">
           {View.bind(value, (found) => `${found.value.label}:${String(found.stale)}`)}
@@ -254,7 +254,7 @@ describe("a value the server shows stale", () => {
       const client = yield* sideOf(clientControl);
       yield* install(html);
       const { report } = yield* hydrateWith(client, (host, root) =>
-        mount(Overridden, { server: false }, host, root),
+        View.mount(Overridden, { server: false }, host, root),
       );
       expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
       expect(textOf("#state")).toBe("Draft:true");
@@ -279,7 +279,7 @@ describe("a value the server shows stale", () => {
         const client = yield* sideOf(clientControl);
         yield* install(html);
         const { report } = yield* hydrateWith(client, (host, root) =>
-          mount(Overridden, { server: false, pause: true }, host, root),
+          View.mount(Overridden, { server: false, pause: true }, host, root),
         );
         expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
         yield* eventually("the fresh value", () => textOf("#state") === "Alpha:false");
@@ -333,7 +333,12 @@ describe("records that change on every pass", () => {
         // SSR's seed holds only settled values, and no row's query settles:
         // its reads agree, and the document it writes is coherent.
         const seeded = yield* Effect.provideContext(
-          renderSeeded((host, root) => mount(Restless, {}, host, root), frame, limit, requestCache),
+          renderSeeded(
+            (host, root) => View.mount(Restless, {}, host, root),
+            frame,
+            limit,
+            requestCache,
+          ),
           server,
         );
         expect(seeded).toContain("</html>");
@@ -357,7 +362,7 @@ const coherentOrRefused = (written: Exit.Exit<string, Html.RecordsUnsettled>) =>
     const client = yield* sideOf(makeControl({ a: "Alpha" }, ["a", "held"]));
     yield* install(written.value);
     const { report } = yield* hydrateWith(client, (host, root) =>
-      mount(Moving, { mover: { on: false, moves: 0 } }, host, root),
+      View.mount(Moving, { mover: { on: false, moves: 0 } }, host, root),
     );
     expect(report.mismatches).toEqual([]);
     return "coherent";
@@ -409,7 +414,7 @@ describe("a query that moves in the final pass", () => {
         const seeded = yield* Effect.exit(
           Effect.provideContext(
             renderSeeded(
-              (host, root) => mount(Moving, { mover: seeding }, host, root),
+              (host, root) => View.mount(Moving, { mover: seeding }, host, root),
               frame,
               { closeWhen: Effect.void },
               requestCache,

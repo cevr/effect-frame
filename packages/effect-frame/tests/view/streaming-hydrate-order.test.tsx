@@ -4,17 +4,7 @@ registerDom();
 
 import { QueryCache, Streaming, useQuery, QueryState } from "effect-frame/actor";
 import type { ActorTransport } from "effect-frame/actor";
-import {
-  Errored,
-  Html,
-  Loading,
-  Query,
-  View,
-  mount,
-  orErrored,
-  ready,
-  render,
-} from "effect-frame/view";
+import { Html, Await, View } from "effect-frame/view";
 import { Deferred, Effect, Option, Stream } from "effect";
 import type { Scope } from "effect";
 import type { Node } from "effect-frame/view";
@@ -108,7 +98,7 @@ const Branches = (props: { readonly id: string }) =>
     const entry = yield* useQuery(Label, { id: props.id });
     return (
       <section>
-        <Query
+        <Await
           state={entry.state}
           loading={
             <ul class="results" aria-busy="true">
@@ -140,11 +130,11 @@ const Beside = (props: { readonly id: string }) =>
       }
       return "searching";
     });
-    const scope = yield* Loading({
+    const scope = yield* View.loading({
       fallback: <p id="pending">loading</p>,
-      children: Effect.gen(function* () {
+      content: Effect.gen(function* () {
         const entry = yield* useQuery(Label, { id: props.id });
-        const value = yield* ready(entry.state, { label: "?" });
+        const value = yield* View.ready(entry.state, { label: "?" });
         return <p id="label">{View.bind(value, (found) => found.label)}</p>;
       }),
     });
@@ -158,11 +148,11 @@ const Beside = (props: { readonly id: string }) =>
 
 /** An `Errored` boundary whose content binds the state `orErrored` returns. */
 const Guarded = (props: { readonly id: string }) =>
-  Errored({
+  View.errored({
     fallback: () => <p id="failed">failed</p>,
-    children: Effect.gen(function* () {
+    content: Effect.gen(function* () {
       const entry = yield* useQuery(Label, { id: props.id });
-      const state = yield* orErrored(entry.state);
+      const state = yield* View.orErrored(entry.state);
       const status = View.bind(state, (found) => {
         if (found._tag === "Ready") {
           return found.value.label;
@@ -222,10 +212,10 @@ describe("a patch written after the shell and read before hydration", () => {
       const client = yield* sideOf(clientControl);
       yield* install(html);
       const { report } = yield* hydrateWith(client, (host, root) =>
-        mount(Unbounded, { id: "a" }, host, root),
+        View.mount(Unbounded, { id: "a" }, host, root),
       );
       expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
-      yield* render;
+      yield* View.flush;
       yield* eventually("the patched status", () => textOf("#status") === "Alpha");
       expect(attributeOf("#row", "class")).toEqual(Option.some("hit"));
       // The value came from the document: the client read nothing.
@@ -246,10 +236,10 @@ describe("a patch written after the shell and read before hydration", () => {
         const client = yield* sideOf(clientControl);
         yield* install(html);
         const { report } = yield* hydrateWith(client, (host, root) =>
-          mount(Branches, { id: "a" }, host, root),
+          View.mount(Branches, { id: "a" }, host, root),
         );
         expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
-        yield* render;
+        yield* View.flush;
         yield* eventually("the ready branch", () => textOf("#row") === "Alpha");
         expect(attributeOf("#row", "class")).toEqual(Option.some("hit"));
         expect(attributeOf("ul", "aria-busy")).toEqual(Option.none());
@@ -270,12 +260,12 @@ describe("a patch written after the shell and read before hydration", () => {
         const client = yield* sideOf(clientControl);
         yield* install(html);
         const { report } = yield* hydrateWith(client, (host, root) =>
-          mount(Guarded, { id: "a" }, host, root),
+          View.mount(Guarded, { id: "a" }, host, root),
         );
         // A value fails nothing, so the content stays, claimed: it shows
         // the server's text until hydration is done, then the value.
         expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
-        yield* render;
+        yield* View.flush;
         yield* eventually("the patched status", () => textOf("#status") === "Alpha");
         expect(clientControl.calls).toEqual([]);
       }),
@@ -295,12 +285,12 @@ describe("a patch written after the shell and read before hydration", () => {
         const client = yield* sideOf(clientControl);
         yield* install(html);
         const { report } = yield* hydrateWith(client, (host, root) =>
-          mount(Beside, { id: "a" }, host, root),
+          View.mount(Beside, { id: "a" }, host, root),
         );
         // The boundary's marks let it replace the fallback; the text has none.
         expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 1 });
         expect(textOf("#label")).toBe("Alpha");
-        yield* render;
+        yield* View.flush;
         yield* eventually("the patched status", () => textOf("#status") === "found Alpha");
         expect(clientControl.calls).toEqual([]);
       }),

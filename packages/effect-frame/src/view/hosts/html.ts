@@ -14,7 +14,7 @@ import {
 } from "effect";
 import type { BoundaryMarks, Cleanup, Host, PropertyValue, StaticProps } from "../host.js";
 import type { BoundaryKind } from "../jsx-runtime.js";
-import { mount, render } from "../runtime.js";
+import { flush, mount } from "../runtime.js";
 import type { View } from "../view.js";
 import { boundaryClose, boundaryFallback, boundaryOpen } from "../boundary-mark.js";
 
@@ -217,7 +217,7 @@ const makeBindings = (): Bindings => {
           one.catchUp();
         }
       }),
-      render,
+      flush,
     ),
   };
 };
@@ -374,7 +374,7 @@ export const renderToString = Effect.fn("Html.renderToString")(function* <Props,
   const scope = yield* Scope.make();
   const root = element("#root");
   const html = yield* mount(view, props, host, root).pipe(
-    Effect.andThen(render),
+    Effect.andThen(flush),
     Effect.map(() => serializeChildren(root.children)),
     Scope.provide(scope),
     Effect.onExit((exit) => Scope.close(scope, exit)),
@@ -473,7 +473,7 @@ const draw = <E, R>(
   root: HtmlElement,
   over: Host<HtmlNode> = host,
 ): Effect.Effect<void, E, Exclude<R, QueryCache>> =>
-  drawing(over, root).pipe(Effect.andThen(render), Effect.provideService(QueryCache, cache));
+  drawing(over, root).pipe(Effect.andThen(flush), Effect.provideService(QueryCache, cache));
 
 /**
  * Render one view as a streamed document (#22): the shell and its

@@ -1,7 +1,7 @@
 import { Streaming } from "effect-frame/actor/client";
 import { mount } from "effect-frame/router";
 import type { AnyRoute } from "effect-frame/router";
-import { Dom, render } from "effect-frame/view";
+import { Dom, View } from "effect-frame/view";
 import { Effect } from "effect";
 import { routes } from "./routes.js";
 import { NotFound } from "./views.js";
@@ -19,7 +19,7 @@ export const hydrateRoutes = <R>(tree: ReadonlyArray<AnyRoute<R>>) =>
     const resumed = yield* Streaming.resume(records);
     const hydration = Dom.hydrate(root);
     const router = yield* mount({ routes: tree, notFound: NotFound, host: hydration.host, root });
-    yield* render;
+    yield* View.flush;
     const report = yield* hydration.finish;
     // Seeds that no view took are dropped now; a later declaration reads fresh.
     yield* resumed.hydrated;

@@ -4,7 +4,7 @@ registerDom();
 
 import { Behavior, Cell, Value, modify, spawn, Source } from "effect-frame/actor";
 import type { LocalActorRef, SetValue } from "effect-frame/actor";
-import { Dom, For, Match, Portal, Show, View, mount } from "effect-frame/view";
+import { Dom, For, Match, Portal, Show, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import type { Host } from "effect-frame/view";
 import { Deferred, Effect, Exit, Option, Ref, Scope, Stream } from "effect";
@@ -24,7 +24,7 @@ const pageMount = <Props, E, R>(root: Node, view: View.View<Props, E, R>, props:
   ViewTest.make({
     host: Dom.host,
     root,
-    setup: (host, mountRoot) => mount(view, props, host, mountRoot),
+    setup: (host, mountRoot) => View.mount(view, props, host, mountRoot),
   });
 
 const Counter = (_props: NoProps) =>
@@ -652,7 +652,7 @@ describe("browser view", () => {
         });
 
       const scope = yield* Scope.make();
-      yield* Scope.provide(mount(Owned, noProps, Dom.host, root), scope);
+      yield* Scope.provide(View.mount(Owned, noProps, Dom.host, root), scope);
       expect(textOf(root, "#owned")).toBe("owned");
 
       yield* Scope.close(scope, Exit.void);
@@ -690,7 +690,7 @@ describe("browser view", () => {
           </>,
         );
 
-      const outcome = yield* Effect.exit(mount(Broken, noProps, host, root));
+      const outcome = yield* Effect.exit(View.mount(Broken, noProps, host, root));
       expect(Exit.isFailure(outcome)).toBe(true);
       expect(insertions).toBe(2);
       expect(root.childNodes.length).toBe(0);
@@ -943,7 +943,7 @@ describe("rows with a setup", () => {
       const tasks = yield* spawn(Behavior.value<ReadonlyArray<Task>>([{ id: "b", title: "beta" }]));
       const scope = yield* Scope.make();
       yield* Scope.provide(
-        mount(
+        View.mount(
           LateRows,
           { tasks: tasks.state, slow: "b", gate, setupStarted, setupFinalized },
           Dom.host,

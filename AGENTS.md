@@ -34,7 +34,8 @@ The gate checks the Bun version, then runs three lanes, then the tests:
   ts or tsx block in a reference doc is a compiled example region, and no
   changeset takes a package to 1.0 by accident).
 - build: the package build, the browser bundles, `bun run boundary`, and
-  `bun run declarations`.
+  `bun run declarations` (which also resolves every `Head.member`
+  citation against the built package).
 
 The pre-commit hook runs `bun run lint:fix`, `bun run fmt`, and the gate;
 the `commit-msg` hook checks the Conventional Commits type.
@@ -100,6 +101,11 @@ The lint is strict and the rules are written down in `.oxlintrc.json`:
   `packages/effect-frame/tests/examples/` runs what it can.
 - A term is defined once, in `CONTEXT.md`, with the code that holds it.
 - A doc cites only paths the tree holds (`bun run paths`).
+- A `Head.member` citation (in backticks, or in a ts fence) in JSDoc, a
+  reference doc or a changeset names something the package has, when its
+  head is an effect-frame name. In a changeset any head must resolve or be
+  someone else's name. A changeset that names a removed API lists it in a
+  comment, `<!-- removed: Old, Area.gone -->` (`bun run declarations`).
 
 ## Changes
 

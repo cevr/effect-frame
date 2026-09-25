@@ -27,6 +27,8 @@ The `plugins` list names `unicorn` and `oxc` with the rest, because a `plugins` 
 
 The change rules run outside the gate. Lefthook's `commit-msg` hook runs `tooling/checks/src/commit-message.ts` on the message git wrote and refuses a subject with no Conventional Commits type. CI runs `changeset status --since=origin/main` on a pull request, on a full clone (`fetch-depth: 0`); `.changeset/config.json` counts a change to a package's `src/**` or `package.json`, and private packages are not versioned, so only `effect-frame` needs a changeset. The Version PR is exempt.
 
+`bun run declarations` also reads every `Head.member` citation, in backticks or in a ts fence, in the JSDoc of `packages/*/src`, the reference docs and the changesets (`tooling/checks/src/citations.ts`). A head that is an effect-frame name must have the member: a runtime member of the built package (inherited statics count), a type its namespace exports, a field of its interface or of its service tag's interface, or a member of Effect's module of the same name. Namespace aliases (`import * as Driven from "effect-frame/view/driven"`) resolve to their subpath. An interface that extends another is open. In a changeset an unknown head must be an Effect module, a global, a name the repository exports, or a span, unless a `<!-- removed: … -->` comment lists it.
+
 ## Checks
 
 - `bun install`: passed. The compiler patch verified itself.

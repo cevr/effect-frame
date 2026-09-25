@@ -1,5 +1,8 @@
 import { Effect, Exit } from "effect";
 import { repositoryRoot } from "./browser-entries.js";
+import { readFacts } from "./citation-facts.js";
+import { deadCitations, formatCitation, type Kind } from "./citations.js";
+import { isReferenceDoc } from "./examples.js";
 import { checkDeclarations, formatLeak } from "./declarations.js";
 import { checkSubpaths, formatMissing } from "./subpaths.js";
 import {
@@ -17,7 +20,9 @@ import {
  * not write, or a leaked `any` or `unknown` in any package's `dist`, turns
  * the gate red with the file of each one, and so does a value name that
  * two subpaths export, or a value a reader can import by two paths
- * (`collisions.ts`). It also writes the consumer
+ * (`collisions.ts`), and so does a `Head.member` citation in JSDoc, a
+ * reference doc or a changeset that names nothing the package has
+ * (`citations.ts`). It also writes the consumer
  * module that imports every published subpath, which `tsc -p consumer`
  * then compiles against `dist`.
  */
@@ -63,9 +68,48 @@ const collisionRule = Effect.gen(function* () {
   );
 });
 
+/** Which files the citation rule reads, and how. */
+const kindOf = (file: string): ReadonlyArray<Kind> => {
+  if (/^packages\/[^/]+\/src\/.+\.tsx?$/.test(file)) {
+    return ["jsdoc"];
+  }
+  if (/^\.changeset\/[^/]+\.md$/.test(file)) {
+    return ["changeset"];
+  }
+  if (isReferenceDoc(file)) {
+    return ["doc"];
+  }
+  return [];
+};
+
+const citationRule = Effect.gen(function* () {
+  const { name, surfaces } = yield* readSurfaces(repositoryRoot, "packages/effect-frame");
+  const { facts, texts } = yield* readFacts(
+    repositoryRoot,
+    "packages/effect-frame",
+    surfaces.map((surface) => ({ subpath: surface.subpath, module: surface.module })),
+  );
+  const read = [...texts].flatMap(([file, text]) =>
+    kindOf(file).map((kind) => ({ file, text, kind })),
+  );
+  const dead = read.flatMap(({ file, text, kind }) =>
+    deadCitations(kind, text, facts).map((citation) => formatCitation(file, citation)),
+  );
+  if (dead.length > 0) {
+    yield* Effect.logError(dead.join("\n"));
+    return yield* Effect.fail(
+      `declarations: ${String(dead.length)} citations name nothing ${name} has`,
+    );
+  }
+  return yield* Effect.log(
+    `declarations: every Head.member citation in ${String(read.length)} sources, docs and changesets names something ${name} has`,
+  );
+});
+
 const main = Effect.gen(function* () {
   yield* subpathRule;
   yield* collisionRule;
+  yield* citationRule;
   const checked = yield* checkDeclarations(repositoryRoot);
   if (checked.files === 0) {
     return yield* Effect.fail("declarations: no dist/**/*.d.ts found; run the build first");

@@ -258,6 +258,8 @@ Loop decisions on owner questions (the owner may reverse any; each names its nor
 - P2-A6 (A12): its own pass, after a model-based test; not in pass 2.
 - P2-G9 (the wait is the expectation): hold until W2 lands; re-open if a test still settles on one binding.
 - Batch E key inference (06804f1): keep the one written rule — a plain fixed-key struct codec names its own search keys (`inferredSearchKeys`, `SegmentOptions.search`). It is stated, not silent, and 30 segments pass `Schema.Struct({})`; an annotated `Route.search` never takes it (explicit: the rule is written where the option is).
+- L2 route setup defect (fa4621d): a defect in a route's or row's setup after mount closes the mount, as a refused Portal does (B1). A typed failure stops at `attempt`/`errored`; a defect has no boundary. `route-pending` tests 8 and 8b now assert the close (explicit, effect-native: a defect is not swallowed).
+- Pass 3 seed (hold): a handler's defect, a source subscription's defect and a finalizer's defect are still dropped (`runtime.ts` `handle`, `track`, `owned.close`). Whether a click's defect closes the mount is a design question. The `Handler` JSDoc now states the drop instead of claiming a reporter.
 
 Apply groups (one after the other in the worktree):
 

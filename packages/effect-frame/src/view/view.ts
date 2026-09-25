@@ -87,8 +87,9 @@ export const attach = <HostNode>(
 
 /**
  * A handler maps one host event to work. Its failures must already be
- * handled: a view has no place to return one. Defects reach the fiber's
- * error reporter.
+ * handled: a view has no place to return one. A defect ends the handler's
+ * fiber and is not reported: no error reporter is installed, and the mount
+ * stays open. Catch a defect you expect inside the handler.
  */
 export type Handler = (event: HostEvent) => Effect.Effect<unknown>;
 

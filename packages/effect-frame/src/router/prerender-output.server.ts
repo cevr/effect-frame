@@ -111,7 +111,8 @@ export const lock = (
 
 /**
  * A fresh directory to write one build into. It is removed when the scope
- * fails; once `publish` moved it, there is nothing left to remove.
+ * fails; once `publish` moved it, there is nothing left to remove. Every
+ * write into it runs uninterruptibly, so none lands after the removal.
  */
 export const stage = (
   fs: FileSystem.FileSystem,

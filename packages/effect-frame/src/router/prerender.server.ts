@@ -483,9 +483,16 @@ export const build = <Routes extends AnyRoute<unknown>, N, DE, DR, CE, CR>(
           }
           const file = fileOf(path, page.href);
           const target = path.join(staging, file);
-          yield* fs.makeDirectory(path.dirname(target), { recursive: true });
-          yield* fs.writeFileString(target, outcome.body.html);
-          const etag = yield* etagOf(crypto, yield* fs.readFile(target));
+          // The staging's scope removes it when the build fails. A write
+          // into it ends before that: an interrupted platform call would
+          // otherwise land after the removal and make the directory again.
+          const etag = yield* Effect.uninterruptible(
+            Effect.gen(function* () {
+              yield* fs.makeDirectory(path.dirname(target), { recursive: true });
+              yield* fs.writeFileString(target, outcome.body.html);
+              return yield* etagOf(crypto, yield* fs.readFile(target));
+            }),
+          );
           const written: ManifestPage = { href: page.href, route: page.route, file, etag };
           return written;
         }),
@@ -511,13 +518,12 @@ export const build = <Routes extends AnyRoute<unknown>, N, DE, DR, CE, CR>(
       );
 
     const written = yield* Effect.forEach(pages, renderOne, { concurrency });
-    yield* fs.writeFileString(path.join(staging, clientFile), yield* options.client);
+    const client = yield* options.client;
+    yield* Effect.uninterruptible(fs.writeFileString(path.join(staging, clientFile), client));
     const manifest: Manifest = { builtAt, client: clientFile, pages: written };
     // The receipt is written last, from the list just rendered.
-    yield* fs.writeFileString(
-      path.join(staging, manifestFile),
-      yield* Effect.orDie(encodeManifest(manifest)),
-    );
+    const encoded = yield* Effect.orDie(encodeManifest(manifest));
+    yield* Effect.uninterruptible(fs.writeFileString(path.join(staging, manifestFile), encoded));
     yield* publish(fs, path, output, staging);
     return manifest;
   }).pipe(

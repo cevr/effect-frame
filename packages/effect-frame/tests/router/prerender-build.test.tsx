@@ -18,7 +18,7 @@ import { Route } from "effect-frame/router";
 import * as Prerender from "effect-frame/router/prerender";
 import { View } from "effect-frame/view";
 import { BunServices } from "@effect/platform-bun";
-import { Clock, Effect, Exit, Fiber, FileSystem, Layer, Schema } from "effect";
+import { Clock, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { eventually, idOf, makeControl, recordsIn, sideOf } from "../view/streaming-fixture.js";
 import {
@@ -311,6 +311,61 @@ describe("the prerender build (#23 §2)", () => {
         expect(yield* namesIn(`${out}/generations`)).toHaveLength(1);
       }),
     10_000,
+  );
+
+  platform("an interrupted page write lands before the staging is removed", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const directory = yield* tempDirectory;
+      const out = `${directory}/out`;
+      const staging = `${out}/staging/`;
+      const started = yield* Deferred.make<void>();
+      const removed = yield* Deferred.make<void>();
+      const landed = yield* Deferred.make<void>();
+      const pageDirectories = { count: 0 };
+      // The first page directory is made the way the platform makes one: an
+      // interrupted call returns at once, and the directory lands later, once
+      // the staging is removed, or after a while when nothing removes it.
+      const orphaning: FileSystem.FileSystem = {
+        ...fs,
+        makeDirectory: (path, options) =>
+          Effect.suspend(() => {
+            if (!path.startsWith(staging) || pageDirectories.count > 0) {
+              return fs.makeDirectory(path, options);
+            }
+            pageDirectories.count += 1;
+            return Effect.gen(function* () {
+              const late = yield* Effect.forkDetach(
+                Effect.race(Deferred.await(removed), Effect.sleep("200 millis")).pipe(
+                  Effect.andThen(fs.makeDirectory(path, options)),
+                  Effect.ensuring(Deferred.succeed(landed, void 0)),
+                ),
+              );
+              yield* Deferred.succeed(started, void 0);
+              yield* Fiber.join(late);
+            });
+          }),
+        remove: (path, options) =>
+          Effect.ensuring(
+            fs.remove(path, options),
+            Effect.suspend(() => {
+              if (path.startsWith(staging)) {
+                return Deferred.succeed(removed, void 0);
+              }
+              return Effect.succeed(false);
+            }),
+          ),
+      };
+      const building = yield* Effect.forkChild(
+        buildInto(yield* sideOf(makeControl(blogLabels)), blogRoutes, out).pipe(
+          Effect.provideService(FileSystem.FileSystem, orphaning),
+        ),
+      );
+      yield* Deferred.await(started);
+      yield* Fiber.interrupt(building);
+      yield* Deferred.await(landed);
+      expect(yield* namesIn(`${out}/staging`)).toEqual([]);
+    }),
   );
 });
 

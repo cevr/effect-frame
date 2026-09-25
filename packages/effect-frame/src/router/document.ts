@@ -1,4 +1,4 @@
-import type { View } from "effect-frame/view";
+import type { ScopesClosed, View } from "effect-frame/view";
 import { Deferred, Duration, Effect, Exit, Option, Schema, Scope, Stream } from "effect";
 import type { ActorTransport } from "effect-frame/actor/client";
 import { QueryCache } from "effect-frame/actor/client";
@@ -39,7 +39,7 @@ import type { Runtime as UrlStateRuntime } from "./url-state-runtime.js";
 
 export interface DocumentOptions<R, N = R> {
   readonly routes: ReadonlyArray<AnyRoute<R>>;
-  readonly notFound: View.View<NotFoundProps, never, N>;
+  readonly notFound: View.View<NotFoundProps, never, N> & ScopesClosed<N>;
   /** The request URL. */
   readonly url: URL;
   /** The document around the routed markup, as `Html.renderToStream` takes it. */

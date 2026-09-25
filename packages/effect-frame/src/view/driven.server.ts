@@ -3,8 +3,9 @@ import type { AnyContract } from "effect-frame/actor/client";
 import { Deferred, Effect, Exit, Option, Schema, Scope, Stream } from "effect";
 import { driveOnly } from "./drive-transport.js";
 import * as Remote from "./hosts/remote.js";
-import { mount } from "./runtime.js";
+import { mountView } from "./runtime.js";
 import type { View } from "./view.js";
+import type { ScopesClosed } from "./readiness.js";
 
 /**
  * The server half of a server-driven view (#15, #27). A session is one
@@ -72,7 +73,7 @@ export interface Session {
  * session keeps no operation after it is drained.
  */
 export const session = Effect.fn("Driven.session")(function* <Props, E, R, C extends AnyContract>(
-  view: View<Props, E, R>,
+  view: View<Props, E, R> & ScopesClosed<R>,
   props: Props,
   drive: Remote.Drive<C>,
   options: SessionOptions = {},
@@ -112,7 +113,7 @@ export const session = Effect.fn("Driven.session")(function* <Props, E, R, C ext
     }),
   );
   const mountScope = yield* Scope.fork(yield* Effect.scope);
-  yield* mount(view, props, recording.host, Remote.root).pipe(
+  yield* mountView(view, props, recording.host, Remote.root).pipe(
     Effect.provideService(ActorTransport, mountTransport),
     Scope.provide(mountScope),
   );

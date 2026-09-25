@@ -35,6 +35,7 @@ import type {
   ShowNode,
 } from "./jsx-runtime.js";
 import { repopulate } from "./form.js";
+import type { ScopesClosed } from "./readiness.js";
 import type { Attached, Bound, Handler, PlainPost, Prepared, View } from "./view.js";
 import * as Inspection from "../inspection.js";
 
@@ -1719,15 +1720,11 @@ const buildFor =
 // ---------------------------------------------------------------------------
 
 /**
- * Mount one view on a host. The Scope owns everything: the view's setup
- * resources, the forked source subscriptions, the reactive root, and the host
- * nodes. Closing it runs every Effect finalizer and then removes the nodes.
- *
- * ```ts
- * yield* View.mount(Counter, { start: 0 }, Dom.host, document.body);
- * ```
+ * Mount one view on a host, with no check on its services: the package's
+ * own hosts and the router call it with a view whose `R` is generic. An
+ * application calls `mount`.
  */
-export const mount = Effect.fn("View.mount")(function* <Props, E, R, HostNode>(
+export const mountView = Effect.fn("View.mount")(function* <Props, E, R, HostNode>(
   view: View<Props, E, R>,
   props: Props,
   host: Host<HostNode>,
@@ -1832,6 +1829,26 @@ export const mount = Effect.fn("View.mount")(function* <Props, E, R, HostNode>(
     onSuccess: () => Effect.void,
   });
 });
+
+/**
+ * Mount one view on a host. The Scope owns everything: the view's setup
+ * resources, the forked source subscriptions, the reactive root, and the host
+ * nodes. Closing it runs every Effect finalizer and then removes the nodes.
+ *
+ * A view whose `R` still holds a readiness scope does not compile
+ * (`ScopesClosed`): a `View.ready` needs a `View.loading` above it, and a
+ * `View.orErrored` a `View.errored`.
+ *
+ * ```ts
+ * yield* View.mount(Counter, { start: 0 }, Dom.host, document.body);
+ * ```
+ */
+export const mount = <Props, E, R, HostNode>(
+  view: View<Props, E, R> & ScopesClosed<R>,
+  props: Props,
+  host: Host<HostNode>,
+  root: HostNode,
+): Effect.Effect<void, E, R | Scope.Scope> => mountView(view, props, host, root);
 
 /**
  * Flush reactive writes that have already reached Solid. Source delivery and

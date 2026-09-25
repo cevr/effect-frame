@@ -14,8 +14,9 @@ import {
 } from "effect";
 import type { BoundaryMarks, Cleanup, Host, PropertyValue, StaticProps } from "../host.js";
 import type { BoundaryKind } from "../jsx-runtime.js";
-import { flush, mount } from "../runtime.js";
+import { flush, mountView } from "../runtime.js";
 import type { View } from "../view.js";
+import type { ScopesClosed } from "../readiness.js";
 import { boundaryClose, boundaryFallback, boundaryOpen } from "../boundary-mark.js";
 
 /**
@@ -368,12 +369,12 @@ export const host: Host<HtmlNode> = makeHost(() => {});
  * is released before the string returns. Two requests never share state.
  */
 export const renderToString = Effect.fn("Html.renderToString")(function* <Props, E, R>(
-  view: View<Props, E, R>,
+  view: View<Props, E, R> & ScopesClosed<R>,
   props: Props,
 ) {
   const scope = yield* Scope.make();
   const root = element("#root");
-  const html = yield* mount(view, props, host, root).pipe(
+  const html = yield* mountView(view, props, host, root).pipe(
     Effect.andThen(flush),
     Effect.map(() => serializeChildren(root.children)),
     Scope.provide(scope),
@@ -464,7 +465,7 @@ export type Drawn<R> = Exclude<Exclude<R, QueryCache>, Scope.Scope> | ActorTrans
 const viewDrawing =
   <Props, E, R>(view: View<Props, E, R>, props: Props): Drawing<E, R | Scope.Scope> =>
   (over, root) =>
-    mount(view, props, over, root);
+    mountView(view, props, over, root);
 
 /** Mount a drawing over `root` in the current scope and draw one frame. */
 const draw = <E, R>(
@@ -493,7 +494,7 @@ const draw = <E, R>(
  * fails with `RecordsUnsettled`.
  */
 export const renderToStream = <Props, E, R>(
-  view: View<Props, E, R>,
+  view: View<Props, E, R> & ScopesClosed<R>,
   props: Props,
   document: Document,
   options: Streaming.ShellOptions,
@@ -590,7 +591,7 @@ export const streamPrepared = <E, R>(
  * so such a page always waits for the limit.
  */
 export const renderAwaitAll = <Props, E, R>(
-  view: View<Props, E, R>,
+  view: View<Props, E, R> & ScopesClosed<R>,
   props: Props,
   document: Document,
   options: Streaming.ShellOptions,

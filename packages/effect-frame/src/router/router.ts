@@ -1,6 +1,7 @@
 import { Source } from "effect-frame/actor/client";
-import type { Host } from "effect-frame/view";
+import type { Host, ScopesClosed } from "effect-frame/view";
 import { View } from "effect-frame/view";
+import { mountView } from "../view/runtime.js";
 import type { Duration } from "effect";
 import {
   Cause,
@@ -119,7 +120,7 @@ export interface NotFoundProps {
  */
 export interface MountOptions<R, HostNode, N = R> {
   readonly routes: ReadonlyArray<AnyRoute<R>>;
-  readonly notFound: View.View<NotFoundProps, never, N>;
+  readonly notFound: View.View<NotFoundProps, never, N> & ScopesClosed<N>;
   readonly host: Host<HostNode>;
   readonly root: HostNode;
   /**
@@ -655,7 +656,7 @@ export const mount: <R, HostNode, N = R>(
                 UrlStateRuntime,
                 urlStateRuntime,
               );
-            let mountedPage = View.mount(page, {}, drawing.host, options.root);
+            let mountedPage = mountView(page, {}, drawing.host, options.root);
             if (Option.isSome(routeOwner)) {
               mountedPage = Effect.provideService(mountedPage, Inspection.Owner, routeOwner.value);
             }

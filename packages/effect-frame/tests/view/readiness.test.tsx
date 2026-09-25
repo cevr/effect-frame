@@ -16,7 +16,7 @@ import { Behavior, QueryState, Value, Source } from "effect-frame/actor/client";
 import { QueryTest } from "effect-frame/actor/testing";
 import { Await, Dom, Html, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
-import type { Bound, ReadyValue } from "effect-frame/view";
+import type { Bound, ReadyValue, ScopesClosed } from "effect-frame/view";
 import {
   Context,
   Deferred,
@@ -83,7 +83,10 @@ const staleClass = (stale: boolean): string => {
 };
 
 /** Mount a scope view, which takes no props of its own. */
-const mountScoped = <E, R>(view: View.View<Record<string, never>, E, R>, root: HTMLElement) =>
+const mountScoped = <E, R>(
+  view: View.View<Record<string, never>, E, R> & ScopesClosed<R>,
+  root: HTMLElement,
+) =>
   ViewTest.make({
     host: Dom.host,
     root,

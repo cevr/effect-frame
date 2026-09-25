@@ -665,29 +665,31 @@ const postParams: Equals<
   { readonly tenant: string; readonly postId: string }
 > = true;
 
-/** A layout that places the outlet outside Loading leaks the child's View.LoadingScope. */
-const leaky = Route.client(
-  "leaky",
-  Route.layout(
-    tenantSegment,
-    [
-      Route.leaf(editSegment, (props) =>
-        Effect.map(View.ready(props.data.post.state, ""), (title) => <h2>{View.bind(title)}</h2>),
-      ),
-    ],
-    (props) => Effect.map(props.outlet, (outlet) => <div>{outlet}</div>),
-  ),
+/**
+ * A layout that places the outlet outside Loading leaves the child's
+ * View.LoadingScope open, and the mode constructor refuses the tree with an
+ * error that names the fix.
+ */
+const leakyTree = Route.layout(
+  tenantSegment,
+  [
+    Route.leaf(editSegment, (props) =>
+      Effect.map(View.ready(props.data.post.state, ""), (title) => <h2>{View.bind(title)}</h2>),
+    ),
+  ],
+  (props) => Effect.map(props.outlet, (outlet) => <div>{outlet}</div>),
 );
+type BranchServices<T> = T extends Route.Branch<Route.AnySegment, infer R, infer D> ? R | D : never;
 const leakyServices: Equals<
-  RouteServices<typeof leaky>,
+  BranchServices<typeof leakyTree>,
   QueryCache | ActorTransport | View.LoadingScope
 > = true;
 
 // Negative fixtures below are TypeScript errors by design. The Effect language
 // service reports the same mismatch separately, so it is paused for them only.
 // @effect-diagnostics missingEffectError:off
-// @ts-expect-error The leaked View.LoadingScope is part of the route's requirements.
-const leakyWithoutScope: Equals<RouteServices<typeof leaky>, QueryCache | ActorTransport> = true;
+// @ts-expect-error View.ready needs a View.loading above it.
+const leaky = Route.client("leaky", leakyTree);
 
 const collision = Route.child(tenantSegment, "collision", {
   path: "c",
@@ -712,7 +714,7 @@ const typeFixtures = [
   commandsBinding,
   postParams,
   leakyServices,
-  leakyWithoutScope,
+  leaky,
   collision,
   missingBinding,
   notARef,

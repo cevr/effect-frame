@@ -16,7 +16,7 @@ import type { Source } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import { Dom, Html, Await, Show, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
-import type { Node as ViewNode } from "effect-frame/view";
+import type { Node as ViewNode, ScopesClosed } from "effect-frame/view";
 import * as Frame from "../../src/frame.js";
 import {
   Cause,
@@ -159,7 +159,10 @@ const makeRoot = Effect.acquireRelease(
   (created) => Effect.sync(() => created.remove()),
 );
 
-const mountPage = <E, R>(view: View.View<Record<string, never>, E, R>, root: HTMLElement) =>
+const mountPage = <E, R>(
+  view: View.View<Record<string, never>, E, R> & ScopesClosed<R>,
+  root: HTMLElement,
+) =>
   ViewTest.make({
     host: Dom.host,
     root,

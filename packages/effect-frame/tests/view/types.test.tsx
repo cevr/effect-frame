@@ -1,7 +1,9 @@
 import type { QueryState } from "effect-frame/actor";
-import type { Host, Node as ViewNode } from "effect-frame/view";
+import type { Host, Node as ViewNode, ScopesClosed } from "effect-frame/view";
 import type { MatchNode } from "../../src/view/jsx-runtime.js";
-import { For, Match, View } from "effect-frame/view";
+import { For, Html, Match, Remote, View } from "effect-frame/view";
+import * as Driven from "effect-frame/view/driven";
+import type { AnyContract } from "effect-frame/actor/client";
 import { Source } from "effect-frame/actor";
 import type { Scope } from "effect";
 import { Context, Effect, Schema } from "effect";
@@ -77,13 +79,14 @@ describe("view types", () => {
 });
 
 // ---------------------------------------------------------------------------
-// PROTOTYPE (ticket #16): readiness requirements
+// Readiness requirements (#16): an open boundary is refused where it is mounted
 // ---------------------------------------------------------------------------
 
 /**
  * `ready` registers with a scope, so it requires one. The requirement is an
- * ordinary Effect service, which makes "a read outside a readiness scope" a
- * compile error rather than something the runtime has to detect and report.
+ * ordinary Effect service, so "a read outside a readiness scope" stays in
+ * the view's `R`, and `View.mount` refuses a view whose `R` still holds a
+ * readiness scope, with an error that names the fix.
  */
 const readyOutsideAScope = (_props: NoProps) =>
   Effect.gen(function* () {
@@ -91,32 +94,25 @@ const readyOutsideAScope = (_props: NoProps) =>
     return <h1>{View.bind(title)}</h1>;
   });
 
-/** Mounting it demands `LoadingScope`, which `mount` does not provide. */
+/** The requirement is in the view's own type. */
 const readyNeedsLoadingScope: Equals<
-  ReturnType<typeof mountReadyOutside>,
-  Effect.Effect<void, never, View.LoadingScope | Scope.Scope>
+  Effect.Services<ReturnType<typeof readyOutsideAScope>>,
+  View.LoadingScope | Scope.Scope
 > = true;
 
+// @ts-expect-error View.ready needs a View.loading above it.
 const mountReadyOutside = () => View.mount(readyOutsideAScope, noProps, host, "root");
 
-/**
- * The ticket's central claim, stated as a type rather than as a suppressed
- * error. `ready` with no `Loading` above it leaves `LoadingScope` in `R`, so
- * the mount is *not* assignable to an Effect that needs only a `Scope`: an
- * application cannot run it without providing the scope, and there is no
- * runtime check anywhere that could have caught this instead.
- *
- * A `@ts-expect-error` would have been the direct way to write it, but the
- * missing service is reported by `effect(missingEffectContext)`, a plugin
- * diagnostic that `@ts-expect-error` does not suppress. Asserting the
- * assignability is `false` proves the same thing and keeps the file clean.
- */
-type RunnableWithoutScope = Effect.Effect<void, never, Scope.Scope>;
-
-const readyOutsideIsNotRunnable: Equals<
-  ReturnType<typeof mountReadyOutside> extends RunnableWithoutScope ? true : false,
-  false
+/** The brand names the fix: the missing member is the sentence. */
+const loadingOpen: Equals<
+  ScopesClosed<View.LoadingScope | Clock>,
+  { readonly "View.ready needs a View.loading above it": View.LoadingScope }
 > = true;
+const erroredOpen: Equals<
+  ScopesClosed<View.ErroredScope | Clock>,
+  { readonly "View.orErrored needs a View.errored above it": View.ErroredScope }
+> = true;
+const closed: Equals<ScopesClosed<Clock | Scope.Scope>, unknown> = true;
 
 /** `Loading` discharges the scope it provides, and leaks nothing. */
 const wrapped = View.loading({
@@ -136,8 +132,8 @@ const mountWrapped = () => View.mount(() => wrapped, {}, host, "root");
 
 /**
  * `orErrored` requires `ErroredScope` separately, so a `Loading` with no
- * `Errored` above it still compiles. Only a query whose failure someone must
- * show pays for an error boundary.
+ * `Errored` above it keeps it. Only a query whose failure someone must show
+ * pays for an error boundary, and `View.mount` names the one that is missing.
  */
 const wrappedWithError = View.loading({
   fallback: <p>loading</p>,
@@ -148,18 +144,33 @@ const wrappedWithError = View.loading({
 });
 
 const orErroredKeepsItsOwnRequirement: Equals<
-  ReturnType<typeof mountWrappedWithError>,
-  Effect.Effect<void, never, View.ErroredScope | Scope.Scope>
+  Effect.Services<typeof wrappedWithError>,
+  View.ErroredScope | Scope.Scope
 > = true;
 
+// @ts-expect-error View.orErrored needs a View.errored above it.
 const mountWrappedWithError = () => View.mount(() => wrappedWithError, {}, host, "root");
 
+/** Every place a view's services are final checks them the same way. */
+// @ts-expect-error View.ready needs a View.loading above it.
+const renderReadyOutside = () => Html.renderToString(readyOutsideAScope, noProps);
+declare const drive: Remote.Drive<AnyContract>;
+// @ts-expect-error View.ready needs a View.loading above it.
+const drawReadyOutside = () => Remote.draw(readyOutsideAScope, noProps, drive, "");
+// @ts-expect-error View.ready needs a View.loading above it.
+const sessionReadyOutside = () => Driven.session(readyOutsideAScope, noProps, drive);
+
 describe("readiness types", () => {
-  test("ready requires a scope the compiler must see provided", () => {
+  test("an open readiness scope is refused where the view is mounted", () => {
     expect(readyNeedsLoadingScope).toBe(true);
+    expect([loadingOpen, erroredOpen, closed]).toEqual([true, true, true]);
     expect(loadingDischargesItsScope).toBe(true);
     expect(orErroredKeepsItsOwnRequirement).toBe(true);
-    expect(readyOutsideIsNotRunnable).toBe(true);
+    void mountReadyOutside;
+    void mountWrappedWithError;
+    void renderReadyOutside;
+    void drawReadyOutside;
+    void sessionReadyOutside;
   });
 });
 

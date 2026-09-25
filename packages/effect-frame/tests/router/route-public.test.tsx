@@ -11,7 +11,7 @@ import {
   Policy,
   Source,
 } from "effect-frame/actor";
-import type { ActorTransport, QueryCache } from "effect-frame/actor";
+import type { ActorTransport, QueryCache, QueryState } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import * as Frame from "effect-frame/frame";
 import {
@@ -502,16 +502,36 @@ const missingService = (root: HTMLElement) =>
 /** A layout that yields its outlet outside `Loading` keeps `LoadingScope`. */
 const ReadingChild = (props: Route.PropsOf<typeof post>) =>
   Effect.map(View.ready(props.data.post.state, ""), (body): Node => <p>{View.bind(body)}</p>);
-const leakyApp = Route.client(
-  "leaky",
-  Route.layout(tenant, [Route.leaf(post, ReadingChild)], (props) =>
-    Effect.map(props.outlet, (outlet) => <div>{outlet}</div>),
-  ),
+const leakyTree = Route.layout(tenant, [Route.leaf(post, ReadingChild)], (props) =>
+  Effect.map(props.outlet, (outlet) => <div>{outlet}</div>),
 );
+type BranchServices<T> = T extends Route.Branch<Route.AnySegment, infer R, infer D> ? R | D : never;
 const leakyServices: Equals<
-  RouteServices<typeof leakyApp>,
+  BranchServices<typeof leakyTree>,
   QueryCache | ActorTransport | Access | View.LoadingScope
 > = true;
+// @effect-diagnostics missingEffectError:off
+// @ts-expect-error A mode constructor refuses an open View.LoadingScope: View.ready needs a View.loading above it.
+const leakyApp = Route.client("leaky", leakyTree);
+// @effect-diagnostics missingEffectError:error
+
+/** The not-found view's services are final at the router's mount too. */
+declare const missingPage: Source<QueryState<string, never>>;
+const ReadingNotFound = (_props: { readonly url: Source<URL> }) =>
+  Effect.map(View.ready(missingPage, ""), (text): Node => <p>{View.bind(text)}</p>);
+// A refused call has no settled requirements to report.
+// @effect-diagnostics anyUnknownInErrorContext:off
+const leakyNotFound = (root: HTMLElement) =>
+  mountRouter({
+    landing: NavigationBehavior.Restore,
+    traversalReadLimit: "3 seconds",
+    routes: [],
+    // @ts-expect-error View.ready needs a View.loading above it.
+    notFound: ReadingNotFound,
+    host: Dom.host,
+    root,
+  });
+// @effect-diagnostics anyUnknownInErrorContext:error
 
 // 5. Missing typed fallback.
 // @effect-diagnostics missingEffectError:off
@@ -591,6 +611,8 @@ const compiled = [
   missingData,
   handBranch,
   hiddenCheck,
+  leakyApp,
+  leakyNotFound,
 ];
 
 // A layout that outlives a param move: its links follow the params Source.
@@ -638,7 +660,7 @@ describe("public nested routes", () => {
   it.effect("0. keeps exact E and R, typed targets, lazy props, services, and fallbacks", () =>
     Effect.sync(() => {
       expect(typeFixtures).toEqual([true, true, true, true, true, true, true]);
-      expect(compiled).toHaveLength(17);
+      expect(compiled).toHaveLength(19);
       // The type refuses a child root; construction refuses it by name.
       expect(Option.getOrThrow(Result.getFailure(Result.try(orphanRoot)))).toMatchObject({
         _tag: "BranchRejected",

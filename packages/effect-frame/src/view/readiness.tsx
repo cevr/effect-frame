@@ -128,6 +128,23 @@ export class ErroredScope extends ServiceMap.Service<ErroredScope, Registry>()(
   "effect-frame/src/view/readiness/ErroredScope",
 ) {}
 
+/**
+ * A check on a whole tree's services where they are final: `View.mount`,
+ * the `Html` and `Remote` renders, `Driven.session`, a router's `notFound`
+ * view, and every `Route` mode constructor. A `View.ready` with no
+ * `View.loading` above it leaves `LoadingScope` in `R`, and a
+ * `View.orErrored` with no `View.errored` above it leaves `ErroredScope`.
+ * Either one turns the check into an object whose one required key is the
+ * fix, so the compiler reports it at the call, not where the application
+ * provides its layers. An `R` with neither is `unknown`, which any value
+ * satisfies.
+ */
+export type ScopesClosed<R> = [Extract<R, LoadingScope>] extends [never]
+  ? [Extract<R, ErroredScope>] extends [never]
+    ? unknown
+    : { readonly "View.orErrored needs a View.errored above it": ErroredScope }
+  : { readonly "View.ready needs a View.loading above it": LoadingScope };
+
 const noAhead = (): boolean => false;
 
 /**

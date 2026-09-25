@@ -6,7 +6,7 @@ import { Actor, Behavior, Value, modify, Source } from "effect-frame/actor";
 import type { LocalActorRef, SetValue } from "effect-frame/actor";
 import { Dom, For, Match, Portal, Show, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
-import type { Host } from "effect-frame/view";
+import type { Host, ScopesClosed } from "effect-frame/view";
 import { Deferred, Effect, Exit, Option, Ref, Scope, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
@@ -20,7 +20,11 @@ const noProps: NoProps = { _tag: "NoProps" };
 /** A fresh detached root for each mount, so one test never sees another's nodes. */
 const makeRoot = Effect.sync(() => document.createElement("main"));
 
-const pageMount = <Props, E, R>(root: Node, view: View.View<Props, E, R>, props: Props) =>
+const pageMount = <Props, E, R>(
+  root: Node,
+  view: View.View<Props, E, R> & ScopesClosed<R>,
+  props: Props,
+) =>
   ViewTest.make({
     host: Dom.host,
     root,

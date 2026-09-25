@@ -16,7 +16,7 @@ import type { QueryEntry, QueryFailure, QueryState, Source } from "effect-frame/
 import { QueryTest } from "effect-frame/actor/testing";
 import { Dom, Html, Portal, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
-import type { Host } from "effect-frame/view";
+import type { Host, ScopesClosed } from "effect-frame/view";
 import { make as makeTuiHost } from "effect-frame/view/opentui";
 import type { TuiNode } from "effect-frame/view/opentui";
 import { TextNodeRenderable, TextRenderable } from "@opentui/core";
@@ -136,7 +136,10 @@ const failedResponse = (error: string): Response => ({ _tag: "Failed", error });
 
 const makeRoot = Effect.sync(() => document.createElement("main"));
 
-const mountPage = <E, R>(view: View.View<Record<string, never>, E, R>, root: HTMLElement) =>
+const mountPage = <E, R>(
+  view: View.View<Record<string, never>, E, R> & ScopesClosed<R>,
+  root: HTMLElement,
+) =>
   ViewTest.make({
     host: Dom.host,
     root,

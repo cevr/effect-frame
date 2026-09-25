@@ -29,7 +29,7 @@ import {
   committedRevision,
   QueryState,
 } from "effect-frame/actor/client";
-import type { Node, Remote } from "effect-frame/view";
+import type { Node, Remote, ScopesClosed } from "effect-frame/view";
 import { View } from "effect-frame/view";
 import {
   Clock,
@@ -3107,6 +3107,11 @@ const treeSearchKeys = (all: ReadonlyArray<SearchKeyInfo>): SearchKeyInfo => {
  * There is one form: a root segment's branch. A one-page route is
  * `Route.client(name, Route.leaf(Route.segment(name, { path, params }), view))`.
  *
+ * The tree's view services are final here, so a tree that leaves a
+ * readiness scope open does not compile (`ScopesClosed`): a `View.ready`
+ * whose view no `View.loading` wraps, or a layout that yields its outlet
+ * outside one.
+ *
  * @example
  * ```ts
  * const Home = Route.segment("home", { path: "/", params: NoParams });
@@ -3116,7 +3121,7 @@ const treeSearchKeys = (all: ReadonlyArray<SearchKeyInfo>): SearchKeyInfo => {
 export interface ModeConstructor {
   <const Name extends string, Seg extends RootSegment, ViewR, DataR>(
     name: Name,
-    root: Branch<Seg, ViewR, DataR>,
+    root: Branch<Seg, ViewR, DataR> & ScopesClosed<ViewR>,
   ): Tree<Name, ViewR | DataR>;
 }
 
@@ -3124,7 +3129,7 @@ const modeConstructor =
   (mode: RenderingMode): ModeConstructor =>
   <const Name extends string, Seg extends RootSegment, ViewR, DataR>(
     name: Name,
-    root: Branch<Seg, ViewR, DataR>,
+    root: Branch<Seg, ViewR, DataR> & ScopesClosed<ViewR>,
   ): Tree<Name, ViewR | DataR> =>
     mountTree(name, root, {}, mode);
 
@@ -3280,7 +3285,7 @@ export const driven: ModeConstructor = <
   DataR,
 >(
   name: Name,
-  root: Branch<Seg, ViewR, DataR>,
+  root: Branch<Seg, ViewR, DataR> & ScopesClosed<ViewR>,
 ): Tree<Name, ViewR | DataR> => {
   // Checked before the tree is mounted: a refused tree registers nothing.
   const resolve = drivenTree(name, root);
@@ -3332,7 +3337,7 @@ export interface PrerenderConstructor {
     const I extends ReadonlyArray<AnyInputs>,
   >(
     name: Name,
-    root: Branch<Seg, ViewR, DataR>,
+    root: Branch<Seg, ViewR, DataR> & ScopesClosed<ViewR>,
     options: PrerenderOptions<I>,
   ): Tree<Name, ViewR | DataR> & Prerendered<InputsError<I[number]>, InputsServices<I[number]>>;
 }
@@ -3353,7 +3358,7 @@ export const prerender: PrerenderConstructor = <
   const I extends ReadonlyArray<AnyInputs>,
 >(
   name: Name,
-  root: Branch<Seg, ViewR, DataR>,
+  root: Branch<Seg, ViewR, DataR> & ScopesClosed<ViewR>,
   options: PrerenderOptions<I>,
 ): Tree<Name, ViewR | DataR> & Prerendered<InputsError<I[number]>, InputsServices<I[number]>> => {
   // Checked before the tree is mounted: a refused tree registers nothing.

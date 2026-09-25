@@ -231,7 +231,9 @@ const program = Effect.gen(function* () {
   `Route.LayoutPropsOf<typeof tenant, ChildR>` for a layout. A layout view
   stays generic in `ChildR`, the services its children's views need, so
   `Route.layout` can prove the outlet's requirements (a `View.loading`
-  around `props.outlet` provides `LoadingScope`). In a `.tsx` file the
+  around `props.outlet` provides `LoadingScope`; a tree that leaves it open
+  fails at the mode constructor with `View.ready needs a View.loading above
+it`). In a `.tsx` file the
   generic needs its trailing comma:
 
   ```tsx

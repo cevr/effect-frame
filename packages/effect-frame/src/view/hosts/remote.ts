@@ -15,8 +15,9 @@ import {
 } from "effect";
 import { driveOnly, sendsNothing } from "../drive-transport.js";
 import type { Cleanup, EventHandler, Host, PropertyValue, StaticProps } from "../host.js";
-import { flush, mount } from "../runtime.js";
+import { flush, mountView } from "../runtime.js";
 import type { View } from "../view.js";
+import type { ScopesClosed } from "../readiness.js";
 
 /**
  * The streamed host-operation wire (#15), and reconnect over it (#27).
@@ -799,7 +800,7 @@ const drawAt = Effect.fn("Remote.drawAt")(function* <Props, E, R, C extends AnyC
   const recording = recorder();
   const scope = yield* Scope.make();
   const ops = yield* Effect.gen(function* () {
-    yield* mount(view, props, recording.host, root);
+    yield* mountView(view, props, recording.host, root);
     yield* recording.settled;
     return recording.drain();
   }).pipe(
@@ -818,7 +819,7 @@ const drawAt = Effect.fn("Remote.drawAt")(function* <Props, E, R, C extends AnyC
  * the first-mount op log crossing the wire.
  */
 export const draw = Effect.fn("Remote.draw")(function* <Props, E, R, C extends AnyContract>(
-  view: View<Props, E, R>,
+  view: View<Props, E, R> & ScopesClosed<R>,
   props: Props,
   drive: Drive<C>,
   payload: string,
@@ -946,7 +947,7 @@ const firstUnknown = (
  * host, so the DOM and a reference host are driven the same way.
  */
 export const client = <Props, E, R, C extends AnyContract, HostNode>(
-  view: View<Props, E, R>,
+  view: View<Props, E, R> & ScopesClosed<R>,
   props: Props,
   drive: Drive<C>,
   target: Target<HostNode>,

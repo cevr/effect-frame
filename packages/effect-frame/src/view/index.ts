@@ -39,4 +39,5 @@ export {
   type ErroredProps,
   type LoadingProps,
   type ReadyValue,
+  type ScopesClosed,
 } from "./readiness.js";

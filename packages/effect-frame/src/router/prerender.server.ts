@@ -15,7 +15,7 @@ import {
   Streaming,
   Unauthorized,
 } from "effect-frame/actor/client";
-import type { View } from "effect-frame/view";
+import type { ScopesClosed, View } from "effect-frame/view";
 import type { Duration } from "effect";
 import {
   Cause,
@@ -230,7 +230,7 @@ export type PageDocument = Omit<Document, "bootstrap">;
 export interface BuildOptions<Routes extends AnyRoute<unknown>, N, DE, DR, CE, CR> {
   /** Every route, in the order the server mounts them. The prerender ones are built. */
   readonly routes: ReadonlyArray<Routes>;
-  readonly notFound: View.View<NotFoundProps, never, N>;
+  readonly notFound: View.View<NotFoundProps, never, N> & ScopesClosed<N>;
   /** The document around one page. It runs in the build, once per page. */
   readonly document: (page: Page) => Effect.Effect<PageDocument, DE, DR>;
   /** The app's browser bundle, written once as `client.js` and loaded by every page. */

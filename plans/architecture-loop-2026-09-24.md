@@ -96,7 +96,7 @@ Apply groups (run one after the other in the worktree):
 | 7 docs + agent entry | D1, D2, D3, D4, D5, D7, D11, D12, D13, D15, G5, G9, G10 |
 | 8 EGW | adopt every renamed/added API in `bible-tools/apps/egw-search` |
 
-Pass 2 candidates already known: A12, P5/P6 (a conditional that hosts a view, remount on key), P15 (debounced input marks results stale), Foldkit `Stale` on failed refresh, per-field form issues.
+Pass 2 candidates already known: compile or export-check JSDoc `@example` blocks and `.changeset/*.md` code (counsel C1); A12, P5/P6 (a conditional that hosts a view, remount on key), P15 (debounced input marks results stale), Foldkit `Stale` on failed refresh, per-field form issues.
 
 More pass 2 candidates, found while applying pass 1:
 
@@ -199,6 +199,7 @@ Counsel defects:
 | V4 | `onKeyDown` listened for `keyDown` and never fired | `packages/effect-frame/tests/view/dom.test.tsx` | done 5bd87f9 |
 | V3-select | a `select`'s change event carried an empty value | `packages/effect-frame/tests/view/dom.test.tsx` | done fa52a41 |
 | E6a | a Durable Object served a request naming another address | `packages/host-durable-object/tests/frame-host.test.ts` | done eb22ef4 |
+| C1 (counsel major) | JSDoc examples and changesets named removed APIs (`NoParams` as a value, `updateSearch`, `spawn`, `Query.batched`, `QueryTest`, `layerTest`, an incomplete `hydrate`, flat-route wording); counsel `/tmp/counsel/worktrees-effect-frame-arch-pass1-02279afb/20260925-125406-claude-to-codex-dfd7f9/codex.md`, verdict no blocker | none: docs are not compiled; the structural guard (JSDoc `@example` and changeset blocks checked against exports) is a pass 2 candidate | done (this commit) |
 | D13-link | `link` computes `aria-current` per segment and ignores params: on `/counters/home`, the `/counters/work` link also carries `aria-current="page"` (`router/link.tsx` `to.currentAt(match)`; the notes lists nav too) | `packages/effect-frame/tests/router/route-public.test.tsx` "4. a link is the page only when its own params print the current path; search does not count"; `packages/effect-frame/tests/examples/counter.test.tsx` "draws a counter page on the server, with the names beside it" | done e8da6b0 |
 
 Live check: `<pending>`

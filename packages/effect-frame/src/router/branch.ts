@@ -938,9 +938,9 @@ const ownEmpty = <Own>(): Own => {
 // ---------------------------------------------------------------------------
 
 /**
- * What a segment's view receives: a flat route's props and the segment's
+ * What a segment's view receives: the route's props and the segment's
  * data. Sources, so a stayed segment re-runs nothing. `href` prints this
- * segment; `updateSearch` and `replaceSearch` update its search against the
+ * segment; `pushSearch` and `replaceSearch` update its search against the
  * latest URL and are refused once this instance's route is gone.
  */
 export interface SegmentProps<Params, Search, Data extends Declarations> extends RouteProps<
@@ -3122,7 +3122,7 @@ const treeSearchKeys = (all: ReadonlyArray<SearchKeyInfo>): SearchKeyInfo => {
  *
  * @example
  * ```ts
- * const Home = Route.segment("home", { path: "/", params: NoParams });
+ * const Home = Route.segment("home", { path: "/" });
  * export const HomeRoute = Route.ssr("home", Route.leaf(Home, HomeView));
  * ```
  */
@@ -3178,7 +3178,7 @@ export const awaitAll: ModeConstructor = modeConstructor("AwaitAll");
  *
  * @example
  * ```ts
- * const home = Route.segment("home", { path: "/", params: Schema.Struct({}) });
+ * const home = Route.segment("home", { path: "/" });
  * export const Home = Route.redirecting("home", home, () =>
  *   Effect.succeed(Route.redirect(lists, {}, {})),
  * );

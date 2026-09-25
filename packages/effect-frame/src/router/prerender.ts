@@ -246,7 +246,7 @@ const refuse = (error: PrerenderAncestorNotEnumerable | PrerenderInputsRejected)
  * param must name inputs, and every inputs value must name a segment of
  * the tree, once. A segment that adds no param needs none: it contributes
  * one page per parent page. Given inputs, it contributes one per record,
- * so a flat route's inputs are its page list (`[{}]` is one page).
+ * so a one-leaf tree's inputs are its page list (`[{}]` is one page).
  * It runs where the tree is constructed, before the tree is mounted.
  */
 export const planFor = (name: string, level: Level, given: ReadonlyArray<AnyInputs>): Plan => {

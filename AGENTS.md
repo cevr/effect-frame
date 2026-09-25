@@ -30,8 +30,9 @@ The gate checks the Bun version, then runs three lanes, then the tests:
 
 - types: `tsc` over every workspace, with the Effect language service.
 - style: `oxlint`, `oxfmt --check`, `bun run paths` (every path a doc cites
-  exists), and `bun run docs` (the glossary defines each term once, and
-  every ts or tsx block in a reference doc is a compiled example region).
+  exists), and `bun run docs` (the glossary defines each term once, every
+  ts or tsx block in a reference doc is a compiled example region, and no
+  changeset takes a package to 1.0 by accident).
 - build: the package build, the browser bundles, `bun run boundary`, and
   `bun run declarations`.
 
@@ -91,6 +92,10 @@ The lint is strict and the rules are written down in `.oxlintrc.json`:
 
 - Commits follow Conventional Commits. A breaking change has `!`.
 - A change to a published package carries a changeset in `.changeset/`.
+- A package below 1.0 takes no `major` changeset: a breaking change on 0.x
+  is `minor`. The first major release is the owner's decision, written by
+  setting `firstMajor` in `tooling/checks/src/changesets.ts`; until then
+  `bun run docs` refuses the bump and a published package at 1.0.
 - A new check gets a test that fails before the check exists.
 - A row of `docs/design/acceptance.md` moves only with the test that proves
   it.

@@ -1,7 +1,7 @@
 import { Array as Arr, Context, Effect, Option, Result, Schema } from "effect";
-import type { Address } from "./contract.js";
+import type { Address, AnyContract, KeyOf } from "./contract.js";
 import type { Authenticated, Principal } from "./principal.js";
-import type { QueryKey } from "./query.js";
+import type { AnyQuery, ArgsOf, QueryKey } from "./query.js";
 import { Unauthorized } from "./vocabulary.js";
 
 /**
@@ -91,6 +91,25 @@ const authenticated: Policy = {
   },
 };
 
+/** Runs `check` on what `decode` reads from the subject; nothing read refuses. */
+const decided = <P, A>(
+  principal: P,
+  subject: Subject,
+  action: Action,
+  decode: (subject: Subject) => Option.Option<A>,
+  check: (principal: P, value: A, action: Action) => Effect.Effect<boolean>,
+): Effect.Effect<void, Unauthorized> =>
+  Option.match(decode(subject), {
+    onNone: () => refuse(subject),
+    onSome: (value) =>
+      Effect.flatMap(check(principal, value, action), (allowed) => {
+        if (allowed) {
+          return Effect.void;
+        }
+        return refuse(subject);
+      }),
+  });
+
 /**
  * Narrows to an authenticated principal and a decoded subject. An anonymous
  * caller, or a subject `decode` does not recognize, is refused before
@@ -104,18 +123,76 @@ const of = <A>(
     if (principal._tag !== "Authenticated") {
       return refuse(subject);
     }
-    return Option.match(decode(subject), {
-      onNone: () => refuse(subject),
-      onSome: (value) =>
-        Effect.flatMap(check(principal, value, action), (allowed) => {
-          if (allowed) {
-            return Effect.void;
-          }
-          return refuse(subject);
-        }),
-    });
+    return decided(principal, subject, action, decode, check);
   },
 });
+
+/** The subjects a `forSubjects` rule reads: contracts by their key, queries by their arguments. */
+export interface PolicySubjects<
+  Contracts extends ReadonlyArray<AnyContract>,
+  Queries extends ReadonlyArray<AnyQuery>,
+> {
+  readonly contracts: Contracts;
+  readonly queries: Queries;
+}
+
+/** The decoded key of a named contract, or the decoded arguments of a named query. */
+export type PolicySubjectKey<
+  Contracts extends ReadonlyArray<AnyContract>,
+  Queries extends ReadonlyArray<AnyQuery>,
+> = KeyOf<Contracts[number]> | ArgsOf<Queries[number]>;
+
+/**
+ * A rule over typed keys. It names the contracts and queries it reads, and
+ * `check` gets the subject's key or arguments decoded by that contract's or
+ * query's own codec, so a rule never parses the wire form. A subject it
+ * does not name, of another version, or whose key does not decode is
+ * refused before `check` runs. The principal is not narrowed: combine with
+ * `Policy.authenticated` through `Policy.all` to refuse Anonymous.
+ *
+ * ```ts
+ * const tenantMember = Policy.forSubjects(
+ *   { contracts: [Ledger], queries: [Totals] },
+ *   (who, key) => Effect.succeed(tenantsOf(who).includes(key.tenant)),
+ * );
+ * ```
+ */
+const forSubjects = <
+  const Contracts extends ReadonlyArray<AnyContract>,
+  const Queries extends ReadonlyArray<AnyQuery>,
+>(
+  subjects: PolicySubjects<Contracts, Queries>,
+  check: (
+    principal: Principal,
+    key: PolicySubjectKey<Contracts, Queries>,
+    action: Action,
+  ) => Effect.Effect<boolean>,
+): Policy => {
+  const decode = (subject: Subject): Option.Option<PolicySubjectKey<Contracts, Queries>> => {
+    if (subject._tag === "Actor") {
+      return Option.flatMap(
+        Arr.findFirst(
+          subjects.contracts,
+          (named) =>
+            named.name === subject.address.contract && named.version === subject.address.version,
+        ),
+        (named): Option.Option<KeyOf<Contracts[number]>> =>
+          Schema.decodeUnknownOption(named.key)(subject.address.key),
+      );
+    }
+    return Option.flatMap(
+      Arr.findFirst(
+        subjects.queries,
+        (named) => named.name === subject.key.query && named.version === subject.key.version,
+      ),
+      (named): Option.Option<ArgsOf<Queries[number]>> =>
+        Schema.decodeUnknownOption(named.args)(subject.key.args),
+    );
+  };
+  return {
+    check: (principal, subject, action) => decided(principal, subject, action, decode, check),
+  };
+};
 
 /** Allows only when every policy allows. No policies allow everything. */
 const all = (...policies: ReadonlyArray<Policy>): Policy => ({
@@ -145,6 +222,7 @@ export const Policy = {
   /** Requires any authenticated principal. */
   authenticated,
   of,
+  forSubjects,
   all,
   any,
   byAction,

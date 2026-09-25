@@ -39,6 +39,8 @@ export {
   Policy,
   PolicyNamesMissing,
   type Action,
+  type PolicySubjectKey,
+  type PolicySubjects,
   type PolicyTable,
   type Subject,
 } from "./policy.js";

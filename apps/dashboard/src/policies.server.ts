@@ -1,6 +1,8 @@
-import { Policies, Unauthorized } from "effect-frame/actor";
-import type { Policy, Principal, Subject } from "effect-frame/actor";
-import { Effect, Layer, Option, Predicate, Schema } from "effect";
+import { Policies, Policy } from "effect-frame/actor";
+import type { Principal } from "effect-frame/actor";
+import { Effect, Layer, Predicate } from "effect";
+import { Alerts, Memo, Orders } from "./contract.js";
+import { Funnel, OrderDetail, OrderList, Revenue, Slowest, TenantInfo } from "./queries.js";
 
 /**
  * The one policy table (#20). One name, `tenantMember`, guards every actor
@@ -14,17 +16,6 @@ import { Effect, Layer, Option, Predicate, Schema } from "effect";
  * again (#25 §4).
  */
 
-const Tenanted = Schema.fromJsonString(Schema.Struct({ tenant: Schema.String }));
-const decodeTenant = Schema.decodeUnknownOption(Tenanted);
-
-/** The tenant a subject names: an actor key's, or a query's arguments'. */
-const tenantOf = (subject: Subject): Option.Option<string> => {
-  if (subject._tag === "Actor") {
-    return Option.map(decodeTenant(subject.address.key), (key) => key.tenant);
-  }
-  return Option.map(decodeTenant(subject.key.args), (args) => args.tenant);
-};
-
 /** The tenants a principal's claims name. Anonymous names none. */
 export const tenantsOf = (principal: Principal): ReadonlyArray<string> => {
   if (principal._tag === "Anonymous") {
@@ -37,21 +28,13 @@ export const tenantsOf = (principal: Principal): ReadonlyArray<string> => {
   return claimed.filter(Predicate.isString);
 };
 
-const nameOf = (subject: Subject): string => {
-  if (subject._tag === "Actor") {
-    return subject.address.contract;
-  }
-  return subject.key.query;
-};
-
-export const tenantMember: Policy = {
-  check: (principal, subject) => {
-    const tenant = tenantOf(subject);
-    if (Option.isSome(tenant) && tenantsOf(principal).includes(tenant.value)) {
-      return Effect.void;
-    }
-    return Effect.fail(Unauthorized.make({ contract: nameOf(subject) }));
+/** Every actor and query this app declares carries its tenant; the rule reads it typed. */
+export const tenantMember = Policy.forSubjects(
+  {
+    contracts: [Orders, Alerts, Memo],
+    queries: [TenantInfo, Revenue, OrderList, Funnel, Slowest, OrderDetail],
   },
-};
+  (principal, key) => Effect.succeed(tenantsOf(principal).includes(key.tenant)),
+);
 
 export const policies = Layer.succeed(Policies, Policies.of({ tenantMember }));

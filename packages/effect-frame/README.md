@@ -1396,26 +1396,21 @@ export const Totals = query("Totals", {
 <!-- example: examples/features/authorization.server.ts#policy -->
 
 ```ts
-const decodeLedgerKey = Schema.decodeUnknownOption(Ledger.key);
-const decodeTotalsArgs = Schema.decodeUnknownOption(Totals.args);
-
-// The tenant a subject names: a ledger's key, or the totals' arguments.
-const tenantOf = (subject: Subject): Option.Option<string> => {
-  if (subject._tag === "Actor") {
-    return Option.map(decodeLedgerKey(subject.address.key), (key) => key.tenant);
-  }
-  return Option.map(decodeTotalsArgs(subject.key.args), (args) => args.tenant);
-};
-
 const decodeTenants = Schema.decodeUnknownOption(Schema.Array(Schema.String));
 
-// The tenants a session published about its subject.
-const tenantsOf = (who: Authenticated): ReadonlyArray<string> =>
-  Option.getOrElse(decodeTenants(who.claims["tenants"]), (): ReadonlyArray<string> => []);
+// The tenants a session published about its subject. Anonymous has none.
+const tenantsOf = (who: Principal): ReadonlyArray<string> => {
+  if (who._tag === "Anonymous") {
+    return [];
+  }
+  return Option.getOrElse(decodeTenants(who.claims["tenants"]), (): ReadonlyArray<string> => []);
+};
 
-// One rule for actors and queries. `Policy.of` refuses Anonymous first.
-const tenantMember = Policy.of(tenantOf, (who, tenant) =>
-  Effect.succeed(tenantsOf(who).includes(tenant)),
+// One rule for the ledger and the totals. `forSubjects` decodes the ledger's
+// key and the totals' arguments with their own codecs, and refuses any
+// subject it does not name.
+const tenantMember = Policy.forSubjects({ contracts: [Ledger], queries: [Totals] }, (who, key) =>
+  Effect.succeed(tenantsOf(who).includes(key.tenant)),
 );
 
 // Every name a contract or query declares has a rule. Allow-all exists
@@ -1453,8 +1448,12 @@ export const handler = Effect.gen(function* () {
 ```
 
 - `effect-frame/actor` exports `Policy` (`allowAll`, `authenticated`,
-  `of`, `all`, `any`, `byAction`), `Policies`, `PolicyNamesMissing`, and
-  the types `PolicyTable`, `Subject`, `Action`.
+  `of`, `forSubjects`, `all`, `any`, `byAction`), `Policies`,
+  `PolicyNamesMissing`, and the types `PolicyTable`, `Subject`, `Action`.
+- `Policy.forSubjects({ contracts, queries }, check)` names what the rule
+  reads, and `check` gets the key or the arguments decoded by that
+  contract's or query's own codec. A subject it does not name is refused.
+  A rule never parses the wire form of a key.
 - `effect-frame/actor/client` exports `Principal` (`anonymous`,
   `constant`, `equals`, `isAuthenticated`), `Anonymous`, `Authenticated`,
   `Claims`, `CurrentPrincipal`, and the type `PrincipalSource`. The client

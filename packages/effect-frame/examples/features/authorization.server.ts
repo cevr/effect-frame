@@ -7,9 +7,7 @@ import {
   implementQuery,
   implementTransparent,
 } from "effect-frame/actor";
-import type { Subject } from "effect-frame/actor";
 import { Anonymous, Principal } from "effect-frame/actor/client";
-import type { Authenticated } from "effect-frame/actor/client";
 import { Effect, Layer, Option, Schema, Stream } from "effect";
 import type { HttpServerRequest } from "effect/unstable/http";
 import { Headers } from "effect/unstable/http";
@@ -31,26 +29,21 @@ const TotalsLive = implementQuery(Totals, {
 // #endregion query-reads-actor
 
 // #region policy
-const decodeLedgerKey = Schema.decodeUnknownOption(Ledger.key);
-const decodeTotalsArgs = Schema.decodeUnknownOption(Totals.args);
-
-// The tenant a subject names: a ledger's key, or the totals' arguments.
-const tenantOf = (subject: Subject): Option.Option<string> => {
-  if (subject._tag === "Actor") {
-    return Option.map(decodeLedgerKey(subject.address.key), (key) => key.tenant);
-  }
-  return Option.map(decodeTotalsArgs(subject.key.args), (args) => args.tenant);
-};
-
 const decodeTenants = Schema.decodeUnknownOption(Schema.Array(Schema.String));
 
-// The tenants a session published about its subject.
-const tenantsOf = (who: Authenticated): ReadonlyArray<string> =>
-  Option.getOrElse(decodeTenants(who.claims["tenants"]), (): ReadonlyArray<string> => []);
+// The tenants a session published about its subject. Anonymous has none.
+const tenantsOf = (who: Principal): ReadonlyArray<string> => {
+  if (who._tag === "Anonymous") {
+    return [];
+  }
+  return Option.getOrElse(decodeTenants(who.claims["tenants"]), (): ReadonlyArray<string> => []);
+};
 
-// One rule for actors and queries. `Policy.of` refuses Anonymous first.
-const tenantMember = Policy.of(tenantOf, (who, tenant) =>
-  Effect.succeed(tenantsOf(who).includes(tenant)),
+// One rule for the ledger and the totals. `forSubjects` decodes the ledger's
+// key and the totals' arguments with their own codecs, and refuses any
+// subject it does not name.
+const tenantMember = Policy.forSubjects({ contracts: [Ledger], queries: [Totals] }, (who, key) =>
+  Effect.succeed(tenantsOf(who).includes(key.tenant)),
 );
 
 // Every name a contract or query declares has a rule. Allow-all exists

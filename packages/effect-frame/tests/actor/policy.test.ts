@@ -10,8 +10,8 @@ import {
   implementQuery,
   implementTransparent,
 } from "effect-frame/actor";
-import type { PolicyTable } from "effect-frame/actor";
-import { ActorTransport, contract, query } from "effect-frame/actor/client";
+import type { PolicyTable, Subject } from "effect-frame/actor";
+import { Anonymous, ActorTransport, contract, query } from "effect-frame/actor/client";
 
 /**
  * A required table, validated at construction (#20 §3). A host whose
@@ -135,6 +135,50 @@ describe("a required policy table", () => {
         }),
       );
       expect(served).toBe(2);
+    }),
+  );
+});
+
+describe("a rule over typed keys", () => {
+  const Ledger = contract("Ledger", {
+    version: 1,
+    policy: "tenantMember",
+    key: Schema.Struct({ tenant: Schema.String, id: Schema.String }),
+    snapshot: Schema.Finite,
+    message: Schema.Union([Add]),
+  });
+  // A rule reads the key and the arguments as their contract and query decode them.
+  const tenantMember = Policy.forSubjects(
+    { contracts: [Ledger], queries: [Totals] },
+    (_principal, key) => Effect.succeed(key.tenant === "acme"),
+  );
+  const actor = (contractName: string, key: string): Subject => ({
+    _tag: "Actor",
+    address: { contract: contractName, version: 1, key },
+  });
+  const totals = (args: string): Subject => ({
+    _tag: "Query",
+    key: { query: "Totals", version: 1, args },
+  });
+  const allows = (subject: Subject) =>
+    Effect.map(
+      Effect.exit(tenantMember.check(Anonymous.make({}), subject, "read")),
+      Exit.isSuccess,
+    );
+
+  it.effect("decodes each named subject's key with its own codec", () =>
+    Effect.gen(function* () {
+      expect(yield* allows(actor("Ledger", '{"tenant":"acme","id":"book"}'))).toBe(true);
+      expect(yield* allows(actor("Ledger", '{"tenant":"globex","id":"book"}'))).toBe(false);
+      expect(yield* allows(totals('{"tenant":"acme"}'))).toBe(true);
+    }),
+  );
+
+  it.effect("refuses a subject it does not name, or a key that does not decode", () =>
+    Effect.gen(function* () {
+      expect(yield* allows(actor("Other", '{"tenant":"acme","id":"book"}'))).toBe(false);
+      expect(yield* allows(actor("Ledger", '{"tenant":"acme"}'))).toBe(false);
+      expect(yield* allows(actor("Ledger", "not json"))).toBe(false);
     }),
   );
 });

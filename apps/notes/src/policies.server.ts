@@ -1,7 +1,6 @@
-import { Policies, Policy, Unauthorized } from "effect-frame/actor";
-import type { Subject } from "effect-frame/actor";
-import { Effect, Layer, Option, Schema } from "effect";
-import { NotesKey, readOnlyList } from "./contract.js";
+import { Policies, Policy } from "effect-frame/actor";
+import { Effect, Layer } from "effect";
+import { Notes, readOnlyList } from "./contract.js";
 
 /**
  * The one policy table (#20). Notes has no sessions and no tenants, so
@@ -14,20 +13,11 @@ import { NotesKey, readOnlyList } from "./contract.js";
  * predicted row back (#19, #37).
  */
 
-const decodeKey = Schema.decodeUnknownOption(Schema.fromJsonString(NotesKey));
-
-const readOnly = (subject: Subject): boolean =>
-  subject._tag === "Actor" &&
-  Option.exists(decodeKey(subject.address.key), (key) => key.list === readOnlyList);
-
-const sendsToWritableLists: Policy = {
-  check: (_principal, subject) => {
-    if (readOnly(subject)) {
-      return Effect.fail(Unauthorized.make({ contract: "Notes" }));
-    }
-    return Effect.void;
-  },
-};
+/** A send to the notes actor names a writable list. */
+const sendsToWritableLists = Policy.forSubjects(
+  { contracts: [Notes], queries: [] },
+  (_principal, key) => Effect.succeed(key.list !== readOnlyList),
+);
 
 export const policies = Layer.succeed(
   Policies,

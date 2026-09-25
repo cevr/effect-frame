@@ -2,7 +2,7 @@
 
 import { spawn } from "node:child_process";
 
-export type OwnedProcess = ReturnType<typeof spawn>;
+type OwnedProcess = ReturnType<typeof spawn>;
 
 export interface OwnedProcessState {
   spawned: boolean;

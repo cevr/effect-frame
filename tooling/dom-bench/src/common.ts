@@ -87,9 +87,6 @@ export const nouns: ReadonlyArray<string> = [
   "keyboard",
 ];
 
-const contains = (values: ReadonlyArray<string>, value: string | undefined): boolean =>
-  value !== undefined && values.includes(value);
-
 const randomIndex = (seed: number, length: number): number => {
   const value = (Math.imul(seed ^ 0x9e3779b9, 1_664_525) + 1_013_904_223) >>> 0;
   return Math.round((value / 0xffffffff) * 1_000) % length;
@@ -105,22 +102,6 @@ export const labelFor = (index: number, firstId = 1): string => {
   return `${adjectives[randomIndex(seed, adjectives.length)]} ${colors[randomIndex(seed + 1, colors.length)]} ${nouns[randomIndex(seed + 2, nouns.length)]}`;
 };
 
-const baseLabel = (label: string): string => {
-  if (label.endsWith(" !!!")) return label.slice(0, -4);
-  return label;
-};
-
-export const isCanonicalLabel = (label: string): boolean => {
-  const base = baseLabel(label);
-  const words = base.split(" ");
-  return (
-    words.length === 3 &&
-    contains(adjectives, words[0]) &&
-    contains(colors, words[1]) &&
-    contains(nouns, words[2])
-  );
-};
-
 export const makeRows = (count: number, firstId = 1): ReadonlyArray<Row> =>
   Array.from({ length: count }, (_, index) => {
     const id = firstId + index;
@@ -132,10 +113,9 @@ const updateRow = (row: Row, index: number): Row => {
   return row;
 };
 
-export const updateEveryTenth = (rows: ReadonlyArray<Row>): ReadonlyArray<Row> =>
-  rows.map(updateRow);
+const updateEveryTenth = (rows: ReadonlyArray<Row>): ReadonlyArray<Row> => rows.map(updateRow);
 
-export const swapRows = (rows: ReadonlyArray<Row>): ReadonlyArray<Row> => {
+const swapRows = (rows: ReadonlyArray<Row>): ReadonlyArray<Row> => {
   if (rows.length < 999) {
     return rows;
   }

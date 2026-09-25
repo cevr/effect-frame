@@ -15,7 +15,7 @@ import type { OperationName } from "./common.js";
  * the owner again when it runs. Success, cancellation, replacement by a new
  * owner, and page hide all clear the pending timer.
  */
-export interface CompletionRequest {
+interface CompletionRequest {
   readonly beforeVersion: number;
   readonly rows: number;
   readonly selected: number | null;

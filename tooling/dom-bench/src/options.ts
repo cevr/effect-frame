@@ -18,7 +18,7 @@ export type FrameworkName = Schema.Schema.Type<typeof FrameworkSchema>;
 export type EngineName = Schema.Schema.Type<typeof EngineSchema>;
 export type OperationName = Schema.Schema.Type<typeof OperationNameSchema>;
 
-export interface BenchOptions {
+interface BenchOptions {
   readonly help: boolean;
   readonly framework: FrameworkName;
   readonly engines: ReadonlyArray<EngineName>;

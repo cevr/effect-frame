@@ -1,7 +1,7 @@
 /* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNewError, effect/noNullish, effect/noThrowStatement, effect/noTernary, effect/noNodeBuiltinImport, no-await-in-loop -- this harness owns the real browser, the page server, and bundling for the transport proof. */
 import type { Engine } from "@effect-frame/test-browser";
 import { backendOf, requireBrowser } from "@effect-frame/test-browser";
-import { Effect, Exit, Scope } from "effect";
+import { Effect, Exit, Option, Scope } from "effect";
 import { resolve } from "node:path";
 import * as Gateway from "../src/gateway.js";
 import * as Client from "../src/reader.js";
@@ -182,12 +182,13 @@ export const startGateway = async (options: GatewayTuning): Promise<RunningGatew
 
 export const stats = (running: RunningGateway) => Effect.runPromise(running.gateway.stats);
 
-export const cli = (
-  argv: ReadonlyArray<string>,
-  token: string,
-  interrupt?: AbortSignal,
-): Promise<Client.CliResult> =>
-  Effect.runPromise(Client.run(argv, interrupt === undefined ? { token } : { token, interrupt }));
+export const cli = (argv: ReadonlyArray<string>, token: string): Promise<Client.CliResult> =>
+  Effect.runPromise(
+    Client.run(argv, {
+      token: Option.filter(Option.some(token), (value) => value.length > 0),
+      interrupt: Effect.never,
+    }),
+  );
 
 export const cliJson = async <A>(
   argv: ReadonlyArray<string>,

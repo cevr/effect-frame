@@ -16,7 +16,7 @@ import * as Capabilities from "./capabilities.js";
 import { Help, Invalid, invalid, readFlags, type FlagSpec } from "./flags.js";
 import * as Gateway from "./gateway.js";
 import * as Reader from "./reader.js";
-import { exitCodeOf, untilInterrupted, type ExitCode } from "./signals.js";
+import { exitCodeOf, type ExitCode, type InterruptSignal } from "./signals.js";
 
 export type { ExitCode } from "./signals.js";
 
@@ -30,8 +30,8 @@ export interface Io {
   readonly xdgStateHome: Option.Option<string>;
   /** This process's PID; it owns the gateway lock. */
   readonly pid: number;
-  /** Aborted with `SIGINT`, `SIGTERM`, or `SIGHUP` as its reason. */
-  readonly interrupt: AbortSignal;
+  /** Completes with `SIGINT`, `SIGTERM`, or `SIGHUP` when one arrives. */
+  readonly interrupt: Effect.Effect<InterruptSignal>;
   readonly stdout: (text: string) => void;
   readonly stderr: (text: string) => void;
 }
@@ -197,7 +197,7 @@ const serve = (args: GatewayArgs, io: Io): Effect.Effect<ExitCode> =>
     });
     const files = yield* Capabilities.write(args.stateDir, tokens);
     io.stderr(readyText(args, gateway, files));
-    const signal = yield* untilInterrupted(io.interrupt);
+    const signal = yield* io.interrupt;
     return exitCodeOf(signal);
   }).pipe(
     Effect.scoped,
@@ -251,10 +251,7 @@ const gateway = (rest: ReadonlyArray<string>, io: Io): Effect.Effect<ExitCode> =
 // ---------------------------------------------------------------------------
 
 const reader = (io: Io): Effect.Effect<ExitCode> =>
-  Reader.run(io.argv, {
-    ...Option.match(io.token, { onNone: () => ({}), onSome: (token) => ({ token }) }),
-    interrupt: io.interrupt,
-  }).pipe(
+  Reader.run(io.argv, io).pipe(
     Effect.map((result) => {
       io.stdout(result.stdout);
       io.stderr(result.stderr);

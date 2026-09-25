@@ -2,8 +2,9 @@
 /**
  * The reader commands of the `effect-frame` executable. `run` takes argv and
  * an environment and returns the exit code with stdout and stderr text; it
- * never touches the process. `bin.ts` wires `process.argv`, the token
- * environment variable, SIGINT, and the streams to it.
+ * never touches the process, except to read a `--token-file`. `bin.ts`
+ * wires `process.argv`, the token environment variable, the signals, and
+ * the streams to it.
  *
  *   roots   --url <gateway> [--json] [--deadline <ms>] [--token-file <path>]
  *   inspect --url <gateway> --root <id|prefix|name> [--json] [--deadline <ms>]
@@ -18,18 +19,17 @@ import { Effect, Match, Option, Result, Schema } from "effect";
 import { Protocol } from "effect-frame/inspection";
 import { Help, Invalid, invalid, readFlags, type FlagSpec } from "./flags.js";
 import { DEFAULT_DEADLINE_MILLIS } from "./limits.js";
-import { InterruptSignal, exitCodeOf, untilInterrupted, type ExitCode } from "./signals.js";
+import { InterruptSignal, exitCodeOf, type ExitCode } from "./signals.js";
 import { escapeText } from "./text.js";
 
 export const TOKEN_ENV = "EFFECT_FRAME_INSPECT_TOKEN";
 
+/** What a reader command takes from the process. `bin.ts` builds it. */
 export interface CliEnvironment {
-  /** The value of `EFFECT_FRAME_INSPECT_TOKEN`, if set. */
-  readonly token?: string;
-  /** Reads a token file. The default uses `Bun.file`. */
-  readonly readFile?: (path: string) => Promise<string>;
-  /** Aborts the command as SIGINT would. */
-  readonly interrupt?: AbortSignal;
+  /** The value of `EFFECT_FRAME_INSPECT_TOKEN`, when set. */
+  readonly token: Option.Option<string>;
+  /** Completes with the signal that ends the command. */
+  readonly interrupt: Effect.Effect<InterruptSignal>;
 }
 
 export interface CliResult {
@@ -364,20 +364,16 @@ const exchange = (parsed: Parsed, token: string) =>
     }),
   );
 
+/** The token: from `--token-file` when given, read here at the boundary; else the environment's. */
 const readToken = (parsed: Parsed, environment: CliEnvironment) =>
   Option.match(parsed.tokenFile, {
-    onNone: () => Effect.succeed(Option.fromNullishOr(environment.token)),
+    onNone: () => Effect.succeed(environment.token),
     onSome: (path) =>
-      Effect.tryPromise(() =>
-        (environment.readFile ?? ((file: string) => Bun.file(file).text()))(path),
-      ).pipe(
+      Effect.tryPromise(() => Bun.file(path).text()).pipe(
         Effect.map((text) => Option.some(text.trim())),
         Effect.catchTag("UnknownError", () => Effect.succeed(Option.none<string>())),
       ),
   });
-
-const awaitInterrupt = (signal: Option.Option<AbortSignal>) =>
-  Option.match(signal, { onNone: () => Effect.never, onSome: untilInterrupted });
 
 const result = (exitCode: CliResult["exitCode"], stdout: string, stderr: string): CliResult => ({
   exitCode,
@@ -412,7 +408,7 @@ const execute = (parsed: Parsed, environment: CliEnvironment) =>
     // A signal wins the race as a failure value; a reply as a success.
     const reply = yield* Effect.raceFirst(
       Effect.map(exchange(parsed, token.value), Result.succeed),
-      Effect.map(awaitInterrupt(Option.fromNullishOr(environment.interrupt)), Result.fail),
+      Effect.map(environment.interrupt, Result.fail),
     );
     return Result.match(reply, {
       onSuccess: (response) => render(parsed, response),
@@ -426,7 +422,7 @@ const execute = (parsed: Parsed, environment: CliEnvironment) =>
 /** Run one reader command. It never fails and never exits the process. */
 export const run = (
   argv: ReadonlyArray<string>,
-  environment: CliEnvironment = {},
+  environment: CliEnvironment,
 ): Effect.Effect<CliResult> =>
   parse(argv).pipe(
     Effect.flatMap((parsed) => execute(parsed, environment)),

@@ -4,7 +4,7 @@
  * limits stay equal to the public schema bounds.
  */
 import { describe, expect, it } from "bun:test";
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { Protocol } from "effect-frame/inspection";
 import { statusOf } from "../src/limits.js";
 import * as Reader from "../src/reader.js";
@@ -80,7 +80,12 @@ describe("reader text view", () => {
     });
     const argv = ["inspect", "--url", `http://127.0.0.1:${server.port}`, "--root", "frame-root-1"];
     const read = (extra: ReadonlyArray<string>) =>
-      Effect.runPromise(Reader.run([...argv, ...extra], { token: "t".repeat(64) }));
+      Effect.runPromise(
+        Reader.run([...argv, ...extra], {
+          token: Option.some("t".repeat(64)),
+          interrupt: Effect.never,
+        }),
+      );
     const both = async () => ({ text: await read([]), json: await read(["--json"]) });
     const { text: result, json } = await both().finally(() => server.stop(true));
     expect(result.exitCode).toBe(0);
@@ -92,6 +97,41 @@ describe("reader text view", () => {
     // --json keeps the exact strings; JSON string escaping keeps C0 inert.
     expect(json.exitCode).toBe(0);
     expect(json.stdout).toContain(JSON.stringify(`book${HOSTILE}`));
+  });
+});
+
+describe("the reader's process port", () => {
+  it("an interrupt ends a read that has no reply, with the signal's exit code", async () => {
+    // A gateway whose reply never ends: only the interrupt can end the read.
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () => new Response(new ReadableStream({})),
+    });
+    const argv = ["roots", "--url", `http://127.0.0.1:${server.port}`, "--json"];
+    const result = await Effect.runPromise(
+      Reader.run(argv, {
+        token: Option.some("t".repeat(64)),
+        interrupt: Effect.succeed("SIGTERM"),
+      }),
+    ).finally(() => server.stop(true));
+    expect(result.exitCode).toBe(143);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      _tag: "Error",
+      error: { _tag: "Interrupted", signal: "SIGTERM" },
+    });
+  });
+
+  it("reads the token from --token-file, and a missing file is a missing capability", async () => {
+    const argv = ["roots", "--url", "http://127.0.0.1:1", "--json", "--token-file"];
+    const missing = await Effect.runPromise(
+      Reader.run([...argv, "/nonexistent/effect-frame-token"], {
+        token: Option.some("t".repeat(64)),
+        interrupt: Effect.never,
+      }),
+    );
+    expect(missing.exitCode).toBe(2);
+    expect(JSON.parse(missing.stdout)).toMatchObject({ error: { _tag: "MissingCapability" } });
   });
 });
 

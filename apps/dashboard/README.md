@@ -29,30 +29,30 @@ member on each request instead. Set `PORT` to use another port.
 
 ## What each file does
 
-| File                           | Role                                                                                                     |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `src/contract.ts`              | The three actor contracts: `Orders`, `Alerts`, and `Memo`, which no query names. Browser safe.           |
-| `src/queries.ts`               | The six queries and their `depends` lists: the point of the example.                                     |
-| `src/behavior.ts`              | The reducers. The host runs them; the page's `Orders` and `Memo` references predict with them.           |
-| `src/segments.ts`              | The layout segment and its two children, and the data each one declares.                                 |
-| `src/routes.tsx`               | The route tree: one streamed layout, two leaves, and the redirect from `/`.                              |
-| `src/views.tsx`                | The shell (outer `Errored` and `Loading`), the memo card, and the fallbacks.                             |
-| `src/overview.tsx`             | The overview's cards. The slowest endpoints sit under a nested `Loading`; the funnel mounts on a reveal. |
-| `src/orders-page.tsx`          | The orders page: every order, and the open ones.                                                         |
-| `src/commands.ts`              | `Fulfil`, `Cancel`, `Ack`, `Write`, and the snapshot of a bound actor.                                   |
-| `src/app.ts`                   | Hydrate the route tree over the server's nodes.                                                          |
-| `src/orders.server.ts`         | The `Orders` actor. A server module.                                                                     |
-| `src/alerts.server.ts`         | The `Alerts` and `Memo` actors. A server module.                                                         |
-| `src/queries.server.ts`        | The query handlers. They read the actors through the host they run in. A server module.                  |
-| `src/policies.server.ts`       | `tenantMember`: one policy for every actor and query, read off the `tenant` field. A server module.      |
-| `src/host.server.ts`           | The in-memory host over the actors and queries. A server module.                                         |
-| `src/server.ts`                | The platform boundary: `Bun.serve`, `Bun.build`, and the request's principal.                            |
-| `src/client.tsx`               | The browser entry.                                                                                       |
-| `tests/single-flight.test.tsx` | Each command's reply refreshes exactly its dependents on screen; a memo write refreshes none.            |
-| `tests/query.test.tsx`         | One read of the layout's tenant; canonical keys; stale from send until the last reply.                   |
-| `tests/readiness.test.tsx`     | The nested `Loading`; the late funnel card; one fallback on failure.                                     |
-| `tests/transition.test.tsx`    | `active` names both leaves mid-transition, one after, and stays bounded over 50 navigations.             |
-| `tests/boundary.test.ts`       | The browser entry reaches no server module; an injected one is refused with its import chain.            |
+| File                           | Role                                                                                                            |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `src/contract.ts`              | The three actor contracts: `Orders`, `Alerts`, and `Memo`, which no query names. Browser safe.                  |
+| `src/queries.ts`               | The six queries and their `depends` lists: the point of the example.                                            |
+| `src/behavior.ts`              | The reducers. The host runs them; the page's `Orders` and `Memo` references predict with them.                  |
+| `src/segments.ts`              | The layout segment and its two children, and the data each one declares.                                        |
+| `src/routes.tsx`               | The route tree: one streamed layout, two leaves, and the redirect from `/`.                                     |
+| `src/views.tsx`                | The shell (outer `Errored` and `Loading`), the memo card, and the fallbacks.                                    |
+| `src/overview.tsx`             | The overview's cards. The slowest endpoints sit under a nested `Loading`; the funnel mounts on a reveal.        |
+| `src/orders-page.tsx`          | The orders page: every order, and the open ones.                                                                |
+| `src/commands.ts`              | `Fulfil`, `Cancel`, `Ack`, `Write`, and the snapshot of a bound actor.                                          |
+| `src/app.ts`                   | Hydrate the route tree over the server's nodes.                                                                 |
+| `src/orders.server.ts`         | The `Orders` actor. A server module.                                                                            |
+| `src/alerts.server.ts`         | The `Alerts` and `Memo` actors. A server module.                                                                |
+| `src/queries.server.ts`        | The query handlers. They read the actors through the host they run in. A server module.                         |
+| `src/policies.server.ts`       | `tenantMember`: one policy for every actor and query, read off the `tenant` field. A server module.             |
+| `src/host.server.ts`           | The in-memory host over the actors and queries. A server module.                                                |
+| `src/server.ts`                | The platform boundary: `Bun.serve`, `Bun.build`, and the request's principal.                                   |
+| `src/client.tsx`               | The browser entry.                                                                                              |
+| `tests/single-flight.test.tsx` | Each command's reply refreshes exactly its dependents on screen; a memo write refreshes none.                   |
+| `tests/query.test.tsx`         | One read of the layout's tenant; canonical keys; stale from send until the last reply.                          |
+| `tests/readiness.test.tsx`     | The nested `Loading`; the late funnel card; one fallback on failure.                                            |
+| `tests/transition.test.tsx`    | `active` names both leaves mid-transition, one after, and stays bounded over 50 navigations.                    |
+| `tests/boundary.test.ts`       | An injected server import is the one refusal, named with its import chain; `bun run boundary` checks the entry. |
 
 ## Routes
 

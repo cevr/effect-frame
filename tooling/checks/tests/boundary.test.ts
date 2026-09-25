@@ -1,28 +1,18 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { checkEntry, formatViolation } from "../src/boundary";
-import { browserEntries, repositoryRoot } from "../src/browser-entries";
+import { repositoryRoot } from "../src/browser-entries";
 
 /**
- * The build rule, proved on both sides: every browser entry in the
- * repository is clean, and a graph that reaches a server module is refused
- * with the chain of files that reached it.
+ * The build rule's reading, on fixtures: a graph that reaches a server
+ * module is refused with the chain of files that reached it, and a clean
+ * graph is not. Every browser entry in the repository is checked by
+ * `bun run boundary`, which the gate runs.
  */
 
 const fixtures = `${repositoryRoot}/tooling/checks/tests/fixtures`;
 
 describe("server/client build rule", () => {
-  for (const entry of browserEntries) {
-    it.effect(`${entry.replace(repositoryRoot, ".")} reaches no server module`, () =>
-      Effect.gen(function* () {
-        const violations = yield* checkEntry(entry);
-        expect(violations.map((violation) => formatViolation(violation, repositoryRoot))).toEqual(
-          [],
-        );
-      }),
-    );
-  }
-
   it.effect("a server module three files deep is refused with its path chain", () =>
     Effect.gen(function* () {
       const violations = yield* checkEntry(`${fixtures}/leaking-entry.ts`);

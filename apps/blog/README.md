@@ -45,7 +45,7 @@ Open <http://127.0.0.1:3000/posts>. Every post link is a built file. Delete one 
 | `tests/browser.test.ts`        | In real Chrome and WebKit: the first scripted heart goes over the transport, the page stays, and the count moves to 1.                |
 | `tests/serve.test.ts`          | A real server on a free port: a hit is the file and the router never runs; a miss renders the same page.                              |
 | `tests/deploy-build.deploy.ts` | The deploy build, run as a process: `bun run build` writes the published page tree. `bun run test:deploy` runs it; the gate does not. |
-| `tests/boundary.test.ts`       | The browser entry reaches no server module; an injected one is refused with its import chain.                                         |
+| `tests/boundary.test.ts`       | An injected server import is the one refusal, named with its import chain; `bun run boundary` checks the entry.                       |
 
 ## Routes
 

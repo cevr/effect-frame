@@ -53,7 +53,7 @@ Type a note in either client and press Enter. Both update. Tick a box in the bro
 | `tests/readiness.test.tsx` | One fallback in each nesting order; a refetch keeps the counts on screen.                                                       |
 | `tests/command.test.tsx`   | `Sent` before the reply, the predicted row, the rollback, and stale counts over HTTP.                                           |
 | `tests/navigation.test.ts` | Scroll and focus in real WebKit and Chrome.                                                                                     |
-| `tests/boundary.test.ts`   | The browser entry reaches no server module; an injected one is refused with its import chain.                                   |
+| `tests/boundary.test.ts`   | An injected server import is the one refusal, named with its import chain; `bun run boundary` checks the entry.                 |
 | `tests/plain-form.test.ts` | The compose form with no script: a real post, a 303, and a double post that adds one note.                                      |
 
 ## Routes

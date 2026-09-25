@@ -19,7 +19,7 @@ These are release requirements. They are not implemented features.
 
 The workspace contains the project tools and their compatibility probes. It does not yet contain a framework runtime. The actor API, renderer adapter, and recovery model remain open decisions on the map.
 
-The private `tooling/checks` workspace checks Effect v4 schema codecs, scope cleanup, and browser bundling. It also holds the server/client build rule. It is not a framework package.
+The private `tooling/checks` workspace holds the build rules the gate runs: the server/client boundary, the published declarations and subpaths, and the Bun version pin. It is not a framework package.
 
 ## Commands
 

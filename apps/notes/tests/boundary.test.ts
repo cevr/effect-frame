@@ -4,10 +4,9 @@ import { Effect } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 /**
- * #24 in the app: the browser entry reaches no server module, and one
- * injected import of `queries.server.js` in the list page is refused with
- * the chain of files that reached it. `bun run boundary` in the gate runs
- * the same check over the same entry.
+ * #24 in the app: one injected import of `queries.server.js` in the list page
+ * is refused with the chain of files that reached it, and it is the only
+ * refusal. `bun run boundary` in the gate checks the entry as written.
  */
 
 /** The source directory, with no trailing slash, as `formatViolation` takes a root. */
@@ -16,12 +15,6 @@ const client = `${source}/client.tsx`;
 const page = `${source}/page.tsx`;
 
 describe("the Notes browser entry and its server modules (#24)", () => {
-  it.effect("the browser entry reaches no server module", () =>
-    Effect.gen(function* () {
-      expect(yield* checkEntry(client)).toEqual([]);
-    }),
-  );
-
   it.effect("an import of queries.server.js in page.tsx is refused with its path chain", () =>
     Effect.gen(function* () {
       const written = yield* Effect.promise(() => Bun.file(page).text());

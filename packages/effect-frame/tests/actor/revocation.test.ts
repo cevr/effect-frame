@@ -507,7 +507,6 @@ describe("a shared session subscription is bounded", () => {
       expect(Option.map(seen, (all) => all.map((next) => next.revision))).toEqual(
         Option.some([0, 100]),
       );
-      expect(HttpServer.sessionBuffer).toEqual({ capacity: 1, strategy: "sliding", replay: 1 });
     }),
   );
 

@@ -102,7 +102,7 @@ from those designs, and why.
 - `HttpServer.shareSessions({ read, follow })` keeps one subscription per
   session key in an `RcMap` of shared streams. It numbers the revisions
   once, before the share, so every connection compares the same numbers.
-  The share buffers with `HttpServer.sessionBuffer`: capacity 1, sliding,
+  The share buffers the latest revision only: capacity 1, sliding,
   replay 1. A connection that falls behind keeps only the newest revision,
   so no buffer grows with the number of changes. A skipped revision is
   safe: the newest one still has a larger number, so A, B, A still ends

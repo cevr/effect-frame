@@ -158,20 +158,6 @@ export interface SessionPrincipals<K, R = never> {
 }
 
 /**
- * How a shared session subscription buffers for each connection: the latest
- * revision only. A connection that falls behind skips to the newest
- * revision and never holds a queue that grows. The number still tells it a
- * change happened, so skipping one is safe.
- */
-export interface SessionBuffer {
-  readonly capacity: 1;
-  readonly strategy: "sliding";
-  readonly replay: 1;
-}
-
-export const sessionBuffer: SessionBuffer = { capacity: 1, strategy: "sliding", replay: 1 };
-
-/**
  * One subscription per session, shared by every connection that follows
  * it. The first connection on a key opens the subscription; the rest
  * join it and see its latest revision first; the last one to close
@@ -186,7 +172,15 @@ export const shareSessions = <K, R>(
   Effect.gen(function* () {
     const context = yield* Effect.context<R>();
     const followed = yield* RcMap.make({
-      lookup: (key: K) => Stream.share(Principal.revisions(sessions.follow(key)), sessionBuffer),
+      // The latest revision only: a connection that falls behind skips to the
+      // newest one and never holds a queue that grows. The number still tells
+      // it a change happened, so skipping one is safe.
+      lookup: (key: K) =>
+        Stream.share(Principal.revisions(sessions.follow(key)), {
+          capacity: 1,
+          strategy: "sliding",
+          replay: 1,
+        }),
     });
     return (key: K): PrincipalSource => ({
       // The server is the boundary: a request's read runs in the server's context.

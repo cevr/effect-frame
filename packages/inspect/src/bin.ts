@@ -5,7 +5,7 @@
  * SIGINT, SIGTERM, and SIGHUP complete the command's interrupt with the
  * signal's name; the command cleans up and returns 130, 143, or 129.
  */
-import { Effect, Fiber, Option } from "effect";
+import { Deferred, Effect, Exit, Fiber, Option } from "effect";
 import * as Cli from "./cli.js";
 import { makeOutput } from "./exit.js";
 import { TOKEN_ENV } from "./reader.js";
@@ -13,17 +13,29 @@ import type { InterruptSignal } from "./signals.js";
 
 const signals: ReadonlyArray<InterruptSignal> = ["SIGINT", "SIGTERM", "SIGHUP"];
 
-/** The first of the signals to arrive. Its listeners go when it completes or is interrupted. */
-const firstSignal = Effect.callback<InterruptSignal>((resume) => {
-  const listeners = signals.map((signal) => {
-    const listener = () => resume(Effect.succeed(signal));
-    process.on(signal, listener);
-    return { signal, listener };
-  });
-  return Effect.sync(() => {
-    for (const { signal, listener } of listeners) process.off(signal, listener);
-  });
-});
+/**
+ * The first of the signals to arrive. Its listeners go when it completes or
+ * is interrupted: the release below runs on both, where an `Effect.callback`
+ * cleanup runs only on interrupt. A second signal during cleanup then gets
+ * the process's default handling.
+ */
+const firstSignal = Effect.gen(function* () {
+  const arrived = yield* Deferred.make<InterruptSignal>();
+  yield* Effect.acquireRelease(
+    Effect.sync(() =>
+      signals.map((signal) => {
+        const listener = () => void Deferred.doneUnsafe(arrived, Exit.succeed(signal));
+        process.on(signal, listener);
+        return { signal, listener };
+      }),
+    ),
+    (listeners) =>
+      Effect.sync(() => {
+        for (const { signal, listener } of listeners) process.off(signal, listener);
+      }),
+  );
+  return yield* Deferred.await(arrived);
+}).pipe(Effect.scoped);
 
 const env = (name: string) => Option.fromNullishOr(process.env[name]);
 

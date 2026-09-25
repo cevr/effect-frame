@@ -491,7 +491,7 @@ Bun.serve({
 
 | Write                                     | Kind           | For                                                                          |
 | ----------------------------------------- | -------------- | ---------------------------------------------------------------------------- |
-| `View.bind(source, f?)`                   | prop or child  | a value that follows a source                                                |
+| `View.bind(source, f?)`                   | prop or child  | a value that follows a source, projected by `f` where it is drawn            |
 | `View.event(handler)`                     | `on*` prop     | an event handler, an Effect                                                  |
 | `View.submit(handler)`                    | `onSubmit`     | a submit whose default action the host suppresses                            |
 | `View.form({ ref, message, ... })`        | yielded Effect | a command form that posts with no script                                     |

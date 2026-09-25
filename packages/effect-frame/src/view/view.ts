@@ -1,18 +1,23 @@
 import type { Form } from "effect-frame/actor";
-import { Source } from "effect-frame/actor/client";
+import type { Source } from "effect-frame/actor/client";
 import type { Effect, Scope } from "effect";
-import { Option } from "effect";
+import { Option, identity } from "effect";
 import type { HostEvent } from "./host.js";
 import type { Node } from "./jsx-runtime.js";
 
 /**
  * A dynamic JSX value. `bind` is the only way to make one, so a reader sees
- * every reactive position in a template. The runtime subscribes to
- * `source.changes` inside the view scope; every other JSX value is static.
+ * every reactive position in a template. The runtime subscribes to the
+ * source inside the view scope and applies the projection where it draws,
+ * so a projected row item is read from the row as directly as the item
+ * itself; every other JSX value is static.
+ *
+ * `open` hands the source and its projection to a reader. The source's own
+ * type is the binding's business, so it is passed, not stored.
  */
 export interface Bound<A> {
   readonly _tag: "Bound";
-  readonly source: Source<A>;
+  readonly open: <R>(read: <S>(source: Source<S>, project: (value: S) => A) => R) => R;
 }
 
 /**
@@ -100,8 +105,8 @@ export interface Bind {
 
 export const bind: Bind = <A, B>(source: Source<A>, project?: (value: A) => B): Bound<A | B> =>
   Option.match(Option.fromNullishOr(project), {
-    onNone: (): Bound<A | B> => ({ _tag: "Bound", source }),
-    onSome: (f): Bound<A | B> => ({ _tag: "Bound", source: Source.select(source, f) }),
+    onNone: (): Bound<A | B> => ({ _tag: "Bound", open: (read) => read(source, identity) }),
+    onSome: (f): Bound<A | B> => ({ _tag: "Bound", open: (read) => read(source, f) }),
   });
 
 /**

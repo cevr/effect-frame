@@ -72,7 +72,7 @@ const hasAt = (root: Node, selector: string): boolean => {
  */
 const bound = <A, B>(source: Source<A>, project: (value: A) => B): Bound<B> => ({
   _tag: "Bound",
-  source: Source.select(source, project),
+  open: (read) => read(source, project),
 });
 
 const staleClass = (stale: boolean): string => {

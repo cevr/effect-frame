@@ -940,7 +940,7 @@ const plan = <HostNode>(renderer: Renderer<HostNode>, node: Node): Build<HostNod
     Match.tagsExhaustive({
       Empty: () => nothing(),
       Text: (text) => staticText(renderer.host, text.text),
-      Bound: (bound) => dynamicText(renderer.host, renderer.tracker.track(bound.source)),
+      Bound: (bound) => dynamicText(renderer.host, trackBound(renderer.tracker, bound)),
       List: (list) =>
         sequence(
           renderer.host,
@@ -973,6 +973,17 @@ const staticText =
     slot.nodes = [node];
     host.insert(parent, node, Option.none());
   };
+
+/**
+ * Track a binding's source and project inside the graph. A row item stays
+ * on the signal path this way, so its projected text paints in the flush
+ * that repaints the list.
+ */
+const trackBound = <A>(tracker: Tracker, bound: Bound<A>): Accessor<A> =>
+  bound.open((source, project) => {
+    const read = tracker.track(source);
+    return () => project(read());
+  });
 
 const dynamicText =
   <HostNode>(host: Host<HostNode>, accessor: Accessor<unknown>): Build<HostNode> =>
@@ -1427,7 +1438,7 @@ const sortProps = <HostNode>(
     if (prop._tag === "Prepared" && isEventProp(name)) {
       events.push([eventNameOf(name), prop]);
     } else if (prop._tag === "Bound") {
-      dynamic.push([name, renderer.tracker.track(prop.source)]);
+      dynamic.push([name, trackBound(renderer.tracker, prop)]);
     } else if (prop._tag === "Static") {
       staticProps[name] = prop.value;
     }

@@ -14,6 +14,7 @@ export const browserEntries: ReadonlyArray<string> = [
   "apps/blog/src/client.tsx",
   "apps/notes/src/client.tsx",
   "apps/dashboard/src/client.tsx",
+  "tooling/dom-bench/src/fixtures/effect-frame.tsx",
   "packages/effect-frame/src/actor/client.ts",
   "packages/effect-frame/src/frame.ts",
   "packages/effect-frame/src/view/index.ts",

@@ -1,7 +1,7 @@
 /* oxlint-disable effect/noGlobals, effect/noNullish, effect/noRuntimeTypeof, effect/noTernary -- this browser fixture is the benchmark boundary: it must use DOM globals, nullable DOM state, and the canonical imperative callback shape. */
 
-import { Behavior, Value, select, spawn } from "effect-frame/actor";
-import type { Source } from "effect-frame/actor";
+import { Behavior, Value, select, spawn } from "effect-frame/actor/client";
+import type { Source } from "effect-frame/actor/client";
 import { Dom, View, mount, render } from "effect-frame/view";
 import { Effect } from "effect";
 import {

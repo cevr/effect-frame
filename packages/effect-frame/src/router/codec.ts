@@ -1,10 +1,9 @@
 import type { Source } from "effect-frame/actor";
-import type { Node, View } from "effect-frame/view";
+import type { Node } from "effect-frame/view";
 import type { SchemaAST, Scope } from "effect";
 import { Effect, Option, Predicate, Result, Schema, SchemaGetter } from "effect";
 import { matchPrefix, refuseOutOfDomain, segmentFault, segmentsOf, textFault } from "./path.js";
 export { UrlValueRejected } from "./path.js";
-import type { NavigationBehavior } from "./navigation-behavior.js";
 import type { RouteMatch } from "./router.js";
 
 /**
@@ -17,8 +16,8 @@ import type { RouteMatch } from "./router.js";
  * used: the object only parses, and a router needs to print.
  *
  * This module is internal. The public `Route` namespace is `route.ts`,
- * which lists what it exports. A route constructor is in `branch.ts`: a
- * flat route is a tree of one leaf.
+ * which lists what it exports. The segments, branches, and rendering-mode
+ * constructors are in `branch.ts`.
  */
 
 // ---------------------------------------------------------------------------
@@ -490,20 +489,6 @@ export interface RouteProps<Params, Search> {
   readonly replaceSearch: (update: SearchUpdater<Search>) => Effect.Effect<void>;
 }
 
-export interface RouteDefinition<Params extends ParamsCodec, Search extends SearchCodec, R> {
-  /** The URLPattern pathname grammar, restricted to what prints. */
-  readonly path: string;
-  readonly params: Params;
-  readonly search: Search;
-  /** Encoded search keys for an opaque codec such as a custom SearchRecord. */
-  readonly searchKeys?: ReadonlyArray<string>;
-  /** Search keys to carry when this route is entered without a caller value. */
-  readonly retain?: ReadonlyArray<Extract<keyof Search["Type"], string>>;
-  readonly view: View.View<RouteProps<Params["Type"], Search["Type"]>, never, R>;
-  /** How a navigation to this route lands (#31). Absent: the router's default. */
-  readonly behavior?: NavigationBehavior;
-}
-
 /**
  * A mounted route as the router drives it. `setup` is the view's setup with
  * this URL's values already bound; `update` publishes a later URL into them
@@ -530,9 +515,9 @@ export interface AnyRoute<R> {
 }
 
 /**
- * A typed link destination: a flat route or a nested segment. It prints
- * against the current URL, reads the current search for a functional
- * update, and says whether the document is on it.
+ * A typed link destination: a segment. It prints against the current URL,
+ * reads the current search for a functional update, and says whether the
+ * document is on it.
  */
 export interface Linkable<Params, Search> {
   /** Prints after carrying retained keys from the current URL. */
@@ -541,7 +526,7 @@ export interface Linkable<Params, Search> {
   readonly searchAt: (current: URL) => Search;
   /**
    * Where the current match is relative to this destination: on it
-   * (`"page"`), below it (`"ancestor"`, a segment only), or elsewhere.
+   * (`"page"`), below it (`"ancestor"`), or elsewhere.
    */
   readonly currentAt: (current: RouteMatch) => Current;
 }
@@ -551,20 +536,6 @@ export interface Linkable<Params, Search> {
  * `aria-current="page"` and `"ancestor"` as `aria-current="true"`.
  */
 export type Current = "page" | "ancestor" | "none";
-
-export interface Route<
-  Name extends string,
-  Params extends ParamsCodec,
-  Search extends SearchCodec,
-  R,
->
-  extends AnyRoute<R>, Linkable<Params["Type"], Search["Type"]> {
-  readonly name: Name;
-  readonly params: Params;
-  readonly search: Search;
-  /** Prints. Total: a value of the Schema's own type always encodes. */
-  readonly href: (params: Params["Type"], search: Search["Type"]) => string;
-}
 
 /** The decoded values one URL gives one address. */
 export interface Decoded<Params, Search> {
@@ -584,9 +555,8 @@ export interface AddressSpec<Params extends ParamsCodec, Search extends SearchCo
 }
 
 /**
- * One printable, parseable address: a route's whole path, with the params
- * and search codecs that decode and encode it. A flat route and a nested
- * segment print and parse through this one implementation.
+ * One printable, parseable address: a segment's whole path, with the params
+ * and search codecs that decode and encode it.
  */
 export interface Address<Params, Search> {
   /** Encoded search ownership. Unknown means an opaque codec needs a declaration. */

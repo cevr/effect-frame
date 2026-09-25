@@ -102,17 +102,18 @@ const NotFound = (props: { readonly url: Source<URL> }) =>
   Effect.succeed(<p id="missing">{View.bind(props.url, (url) => url.pathname)}</p>);
 
 const makeBook = (ready: Deferred.Deferred<UrlState.State<FilterState>>) =>
-  Route.client("book", {
-    path: "/books/:id",
-    params: BookParams,
-    search: BookSearch,
-    view: (_props) =>
-      Effect.gen(function* () {
-        const state = yield* UrlState.make(FilterSearch);
-        yield* Deferred.succeed(ready, state);
-        return <p id="book">{View.bind(state.state, (value) => value.filter)}</p>;
-      }),
-  });
+  Route.client(
+    "book",
+    Route.leaf(
+      Route.segment("book", { path: "/books/:id", params: BookParams, search: BookSearch }),
+      (_props) =>
+        Effect.gen(function* () {
+          const state = yield* UrlState.make(FilterSearch);
+          yield* Deferred.succeed(ready, state);
+          return <p id="book">{View.bind(state.state, (value) => value.filter)}</p>;
+        }),
+    ),
+  );
 
 const makeStart = <R,>(initial: string, routes: ReadonlyArray<Route.AnyRoute<R>>) =>
   Effect.gen(function* () {
@@ -278,23 +279,30 @@ describe("Frame router inspection", () => {
       Effect.gen(function* () {
         const started = yield* Deferred.make<void>();
         const release = yield* Deferred.make<void>();
-        const old = Route.client("old", {
+        const oldSegment = Route.segment("old", {
           path: "/old",
           params: Nothing,
           search: Route.search(Nothing),
-          view: () => Effect.succeed(<p id="old">old</p>),
         });
-        const slow = Route.client("slow", {
+        const old = Route.client(
+          "old",
+          Route.leaf(oldSegment, () => Effect.succeed(<p id="old">old</p>)),
+        );
+        const slowSegment = Route.segment("slow", {
           path: "/slow",
           params: Nothing,
           search: Route.search(Nothing),
-          view: () =>
+        });
+        const slow = Route.client(
+          "slow",
+          Route.leaf(slowSegment, () =>
             Effect.gen(function* () {
               yield* Deferred.succeed(started, void 0);
               yield* Deferred.await(release);
               return <p id="slow">slow</p>;
             }),
-        });
+          ),
+        );
         const { router } = yield* makeStart("http://app.test/old", [old, slow]);
         const moving = yield* Effect.forkScoped(router.navigate("/slow"));
         yield* Deferred.await(started);
@@ -325,12 +333,15 @@ describe("Frame router inspection", () => {
     "keeps unsupported route values explicit and bounded",
     () =>
       Effect.gen(function* () {
-        const weird = Route.client("weird", {
+        const weirdSegment = Route.segment("weird", {
           path: "/weird/:id",
           params: WeirdParams,
           search: Route.search(Nothing),
-          view: () => Effect.succeed(<p>weird</p>),
         });
+        const weird = Route.client(
+          "weird",
+          Route.leaf(weirdSegment, () => Effect.succeed(<p>weird</p>)),
+        );
         yield* makeStart("http://app.test/weird/1", [weird]);
         const route = routeNamed(yield* Frame.inspect, "weird");
         expect(route.params).toEqual({
@@ -385,12 +396,15 @@ describe("Frame router inspection", () => {
             encode: SchemaGetter.transform((): Route.PathRecord => ({ id: "1" })),
           }),
         );
-        const base = Route.client("counted", {
+        const baseSegment = Route.segment("counted", {
           path: "/counted/:id",
           params: CountedParams,
           search: Route.search(Nothing),
-          view: () => Effect.succeed(<p>counted</p>),
         });
+        const base = Route.client(
+          "counted",
+          Route.leaf(baseSegment, () => Effect.succeed(<p>counted</p>)),
+        );
         const counted: AnyRoute<never> = {
           ...base,
           enter: (url, navigation) => {
@@ -445,12 +459,15 @@ describe("Frame router inspection", () => {
             encode: SchemaGetter.transform((): Route.PathRecord => ({ id: "1" })),
           }),
         );
-        const diagnosticRoute = Route.client("bounds", {
+        const diagnosticRouteSegment = Route.segment("bounds", {
           path: "/bounds/:id",
           params: DiagnosticParams,
           search: Route.search(Nothing),
-          view: () => Effect.succeed(<p>bounds</p>),
         });
+        const diagnosticRoute = Route.client(
+          "bounds",
+          Route.leaf(diagnosticRouteSegment, () => Effect.succeed(<p>bounds</p>)),
+        );
         yield* makeStart("http://app.test/bounds/1", [diagnosticRoute]);
 
         const first = yield* Frame.inspect;
@@ -585,18 +602,24 @@ describe("Frame router inspection", () => {
               encode: SchemaGetter.transform((): Route.PathRecord => ({ id: "1" })),
             }),
           );
-        const recordRoute = Route.client("unreadable-record", {
+        const recordRouteSegment = Route.segment("unreadable-record", {
           path: "/unreadable-record/:id",
           params: paramsFor(unreadableRecord),
           search: Route.search(Nothing),
-          view: () => Effect.succeed(<p>record</p>),
         });
-        const arrayRoute = Route.client("unreadable-array", {
+        const recordRoute = Route.client(
+          "unreadable-record",
+          Route.leaf(recordRouteSegment, () => Effect.succeed(<p>record</p>)),
+        );
+        const arrayRouteSegment = Route.segment("unreadable-array", {
           path: "/unreadable-array/:id",
           params: paramsFor(unreadableArray),
           search: Route.search(Nothing),
-          view: () => Effect.succeed(<p>array</p>),
         });
+        const arrayRoute = Route.client(
+          "unreadable-array",
+          Route.leaf(arrayRouteSegment, () => Effect.succeed(<p>array</p>)),
+        );
         const { router } = yield* makeStart("http://app.test/unreadable-record/1", [
           recordRoute,
           arrayRoute,
@@ -630,12 +653,15 @@ describe("Frame router inspection", () => {
             encode: SchemaGetter.transform((): Route.PathRecord => ({ id: "1" })),
           }),
         );
-        const route = Route.client("cost", {
+        const routeSegment = Route.segment("cost", {
           path: "/cost/:id",
           params,
           search: Route.search(Nothing),
-          view: () => Effect.succeed(<p>cost</p>),
         });
+        const route = Route.client(
+          "cost",
+          Route.leaf(routeSegment, () => Effect.succeed(<p>cost</p>)),
+        );
         yield* makeStart("http://app.test/cost/1", [route]);
 
         const value = routeNamed(yield* Frame.inspect, "cost").params;
@@ -659,12 +685,15 @@ describe("Frame router inspection", () => {
             encode: SchemaGetter.transform((): Route.PathRecord => ({ id: "1" })),
           }),
         );
-        const route = Route.client("node-budget", {
+        const routeSegment = Route.segment("node-budget", {
           path: "/node-budget/:id",
           params,
           search: Route.search(Nothing),
-          view: () => Effect.succeed(<p>node budget</p>),
         });
+        const route = Route.client(
+          "node-budget",
+          Route.leaf(routeSegment, () => Effect.succeed(<p>node budget</p>)),
+        );
         yield* makeStart("http://app.test/node-budget/1", [route]);
 
         const value = routeNamed(yield* Frame.inspect, "node-budget").params;
@@ -677,12 +706,15 @@ describe("Frame router inspection", () => {
     () =>
       Effect.gen(function* () {
         let released = 0;
-        const old = Route.client("old", {
+        const oldSegment = Route.segment("old", {
           path: "/old",
           params: Nothing,
           search: Route.search(Nothing),
-          view: () => Effect.succeed(<p>old</p>),
         });
+        const old = Route.client(
+          "old",
+          Route.leaf(oldSegment, () => Effect.succeed(<p>old</p>)),
+        );
         const bad: AnyRoute<never> = {
           name: "bad",
           searchKeys: { known: true, keys: [] },
@@ -760,12 +792,15 @@ describe("Frame router inspection", () => {
     () =>
       Effect.gen(function* () {
         let released = 0;
-        const old = Route.client("old-lifetime", {
+        const oldSegment = Route.segment("old-lifetime", {
           path: "/old-lifetime",
           params: Nothing,
           search: Route.search(Nothing),
-          view: () => Effect.succeed(<p>old</p>),
         });
+        const old = Route.client(
+          "old-lifetime",
+          Route.leaf(oldSegment, () => Effect.succeed(<p>old</p>)),
+        );
         const owned: AnyRoute<never> = {
           name: "owned",
           searchKeys: { known: true, keys: [] },
@@ -793,12 +828,15 @@ describe("Frame router inspection", () => {
 
   it.scoped("keeps identical route names independent after one root closes", () =>
     Effect.gen(function* () {
-      const route = Route.client("same-route", {
+      const routeSegment = Route.segment("same-route", {
         path: "/same",
         params: Nothing,
         search: Route.search(Nothing),
-        view: () => Effect.succeed(<p id="same-route">same</p>),
       });
+      const route = Route.client(
+        "same-route",
+        Route.leaf(routeSegment, () => Effect.succeed(<p id="same-route">same</p>)),
+      );
       const openRoot = Effect.gen(function* () {
         const rootScope = yield* Scope.make();
         const context = yield* Scope.provide(

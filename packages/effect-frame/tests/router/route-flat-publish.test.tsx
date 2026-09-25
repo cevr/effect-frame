@@ -22,25 +22,26 @@ const BookParams = Schema.Struct({ id: Schema.String });
 const BookSearch = Route.search(Schema.Struct({ q: Schema.String.pipe(Route.withDefault("")) }));
 
 const makeBook = (published: Ref.Ref<ReadonlyArray<string>>) =>
-  Route.client("book", {
-    path: "/books/:id",
-    params: BookParams,
-    search: BookSearch,
-    view: (props) =>
-      Effect.gen(function* () {
-        yield* Effect.forkScoped(
-          Stream.runForEach(props.params.changes, (params) =>
-            Ref.update(published, (all) => [...all, `params ${params.id}`]),
-          ),
-        );
-        yield* Effect.forkScoped(
-          Stream.runForEach(props.search.changes, (search) =>
-            Ref.update(published, (all) => [...all, `search ${search.q}`]),
-          ),
-        );
-        return <h1 id="book">{View.bind(props.params, (params) => params.id)}</h1>;
-      }),
-  });
+  Route.client(
+    "book",
+    Route.leaf(
+      Route.segment("book", { path: "/books/:id", params: BookParams, search: BookSearch }),
+      (props) =>
+        Effect.gen(function* () {
+          yield* Effect.forkScoped(
+            Stream.runForEach(props.params.changes, (params) =>
+              Ref.update(published, (all) => [...all, `params ${params.id}`]),
+            ),
+          );
+          yield* Effect.forkScoped(
+            Stream.runForEach(props.search.changes, (search) =>
+              Ref.update(published, (all) => [...all, `search ${search.q}`]),
+            ),
+          );
+          return <h1 id="book">{View.bind(props.params, (params) => params.id)}</h1>;
+        }),
+    ),
+  );
 
 const NotFound = (props: { readonly url: Source<URL> }) =>
   Effect.succeed(<p id="missing">{View.bind(props.url, (url) => url.pathname)}</p>);
@@ -62,7 +63,7 @@ const settle = Effect.forEach(Array.from({ length: 40 }), () => Effect.yieldNow,
   discard: true,
 });
 
-describe("flat route publish rule", () => {
+describe("one-leaf route publish rule", () => {
   it.scoped.layer(Frame.layer({ name: "flat-publish" }))(
     "publishes params and search together, only when the raw path or the encoded search changes",
     () =>

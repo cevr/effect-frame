@@ -25,7 +25,7 @@ import {
   blogRoutes,
   buildInto,
   clientBundle,
-  indexRoute,
+  indexRouteSegment,
   labelOf,
   linksIn,
   namesIn,
@@ -84,7 +84,7 @@ describe("the prerender build (#23 §2)", () => {
 
         // One page per input, each at the href its route prints.
         expect(manifest.pages.map((page) => page.href)).toEqual(
-          [indexRoute.href({}, {}), ...posts].toSorted(),
+          [indexRouteSegment.href({}, {}), ...posts].toSorted(),
         );
         expect(posts).toContain("/blog/a%2Fb");
         for (const page of manifest.pages) {
@@ -291,13 +291,16 @@ describe("the prerender build (#23 §2)", () => {
 
         // A build that fails partway leaves it as well.
         const failing = makeControl(changed);
-        const Broken = Route.prerender("broken", {
+        const BrokenSegment = Route.segment("broken", {
           path: "/broken",
           params: Schema.Struct({}),
           search: Route.search(Schema.Struct({})),
-          view: () => Effect.die("the page crashed"),
-          inputs: Effect.succeed([{}]),
         });
+        const Broken = Route.prerender(
+          "broken",
+          Route.leaf(BrokenSegment, () => Effect.die("the page crashed")),
+          { inputs: [Route.inputs(BrokenSegment, Effect.succeed([{}]))] },
+        );
         const crashed = yield* Effect.exit(
           buildInto(yield* sideOf(failing), [...blogRoutes, Broken], out),
         );

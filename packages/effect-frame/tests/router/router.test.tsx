@@ -95,9 +95,9 @@ const Home = (_props: Route.RouteProps<{}, {}>) =>
     // A typed link: the href comes from the route's own Schemas, and
     // `active` follows the router. Declared before `book` exists at runtime
     // only in source order; the route is a module-level constant.
-    const toBook = yield* link(book, { id: "5" }, { q: "" });
-    const nextBook = yield* link(book, { id: "5" }, (previous) => ({ q: `${previous.q}x` }));
-    const here = yield* link(home, {}, {});
+    const toBook = yield* link(bookSegment, { id: "5" }, { q: "" });
+    const nextBook = yield* link(bookSegment, { id: "5" }, (previous) => ({ q: `${previous.q}x` }));
+    const here = yield* link(homeSegment, {}, {});
     return (
       <section id="home">
         <a id="to-book" href="/books/7">
@@ -129,8 +129,8 @@ const Book = (
     updateBookSearch = props.updateSearch;
     replaceBookSearch = props.replaceSearch;
     const params = yield* props.params.get;
-    const nextSearch = yield* link(book, params, (previous) => ({ q: `${previous.q}x` }));
-    const toHome = yield* link(home, {}, {});
+    const nextSearch = yield* link(bookSegment, params, (previous) => ({ q: `${previous.q}x` }));
+    const toHome = yield* link(homeSegment, {}, {});
     return (
       <section id="book-page">
         <h1 id="book">{View.bind(props.params, (values) => values.id)}</h1>
@@ -162,22 +162,15 @@ const NotFound = (props: { readonly url: Source<URL> }) =>
 
 // Annotated because `Home` links to `home` and `book`, and `book` to none:
 // the checker would otherwise chase the cycle.
-const home: Route.Route<"home", typeof Nothing, typeof Nothing, Router> = Route.client("home", {
-  path: "/",
-  params: Nothing,
-  search: Nothing,
-  view: Home,
-});
+const homeSegment = Route.segment("home", { path: "/", params: Nothing, search: Nothing });
+const home: Route.Tree<"home", Router> = Route.client("home", Route.leaf(homeSegment, Home));
 const BookParams = Schema.Struct({ id: Schema.String });
-const book: Route.Route<"book", typeof BookParams, typeof BookSearch, Router> = Route.client(
-  "book",
-  {
-    path: "/books/:id",
-    params: BookParams,
-    search: BookSearch,
-    view: Book,
-  },
-);
+const bookSegment = Route.segment("book", {
+  path: "/books/:id",
+  params: BookParams,
+  search: BookSearch,
+});
+const book: Route.Tree<"book", Router> = Route.client("book", Route.leaf(bookSegment, Book));
 
 const start = (initial: string, routes: ReadonlyArray<Route.AnyRoute<Router>> = [home, book]) =>
   Effect.gen(function* () {
@@ -469,17 +462,21 @@ describe("router", () => {
     Effect.gen(function* () {
       const setupStarted = yield* Deferred.make<void>();
       const releaseSetup = yield* Deferred.make<void>();
-      const slow = Route.client("slow", {
+      const slowSegment = Route.segment("slow", {
         path: "/slow",
         params: Nothing,
         search: Nothing,
-        view: () =>
+      });
+      const slow = Route.client(
+        "slow",
+        Route.leaf(slowSegment, () =>
           Effect.gen(function* () {
             yield* Deferred.succeed(setupStarted, void 0);
             yield* Deferred.await(releaseSetup);
             return <p id="slow">slow</p>;
           }),
-      });
+        ),
+      );
       const { root, location, router, page } = yield* start("http://app.test/", [home, book, slow]);
 
       const slowMove = yield* Effect.forkScoped(router.navigate("/slow"));

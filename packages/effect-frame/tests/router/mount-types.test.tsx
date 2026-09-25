@@ -30,12 +30,13 @@ class RouteValue extends Context.Service<RouteValue, { readonly label: string }>
 
 const Nothing = Schema.Struct({});
 
-const plain = Route.client("plain", {
-  path: "/",
-  params: Nothing,
-  search: Nothing,
-  view: () => Effect.map(Effect.service(RouteValue), (value) => <p id="plain">{value.label}</p>),
-});
+const plainSegment = Route.segment("plain", { path: "/", params: Nothing, search: Nothing });
+const plain = Route.client(
+  "plain",
+  Route.leaf(plainSegment, () =>
+    Effect.map(Effect.service(RouteValue), (value) => <p id="plain">{value.label}</p>),
+  ),
+);
 
 const NotFound = (_props: { readonly url: Source<URL> }) =>
   Effect.gen(function* () {

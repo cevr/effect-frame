@@ -27,7 +27,6 @@ export interface Link {
 export type LinkSearch<Search> = Search | SearchUpdater<Search>;
 
 /**
- * A flat route is the page while the router resolved the document to it.
  * A segment is the page while a tree that holds it matched and the URL ends
  * at it, and an ancestor while the URL continues below it. Not-found and
  * another route are neither.

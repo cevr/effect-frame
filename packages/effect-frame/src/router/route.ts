@@ -5,8 +5,8 @@
  *
  * One model: a segment is an address, a branch is a segment with its view
  * (`leaf`, `layout`), and a rendering-mode constructor (`client`, `ssr`,
- * `streamed`, `awaitAll`, `prerender`) mounts a tree. `client(name, definition)` is the
- * one-leaf shorthand of that model, and so is each other mode's.
+ * `streamed`, `awaitAll`, `prerender`, `driven`) mounts a tree. There is no
+ * other form: a one-page route is a tree of one leaf.
  */
 
 // Addresses: templates, params, and search.
@@ -33,8 +33,6 @@ export type {
   Linkable,
   ParamsCodec,
   Part,
-  Route,
-  RouteDefinition,
   RouteInstance,
   RouteNavigation,
   RouteProps,
@@ -72,8 +70,6 @@ export type {
   Declaration,
   Declarations,
   DrivenAt,
-  DrivenConstructor,
-  DrivenDefinition,
   LayoutProps,
   LayoutPropsOf,
   LeafOptions,
@@ -81,7 +77,6 @@ export type {
   NoParams,
   Pending,
   PrerenderConstructor,
-  PrerenderDefinition,
   PrerenderOptions,
   Presentation,
   PropsOf,

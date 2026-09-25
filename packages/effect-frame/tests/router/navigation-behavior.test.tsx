@@ -42,15 +42,6 @@ Route.leaf(child, ChildView, { behavior: true });
 const restoreExact: NavigationBehavior.Restore = NavigationBehavior.Restore;
 const preserveExact: NavigationBehavior.Preserve = NavigationBehavior.Preserve;
 
-Route.client("flat", {
-  path: "/flat",
-  params: Nothing,
-  search: Nothing,
-  view: () => Effect.succeed(<p>flat</p>),
-  // @ts-expect-error a flat route takes the same value, never a flag.
-  behavior: false,
-});
-
 const NotFound = (_props: NotFoundProps) => Effect.succeed(<p>missing</p>);
 const withDefault: MountOptions<never, globalThis.Node> = {
   routes: [],

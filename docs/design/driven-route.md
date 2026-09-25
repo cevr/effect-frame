@@ -42,8 +42,8 @@ const Rooms = Route.driven(
   ),
 );
 
-// The flat form: one driven leaf.
-const Room1 = Route.driven("room", { path, params, search, drive, view: RoomView });
+// One driven leaf: a tree of one leaf, as every one-page route is.
+const Room1 = Route.driven("room", Route.leaf(room, Route.drivenView({ drive, view: RoomView })));
 ```
 
 A driven tree is rendered as `Streamed`. Its layouts are ordinary views:
@@ -73,16 +73,15 @@ they hydrate, and their queries stream. Only its leaves are driven.
 
 1. **A client-only view is a view that needs a service other than
    `DrivenServices`** (`ActorTransport | Scope`). Such a view is drawn from
-   something the session cannot replay. `Route.drivenView` and the flat
-   form refuse it at the type level. `Route.driven` refuses a tree with a
+   something the session cannot replay. `Route.drivenView` refuses it
+   at the type level. `Route.driven` refuses a tree with a
    leaf whose view is not a `Route.drivenView` when the tree is declared,
    with `BranchRejected`. A leaf's view type cannot show that it came from
    `drivenView`, so that check is at definition time, not at the type level.
 2. **`Route.drivenView` is a view, not a leaf.** A driven leaf is a
    `Route.leaf` with a driven view, so the leaf keeps its segment, data,
    options, and `errored` view. A driven view that can fail makes its leaf
-   name an `errored` view, as any leaf does. The flat form takes a view
-   that cannot fail, as every flat route does.
+   name an `errored` view, as any leaf does.
 3. **No new rendering mode.** The document of a driven tree is `Streamed`.
    The wire is the difference, and it starts after the document.
 4. **`hydrate` owns the wire's start.** It is the one owner that sees both
@@ -129,7 +128,7 @@ they hydrate, and their queries stream. Only its leaves are driven.
   not even after the layout's patch lands. After `Closed`, one connect
   happens, and the server's patches and the adopted button's handler move
   the node that the document drew.
-- "a flat driven route adopts its document, and a change of params follows
+- "a one-leaf driven route adopts its document, and a change of params follows
   the new drive": navigation to new params connects again, and events go
   to the new session only.
 - "a page with no op wire keeps each driven leaf as its document drew it".

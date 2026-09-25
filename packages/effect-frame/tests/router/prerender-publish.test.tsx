@@ -510,12 +510,15 @@ const tagsOf = (tags: ReadonlyArray<string>, links: ReadonlyArray<string> = []) 
     { inputs: [Route.inputs(tagSegment, Effect.succeed(tags.map((tag) => ({ tag }))))] },
   );
 
-const appRoute = Route.ssr("app", {
+const appRouteSegment = Route.segment("app", {
   path: "/app/:id",
   params: Schema.Struct({ id: Schema.String }),
   search: Route.search(Schema.Struct({})),
-  view: () => Effect.succeed(<p>app</p>),
 });
+const appRoute = Route.ssr(
+  "app",
+  Route.leaf(appRouteSegment, () => Effect.succeed(<p>app</p>)),
+);
 
 describe("pages a build refuses (#86)", () => {
   platform("two hrefs that differ only in case fail with PrerenderPathCollision", () =>
@@ -538,14 +541,17 @@ describe("pages a build refuses (#86)", () => {
           encode: SchemaGetter.transform((value) => ({ q: [value.q] })),
         }),
       );
-      const searched = Route.prerender("searched", {
+      const searchedSegment = Route.segment("searched", {
         path: "/searched",
         params: Schema.Struct({}),
         search: always,
         searchKeys: ["q"],
-        view: () => Effect.succeed(<p>searched</p>),
-        inputs: Effect.succeed([{}]),
       });
+      const searched = Route.prerender(
+        "searched",
+        Route.leaf(searchedSegment, () => Effect.succeed(<p>searched</p>)),
+        { inputs: [Route.inputs(searchedSegment, Effect.succeed([{}]))] },
+      );
       const directory = yield* tempDirectory;
       const refused = yield* Effect.flip(
         buildInto(yield* sideOf(makeControl({})), [searched], `${directory}/out`),

@@ -6,6 +6,15 @@ layout part of #36. It promotes the private route slices 2, 3, and 4
 public model in `effect-frame/router` and `effect-frame/view`. Slice 5
 (`route-leave.md`) stays private: the owner has not answered #56.
 
+> **Amended (architecture loop, 2026-09-25): the flat form is deleted.**
+> `Route.client(name, definition)` and the flat forms of every other mode
+> constructor are gone, with `Route.Route`, `Route.RouteDefinition`,
+> `Route.DrivenDefinition`, and `Route.PrerenderDefinition`. A one-page route
+> is `Route.client(name, Route.leaf(Route.segment(name, { path, params }), view))`,
+> and it links, targets, and prints through its segment. The sections below
+> that describe the flat form record why it existed; they no longer
+> describe the surface.
+
 ## The model
 
 There is one route model. It has three layers, and each layer is a value:

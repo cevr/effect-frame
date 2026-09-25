@@ -115,11 +115,14 @@ export const start = (
       }),
   });
 
-  const book = Route.client("book", {
+  const bookSegment = Route.segment("book", {
     path: "/books/:id",
     params: BookParams,
     search: Route.search(Schema.Struct({})),
-    view: (props) =>
+  });
+  const book = Route.client(
+    "book",
+    Route.leaf(bookSegment, (props) =>
       Effect.gen(function* () {
         const local = yield* Actor.local(Behavior.value("local"));
         const id = yield* props.params.get;
@@ -145,7 +148,8 @@ export const start = (
           </section>
         );
       }),
-  });
+    ),
+  );
 
   const services = Layer.mergeAll(
     QueryTest.layer({ queries: [HeldLive] }).pipe(

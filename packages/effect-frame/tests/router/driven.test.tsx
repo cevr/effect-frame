@@ -124,13 +124,20 @@ const LineupView = (params: { readonly room: string }) =>
     );
   });
 
-const lineup = Route.driven("lineup", {
+const lineupSegment = Route.segment("lineup", {
   path: "/lineup/:room",
   params: Schema.Struct({ room: Schema.String }),
-  search: Route.search(Schema.Struct({})),
-  drive: (params: { readonly room: string }) => ({ contract: Lineup, key: params.room }),
-  view: LineupView,
 });
+const lineup = Route.driven(
+  "lineup",
+  Route.leaf(
+    lineupSegment,
+    Route.drivenView({
+      drive: (params: { readonly room: string }) => ({ contract: Lineup, key: params.room }),
+      view: LineupView,
+    }),
+  ),
+);
 
 class RoomClosed extends Schema.TaggedError<RoomClosed>()("RoomClosed", {
   room: Schema.String,
@@ -318,14 +325,15 @@ const wholeDocument = <R,>(routes: ReadonlyArray<AnyRoute<R>>, url: URL) =>
     },
   );
 
-/** The flat form: one driven leaf, no layout, so its document closes at once. */
-const flat = Route.driven("room", {
+/** One driven leaf, no layout, so its document closes at once. */
+const flatSegment = Route.segment("room", {
   path: "/room/:room",
   params: Schema.Struct({ room: Schema.String }),
-  search: Route.search(Schema.Struct({})),
-  drive: roomDrive,
-  view: RoomView,
 });
+const flat = Route.driven(
+  "room",
+  Route.leaf(flatSegment, Route.drivenView({ drive: roomDrive, view: RoomView })),
+);
 
 /** A view that reads the query cache: it can be drawn on the client only. */
 const CachedTitle = (_params: { readonly room: string }) =>
@@ -408,7 +416,7 @@ describe("a driven route (#36)", () => {
   );
 
   it.scopedLive(
-    "a flat driven route adopts its document, and a change of params follows the new drive",
+    "a one-leaf driven route adopts its document, and a change of params follows the new drive",
     () =>
       Effect.gen(function* () {
         const host = yield* sharedHost(yield* Deferred.make<void>());
@@ -674,15 +682,6 @@ export const recovered = Route.leaf(
 
 // @ts-expect-error a driven view may need its drive's transport and its Scope only.
 export const cachedView = Route.drivenView({ drive: roomDrive, view: CachedTitle });
-
-export const cachedFlat = Route.driven("cached", {
-  path: "/cached/:room",
-  params: Schema.Struct({ room: Schema.String }),
-  search: Route.search(Schema.Struct({})),
-  drive: roomDrive,
-  // @ts-expect-error the flat form refuses the same view.
-  view: CachedTitle,
-});
 
 // @ts-expect-error a driven view that can fail needs its leaf's `errored` view.
 export const unrecovered = Route.leaf(

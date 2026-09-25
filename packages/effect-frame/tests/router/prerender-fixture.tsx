@@ -36,11 +36,14 @@ export const slugs = ["a/b", "first", "second"];
 export const indexLabel = slugs.join(",");
 
 /** The index page: one query, and a link to every post. */
-export const indexRoute = Route.prerender("index", {
+export const indexRouteSegment = Route.segment("index", {
   path: "/blog",
   params: Nothing,
   search: Route.search(Nothing),
-  view: () =>
+});
+export const indexRoute = Route.prerender(
+  "index",
+  Route.leaf(indexRouteSegment, () =>
     Effect.gen(function* () {
       const index = yield* QueryCache.use((cache) => cache.open(Label, { id: "index" }));
       return (
@@ -52,8 +55,9 @@ export const indexRoute = Route.prerender("index", {
         </section>
       );
     }),
-  inputs: Effect.succeed([{}]),
-});
+  ),
+  { inputs: [Route.inputs(indexRouteSegment, Effect.succeed([{}]))] },
+);
 
 export const postSegment = Route.segment("post", {
   path: "/blog/:slug",

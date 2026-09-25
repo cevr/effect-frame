@@ -15,19 +15,25 @@ import { describe, expect, it } from "effect-bun-test";
 
 const origin = "http://frame.test";
 
-const Login = Route.client("login", {
+const LoginSegment = Route.segment("login", {
   path: "/login",
   params: Schema.Struct({}),
   search: Route.search(Schema.Struct({})),
-  view: () => Effect.succeed(<p id="login">login</p>),
 });
+const Login = Route.client(
+  "login",
+  Route.leaf(LoginSegment, () => Effect.succeed(<p id="login">login</p>)),
+);
 
-const Home = Route.client("home", {
+const HomeSegment = Route.segment("home", {
   path: "/home",
   params: Schema.Struct({}),
   search: Route.search(Schema.Struct({})),
-  view: () => Effect.succeed(<p id="home">home</p>),
 });
+const Home = Route.client(
+  "home",
+  Route.leaf(HomeSegment, () => Effect.succeed(<p id="home">home</p>)),
+);
 
 const NotFound = () => Effect.succeed(<p id="not-found">not found</p>);
 
@@ -59,7 +65,7 @@ const makeApp = (gate: Gate) => {
           return Route.redirect(Route.target(selfPath, {}, {}));
         }
         if (gate.denied.has(params.id)) {
-          return Route.redirect(Route.target(Login, {}, {}));
+          return Route.redirect(Route.target(LoginSegment, {}, {}));
         }
         return Route.Continue;
       }),

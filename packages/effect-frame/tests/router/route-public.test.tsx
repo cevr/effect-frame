@@ -99,14 +99,18 @@ const frameLayer = (name: string) =>
 // The two-level tenant/post app
 // ---------------------------------------------------------------------------
 
-// A flat route: the one-leaf shorthand.
-const LoginRoute = Route.client("login", {
+// A one-page route: a tree of one leaf.
+const login = Route.segment("login", {
   path: "/login",
   params: Schema.Struct({}),
   search: Route.search(Schema.Struct({ next: Schema.String.pipe(Route.withDefault("/")) })),
-  view: (props) =>
-    Effect.succeed(<p id="login">{View.bind(props.search, (search) => search.next)}</p>),
 });
+const LoginRoute = Route.client(
+  "login",
+  Route.leaf(login, (props) =>
+    Effect.succeed(<p id="login">{View.bind(props.search, (search) => search.next)}</p>),
+  ),
+);
 
 const tenant = Route.segment("tenant", {
   path: "/app/:tenant",
@@ -119,7 +123,7 @@ const tenant = Route.segment("tenant", {
       const access = yield* Access;
       yield* logEvent(`check:tenant:${params.tenant}`);
       if ((yield* Ref.get(access.denied)).has(params.tenant)) {
-        return Route.redirect(Route.target(LoginRoute, {}, { next: url.pathname }));
+        return Route.redirect(Route.target(login, {}, { next: url.pathname }));
       }
       return Route.Continue;
     }),
@@ -412,26 +416,18 @@ const lazyServices: Equals<
   Effect.Services<ReturnType<typeof PostView>>
 > = true;
 const lazyProps: Equals<Parameters<typeof LazyPost>[0], Route.PropsOf<typeof post>> = true;
-/** The flat shorthand keeps its exact route type. */
-const flatExact: Equals<
-  typeof LoginRoute,
-  Route.Route<
-    "login",
-    Schema.Struct<{}>,
-    Schema.Codec<{ readonly next: string }, Route.SearchRecord>,
-    never
-  >
-> = true;
+/** A one-page route is a tree of one leaf. */
+const oneLeafExact: Equals<typeof LoginRoute, Route.Tree<"login", never>> = true;
 
 // 2. Invalid targets.
 const segmentTarget = Route.target(post, { tenant: "t1", postId: "7" }, { mode: "edit" });
-const flatTarget = Route.target(LoginRoute, {}, { next: "/" });
+const loginTarget = Route.target(login, {}, { next: "/" });
 // @ts-expect-error A target needs every param of the destination.
 const missingParam = () => Route.target(post, { tenant: "t1" }, { mode: "read" });
 // @ts-expect-error A param has the destination's decoded type.
 const wrongParam = () => Route.target(post, { tenant: "t1", postId: 7 }, { mode: "read" });
 // @ts-expect-error A search field the destination does not decode.
-const wrongSearch = () => Route.target(LoginRoute, {}, { back: "/" });
+const wrongSearch = () => Route.target(login, {}, { back: "/" });
 
 // 3. Lazy module props.
 const OtherView = (props: { readonly other: string }) => Effect.succeed(<p>{props.other}</p>);
@@ -512,8 +508,8 @@ function somePending(): Route.Pending {
   return { fallback: <p>opening</p>, after: 0, atLeast: 0 };
 }
 
-// 6. Links: a flat route and a segment are both destinations.
-const flatLink = link(LoginRoute, {}, { next: "/" });
+// 6. Links: a root segment and a child segment are both destinations.
+const loginLink = link(login, {}, { next: "/" });
 const segmentLink = link(post, { tenant: "t1", postId: "1" }, (search) => search);
 // @ts-expect-error A link's params have the destination's decoded type.
 const wrongLink = () => link(post, { tenant: "t1", postId: 1 }, { mode: "read" });
@@ -523,16 +519,8 @@ interface TenantData extends Route.Declarations {
   readonly info: Route.QueryDeclaration<typeof TenantInfo>;
 }
 
-// 7. Construction: flat errors stay on the property, a child is not a root,
-// declarations need `data`, and neither a segment nor a branch is a literal.
-const wrongFlatView = () =>
-  Route.client("wrong", {
-    path: "/wrong/:id",
-    params: Schema.Struct({ id: Schema.String }),
-    // @ts-expect-error The flat form reports the view's own props, on the view.
-    view: (props: Route.RouteProps<{ readonly id: number }, {}>) =>
-      Effect.succeed(<p>{View.bind(props.params, (params) => String(params.id))}</p>),
-  });
+// 7. Construction: a child is not a root, declarations need `data`, and
+// neither a segment nor a branch is a literal.
 const orphanRoot = () =>
   // @ts-expect-error A tree mounts from a root segment; `post` is a child of `tenant`.
   Route.client("orphan", Route.leaf(post, ReadingChild));
@@ -560,13 +548,13 @@ const typeFixtures = [
   lazyError,
   lazyServices,
   lazyProps,
-  flatExact,
+  oneLeafExact,
   clipboardServices,
   leakyServices,
 ];
 const compiled = [
   segmentTarget,
-  flatTarget,
+  loginTarget,
   missingParam,
   wrongParam,
   wrongSearch,
@@ -576,10 +564,9 @@ const compiled = [
   unhandledSetup,
   unhandledImport,
   narrowHandler,
-  flatLink,
+  loginLink,
   segmentLink,
   wrongLink,
-  wrongFlatView,
   missingData,
   handBranch,
   hiddenCheck,
@@ -593,14 +580,14 @@ describe("public nested routes", () => {
   it.effect("0. keeps exact E and R, typed targets, lazy props, services, and fallbacks", () =>
     Effect.sync(() => {
       expect(typeFixtures).toEqual([true, true, true, true, true, true, true]);
-      expect(compiled).toHaveLength(18);
+      expect(compiled).toHaveLength(17);
       // The type refuses a child root; construction refuses it by name.
       expect(Option.getOrThrow(Result.getFailure(Result.try(orphanRoot)))).toMatchObject({
         _tag: "BranchRejected",
         reason: "a tree is mounted from a root segment, not a child",
       });
       expect(segmentTarget.href).toBe("/app/t1/posts/7?mode=edit");
-      expect(flatTarget.href).toBe("/login");
+      expect(loginTarget.href).toBe("/login");
     }),
   );
 

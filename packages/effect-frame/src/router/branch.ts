@@ -66,8 +66,6 @@ import type {
   ParamsCodec,
   Part,
   PathRecord,
-  Route,
-  RouteDefinition,
   RouteInstance,
   RouteNavigation,
   RouteProps,
@@ -79,7 +77,7 @@ import type {
 } from "./codec.js";
 import { matchPrefix, segmentsOf } from "./path.js";
 import { address, parseTemplate, printSearch, readSearch, search as searchCodec } from "./codec.js";
-import type { Location, RouteMatch } from "./router.js";
+import type { RouteMatch } from "./router.js";
 import { register as registerInspection } from "./route-inspection.js";
 import { Router } from "./router.js";
 import type { LeaveEntry, LeaveInput, MountedRouteService } from "./leave.js";
@@ -90,13 +88,12 @@ import type { Shell } from "./landing.js";
 import { registerShell } from "./landing.js";
 import * as LeafRoot from "./leaf-root.js";
 import type { NavigationBehavior } from "./navigation-behavior.js";
-import type { AnyView, DrivenOptions, DrivenServices, ErasedDriven } from "./driven.js";
-import { drivenOf, drivenShell, drivenView } from "./driven.js";
+import type { AnyView, DrivenServices, ErasedDriven } from "./driven.js";
+import { drivenOf, drivenShell } from "./driven.js";
 import type { RenderingMode } from "./rendering-mode.js";
 import { register as registerMode } from "./rendering-mode.js";
 import type {
   AnyInputs,
-  Enumerate,
   InputsError,
   InputsServices,
   ParamsRecord,
@@ -114,8 +111,7 @@ import {
  * The nested route model: segments, branches, and the client mode. The
  * public `Route` namespace (`route.ts`) lists what of this module is public;
  * see `docs/design/route-public.md`. The transition is described in
- * `docs/design/nested-transition.md`. A flat
- * `Route.client(name, definition)` is a tree of one leaf, so it runs here too.
+ * `docs/design/nested-transition.md`.
  *
  * A tree of segments mounts as one `AnyRoute`. The existing router keeps
  * history, the same-URL no-op, stale-instance rejection, and not-found; it
@@ -2791,118 +2787,35 @@ const treeSearchKeys = (all: ReadonlyArray<SearchKeyInfo>): SearchKeyInfo => {
   return { known: true, keys: [...new Set(all.flatMap((info) => info.keys))] };
 };
 
-/** A flat definition's `behavior` as the leaf's options argument. */
-const flatOptions = (behavior: Option.Option<NavigationBehavior>): LeafOptionsFor<never> =>
-  Option.match(behavior, {
-    onNone: (): LeafOptionsFor<never> => [],
-    onSome: (one): LeafOptionsFor<never> => [{ behavior: one }],
-  });
-
-/** The two inputs of `client`: a branch has a `_tag`, a definition has none. */
-const isBranch = <Params extends ParamsCodec, Search extends SearchCodec, R>(
-  input: RouteDefinition<Params, Search, R> | AnyBranch<unknown>,
-): input is AnyBranch<unknown> => Predicate.hasProperty(input, "_tag") && input._tag === "Branch";
-
 /**
  * A rendering-mode constructor (#18 §6): it makes a tree mountable and names
  * how the server renders its documents. Each mode is its own constructor,
  * and no route value carries a mode field, so the same segments, leaves,
  * and layouts mount under any mode, and one branch never mixes two.
  *
- * The definition form is the one-leaf shorthand. It is exactly
- * `mode(name, leaf(segment(name, definition), definition.view))`, with the
- * route's codecs and printers on the result. A flat route that needs
- * `before`, `data`, `errored`, or `pending` is written in the segment form.
+ * There is one form: a root segment's branch. A one-page route is
+ * `Route.client(name, Route.leaf(Route.segment(name, { path, params }), view))`.
  *
- * The flat overload is declared last: a call that matches neither reports
- * the flat form's own error, which is the one people write by hand.
+ * @example
+ * ```ts
+ * const Home = Route.segment("home", { path: "/", params: NoParams });
+ * export const HomeRoute = Route.ssr("home", Route.leaf(Home, HomeView));
+ * ```
  */
 export interface ModeConstructor {
   <const Name extends string, Seg extends RootSegment, ViewR, DataR>(
     name: Name,
     root: Branch<Seg, ViewR, DataR>,
   ): Tree<Name, ViewR | DataR>;
-  <const Name extends string, Params extends ParamsCodec, Search extends SearchCodec, R>(
-    name: Name,
-    definition: RouteDefinition<Params, Search, R>,
-  ): Route<Name, Params, Search, R>;
 }
 
-/** The one leaf of a flat definition, and the segment it prints with. */
-const flatLeaf = <
-  const Name extends string,
-  Params extends ParamsCodec,
-  Search extends SearchCodec,
-  R,
->(
-  name: Name,
-  input: RouteDefinition<Params, Search, R>,
-) => {
-  const one = segment(name, {
-    path: input.path,
-    params: input.params,
-    search: input.search,
-    ...Option.match(Option.fromNullishOr(input.searchKeys), {
-      onNone: () => ({}),
-      onSome: (searchKeys) => ({ searchKeys }),
-    }),
-    ...Option.match(Option.fromNullishOr(input.retain), {
-      onNone: () => ({}),
-      onSome: (retain) => ({ retain }),
-    }),
-  });
-  const branch = leaf(one, input.view, ...flatOptions(Option.fromNullishOr(input.behavior)));
-  /** A flat route's own codecs and printers, copied onto the tree. */
-  const extra: Omit<Route<Name, Params, Search, R>, keyof Tree<Name, R>> = {
-    params: input.params,
-    search: input.search,
-    href: one.href,
-    hrefAt: one.hrefAt,
-    searchAt: one.searchAt,
-    // The router resolved the document to this route: the flat rule.
-    currentAt: (current): Current => {
-      if (current.name === name) {
-        return "page";
-      }
-      return "none";
-    },
-  };
-  return { one, branch, extra };
-};
-
-const modeConstructor = (mode: RenderingMode): ModeConstructor => {
-  function made<const Name extends string, Seg extends RootSegment, ViewR, DataR>(
+const modeConstructor =
+  (mode: RenderingMode): ModeConstructor =>
+  <const Name extends string, Seg extends RootSegment, ViewR, DataR>(
     name: Name,
     root: Branch<Seg, ViewR, DataR>,
-  ): Tree<Name, ViewR | DataR>;
-  function made<
-    const Name extends string,
-    Params extends ParamsCodec,
-    Search extends SearchCodec,
-    R,
-  >(name: Name, definition: RouteDefinition<Params, Search, R>): Route<Name, Params, Search, R>;
-  function made<
-    const Name extends string,
-    Params extends ParamsCodec,
-    Search extends SearchCodec,
-    R,
-  >(
-    name: Name,
-    input: RouteDefinition<Params, Search, R> | AnyBranch<unknown>,
-  ): Route<Name, Params, Search, R> | Tree<Name, unknown> {
-    if (isBranch(input)) {
-      return mountTree(name, input, {}, mode);
-    }
-    const flat = flatLeaf(name, input);
-    return mountTree<
-      Name,
-      Exclude<R, Scope.Scope>,
-      never,
-      Omit<Route<Name, Params, Search, R>, keyof Tree<Name, R>>
-    >(name, flat.branch, flat.extra, mode);
-  }
-  return made;
-};
+  ): Tree<Name, ViewR | DataR> =>
+    mountTree(name, root, {}, mode);
 
 /**
  * `ClientOnly` (#22, #62): the route renders on the client only. A server
@@ -2930,40 +2843,6 @@ export const streamed: ModeConstructor = modeConstructor("Streamed");
  * then writes one document and one seed.
  */
 export const awaitAll: ModeConstructor = modeConstructor("AwaitAll");
-
-/**
- * The flat driven definition: a route definition whose view is a driven
- * view. `view` gets the route's params and may need only `DrivenServices`.
- */
-export interface DrivenDefinition<
-  Params extends ParamsCodec,
-  Search extends SearchCodec,
-  C extends AnyContract,
->
-  extends Omit<RouteDefinition<Params, Search, never>, "view">, DrivenOptions<Params["Type"], C> {}
-
-/** What a driven route takes, in both forms. See `driven`. */
-export interface DrivenConstructor {
-  <const Name extends string, Seg extends RootSegment, ViewR, DataR>(
-    name: Name,
-    root: Branch<Seg, ViewR, DataR>,
-  ): Tree<Name, ViewR | DataR>;
-  <
-    const Name extends string,
-    Params extends ParamsCodec,
-    Search extends SearchCodec,
-    C extends AnyContract,
-  >(
-    name: Name,
-    definition: DrivenDefinition<Params, Search, C>,
-  ): Route<Name, Params, Search, DrivenRouteServices>;
-}
-
-/** What a driven leaf's view needs from the router: the transport, the Location, and its Scope. */
-type DrivenLeafServices = ActorTransport | Location | Scope.Scope;
-
-/** What a flat driven route needs: its leaf's services, less the Scope its instance owns. */
-type DrivenRouteServices = Exclude<DrivenLeafServices, Scope.Scope>;
 
 /**
  * A driven leaf's view and props at one URL, and the actor that drives it.
@@ -3021,65 +2900,11 @@ const drivenTree = <R>(
     });
 };
 
-/** The two inputs of `driven`: a branch has a `_tag`, a definition has none. */
-const isDrivenBranch = <
-  Params extends ParamsCodec,
-  Search extends SearchCodec,
-  C extends AnyContract,
->(
-  input: DrivenDefinition<Params, Search, C> | AnyBranch<unknown>,
-): input is AnyBranch<unknown> => Predicate.hasProperty(input, "_tag") && input._tag === "Branch";
-
-function drivenRoute<const Name extends string, Seg extends RootSegment, ViewR, DataR>(
-  name: Name,
-  root: Branch<Seg, ViewR, DataR>,
-): Tree<Name, ViewR | DataR>;
-function drivenRoute<
-  const Name extends string,
-  Params extends ParamsCodec,
-  Search extends SearchCodec,
-  C extends AnyContract,
->(
-  name: Name,
-  definition: DrivenDefinition<Params, Search, C>,
-): Route<Name, Params, Search, DrivenRouteServices>;
-function drivenRoute<
-  const Name extends string,
-  Params extends ParamsCodec,
-  Search extends SearchCodec,
-  C extends AnyContract,
->(
-  name: Name,
-  input: DrivenDefinition<Params, Search, C> | AnyBranch<unknown>,
-): Route<Name, Params, Search, DrivenRouteServices> | Tree<Name, unknown> {
-  if (isDrivenBranch(input)) {
-    // Checked before the tree is mounted: a refused tree registers nothing.
-    const resolve = drivenTree(name, input);
-    const tree = mountTree(name, input, {}, "Streamed");
-    drivenTrees.set(tree, resolve);
-    return tree;
-  }
-  const flat = flatLeaf<Name, Params, Search, DrivenLeafServices>(name, {
-    ...input,
-    view: drivenView<Params["Type"], C>({ drive: input.drive, view: input.view }),
-  });
-  const resolve = drivenTree(name, flat.branch);
-  const tree = mountTree<
-    Name,
-    DrivenRouteServices,
-    never,
-    Omit<Route<Name, Params, Search, DrivenRouteServices>, keyof Tree<Name, DrivenRouteServices>>
-  >(name, flat.branch, flat.extra, "Streamed");
-  drivenTrees.set(tree, resolve);
-  return tree;
-}
-
 /**
  * `Driven` (#18 §6, #22 §5): every leaf of the tree is a server-driven view,
  * made by `Route.drivenView`, and a leaf with any other view is refused at
  * definition with `BranchRejected`. A leaf's view gets its params and may
- * need only `DrivenServices`: a client-only view does not compile. The flat
- * form is `driven(name, leaf(segment(name, definition), drivenView(definition)))`.
+ * need only `DrivenServices`: a client-only view does not compile.
  *
  * Its documents are `Streamed`: a layout's queries stream through the record
  * channel, and each driven leaf is drawn in its container. The client's page
@@ -3087,7 +2912,21 @@ function drivenRoute<
  * end, and never before. The server end of the wire opens `Driven.session` for
  * `drivenAt(routes, url)`.
  */
-export const driven: DrivenConstructor = drivenRoute;
+export const driven: ModeConstructor = <
+  const Name extends string,
+  Seg extends RootSegment,
+  ViewR,
+  DataR,
+>(
+  name: Name,
+  root: Branch<Seg, ViewR, DataR>,
+): Tree<Name, ViewR | DataR> => {
+  // Checked before the tree is mounted: a refused tree registers nothing.
+  const resolve = drivenTree(name, root);
+  const tree = mountTree<Name, ViewR, DataR, object>(name, root, {}, "Streamed");
+  drivenTrees.set(tree, resolve);
+  return tree;
+};
 
 /**
  * The driven leaf `url` ends at, among `routes`: its view, its props, and
@@ -3119,21 +2958,9 @@ export interface PrerenderOptions<I extends ReadonlyArray<AnyInputs>> {
   readonly inputs: I;
 }
 
-/** The flat prerender definition: a route definition and its inputs. */
-export interface PrerenderDefinition<
-  Params extends ParamsCodec,
-  Search extends SearchCodec,
-  R,
-  E,
-  IR,
-> extends RouteDefinition<Params, Search, R> {
-  /** Every page this route contributes to the build, as params. No search. */
-  readonly inputs: Enumerate<Params["Type"], NoParams, E, IR>;
-}
-
 /**
- * The prerender constructor (#23). It takes `inputs` in both forms, and a
- * call without them does not compile: a build must know every page.
+ * The prerender constructor (#23). It takes `inputs`, and a call without
+ * them does not compile: a build must know every page.
  */
 export interface PrerenderConstructor {
   <
@@ -3147,70 +2974,6 @@ export interface PrerenderConstructor {
     root: Branch<Seg, ViewR, DataR>,
     options: PrerenderOptions<I>,
   ): Tree<Name, ViewR | DataR> & Prerendered<InputsError<I[number]>, InputsServices<I[number]>>;
-  <
-    const Name extends string,
-    Params extends ParamsCodec,
-    Search extends SearchCodec,
-    R,
-    E = never,
-    IR = never,
-  >(
-    name: Name,
-    definition: PrerenderDefinition<Params, Search, R, E, IR>,
-  ): Route<Name, Params, Search, R> & Prerendered<E, IR>;
-}
-
-function prerenderTree<
-  const Name extends string,
-  Seg extends RootSegment,
-  ViewR,
-  DataR,
-  const I extends ReadonlyArray<AnyInputs>,
->(
-  name: Name,
-  root: Branch<Seg, ViewR, DataR>,
-  options: PrerenderOptions<I>,
-): Tree<Name, ViewR | DataR> & Prerendered<InputsError<I[number]>, InputsServices<I[number]>>;
-function prerenderTree<
-  const Name extends string,
-  Params extends ParamsCodec,
-  Search extends SearchCodec,
-  R,
-  E = never,
-  IR = never,
->(
-  name: Name,
-  definition: PrerenderDefinition<Params, Search, R, E, IR>,
-): Route<Name, Params, Search, R> & Prerendered<E, IR>;
-function prerenderTree<
-  const Name extends string,
-  Params extends ParamsCodec,
-  Search extends SearchCodec,
-  R,
-  E,
-  IR,
->(
-  name: Name,
-  input: PrerenderDefinition<Params, Search, R, E, IR> | AnyBranch<unknown>,
-  options: PrerenderOptions<ReadonlyArray<AnyInputs>> = { inputs: [] },
-): (Route<Name, Params, Search, R> & Prerendered<E, IR>) | Tree<Name, unknown> {
-  if (isBranch(input)) {
-    // Checked before the tree is mounted: a refused tree registers nothing.
-    const plan = planFor(name, runtimeOf(input).level, options.inputs);
-    const tree = mountTree(name, input, prerendered<unknown, unknown>(), "AwaitAll");
-    registerPrerender(tree, plan);
-    return tree;
-  }
-  const flat = flatLeaf(name, input);
-  const plan = planFor(name, runtimeOf(flat.branch).level, [makeInputs(flat.one, input.inputs)]);
-  const tree = mountTree<
-    Name,
-    Exclude<R, Scope.Scope>,
-    never,
-    Omit<Route<Name, Params, Search, R>, keyof Tree<Name, R>> & Prerendered<E, IR>
-  >(name, flat.branch, { ...flat.extra, ...prerendered<E, IR>() }, "AwaitAll");
-  registerPrerender(tree, plan);
-  return tree;
 }
 
 /**
@@ -3221,7 +2984,28 @@ function prerenderTree<
  * names its `Route.inputs`, or the constructor refuses the tree with
  * `PrerenderAncestorNotEnumerable`.
  */
-export const prerender: PrerenderConstructor = prerenderTree;
+export const prerender: PrerenderConstructor = <
+  const Name extends string,
+  Seg extends RootSegment,
+  ViewR,
+  DataR,
+  const I extends ReadonlyArray<AnyInputs>,
+>(
+  name: Name,
+  root: Branch<Seg, ViewR, DataR>,
+  options: PrerenderOptions<I>,
+): Tree<Name, ViewR | DataR> & Prerendered<InputsError<I[number]>, InputsServices<I[number]>> => {
+  // Checked before the tree is mounted: a refused tree registers nothing.
+  const plan = planFor(name, runtimeOf(root).level, options.inputs);
+  const tree = mountTree<
+    Name,
+    ViewR,
+    DataR,
+    Prerendered<InputsError<I[number]>, InputsServices<I[number]>>
+  >(name, root, prerendered(), "AwaitAll");
+  registerPrerender(tree, plan);
+  return tree;
+};
 
 /** How one segment enumerates its own params for a prerender tree. See `prerender`. */
 export const inputs = makeInputs;

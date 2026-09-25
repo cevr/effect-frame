@@ -177,12 +177,12 @@ const Counter = (_props: Route.RouteProps<{}, {}>) =>
     return <p id="counter">{View.bind(state.state, (value) => String(value.count))}</p>;
   });
 
-const counter = Route.client("counter", {
+const counterSegment = Route.segment("counter", {
   path: "/counter",
   params: Nothing,
   search: Nothing,
-  view: Counter,
 });
+const counter = Route.client("counter", Route.leaf(counterSegment, Counter));
 
 const Dual = (_props: Route.RouteProps<{}, {}>) =>
   Effect.gen(function* () {
@@ -198,12 +198,8 @@ const Dual = (_props: Route.RouteProps<{}, {}>) =>
     );
   });
 
-const dual = Route.client("dual", {
-  path: "/dual",
-  params: Nothing,
-  search: Nothing,
-  view: Dual,
-});
+const dualSegment = Route.segment("dual", { path: "/dual", params: Nothing, search: Nothing });
+const dual = Route.client("dual", Route.leaf(dualSegment, Dual));
 
 const WorkspaceWrongKeysState = (_props: Route.RouteProps<{}, {}>) =>
   Effect.gen(function* () {
@@ -211,12 +207,15 @@ const WorkspaceWrongKeysState = (_props: Route.RouteProps<{}, {}>) =>
     return <span />;
   });
 
-const workspaceWrongKeys = Route.client("workspace-wrong-keys", {
+const workspaceWrongKeysSegment = Route.segment("workspace-wrong-keys", {
   path: "/workspace-wrong-keys",
   params: Nothing,
   search: Nothing,
-  view: WorkspaceWrongKeysState,
 });
+const workspaceWrongKeys = Route.client(
+  "workspace-wrong-keys",
+  Route.leaf(workspaceWrongKeysSegment, WorkspaceWrongKeysState),
+);
 
 const WorkspaceWithFiltersState = (_props: Route.RouteProps<{}, {}>) =>
   Effect.gen(function* () {
@@ -227,12 +226,15 @@ const WorkspaceWithFiltersState = (_props: Route.RouteProps<{}, {}>) =>
     return <span />;
   });
 
-const workspaceWithFiltersStateRoute = Route.client("workspace-with-filters-state", {
+const workspaceWithFiltersStateRouteSegment = Route.segment("workspace-with-filters-state", {
   path: "/workspace-with-filters-state",
   params: Nothing,
   search: Nothing,
-  view: WorkspaceWithFiltersState,
 });
+const workspaceWithFiltersStateRoute = Route.client(
+  "workspace-with-filters-state",
+  Route.leaf(workspaceWithFiltersStateRouteSegment, WorkspaceWithFiltersState),
+);
 
 const collisionView = (_props: Route.RouteProps<{}, {}>) =>
   Effect.gen(function* () {
@@ -241,12 +243,12 @@ const collisionView = (_props: Route.RouteProps<{}, {}>) =>
     return <span />;
   });
 
-const collision = Route.client("collision", {
+const collisionSegment = Route.segment("collision", {
   path: "/collision",
   params: Nothing,
   search: Nothing,
-  view: collisionView,
 });
+const collision = Route.client("collision", Route.leaf(collisionSegment, collisionView));
 
 const routeCollisionView = (props: Route.RouteProps<{}, (typeof CountSearch)["Type"]>) =>
   Effect.gen(function* () {
@@ -254,12 +256,15 @@ const routeCollisionView = (props: Route.RouteProps<{}, (typeof CountSearch)["Ty
     return <span>{View.bind(props.search, (value) => String(value.count))}</span>;
   });
 
-const routeCollision = Route.client("route-collision", {
+const routeCollisionSegment = Route.segment("route-collision", {
   path: "/route-collision",
   params: Nothing,
   search: CountSearch,
-  view: routeCollisionView,
 });
+const routeCollision = Route.client(
+  "route-collision",
+  Route.leaf(routeCollisionSegment, routeCollisionView),
+);
 
 const Other = (_props: Route.RouteProps<{}, {}>) =>
   Effect.gen(function* () {
@@ -267,12 +272,8 @@ const Other = (_props: Route.RouteProps<{}, {}>) =>
     return <p id="other">{View.bind(state.state, (value) => String(value.count))}</p>;
   });
 
-const other = Route.client("other", {
-  path: "/other",
-  params: Nothing,
-  search: Nothing,
-  view: Other,
-});
+const otherSegment = Route.segment("other", { path: "/other", params: Nothing, search: Nothing });
+const other = Route.client("other", Route.leaf(otherSegment, Other));
 
 const RouteAndViewState = (props: Route.RouteProps<{}, (typeof PageSearch)["Type"]>) =>
   Effect.gen(function* () {
@@ -287,12 +288,15 @@ const RouteAndViewState = (props: Route.RouteProps<{}, (typeof PageSearch)["Type
     );
   });
 
-const routeAndView = Route.client("route-and-view", {
+const routeAndViewSegment = Route.segment("route-and-view", {
   path: "/route-and-view",
   params: Nothing,
   search: PageSearch,
-  view: RouteAndViewState,
 });
+const routeAndView = Route.client(
+  "route-and-view",
+  Route.leaf(routeAndViewSegment, RouteAndViewState),
+);
 
 const OpaqueRouteView = (props: Route.RouteProps<{}, (typeof OpaqueRouteSearch)["Type"]>) =>
   Effect.gen(function* () {
@@ -301,13 +305,13 @@ const OpaqueRouteView = (props: Route.RouteProps<{}, (typeof OpaqueRouteSearch)[
     return <span id="opaque-route">{View.bind(props.search, (value) => value.route)}</span>;
   });
 
-const opaqueRoute = Route.client("opaque-route", {
+const opaqueRouteSegment = Route.segment("opaque-route", {
   path: "/opaque-route",
   params: Nothing,
   search: OpaqueRouteSearch,
   searchKeys: ["route"],
-  view: OpaqueRouteView,
 });
+const opaqueRoute = Route.client("opaque-route", Route.leaf(opaqueRouteSegment, OpaqueRouteView));
 
 const ReusableClaims = (_props: Route.RouteProps<{}, {}>) =>
   Effect.gen(function* () {
@@ -329,12 +333,15 @@ const ReusableClaims = (_props: Route.RouteProps<{}, {}>) =>
     return <section id="reusable-claims">{rows}</section>;
   });
 
-const reusableClaims = Route.client("reusable-claims", {
+const reusableClaimsSegment = Route.segment("reusable-claims", {
   path: "/reusable-claims",
   params: Nothing,
   search: Nothing,
-  view: ReusableClaims,
 });
+const reusableClaims = Route.client(
+  "reusable-claims",
+  Route.leaf(reusableClaimsSegment, ReusableClaims),
+);
 
 const InterruptedClaim = (_props: Route.RouteProps<{}, {}>) =>
   Effect.gen(function* () {
@@ -354,12 +361,15 @@ const InterruptedClaim = (_props: Route.RouteProps<{}, {}>) =>
     return <span id="interrupted-claim">ok</span>;
   });
 
-const interruptedClaim = Route.client("interrupted-claim", {
+const interruptedClaimSegment = Route.segment("interrupted-claim", {
   path: "/interrupted-claim",
   params: Nothing,
   search: Nothing,
-  view: InterruptedClaim,
 });
+const interruptedClaim = Route.client(
+  "interrupted-claim",
+  Route.leaf(interruptedClaimSegment, InterruptedClaim),
+);
 
 const RequiredSearch = Route.search(Schema.Struct({ mode: Schema.Literals(["a", "b"]) }));
 const requiredView = (_props: Route.RouteProps<{}, {}>) =>
@@ -367,12 +377,12 @@ const requiredView = (_props: Route.RouteProps<{}, {}>) =>
     yield* UrlState.make(RequiredSearch);
     return <span />;
   });
-const required = Route.client("required", {
+const requiredSegment = Route.segment("required", {
   path: "/required",
   params: Nothing,
   search: Nothing,
-  view: requiredView,
 });
+const required = Route.client("required", Route.leaf(requiredSegment, requiredView));
 
 const MissingOpaqueKeys = (_props: Route.RouteProps<{}, {}>) =>
   Effect.gen(function* () {
@@ -380,12 +390,15 @@ const MissingOpaqueKeys = (_props: Route.RouteProps<{}, {}>) =>
     return <span />;
   });
 
-const missingOpaqueKeys = Route.client("missing-opaque-keys", {
+const missingOpaqueKeysSegment = Route.segment("missing-opaque-keys", {
   path: "/missing-opaque-keys",
   params: Nothing,
   search: Nothing,
-  view: MissingOpaqueKeys,
 });
+const missingOpaqueKeys = Route.client(
+  "missing-opaque-keys",
+  Route.leaf(missingOpaqueKeysSegment, MissingOpaqueKeys),
+);
 
 const NotFound = (props: { readonly url: Source<URL> }) =>
   Effect.succeed(<p id="missing">{View.bind(props.url, (url) => url.pathname)}</p>);
@@ -512,7 +525,7 @@ describe("UrlState", () => {
       const before = root.querySelector("#route-and-view");
       const props = Option.getOrThrow(routeSearchProps);
       const state = Option.getOrThrow(counterState);
-      const typed = yield* link(routeAndView, {}, (previous) => ({
+      const typed = yield* link(routeAndViewSegment, {}, (previous) => ({
         page: `${previous.page}-link`,
       })).pipe(Effect.provideService(Router, router));
       expect(yield* typed.href.get).toBe("/route-and-view?page=one-link&c=1&unknown=x");
@@ -551,7 +564,7 @@ describe("UrlState", () => {
         [opaqueRoute],
       );
       const replace = Option.getOrThrow(opaqueRouteReplace);
-      const typed = yield* link(opaqueRoute, {}, { route: "next" }).pipe(
+      const typed = yield* link(opaqueRouteSegment, {}, { route: "next" }).pipe(
         Effect.provideService(Router, router),
       );
       const replaceResult = yield* Effect.exit(replace(() => ({ route: "next" })));
@@ -678,42 +691,59 @@ describe("UrlState", () => {
 
   it.live("keeps opaque codec ownership separate from route definitions", () =>
     Effect.sync(() => {
-      const opaque = Route.client("opaque", {
+      const opaqueSegment = Route.segment("opaque", {
         path: "/opaque",
         params: Nothing,
         search: Workspace,
-        view: (_props: Route.RouteProps<{}, (typeof Workspace)["Type"]>) =>
-          Effect.succeed(<span />),
       });
+      const opaque = Route.client(
+        "opaque",
+        Route.leaf(opaqueSegment, (_props: Route.RouteProps<{}, (typeof Workspace)["Type"]>) =>
+          Effect.succeed(<span />),
+        ),
+      );
       expect(opaque.searchKeys.known).toBe(false);
-      const declared = Route.client("declared-opaque", {
+      const declaredSegment = Route.segment("declared-opaque", {
         path: "/declared-opaque",
         params: Nothing,
         search: Workspace,
         searchKeys: ["workspace"],
-        view: (_props: Route.RouteProps<{}, (typeof Workspace)["Type"]>) =>
-          Effect.succeed(<span />),
       });
+      const declared = Route.client(
+        "declared-opaque",
+        Route.leaf(declaredSegment, (_props: Route.RouteProps<{}, (typeof Workspace)["Type"]>) =>
+          Effect.succeed(<span />),
+        ),
+      );
       expect(declared.searchKeys).toEqual({ known: true, keys: ["workspace"] });
       expect(() =>
-        Route.client("bad-declaration", {
-          path: "/bad-declaration",
-          params: Nothing,
-          search: Workspace,
-          searchKeys: ["wrong"],
-          view: (_props: Route.RouteProps<{}, (typeof Workspace)["Type"]>) =>
-            Effect.succeed(<span />),
-        }),
+        Route.client(
+          "bad-declaration",
+          Route.leaf(
+            Route.segment("bad-declaration", {
+              path: "/bad-declaration",
+              params: Nothing,
+              search: Workspace,
+              searchKeys: ["wrong"],
+            }),
+            (_props: Route.RouteProps<{}, (typeof Workspace)["Type"]>) => Effect.succeed(<span />),
+          ),
+        ),
       ).not.toThrow();
       expect(() =>
-        Route.client("bad-fixed-declaration", {
-          path: "/bad-fixed-declaration",
-          params: Nothing,
-          search: CountSearch,
-          searchKeys: ["wrong"],
-          view: (_props: Route.RouteProps<{}, (typeof CountSearch)["Type"]>) =>
-            Effect.succeed(<span />),
-        }),
+        Route.client(
+          "bad-fixed-declaration",
+          Route.leaf(
+            Route.segment("bad-fixed-declaration", {
+              path: "/bad-fixed-declaration",
+              params: Nothing,
+              search: CountSearch,
+              searchKeys: ["wrong"],
+            }),
+            (_props: Route.RouteProps<{}, (typeof CountSearch)["Type"]>) =>
+              Effect.succeed(<span />),
+          ),
+        ),
       ).toThrow();
     }),
   );

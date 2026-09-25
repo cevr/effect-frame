@@ -35,19 +35,19 @@ const Query = Route.SearchRecord.pipe(
   }),
 );
 
-const book = Route.client("book", {
+const bookSegment = Route.segment("book", {
   path: "/books/:id",
   params: Schema.Struct({ id: Schema.String }),
   search: Query,
-  view: Blank,
 });
+const book = Route.client("book", Route.leaf(bookSegment, Blank));
 
-const files = Route.client("files", {
+const filesSegment = Route.segment("files", {
   path: "/files/:path*",
   params: Schema.Struct({ path: Schema.Array(Schema.String) }),
   search: Nothing,
-  view: Blank,
 });
+const files = Route.client("files", Route.leaf(filesSegment, Blank));
 
 const Defaults = Route.search(
   Schema.Struct({
@@ -95,28 +95,26 @@ const DefaultsView = <Params, Search>(props: Route.RouteProps<Params, Search>) =
     return <span />;
   });
 
-const defaults = Route.client("defaults", {
+const defaultsSegment = Route.segment("defaults", {
   path: "/defaults/:id",
   params: Schema.Struct({ id: Schema.String }),
   search: Defaults,
-  view: DefaultsView,
 });
+const defaults = Route.client("defaults", Route.leaf(defaultsSegment, DefaultsView));
 
-const emptyDefaults = Route.client("empty-defaults", {
+const emptyDefaultsSegment = Route.segment("empty-defaults", {
   path: "/empty-defaults",
   params: Nothing,
   search: EmptyDefault,
-  view: Blank,
 });
 
-const literals = Route.client("literals", {
+const literalsSegment = Route.segment("literals", {
   path: "/literals",
   params: Nothing,
   search: LiteralSearch,
-  view: Blank,
 });
 
-const tenant = Route.client("tenant", {
+const tenantSegment = Route.segment("tenant", {
   path: "/tenant/:id",
   params: Schema.Struct({ id: Schema.String }),
   search: Route.search(
@@ -127,10 +125,9 @@ const tenant = Route.client("tenant", {
     }),
   ),
   retain: ["tenant", "page"],
-  view: Blank,
 });
 
-const remappedTenant = Route.client("remapped-tenant", {
+const remappedTenantSegment = Route.segment("remapped-tenant", {
   path: "/remapped-tenant/:id",
   params: Schema.Struct({ id: Schema.String }),
   search: Route.search(
@@ -141,7 +138,6 @@ const remappedTenant = Route.client("remapped-tenant", {
     }).pipe(Schema.encodeKeys({ tenant: "t", page: "p" })),
   ),
   retain: ["tenant"],
-  view: Blank,
 });
 
 const Workspace = Route.SearchRecord.pipe(
@@ -155,11 +151,10 @@ const Workspace = Route.SearchRecord.pipe(
   }),
 );
 
-const workspace = Route.client("workspace", {
+const workspaceSegment = Route.segment("workspace", {
   path: "/workspace",
   params: Nothing,
   search: Workspace,
-  view: Blank,
 });
 
 const suffixOf = (index: number): string => {
@@ -207,11 +202,10 @@ const WorkspaceWithFilters = Route.SearchRecord.pipe(
   ),
 );
 
-const workspaceWithFilters = Route.client("workspaceWithFilters", {
+const workspaceWithFiltersSegment = Route.segment("workspaceWithFilters", {
   path: "/workspace-filters",
   params: Nothing,
   search: WorkspaceWithFilters,
-  view: Blank,
 });
 
 const Filters = Schema.Struct({
@@ -258,7 +252,7 @@ describe("template", () => {
 describe("route", () => {
   it.live("prints an href that parses back to the same values", () =>
     Effect.sync(() => {
-      const href = book.href({ id: "a b" }, { q: "x&y" });
+      const href = bookSegment.href({ id: "a b" }, { q: "x&y" });
       expect(href).toBe("/books/a%20b?q=x%26y");
       expect(matches(book, href)).toBe(true);
     }),
@@ -276,13 +270,13 @@ describe("route", () => {
 
   it.live("an empty search prints no query string", () =>
     Effect.sync(() => {
-      expect(book.href({ id: "1" }, { q: "" })).toBe("/books/1");
+      expect(bookSegment.href({ id: "1" }, { q: "" })).toBe("/books/1");
     }),
   );
 
   it.live("a tail takes the rest of the path as a list", () =>
     Effect.sync(() => {
-      expect(files.href({ path: ["a", "b c"] }, {})).toBe("/files/a/b%20c");
+      expect(filesSegment.href({ path: ["a", "b c"] }, {})).toBe("/files/a/b%20c");
       expect(matches(files, "/files")).toBe(true);
       expect(matches(files, "/files/a/b/c")).toBe(true);
       expect(matches(files, "/other")).toBe(false);
@@ -297,19 +291,23 @@ describe("route", () => {
 
   it.scoped("fills omitted defaults and omits equal scalar and array defaults", () =>
     Effect.gen(function* () {
-      expect(defaults.href({ id: "1" }, { page: 1, panes: ["all"] })).toBe("/defaults/1");
-      expect(defaults.href({ id: "1" }, { page: 2, panes: ["one", "two"] })).toBe(
+      expect(defaultsSegment.href({ id: "1" }, { page: 1, panes: ["all"] })).toBe("/defaults/1");
+      expect(defaultsSegment.href({ id: "1" }, { page: 2, panes: ["one", "two"] })).toBe(
         "/defaults/1?p=2&panes=one&panes=two",
       );
-      expect(defaults.href({ id: "1" }, { page: 1, panes: [] })).toBe("/defaults/1?panes=%7E");
-      expect(defaults.href({ id: "1" }, { page: 1, panes: [""] })).toBe("/defaults/1?panes=");
+      expect(defaultsSegment.href({ id: "1" }, { page: 1, panes: [] })).toBe(
+        "/defaults/1?panes=%7E",
+      );
+      expect(defaultsSegment.href({ id: "1" }, { page: 1, panes: [""] })).toBe(
+        "/defaults/1?panes=",
+      );
       expect(
         Schema.decodeUnknownOption(Defaults)(Route.readSearch(new URLSearchParams("panes=~"))),
       ).toEqual(Option.some({ page: 1, panes: [] }));
       expect(
         Schema.decodeUnknownOption(Defaults)(Route.readSearch(new URLSearchParams("panes="))),
       ).toEqual(Option.some({ page: 1, panes: [""] }));
-      expect(emptyDefaults.href({}, { panes: [] })).toBe("/empty-defaults");
+      expect(emptyDefaultsSegment.href({}, { panes: [] })).toBe("/empty-defaults");
       expect(Schema.decodeUnknownOption(EmptyDefault)({})).toEqual(Option.some({ panes: [] }));
 
       const entered = yield* Option.getOrThrow(
@@ -323,7 +321,7 @@ describe("route", () => {
   it.live("uses codec key order when updating an existing query", () =>
     Effect.sync(() => {
       expect(
-        defaults.hrefAt(
+        defaultsSegment.hrefAt(
           new URL("http://app.test/defaults/1?panes=old&p=2&unknown=x"),
           { id: "1" },
           { page: 3, panes: ["new"] },
@@ -334,14 +332,14 @@ describe("route", () => {
 
   it.live("remaps keys, preserves repeated values, and prints in schema order", () =>
     Effect.sync(() => {
-      expect(defaults.href({ id: "1" }, { page: 2, panes: ["one", "two"] })).toBe(
+      expect(defaultsSegment.href({ id: "1" }, { page: 2, panes: ["one", "two"] })).toBe(
         "/defaults/1?p=2&panes=one&panes=two",
       );
-      expect(workspace.href({}, { panes: ["first", "second"] })).toBe(
+      expect(workspaceSegment.href({}, { panes: ["first", "second"] })).toBe(
         "/workspace?workspace=first&workspace=second",
       );
       expect(
-        workspaceWithFilters.href(
+        workspaceWithFiltersSegment.href(
           {},
           {
             panes: [
@@ -351,7 +349,7 @@ describe("route", () => {
           },
         ),
       ).toBe("/workspace-filters?q=first&filters=rank&q2=second&filters2=date");
-      expect(defaults.href({ id: "1" }, { page: 1, panes: ["~", "~~", ""] })).toBe(
+      expect(defaultsSegment.href({ id: "1" }, { page: 1, panes: ["~", "~~", ""] })).toBe(
         "/defaults/1?panes=%7E%7E&panes=%7E%7E%7E&panes=",
       );
       expect(
@@ -359,7 +357,7 @@ describe("route", () => {
           Route.readSearch(new URLSearchParams("panes=~~&panes=~~~&panes=")),
         ),
       ).toEqual(Option.some({ page: 1, panes: ["~", "~~", ""] }));
-      expect(literals.href({}, { scope: "books", scopes: ["all", "books"] })).toBe(
+      expect(literalsSegment.href({}, { scope: "books", scopes: ["all", "books"] })).toBe(
         "/literals?scope=books&scopes=all&scopes=books",
       );
       expect(
@@ -373,34 +371,34 @@ describe("route", () => {
   it.live("retains decoded keys across routes and lets explicit values clear defaults", () =>
     Effect.sync(() => {
       const current = new URL("http://app.test/other?tenant=acme&page=4");
-      expect(tenant.hrefAt(current, { id: "2" }, { section: "main", page: 1 })).toBe(
+      expect(tenantSegment.hrefAt(current, { id: "2" }, { section: "main", page: 1 })).toBe(
         "/tenant/2?tenant=acme&section=main",
       );
       expect(
-        tenant.hrefAt(
+        tenantSegment.hrefAt(
           new URL("http://app.test/tenant/1?tenant=acme&section=old&page=3"),
           { id: "2" },
           { section: "main", page: 1 },
         ),
       ).toBe("/tenant/2?tenant=acme&section=main");
       expect(
-        tenant.hrefAt(
+        tenantSegment.hrefAt(
           new URL("http://app.test/other?tenant=acme&page=oops"),
           { id: "2" },
           { section: "main", page: 1 },
         ),
       ).toBe("/tenant/2?tenant=acme&section=main");
       expect(
-        remappedTenant.hrefAt(
+        remappedTenantSegment.hrefAt(
           new URL("http://app.test/other?t=acme&p=oops"),
           { id: "2" },
           { section: "main", page: 1 },
         ),
       ).toBe("/remapped-tenant/2?t=acme&section=main");
       expect(
-        tenant.hrefAt(current, { id: "2" }, { tenant: "other", section: "main", page: 1 }),
+        tenantSegment.hrefAt(current, { id: "2" }, { tenant: "other", section: "main", page: 1 }),
       ).toBe("/tenant/2?tenant=other&section=main");
-      expect(tenant.hrefAt(current, { id: "2" }, { section: "main", page: 1 })).toBe(
+      expect(tenantSegment.hrefAt(current, { id: "2" }, { section: "main", page: 1 })).toBe(
         "/tenant/2?tenant=acme&section=main",
       );
     }),
@@ -548,36 +546,36 @@ describe("a route prints what it parses (#18)", () => {
           }
           return { href: outcome };
         });
-      expect(yield* refusal(() => book.href({ id: "" }, { q: "" }))).toEqual({
+      expect(yield* refusal(() => bookSegment.href({ id: "" }, { q: "" }))).toEqual({
         name: "id",
         reason: "empty segment",
       });
-      expect(yield* refusal(() => book.href({ id: "." }, { q: "" }))).toEqual({
+      expect(yield* refusal(() => bookSegment.href({ id: "." }, { q: "" }))).toEqual({
         name: "id",
         reason: "dot segment",
       });
-      expect(yield* refusal(() => book.href({ id: ".." }, { q: "" }))).toEqual({
+      expect(yield* refusal(() => bookSegment.href({ id: ".." }, { q: "" }))).toEqual({
         name: "id",
         reason: "dot segment",
       });
-      expect(yield* refusal(() => book.href({ id: "a\uD800" }, { q: "" }))).toEqual({
+      expect(yield* refusal(() => bookSegment.href({ id: "a\uD800" }, { q: "" }))).toEqual({
         name: "id",
         reason: "lone surrogate",
       });
-      expect(yield* refusal(() => files.href({ path: ["a", "", "b"] }, {}))).toEqual({
+      expect(yield* refusal(() => filesSegment.href({ path: ["a", "", "b"] }, {}))).toEqual({
         name: "path",
         reason: "empty segment",
       });
-      expect(yield* refusal(() => book.href({ id: "1" }, { q: "\uDC00" }))).toEqual({
+      expect(yield* refusal(() => bookSegment.href({ id: "1" }, { q: "\uDC00" }))).toEqual({
         name: "q",
         reason: "lone surrogate",
       });
       // Inside the domain, the same shapes print and parse back.
-      expect(yield* refusal(() => book.href({ id: ".a" }, { q: "" }))).toEqual({
+      expect(yield* refusal(() => bookSegment.href({ id: ".a" }, { q: "" }))).toEqual({
         href: "/books/.a",
       });
-      expect(yield* refusal(() => files.href({ path: [] }, {}))).toEqual({ href: "/files" });
-      expect(yield* refusal(() => book.href({ id: "\uD83D\uDE00" }, { q: "" }))).toEqual({
+      expect(yield* refusal(() => filesSegment.href({ path: [] }, {}))).toEqual({ href: "/files" });
+      expect(yield* refusal(() => bookSegment.href({ id: "\uD83D\uDE00" }, { q: "" }))).toEqual({
         href: "/books/%F0%9F%98%80",
       });
     }),
@@ -601,21 +599,21 @@ describe("a route prints what it parses (#18)", () => {
 
   it.live("a search reorder and an absent optional key still match, with the same values", () =>
     Effect.sync(() => {
-      const listing = Route.client("listing", {
+      const listingSegment = Route.segment("listing", {
         path: "/list",
         params: Nothing,
         search: Route.search(
           Schema.Struct({ a: Schema.String, b: Schema.String.pipe(Route.withDefault("none")) }),
         ),
-        view: Blank,
       });
+      const listing = Route.client("listing", Route.leaf(listingSegment, Blank));
       const at = (query: string) => new URL(`/list${query}`, "http://app.test");
       expect(
         ["?a=1&b=2", "?b=2&a=1", "?a=1"].map((query) => matches(listing, `/list${query}`)),
       ).toEqual([true, true, true]);
-      expect(listing.searchAt(at("?a=1&b=2"))).toEqual({ a: "1", b: "2" });
-      expect(listing.searchAt(at("?b=2&a=1"))).toEqual({ a: "1", b: "2" });
-      expect(listing.searchAt(at("?a=1"))).toEqual({ a: "1", b: "none" });
+      expect(listingSegment.searchAt(at("?a=1&b=2"))).toEqual({ a: "1", b: "2" });
+      expect(listingSegment.searchAt(at("?b=2&a=1"))).toEqual({ a: "1", b: "2" });
+      expect(listingSegment.searchAt(at("?a=1"))).toEqual({ a: "1", b: "none" });
     }),
   );
 });

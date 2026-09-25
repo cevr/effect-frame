@@ -216,13 +216,17 @@ const loader =
 // The tenant/post tree with a lazy, pending post
 // ---------------------------------------------------------------------------
 
-const LoginRoute = Route.client("login", {
+const LoginRouteSegment = Route.segment("login", {
   path: "/login",
   params: Schema.Struct({}),
   search: Route.search(Schema.Struct({ next: Schema.String.pipe(Route.withDefault("/")) })),
-  view: (props) =>
-    Effect.succeed(<p id="login">{View.bind(props.search, (search) => search.next)}</p>),
 });
+const LoginRoute = Route.client(
+  "login",
+  Route.leaf(LoginRouteSegment, (props) =>
+    Effect.succeed(<p id="login">{View.bind(props.search, (search) => search.next)}</p>),
+  ),
+);
 
 const TenantParams = Schema.Struct({ tenant: Schema.String });
 const PostParams = Schema.Struct({ tenant: Schema.String, postId: Schema.String });
@@ -232,7 +236,7 @@ const checkTenant = (next: Route.BeforeInput<{ readonly tenant: string }, {}>) =
     const access = yield* Access;
     yield* logEvent(access.events, `check:tenant:${next.url.pathname}`);
     if ((yield* Ref.get(access.denied)).has(next.params.tenant)) {
-      return Route.redirect(Route.target(LoginRoute, {}, { next: next.url.pathname }));
+      return Route.redirect(Route.target(LoginRouteSegment, {}, { next: next.url.pathname }));
     }
     return Route.Continue;
   });

@@ -569,12 +569,15 @@ describe("ViewTest Frame inspection", () => {
         replace: () => Effect.void,
         pops: Stream.empty,
       };
-      const route = Route.client("search", {
+      const routeSegment = Route.segment("search", {
         path: "/search",
         params: Schema.Struct({}),
         search: Route.search(Schema.Struct({ query: Schema.String.pipe(Route.withDefault("")) })),
-        view: () => SearchPage(),
       });
+      const route = Route.client(
+        "search",
+        Route.leaf(routeSegment, () => SearchPage()),
+      );
       const notFound = (_props: NotFoundProps) => Effect.succeed(<p id="missing">missing</p>);
       const root = document.createElement("main");
       const page = yield* ViewTest.make({

@@ -42,7 +42,6 @@ import {
 } from "effect-frame/router";
 
 Route.leaf(tabs, TabsView, { behavior: NavigationBehavior.Preserve }); // per leaf
-Route.client("flat", { path, params, search, view, behavior: NavigationBehavior.Preserve });
 mount({ routes, notFound, host, root, behavior: NavigationBehavior.Restore }); // default: Restore
 mount({ routes, notFound, host, root, traversalReadLimit: "3 seconds" }); // default: 3 seconds
 
@@ -269,12 +268,12 @@ Browser proofs run in real Chrome and WebKit through `Bun.WebView`
 
 Non-browser proofs (`packages/effect-frame/tests/router/navigation-behavior.test.tsx`):
 
-| Test                                                                       | What it shows                                                                                              |
-| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| type assertions at the top of the file                                     | `@ts-expect-error` on a layout `behavior`, a boolean leaf `behavior`, a flat-route flag, a string default. |
-| "no router module reads or writes a scroll position or a storage"          | No `src/router` file names a scroll offset, a storage, or `scrollRestoration`, outside comments.           |
-| "a server render of a branch installs no navigation listener"              | A recording `navigation` global sees no `addEventListener`; the HTML is the branch with `tabindex="-1"`.   |
-| "a server bundle of a routed tree excludes the browser navigation modules" | `Bun.build` of `tests/router/fixtures/server-entry.tsx` has none of the browser module markers.            |
+| Test                                                                       | What it shows                                                                                            |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| type assertions at the top of the file                                     | `@ts-expect-error` on a layout `behavior`, a boolean leaf `behavior`, a string default.                  |
+| "no router module reads or writes a scroll position or a storage"          | No `src/router` file names a scroll offset, a storage, or `scrollRestoration`, outside comments.         |
+| "a server render of a branch installs no navigation listener"              | A recording `navigation` global sees no `addEventListener`; the HTML is the branch with `tabindex="-1"`. |
+| "a server bundle of a routed tree excludes the browser navigation modules" | `Bun.build` of `tests/router/fixtures/server-entry.tsx` has none of the browser module markers.          |
 
 Round 1 proofs outside that file:
 

@@ -440,12 +440,13 @@ describe("declared data on the server (#18 §3.3)", () => {
   it.scopedLive("a user route named not-found is that route, not the fallback", () =>
     Effect.gen(function* () {
       const server = yield* sideOf(makeControl({}));
-      const named = Route.ssr("not-found", {
-        path: "/not-found",
-        params: Schema.Struct({}),
-        search: Route.search(Schema.Struct({})),
-        view: () => Effect.succeed(<p id="page">a page</p>),
-      });
+      const named = Route.ssr(
+        "not-found",
+        Route.leaf(
+          Route.segment("not-found", { path: "/not-found", params: Schema.Struct({}) }),
+          () => Effect.succeed(<p id="page">a page</p>),
+        ),
+      );
       const rendered = yield* renderIn(server, [named], new URL(`${origin}/not-found`));
       expect(rendered.route).toEqual({ _tag: "Matched", route: named });
       expect(rendered.status).toBe(200);
@@ -461,12 +462,11 @@ describe("declared data on the server (#18 §3.3)", () => {
 // Server settlement: checks first, then the mode (#18 §6, route-data.md)
 // ---------------------------------------------------------------------------
 
-const login = Route.client("login", {
-  path: "/login",
-  params: Schema.Struct({}),
-  search: Route.search(Schema.Struct({})),
-  view: () => Effect.succeed(<p id="login">login</p>),
-});
+const loginSegment = Route.segment("login", { path: "/login", params: Schema.Struct({}) });
+const login = Route.client(
+  "login",
+  Route.leaf(loginSegment, () => Effect.succeed(<p id="login">login</p>)),
+);
 
 /** A guarded root segment whose check redirects to `login`, and counts each run. */
 const guardedBranch = (runs: Array<string>, name: string) =>
@@ -478,7 +478,7 @@ const guardedBranch = (runs: Array<string>, name: string) =>
       before: () =>
         Effect.sync(() => {
           runs.push(name);
-          return Route.redirect(Route.target(login, {}, {}));
+          return Route.redirect(Route.target(loginSegment, {}, {}));
         }),
     }),
     (props) => Effect.succeed(<p id="guarded">{View.bind(props.data.label.state, labelOf)}</p>),
@@ -776,12 +776,10 @@ describe("a route's rendering mode is a constructor, not a field (#18 §6)", () 
     Effect.gen(function* () {
       const server = yield* sideOf(makeControl({ "tenant-t1": "Acme", "post-1": "Hello" }));
       const Blank = () => Effect.succeed(<p>flat</p>);
-      const flat = Route.ssr("flat", {
-        path: "/flat",
-        params: Schema.Struct({}),
-        search: Route.search(Schema.Struct({})),
-        view: Blank,
-      });
+      const flat = Route.ssr(
+        "flat",
+        Route.leaf(Route.segment("flat", { path: "/flat", params: Schema.Struct({}) }), Blank),
+      );
       const modes = yield* Effect.forEach([clientApp, ssrApp, streamedApp, awaitApp], (route) =>
         Effect.map(renderIn(server, [route]), (rendered) => rendered.mode),
       );
@@ -792,29 +790,20 @@ describe("a route's rendering mode is a constructor, not a field (#18 §6)", () 
       }
       // @ts-expect-error No route value carries a mode field.
       void ssrApp.mode;
-      // @ts-expect-error A flat route carries none either.
+      // @ts-expect-error A one-leaf route carries none either.
       void flat.mode;
-      // @ts-expect-error A route definition has no mode field: the constructor is the mode.
-      Route.client("moded", { ...flatDefinition, mode: "SSR" });
+      // @ts-expect-error A segment has no mode field: the constructor is the mode.
+      Route.segment("moded", { path: "/moded", params: Schema.Struct({}), mode: "SSR" });
     }),
   );
 });
 
-const flatDefinition = {
-  path: "/moded",
-  params: Schema.Struct({}),
-  search: Route.search(Schema.Struct({})),
-  view: () => Effect.succeed(<p>moded</p>),
-};
-
-/** A flat route of `Moving`, rendered in `mode`: its records move inside every catch-up. */
+/** A one-leaf route of `Moving`, rendered in `mode`: its records move inside every catch-up. */
 const movingRoute = (mode: "SSR" | "Streamed" | "AwaitAll", mover: Mover) => {
-  const definition = {
-    path: "/moving",
-    params: Schema.Struct({}),
-    search: Route.search(Schema.Struct({})),
-    view: () => Moving({ mover }),
-  };
+  const definition = Route.leaf(
+    Route.segment("moving", { path: "/moving", params: Schema.Struct({}) }),
+    () => Moving({ mover }),
+  );
   if (mode === "SSR") {
     return Route.ssr("moving", definition);
   }
@@ -1016,12 +1005,12 @@ const releaseApp = (closed: Array<string>) =>
     ),
   );
 
-const scratch = Route.client("scratch", {
-  path: "/scratch",
-  params: Schema.Struct({}),
-  search: Route.search(Schema.Struct({})),
-  view: () => Effect.succeed(<p id="scratch">scratch</p>),
-});
+const scratch = Route.client(
+  "scratch",
+  Route.leaf(Route.segment("scratch", { path: "/scratch", params: Schema.Struct({}) }), () =>
+    Effect.succeed(<p id="scratch">scratch</p>),
+  ),
+);
 
 describe("an exited segment releases its scope and its unshared keys (#18 §4.3)", () => {
   it.scopedLive("the leaf exits and the shared key stays; the layout exits and it goes", () =>

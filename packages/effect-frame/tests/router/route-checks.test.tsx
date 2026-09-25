@@ -329,13 +329,17 @@ const questions = (log: ReadonlyArray<Asked>): ReadonlyArray<string> =>
 // The tenant/post tree with checks and typed failures
 // ---------------------------------------------------------------------------
 
-const LoginRoute = Route.client("login", {
+const LoginRouteSegment = Route.segment("login", {
   path: "/login",
   params: Schema.Struct({}),
   search: Route.search(Schema.Struct({ next: Schema.String.pipe(Route.withDefault("/")) })),
-  view: (props) =>
-    Effect.succeed(<p id="login">{View.bind(props.search, (search) => search.next)}</p>),
 });
+const LoginRoute = Route.client(
+  "login",
+  Route.leaf(LoginRouteSegment, (props) =>
+    Effect.succeed(<p id="login">{View.bind(props.search, (search) => search.next)}</p>),
+  ),
+);
 
 const TenantParams = Schema.Struct({ tenant: Schema.String });
 const PostParams = Schema.Struct({ tenant: Schema.String, postId: Schema.String });
@@ -354,7 +358,7 @@ const checkTenant = (next: Route.BeforeInput<{ readonly tenant: string }, {}>) =
       yield* Deferred.await(held.value.gate);
     }
     if ((yield* Ref.get(access.denied)).has(next.params.tenant)) {
-      return Route.redirect(Route.target(LoginRoute, {}, { next: next.url.pathname }));
+      return Route.redirect(Route.target(LoginRouteSegment, {}, { next: next.url.pathname }));
     }
     return Route.Continue;
   });
@@ -714,7 +718,7 @@ const printed = Route.target(postSegment, { tenant: "t1", postId: "7" }, { tab: 
 const missingParam = () => Route.target(postSegment, { tenant: "t1" }, { tab: "read" });
 
 // @ts-expect-error A flat route's target is checked against its own search type.
-const wrongSearch = () => Route.target(LoginRoute, {}, { next: 1 });
+const wrongSearch = () => Route.target(LoginRouteSegment, {}, { next: 1 });
 
 // @ts-expect-error A view that can fail with E needs an errored handler.
 const unhandled = Route.leaf(postSegment, failingView);

@@ -129,13 +129,16 @@ import { Link, Route, link, mount } from "effect-frame/router";
 import { View } from "effect-frame/view";
 import { Effect, Schema } from "effect";
 
-// A flat route is the one-leaf shorthand of the same model.
-const Login = Route.client("login", {
+// A one-page route is a tree of one leaf. There is no other form.
+const login = Route.segment("login", {
   path: "/login",
   params: Schema.Struct({}),
   search: Route.search(Schema.Struct({ next: Schema.String.pipe(Route.withDefault("/")) })),
-  view: (props) => Effect.succeed(<p>{View.bind(props.search, (s) => s.next)}</p>),
 });
+const Login = Route.client(
+  "login",
+  Route.leaf(login, (props) => Effect.succeed(<p>{View.bind(props.search, (s) => s.next)}</p>)),
+);
 
 const tenant = Route.segment("tenant", {
   path: "/app/:tenant",
@@ -146,7 +149,7 @@ const tenant = Route.segment("tenant", {
       if (yield* isSignedIn(params.tenant)) {
         return Route.Continue;
       }
-      return Route.redirect(Route.target(Login, {}, { next: `${url.pathname}${url.search}` }));
+      return Route.redirect(Route.target(login, {}, { next: `${url.pathname}${url.search}` }));
     }),
 });
 
@@ -194,7 +197,7 @@ const program = Effect.gen(function* () {
   handler. It receives a `Route.RouteFailure`.
 - Every segment view gets `params`, `search`, `data`, `href`,
   `updateSearch`, and `replaceSearch`. A layout also gets `outlet`.
-- `link` takes a flat route or a segment. `Link` draws `aria-current="page"`
+- `link` takes a segment. `Link` draws `aria-current="page"`
   on the destination, and `aria-current="true"` on a segment the current URL
   continues below. Neither holds on not-found or on another route.
 - `Route.client(name, root)` takes a branch of a root segment only, and so
@@ -238,8 +241,7 @@ Route.leaf(tab, TabView, { behavior: NavigationBehavior.Preserve });
   It then focuses the entering leaf's root, or the first `autofocus` element
   inside that leaf. It does not wait for queries.
 - `NavigationBehavior.Preserve` leaves scroll and focus alone. Set it on a
-  leaf (`Route.leaf(..., { behavior })`), on a flat route (`behavior` in
-  `Route.client(name, { ... })`), or for the whole router
+  leaf (`Route.leaf(..., { behavior })`), or for the whole router
   (`mount({ ..., behavior })`). A layout takes no `behavior`: the destination
   leaf decides.
 - A leaf's root element gets `tabindex="-1"`, unless the view wrote a tab

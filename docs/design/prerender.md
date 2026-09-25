@@ -97,8 +97,7 @@ does, with no body.
    decision 1), and a segment carries no mode. So a tree names its inputs
    in its constructor, `Route.prerender(name, branch, { inputs: [...] })`,
    one `Route.inputs(segment, enumerate)` per segment that adds a param.
-   The flat form takes `inputs` in its definition. A call without `inputs`
-   does not compile.
+   A call without `inputs` does not compile.
 2. **The refusal is at definition time, and names the ancestor and the
    param.** A segment that adds a path param and names no inputs cannot be
    enumerated, so `Route.prerender` throws

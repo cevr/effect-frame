@@ -17,7 +17,6 @@ const OrgParams = Schema.Struct({ org: Schema.String });
 const PostParams = Schema.Struct({ org: Schema.String, slug: Schema.String });
 
 const view = () => Effect.succeed(<p>page</p>);
-const NoSearch = Route.search(Nothing);
 
 const tenant = Route.segment("tenant", { path: "/:org", params: OrgParams });
 const post = Route.child(tenant, "post", { path: "posts/:slug", params: PostParams });
@@ -33,8 +32,6 @@ const entry = Route.child(blog, "entry", {
 
 /** Never called: each line is a compile-time claim. */
 const typeClaims = () => {
-  // @ts-expect-error -- #18 row 78: a flat prerender route without `inputs` does not compile.
-  Route.prerender("no-inputs", { path: "/about", params: Nothing, search: NoSearch, view });
   // @ts-expect-error -- #18 row 78: a prerender tree without its options does not compile.
   Route.prerender("no-options", Route.leaf(blog, view));
   // A child's function receives its ancestors' params and returns only its own.
@@ -87,19 +84,6 @@ describe("prerender inputs at definition time (#23)", () => {
         expect(typeClaims).toBeInstanceOf(Function);
         expect(phantomClaims).toEqual([true, true]);
       }),
-  );
-
-  it.effect("the flat form is a route with its own printer", () =>
-    Effect.sync(() => {
-      const flat = Route.prerender("about", {
-        path: "/about",
-        params: Nothing,
-        search: NoSearch,
-        view,
-        inputs: Effect.succeed([{}]),
-      });
-      expect(flat.href({}, {})).toBe("/about");
-    }),
   );
 
   it.effect(

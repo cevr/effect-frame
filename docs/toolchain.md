@@ -54,7 +54,7 @@ Project files:
 - `tsconfig.json`
 - `.oxlintrc.json`
 - `turbo.json`
-- The codec probe, `codec-probe.ts` in `tooling/checks/src`, removed on 2026-09-25 with its three compatibility tests. The toolchain test now checks the Bun version.
+- The codec probe, `codec-probe.ts` in `tooling/checks/src`, removed on 2026-09-25 with its three compatibility tests. `bun run toolchain` (`tooling/checks/src/toolchain.ts`) checks the Bun version first in the gate, and the toolchain test checks it again.
 - `tooling/checks/tests/toolchain.test.ts`
 
 Installed source:

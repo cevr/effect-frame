@@ -9,6 +9,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test tests/",
+    "toolchain": "bun run src/toolchain-cli.ts",
     "boundary": "bun run src/boundary-cli.ts",
     "paths": "bun run src/paths-cli.ts",
     "docs": "bun run src/docs-cli.ts",

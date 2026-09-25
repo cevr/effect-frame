@@ -18,14 +18,15 @@ them; do not treat them as the reference.
 
 ## The gate
 
-Bun 1.4.2 is required; the toolchain test fails on another version.
+Bun 1.4.2 is required. The gate checks it first (`bun run toolchain`) and
+stops on another version, naming the binary that ran.
 
 ```sh
 bun install
 bun run gate
 ```
 
-The gate runs, in three lanes and then the tests:
+The gate checks the Bun version, then runs three lanes, then the tests:
 
 - types: `tsc` over every workspace, with the Effect language service.
 - style: `oxlint`, `oxfmt --check`, `bun run paths` (every path a doc cites

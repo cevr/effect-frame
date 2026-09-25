@@ -62,8 +62,10 @@ export const link = <Params, Search>(
       (fixed: Params) =>
       (url: URL): string =>
         to.hrefAt(url, fixed, searchAt(to, url, search));
-    const href = Source.zip(router.current, held, (match, fixed) => hrefAt(fixed)(match.url));
-    const current = Source.zip(router.current, held, (match, fixed) => to.currentAt(match, fixed));
+    const href = Source.zipWith(router.current, held, (match, fixed) => hrefAt(fixed)(match.url));
+    const current = Source.zipWith(router.current, held, (match, fixed) =>
+      to.currentAt(match, fixed),
+    );
     return {
       href,
       current,

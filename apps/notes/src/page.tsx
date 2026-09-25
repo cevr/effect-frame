@@ -43,7 +43,8 @@ interface Opened {
 const filtered = (
   notes: Source<ReadonlyArray<Note>>,
   filter: Source<Option.Option<Filter>>,
-): Source<ReadonlyArray<Note>> => Source.zip(notes, filter, (all, only) => all.filter(shows(only)));
+): Source<ReadonlyArray<Note>> =>
+  Source.zipWith(notes, filter, (all, only) => all.filter(shows(only)));
 
 const ListBody = (props: BodyProps) =>
   Effect.gen(function* () {

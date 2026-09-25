@@ -57,7 +57,7 @@ const constant = <A,>(value: A): Source<A> => ({
 /** The source zipped with a constant `hops` times: each zip is one more step on a fiber. */
 const through = <A,>(source: Source<A>, hops: number): Source<A> =>
   Array.from({ length: hops }).reduce<Source<A>>(
-    (chained) => Source.zip(chained, constant(0), (value) => value),
+    (chained) => Source.zipWith(chained, constant(0), (value) => value),
     source,
   );
 

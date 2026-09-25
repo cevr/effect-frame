@@ -113,17 +113,22 @@ export const flatten = <A>(source: Source<Source<A>>): Source<A> =>
   switchMap(source, (inner) => inner);
 
 /**
- * One source from two. It reads both when either changes, so a change to
- * one side is always seen beside the other's current value; the combined
- * source never holds a pair older than what either side would answer alone.
+ * One source from two, combined by `combine`. It reads both when either
+ * changes, so a change to one side is always seen beside the other's
+ * current value; the combined source never holds a pair older than what
+ * either side would answer alone.
  *
  * The first read waits until both sides are followed: each side's first
  * element is its current value (see `Source`), and the combined stream
  * reads once when both have arrived, then once per later element. A read
  * taken before the subscriptions would lose a change that landed between
  * the two, as `derive` explains.
+ *
+ * ```ts
+ * const shown = Source.zipWith(notes, filter, (all, only) => all.filter(shows(only)));
+ * ```
  */
-export const zip = <A, B, C>(
+export const zipWith = <A, B, C>(
   left: Source<A>,
   right: Source<B>,
   combine: (left: A, right: B) => C,
@@ -138,6 +143,17 @@ export const zip = <A, B, C>(
   };
 };
 
+/**
+ * One source of the pair of two, as `Effect.zip` gives a pair: `zipWith`
+ * with no combination.
+ *
+ * ```ts
+ * const both = Source.zip(params, search); // Source<readonly [Params, Search]>
+ * ```
+ */
+export const zip = <A, B>(left: Source<A>, right: Source<B>): Source<readonly [A, B]> =>
+  zipWith(left, right, (a, b): readonly [A, B] => [a, b]);
+
 /** The value type of one source. */
 export type ValueOf<S> = S extends Source<infer A> ? A : never;
 
@@ -145,7 +161,7 @@ export type ValueOf<S> = S extends Source<infer A> ? A : never;
 export type AllValues<Sources> = { readonly [K in keyof Sources]: ValueOf<Sources[K]> };
 
 /**
- * One source from a struct or a tuple of them. As with `zip`, a change on
+ * One source from a struct or a tuple of them. As with `zipWith`, a change on
  * any side reads every side again, so the product never holds a member
  * older than that member would answer alone. A three-way product is one
  * call, not two nested ones.
@@ -167,7 +183,7 @@ export const all = <
     }
     return Object.fromEntries(keys.map((key, index) => [key, values[index]]));
   };
-  // The product is `zip` folded over the members from the first one: each
+  // The product is `zipWith` folded over the members from the first one: each
   // step reads its whole left side again on either side's change, so the
   // innermost change still reaches the outermost read. An empty product is
   // a constant, and never touches a merge.
@@ -176,7 +192,7 @@ export const all = <
     onSome: (first) =>
       members.slice(1).reduce<Source<ReadonlyArray<unknown>>>(
         // oxlint-disable-next-line oxc/no-accumulating-spread -- the reduce accumulates sources, and each read's tuple is as long as the product.
-        (left, member) => zip(left, member, (known, value) => [...known, value]),
+        (left, member) => zipWith(left, member, (known, value) => [...known, value]),
         select(first, (value) => [value]),
       ),
   });
@@ -329,4 +345,5 @@ export const Source = {
   switchMap,
   throttle,
   zip,
+  zipWith,
 };

@@ -510,6 +510,28 @@ Bun.serve({ port: 3000, fetch: (request) => handler(request) });
 | `<Portal into={Dom.target(element)}>`     | tag            | children drawn under a node the host made a target of                        |
 | `View.mount`, `View.flush`                | yielded Effect | mounting a view without the router, and settling it in a test                |
 
+## Sources
+
+A `Source<A>` is a value that changes: `get` reads it now, and `changes`
+starts with the current value. The combinators sit on the `Source`
+namespace from `effect-frame/actor/client`, source first, as `Stream.map`
+sits beside `Stream`.
+
+| Write                                 | Gives                             | For                                          |
+| ------------------------------------- | --------------------------------- | -------------------------------------------- |
+| `Source.select(source, f)`            | `Source<B>`                       | a projection, computed where it is read      |
+| `Source.zip(a, b)`                    | `Source<readonly [A, B]>`         | the pair, as `Effect.zip` gives one          |
+| `Source.zipWith(a, b, f)`             | `Source<C>`                       | the pair combined by `f`                     |
+| `Source.all({ a, b })`, `all([a, b])` | `Source<{ a: A, b: B }>`, a tuple | a struct or tuple of sources as one          |
+| `Source.switchMap(source, f)`         | `Source<B>`                       | the source `f` gives for the current value   |
+| `Source.dedupe(source, equivalence)`  | `Source<A>`                       | changes that differ from the last one only   |
+| `Source.debounce(source, duration)`   | yielded Effect                    | a change once the source has been quiet      |
+| `Source.load(source, f)`              | yielded Effect                    | a `QueryState` of an Effect run per value    |
+| `Source.on(source, f)`                | yielded Effect                    | work for each value, for the view's lifetime |
+
+A combined source reads every side again when one side changes, so it
+never holds a value older than a side would answer alone.
+
 ## One branch per case
 
 Conditions over one value are one tagged union, matched once. Project the

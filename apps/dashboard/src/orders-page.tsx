@@ -97,12 +97,14 @@ export const OrderView = (props: Route.PropsOf<typeof order>) =>
       alerts: 0,
     });
     const all = yield* View.ready(yield* View.orErrored(props.data.orders.state), { rows: [] });
-    const status = Source.zip(props.params, all, (now, result) => statusOf(now.order, result.rows));
+    const status = Source.zipWith(props.params, all, (now, result) =>
+      statusOf(now.order, result.rows),
+    );
     return (
       <section id="order">
         <h3 id="order-of">
           {View.bind(
-            Source.zip(info, props.params, (value, now) => `${value.name} / ${now.order}`),
+            Source.zipWith(info, props.params, (value, now) => `${value.name} / ${now.order}`),
           )}
         </h3>
         <p id="order-status">{View.bind(status)}</p>

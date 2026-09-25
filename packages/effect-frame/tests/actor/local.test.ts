@@ -339,7 +339,7 @@ describe("local actor", () => {
 });
 
 describe("source combinators", () => {
-  it.live("zip loses no change that lands between its first read and its subscription", () =>
+  it.live("zipWith loses no change that lands between its first read and its subscription", () =>
     Effect.gen(function* () {
       // A write lands right after zip's first read of the left side, before
       // anything follows it: the first read is 0 and the ref is then 1.
@@ -362,7 +362,7 @@ describe("source combinators", () => {
         get: SubscriptionRef.get(letter),
         changes: SubscriptionRef.changes(letter),
       };
-      const pair = Source.zip(left, right, (n, s) => `${s}${String(n)}`);
+      const pair = Source.zipWith(left, right, (n, s) => `${s}${String(n)}`);
       const reached = yield* Stream.runHead(
         Stream.filter(pair.changes, (value) => value === "a1"),
       ).pipe(Effect.timeoutOption("200 millis"));
@@ -370,11 +370,22 @@ describe("source combinators", () => {
     }),
   );
 
-  it.scoped("zip reads both sides on either side's change", () =>
+  it.scoped("zip gives the pair, as Effect.zip does; zipWith combines it", () =>
     Effect.gen(function* () {
       const left = yield* Actor.local(Behavior.value(1));
       const right = yield* Actor.local(Behavior.value("a"));
-      const pair = Source.zip(left.state, right.state, (n, s) => `${s}${String(n)}`);
+      const pair: Source<readonly [number, string]> = Source.zip(left.state, right.state);
+      expect(yield* pair.get).toEqual([1, "a"]);
+      const joined = Source.zipWith(left.state, right.state, (n, s) => `${s}${String(n)}`);
+      expect(yield* joined.get).toBe("a1");
+    }),
+  );
+
+  it.scoped("zipWith reads both sides on either side's change", () =>
+    Effect.gen(function* () {
+      const left = yield* Actor.local(Behavior.value(1));
+      const right = yield* Actor.local(Behavior.value("a"));
+      const pair = Source.zipWith(left.state, right.state, (n, s) => `${s}${String(n)}`);
       expect(yield* pair.get).toBe("a1");
 
       const seen = yield* Stream.take(pair.changes, 3).pipe(Stream.runCollect, Effect.forkScoped);

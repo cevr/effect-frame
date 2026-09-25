@@ -128,9 +128,9 @@ export interface ImplementTransparentOptions<C extends AnyContract, R> {
 /**
  * The common case: the snapshot is the state and both share one schema.
  *
- * @example
+ * @example ../../examples/reference/host.server.ts#implement-transparent
  * ```ts
- * const CounterLive = implementTransparent(Counter, { behavior: Behavior.value(0) });
+ * export const CounterLive = implementTransparent(Counter, { behavior: counterBehavior });
  * ```
  */
 export const implementTransparent = <C extends AnyContract, R = never>(

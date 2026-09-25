@@ -5,9 +5,13 @@ import {
   exampleDrift,
   formatDrift,
   isReferenceDoc,
+  jsdocDrift,
+  jsdocPaths,
   namedPaths,
   resolveFrom,
   synced,
+  syncedJsdoc,
+  type Drift,
 } from "./examples.js";
 import { accidentalMajors, decodeWorkspace, firstMajor } from "./changesets.js";
 import { formatRepeat, repeatedTerms } from "./glossary.js";
@@ -16,8 +20,9 @@ import { formatRepeat, repeatedTerms } from "./glossary.js";
  * The docs rules as a command. `bun run gate` runs it:
  *
  * - `CONTEXT.md` defines each term once (`glossary.ts`).
- * - Every ts or tsx block in a reference doc is a region of a file the gate
- *   compiles, word for word (`examples.ts`).
+ * - Every ts or tsx block in a reference doc, and every `@example` block in
+ *   the JSDoc of `packages/*\/src`, is a region of a file the gate compiles,
+ *   word for word (`examples.ts`).
  * - No package goes to 1.0 by accident: no `major` changeset on a 0.x
  *   package, and no published package at 1.0, until `firstMajor` is set
  *   (`changesets.ts`).
@@ -52,10 +57,24 @@ const tracked = (keep: (file: string) => boolean) =>
 /** Every tracked reference doc. */
 const referenceDocs = tracked(isReferenceDoc);
 
-/** The sources a doc's markers name, keyed as the markers write them. A missing file is left out. */
-const sourcesOf = (doc: string, text: string) =>
+/** How the rule reads one kind of file: its blocks, their region paths, and the fix. */
+interface Reading {
+  readonly paths: (text: string) => ReadonlyArray<string>;
+  readonly drift: (
+    file: string,
+    text: string,
+    sources: ReadonlyMap<string, string>,
+  ) => ReadonlyArray<Drift>;
+  readonly synced: (text: string, sources: ReadonlyMap<string, string>) => string;
+}
+
+const docReading: Reading = { paths: namedPaths, drift: exampleDrift, synced };
+const jsdocReading: Reading = { paths: jsdocPaths, drift: jsdocDrift, synced: syncedJsdoc };
+
+/** The sources a file's markers name, keyed as the markers write them. A missing file is left out. */
+const sourcesOf = (reading: Reading, doc: string, text: string) =>
   Effect.map(
-    Effect.forEach(namedPaths(text), (path) => {
+    Effect.forEach(reading.paths(text), (path) => {
       const file = Bun.file(`${repositoryRoot}/${resolveFrom(doc, path)}`);
       return Effect.flatMap(
         Effect.promise(() => file.exists()),
@@ -72,32 +91,40 @@ const sourcesOf = (doc: string, text: string) =>
     (entries) => new Map(entries.flat()),
   );
 
+/** One file's refused blocks; with `--fix`, after writing its marked blocks. */
+const driftsOf = (reading: Reading, file: string) =>
+  Effect.gen(function* () {
+    const text = yield* read(file);
+    const sources = yield* sourcesOf(reading, file, text);
+    if (fixing) {
+      const written = reading.synced(text, sources);
+      if (written !== text) {
+        yield* Effect.promise(() => Bun.write(`${repositoryRoot}/${file}`, written));
+        yield* Effect.log(`docs: wrote the examples of ${file}`);
+      }
+      return reading.drift(file, written, sources);
+    }
+    return reading.drift(file, text, sources);
+  });
+
+const sourceFile = /^packages\/[^/]+\/src\/.+\.tsx?$/;
+
 const examplesRule = Effect.gen(function* () {
   const docs = yield* referenceDocs;
-  const drifts = yield* Effect.forEach(docs, (doc) =>
-    Effect.gen(function* () {
-      const text = yield* read(doc);
-      const sources = yield* sourcesOf(doc, text);
-      if (fixing) {
-        const written = synced(text, sources);
-        if (written !== text) {
-          yield* Effect.promise(() => Bun.write(`${repositoryRoot}/${doc}`, written));
-          yield* Effect.log(`docs: wrote the examples of ${doc}`);
-        }
-        return exampleDrift(doc, written, sources);
-      }
-      return exampleDrift(doc, text, sources);
-    }),
-  );
-  const refused = drifts.flat().map(formatDrift);
+  const sources = yield* tracked((file) => sourceFile.test(file));
+  const drifts = yield* Effect.all([
+    Effect.forEach(docs, (doc) => driftsOf(docReading, doc)),
+    Effect.forEach(sources, (source) => driftsOf(jsdocReading, source), { concurrency: 16 }),
+  ]);
+  const refused = drifts.flat(2).map(formatDrift);
   if (refused.length === 0) {
     return yield* Effect.log(
-      `docs: every ts and tsx block in ${String(docs.length)} reference docs is a compiled example`,
+      `docs: every ts and tsx block in ${String(docs.length)} reference docs, and every @example in ${String(sources.length)} source files, is a compiled example`,
     );
   }
   yield* Effect.logError(refused.join("\n"));
   return yield* Effect.fail(
-    `docs: ${String(refused.length)} blocks are not compiled examples; mark each <!-- example: path#region --> and run bun run docs --fix`,
+    `docs: ${String(refused.length)} blocks are not compiled examples; mark each <!-- example: path#region --> (or @example path#region) and run bun run docs --fix`,
   );
 });
 

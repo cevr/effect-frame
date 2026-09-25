@@ -8,7 +8,7 @@ import { Actor as ClientActor } from "./placement.js";
  * it survives a restart. A browser bundle never carries a store, so the
  * client entry has no `durable`.
  *
- * @example
+ * @example ../../examples/reference/host.server.ts#durable
  * ```ts
  * const counter = yield* Actor.durable({
  *   behavior: Behavior.value(0),

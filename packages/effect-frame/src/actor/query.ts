@@ -107,9 +107,9 @@ const makeQuery = <
  * Declares a query the host reads one key at a time. The server half is
  * `implementQuery`.
  *
- * @example
+ * @example ../../examples/reference/actor.ts#query
  * ```ts
- * const Totals = query("Totals", {
+ * export const Totals = query("Totals", {
  *   version: 1,
  *   args: Schema.Struct({ tenant: Schema.String }),
  *   result: Schema.Finite,
@@ -133,9 +133,9 @@ export const query = <
  * arguments. The server half is `implementBatchedQuery`. The mode is on the
  * client contract, so a reader and the cache both see the transport choice.
  *
- * @example
+ * @example ../../examples/reference/actor.ts#batched-query
  * ```ts
- * const Rows = batchedQuery("Rows", {
+ * export const Rows = batchedQuery("Rows", {
  *   version: 1,
  *   args: Schema.String,
  *   result: Row,

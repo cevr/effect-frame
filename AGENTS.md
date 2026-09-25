@@ -91,6 +91,11 @@ The lint is strict and the rules are written down in `.oxlintrc.json`:
   to the doc, and wrap the source in `// #region name` and
   `// #endregion name`. `bun run docs --fix` writes every marked block from
   its region; `bun run docs` fails on a block that drifted or has no marker.
+- An `@example` block in the JSDoc of `packages/*/src` is held the same way.
+  The tag names the region, ` * @example path#region`, with `path` relative
+  to the source file; the JSDoc examples live in
+  `packages/effect-frame/examples/reference/`. A JSDoc block with no
+  `@example` tag is prose.
 - A new example lives in `packages/effect-frame/examples/`, and a test in
   `packages/effect-frame/tests/examples/` runs what it can.
 - A term is defined once, in `CONTEXT.md`, with the code that holds it.

@@ -1,6 +1,15 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "effect-bun-test";
-import { exampleDrift, isReferenceDoc, regionsOf, resolveFrom, synced } from "../src/examples";
+import {
+  exampleDrift,
+  isReferenceDoc,
+  jsdocDrift,
+  jsdocPaths,
+  regionsOf,
+  resolveFrom,
+  synced,
+  syncedJsdoc,
+} from "../src/examples";
 
 /**
  * The examples rule: a ts or tsx block in a reference doc is a region of a
@@ -157,6 +166,63 @@ describe("examples rule", () => {
         "packages/effect-frame/examples/a.ts",
       );
       expect(resolveFrom("README.md", "packages/a.ts")).toBe("packages/a.ts");
+    }),
+  );
+
+  const jsdocFiles = new Map([["../examples/greet.ts", source]]);
+
+  const module = (body: ReadonlyArray<string>) =>
+    [
+      "/**",
+      " * Greets a name.",
+      " *",
+      " * @example ../examples/greet.ts#greet",
+      " * ```ts",
+      ...body,
+      " * ```",
+      " */",
+      "export const greet = 1;",
+      "",
+      "  /**",
+      "   * An untagged block is prose: the citation rule reads it.",
+      "   *",
+      "   * ```ts",
+      "   * greet(1)",
+      "   * ```",
+      "   */",
+    ].join("\n");
+
+  it.effect("holds an @example block in JSDoc to its region", () =>
+    Effect.sync(() => {
+      const exact = module([
+        " * export const greet = (name: string) =>",
+        " *   Effect.succeed(`hello ${name}`);",
+      ]);
+      expect(jsdocDrift("src/greet.ts", exact, jsdocFiles)).toEqual([]);
+      expect(jsdocPaths(exact)).toEqual(["../examples/greet.ts"]);
+      const drifted = module([" * export const greet = (name: string) => name;"]);
+      expect(jsdocDrift("src/greet.ts", drifted, jsdocFiles)).toEqual([
+        { file: "src/greet.ts", line: 5, reason: "differs from ../examples/greet.ts#greet" },
+      ]);
+    }),
+  );
+
+  it.effect("refuses an @example block that names no region", () =>
+    Effect.sync(() => {
+      const bare = ["/**", " * @example", " * ```ts", " * greet(1)", " * ```", " */"].join("\n");
+      expect(jsdocDrift("src/greet.ts", bare, jsdocFiles)).toEqual([
+        { file: "src/greet.ts", line: 3, reason: "an @example block names no example region" },
+      ]);
+    }),
+  );
+
+  it.effect("writes an @example block from its region, with the JSDoc prefix", () =>
+    Effect.sync(() => {
+      const exact = module([
+        " * export const greet = (name: string) =>",
+        " *   Effect.succeed(`hello ${name}`);",
+      ]);
+      expect(syncedJsdoc(module([" * stale"]), jsdocFiles)).toBe(exact);
     }),
   );
 });

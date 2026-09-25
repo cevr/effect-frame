@@ -10,6 +10,12 @@ import { Option } from "effect";
  * `// #endregion name`, without any region marker line, dedented. A ts or
  * tsx block with no marker is refused, so no block can drift from the API
  * it shows. `synced` writes every marked block from its region.
+ *
+ * JSDoc is the reference for a module, so an `@example` block there is held
+ * the same way: the tag names the region, ` * @example path#region`, with
+ * `path` relative to the source file, and the ts or tsx block after it must
+ * be that region's text under the ` * ` prefix. A JSDoc block with no
+ * `@example` tag is prose; the citation rule reads it.
  */
 
 /** One block the rule refuses: the line of its opening fence, 1-based. */
@@ -21,7 +27,6 @@ export interface Drift {
 
 const regionStart = /^\s*\/\/ #region (\S+)\s*$/;
 const regionEnd = /^\s*\/\/ #endregion (\S+)\s*$/;
-const marker = /^<!-- example: (\S+)#(\S+) -->$/;
 const codeFence = /^```(ts|tsx)\s*$/;
 const anyFence = /^```/;
 
@@ -63,6 +68,37 @@ interface Block {
   readonly names: Option.Option<{ readonly path: string; readonly region: string }>;
 }
 
+/** Where a kind of file keeps its blocks and how it marks them. */
+interface Dialect {
+  /** The file's lines as prose, one for one: a JSDoc line without its ` * ` prefix. */
+  readonly view: (text: string) => ReadonlyArray<string>;
+  /** The line above a block that names its region: `path` is group 1, `region` group 2. */
+  readonly marker: RegExp;
+  /** Whether a block, given the text above it, is held to a region at all. */
+  readonly held: (before: Option.Option<string>) => boolean;
+  /** Why a held block that names no region is refused. */
+  readonly unmarked: string;
+}
+
+const markdownDialect: Dialect = {
+  view: (text) => text.split("\n"),
+  marker: /^<!-- example: (\S+)#(\S+) -->$/,
+  held: () => true,
+  unmarked: "a ts or tsx block names no example region",
+};
+
+const jsdocLine = /^\s*\*(?: (.*))?$/;
+
+const jsdocDialect: Dialect = {
+  view: (text) =>
+    text
+      .split("\n")
+      .map((line) => Option.getOrElse(Option.fromNullishOr(jsdocLine.exec(line)?.[1]), () => "")),
+  marker: /^@example (\S+)#(\S+)$/,
+  held: (before) => Option.exists(before, (text) => /^@example\b/.test(text.trim())),
+  unmarked: "an @example block names no example region",
+};
+
 const lastTextBefore = (lines: ReadonlyArray<string>, index: number): Option.Option<string> =>
   Option.fromNullishOr(
     lines
@@ -71,27 +107,28 @@ const lastTextBefore = (lines: ReadonlyArray<string>, index: number): Option.Opt
       .find((text) => text.trim().length > 0),
   );
 
-/** Every ts or tsx block of a markdown file. A block inside another fence is not one. */
-const blocksOf = (markdown: string): ReadonlyArray<Block> => {
-  const lines = markdown.split("\n");
+/** Every ts or tsx block a dialect holds. A block inside another fence is not one. */
+const blocksOf = (dialect: Dialect, text: string): ReadonlyArray<Block> => {
+  const lines = dialect.view(text);
   const blocks: Array<Block> = [];
   let index = 0;
   while (index < lines.length) {
-    const text = lines[index] ?? "";
-    if (!anyFence.test(text.trimStart())) {
+    const line = lines[index] ?? "";
+    if (!anyFence.test(line.trimStart())) {
       index += 1;
       continue;
     }
     // An unclosed fence runs to the end of the file.
     const found = lines.findIndex((later, at) => at > index && later.trim() === "```");
     const end = Math.max(found, 0) || lines.length;
-    if (codeFence.test(text.trimStart())) {
+    const before = lastTextBefore(lines, index);
+    if (codeFence.test(line.trimStart()) && dialect.held(before)) {
       blocks.push({
         open: index,
         close: end,
         body: dedent(lines.slice(index + 1, end)),
-        names: Option.flatMap(lastTextBefore(lines, index), (before) =>
-          Option.map(Option.fromNullishOr(marker.exec(before.trim())), (match) => ({
+        names: Option.flatMap(before, (above) =>
+          Option.map(Option.fromNullishOr(dialect.marker.exec(above.trim())), (match) => ({
             path: match[1] ?? "",
             region: match[2] ?? "",
           })),
@@ -112,59 +149,77 @@ const regionText = (
     Option.fromNullishOr(regionsOf(source).get(region)),
   );
 
-/** Every block of `markdown` that names no region, names a missing one, or differs from it. */
-export const exampleDrift = (
-  file: string,
-  markdown: string,
-  files: ReadonlyMap<string, string>,
-): ReadonlyArray<Drift> =>
-  blocksOf(markdown).flatMap((block): ReadonlyArray<Drift> => {
-    const line = block.open + 1;
-    return Option.match(block.names, {
-      onNone: () => [{ file, line, reason: "a ts or tsx block names no example region" }],
-      onSome: ({ path, region }) =>
-        Option.match(regionText(files, path, region), {
-          onNone: () => [{ file, line, reason: `names ${path}#${region}, which does not exist` }],
-          onSome: (text) =>
-            [{ file, line, reason: `differs from ${path}#${region}` }].filter(
-              () => text !== block.body,
-            ),
-        }),
+const driftOf =
+  (dialect: Dialect) =>
+  (file: string, text: string, files: ReadonlyMap<string, string>): ReadonlyArray<Drift> =>
+    blocksOf(dialect, text).flatMap((block): ReadonlyArray<Drift> => {
+      const line = block.open + 1;
+      return Option.match(block.names, {
+        onNone: () => [{ file, line, reason: dialect.unmarked }],
+        onSome: ({ path, region }) =>
+          Option.match(regionText(files, path, region), {
+            onNone: () => [{ file, line, reason: `names ${path}#${region}, which does not exist` }],
+            onSome: (body) =>
+              [{ file, line, reason: `differs from ${path}#${region}` }].filter(
+                () => body !== block.body,
+              ),
+          }),
+      });
     });
-  });
+
+/** Every block of a markdown doc that names no region, names a missing one, or differs from it. */
+export const exampleDrift = driftOf(markdownDialect);
+
+/** Every `@example` block of a source file's JSDoc that names no region, a missing one, or differs from it. */
+export const jsdocDrift = driftOf(jsdocDialect);
+
+/** The text with every marked block written from its region, under the fence's prefix. */
+const syncedOf =
+  (dialect: Dialect) =>
+  (text: string, files: ReadonlyMap<string, string>): string => {
+    const lines = text.split("\n");
+    return blocksOf(dialect, text)
+      .toReversed()
+      .reduce((current, block) => {
+        const fence = lines[block.open] ?? "";
+        const prefix = fence.slice(0, fence.indexOf("```"));
+        return Option.match(
+          Option.flatMap(block.names, ({ path, region }) => regionText(files, path, region)),
+          {
+            onNone: () => current,
+            onSome: (body) => [
+              ...current.slice(0, block.open + 1),
+              ...body.split("\n").map((line) => `${prefix}${line}`.trimEnd()),
+              ...current.slice(block.close),
+            ],
+          },
+        );
+      }, lines)
+      .join("\n");
+  };
 
 /** `markdown` with every marked block written from its region. A block with no region stays. */
-export const synced = (markdown: string, files: ReadonlyMap<string, string>): string => {
-  const lines = markdown.split("\n");
-  const indentOf = (text: string): string => text.slice(0, text.length - text.trimStart().length);
-  return blocksOf(markdown)
-    .toReversed()
-    .reduce((current, block) => {
-      const indent = indentOf(lines[block.open] ?? "");
-      return Option.match(
-        Option.flatMap(block.names, ({ path, region }) => regionText(files, path, region)),
-        {
-          onNone: () => current,
-          onSome: (text) => [
-            ...current.slice(0, block.open + 1),
-            ...text.split("\n").map((body) => `${indent}${body}`.trimEnd()),
-            ...current.slice(block.close),
-          ],
-        },
-      );
-    }, lines)
-    .join("\n");
-};
+export const synced = syncedOf(markdownDialect);
+
+/** A source file with every `@example` block written from its region, under the ` * ` prefix. */
+export const syncedJsdoc = syncedOf(jsdocDialect);
+
+const pathsOf =
+  (dialect: Dialect) =>
+  (text: string): ReadonlyArray<string> =>
+    Array.from(
+      new Set(
+        blocksOf(dialect, text).flatMap((block) =>
+          Option.match(block.names, { onNone: () => [], onSome: ({ path }) => [path] }),
+        ),
+      ),
+    );
 
 /** Every region path a markdown file names, so the command reads only those files. */
-export const namedPaths = (markdown: string): ReadonlyArray<string> =>
-  Array.from(
-    new Set(
-      blocksOf(markdown).flatMap((block) =>
-        Option.match(block.names, { onNone: () => [], onSome: ({ path }) => [path] }),
-      ),
-    ),
-  );
+export const namedPaths = pathsOf(markdownDialect);
+
+/** Every region path a source file's `@example` tags name. */
+export const jsdocPaths = pathsOf(jsdocDialect);
 
 /** One drift as the gate prints it. */
 export const formatDrift = (drift: Drift): string =>

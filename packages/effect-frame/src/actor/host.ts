@@ -254,9 +254,9 @@ const build = <R>(
  * survives the process: pass it as `store` for a test, or for a host whose
  * actors keep nothing across a restart.
  *
- * @example
+ * @example ../../examples/reference/host.server.ts#memory-store
  * ```ts
- * const host = ActorHost.layer({
+ * export const host = ActorHost.layer({
  *   implementations: [CounterLive],
  *   store: ActorHost.memoryStore,
  * }).pipe(Layer.provide(policies));

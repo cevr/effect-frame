@@ -1004,9 +1004,12 @@ export type RecoveryFor<E> = [E] extends [never]
  * `Route.layout(..., { landing })` does not compile. The name is not
  * `behavior`: that word is an actor's reducer (`Route.actor(c, k, { behavior })`).
  *
- * @example
+ * @example ../../examples/reference/routes.tsx#leaf-landing
  * ```ts
- * Route.leaf(tabs, TabsView, { landing: NavigationBehavior.Preserve });
+ * export const Tabs = Route.client(
+ *   "tabs",
+ *   Route.leaf(tabs, TabsView, { landing: NavigationBehavior.Preserve }),
+ * );
  * ```
  */
 export interface LeafOptions {
@@ -3087,7 +3090,7 @@ const treeSearchKeys = (all: ReadonlyArray<SearchKeyInfo>): SearchKeyInfo => {
  * whose view no `View.loading` wraps, or a layout that yields its outlet
  * outside one.
  *
- * @example
+ * @example ../../examples/reference/routes.tsx#mode
  * ```ts
  * const Home = Route.segment("home", { path: "/" });
  * export const HomeRoute = Route.ssr("home", Route.leaf(Home, HomeView));
@@ -3143,10 +3146,10 @@ export const awaitAll: ModeConstructor = modeConstructor("AwaitAll");
  * elsewhere still wins. A segment that declares data is refused by the
  * type: nothing would read it.
  *
- * @example
+ * @example ../../examples/reference/routes.tsx#redirecting
  * ```ts
- * const home = Route.segment("home", { path: "/" });
- * export const Home = Route.redirecting("home", home, () =>
+ * const start = Route.segment("start", { path: "/start" });
+ * export const Start = Route.redirecting("start", start, () =>
  *   Effect.succeed(Route.redirect(lists, {}, {})),
  * );
  * ```

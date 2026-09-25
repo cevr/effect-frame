@@ -76,9 +76,9 @@ export interface ImplementQueryOptions<Q extends SingleQuery, E, R> {
  * the reference lives exactly as long as the one read. That is what lets one
  * host own both halves with no cycle and no second instance set.
  *
- * @example
+ * @example ../../examples/reference/host.server.ts#implement-query
  * ```ts
- * const TotalsLive = implementQuery(Totals, {
+ * export const TotalsLive = implementQuery(Totals, {
  *   run: ({ tenant }) => Effect.succeed(totalFor(tenant)),
  * });
  * ```
@@ -131,10 +131,10 @@ const failed = <E>(contract: AnyQuery, error: E): QueryFailed =>
  * The server half of a query declared with `batchedQuery`: one resolver for
  * every argument collected in one request.
  *
- * @example
+ * @example ../../examples/reference/host.server.ts#implement-batched-query
  * ```ts
- * const RowsLive = implementBatchedQuery(Rows, {
- *   resolve: (ids) => Effect.succeed((id) => Effect.succeed(rowFor(id))),
+ * export const RowsLive = implementBatchedQuery(Rows, {
+ *   resolve: () => Effect.succeed((id: string) => Effect.succeed(rowFor(id))),
  * });
  * ```
  */

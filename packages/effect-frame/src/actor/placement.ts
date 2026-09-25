@@ -17,11 +17,11 @@ import { remote, remoteCommands } from "./ref.js";
  * The server entry (`effect-frame/actor`) adds `Actor.durable`, an actor
  * whose state and mailbox live in the `MailboxStore` in context.
  *
- * @example
+ * @example ../../examples/reference/actor.ts#placement
  * ```ts
  * const draft = yield* Actor.local(Behavior.value(""));
- * const counter = yield* Actor.remote(Counter, "main", { resume: Option.none() });
- * const commands = yield* Actor.remoteCommands(Counter, "main");
+ * const counter = yield* Actor.remote(Counter, { name: "main" }, { resume: Option.none() });
+ * const commands = yield* Actor.remoteCommands(Counter, { name: "main" });
  * ```
  */
 export const Actor = { local, remote, remoteCommands };

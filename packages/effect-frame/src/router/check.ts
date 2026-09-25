@@ -42,13 +42,13 @@ export const Continue: Continue = { _tag: "Continue" };
  * `link` takes a destination. `NoInfer` keeps the destination's types in
  * charge, so a wrong param is an error here rather than a widened type.
  *
- * @example
+ * @example ../../examples/reference/routes.tsx#redirect
  * ```ts
- * const tenant = Route.segment("tenant", {
+ * export const tenant = Route.segment("tenant", {
  *   path: "/app/:tenant",
  *   params: Schema.Struct({ tenant: Schema.String }),
- *   before: ({ url }) =>
- *     Effect.map(isSignedIn, (signedIn) => {
+ *   before: ({ params, url }) =>
+ *     Effect.map(isSignedIn(params.tenant), (signedIn) => {
  *       if (signedIn) {
  *         return Route.Continue;
  *       }

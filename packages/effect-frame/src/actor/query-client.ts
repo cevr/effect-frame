@@ -1388,7 +1388,7 @@ export namespace QueryCache {
    * The client's query cache. Provide it once per root, beside the
    * `ActorTransport` the cache reads through and the router's `Location`.
    *
-   * @example
+   * @example ../../examples/reference/actor.ts#client-services
    * ```ts
    * const transport = HttpTransport.layer({
    *   baseUrl,

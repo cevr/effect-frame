@@ -191,9 +191,9 @@ const readTag = Schema.decodeUnknownEffect(TaggedInput);
  * writes the id a note is created under. The contract is the reference's
  * own.
  *
- * @example
+ * @example ../../examples/reference/actor.ts#generated-send
  * ```ts
- * const handle = yield* Generated.send(notes, { _tag: "Add", text: "hello" });
+ * const handle = yield* Generated.send(counter, { _tag: "Increment", by: 2 });
  * ```
  */
 export const send = <C extends AnyContract>(

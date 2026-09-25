@@ -413,12 +413,6 @@ export const codec = <S extends Schema.Top>(schema: S & Codable<S>) =>
  * both run it, so one body decodes to one message on both paths. A body
  * that cannot nest fails with `FormMalformed`; one that nests but does not
  * decode fails with the schema's `SchemaError`, whose issues name fields.
- *
- * @example
- * ```ts
- * const decodeNotes = decode(Notes.raw.message);
- * const message = yield* decodeNotes(fromBody("_tag=Add&text=milk"));
- * ```
  */
 export const decode = <S extends Schema.Top>(schema: S) => {
   const decodeTree = Schema.decodeUnknownEffect(schema);

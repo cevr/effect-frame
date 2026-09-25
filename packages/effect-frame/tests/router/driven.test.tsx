@@ -14,9 +14,9 @@ import {
   implementTransparent,
   Source,
   Anonymous,
+  ActorHost,
 } from "effect-frame/actor";
 import type { TransportService } from "effect-frame/actor";
-import { QueryTest } from "effect-frame/actor/testing";
 import { Location, Route, hydrate, renderDocument, NavigationBehavior } from "effect-frame/router";
 import type { LocationService, NotFoundProps } from "effect-frame/router";
 import { For, View } from "effect-frame/view";
@@ -212,12 +212,18 @@ const locationAt = (href: string): Effect.Effect<LocationService> =>
 /** One in-process host both sides reach: the room, and a layout query held on `title`. */
 const sharedHost = (title: Deferred.Deferred<void>) =>
   Layer.build(
-    QueryTest.layer({
-      queries: [
-        implementQuery(Label, { run: () => Effect.as(Deferred.await(title), { label: "Rooms" }) }),
-      ],
-      implementations: [RoomLive, LineupLive],
-    }).pipe(
+    Layer.merge(
+      QueryCache.layer,
+      ActorHost.layer({
+        queries: [
+          implementQuery(Label, {
+            run: () => Effect.as(Deferred.await(title), { label: "Rooms" }),
+          }),
+        ],
+        implementations: [RoomLive, LineupLive],
+        store: ActorHost.memoryStore,
+      }),
+    ).pipe(
       Layer.provide(Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }))),
       Layer.orDie,
     ),

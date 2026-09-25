@@ -11,9 +11,9 @@ import {
   Policies,
   Policy,
   QueryCache,
+  ActorHost,
 } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
-import { QueryTest } from "effect-frame/actor/testing";
 import { Dom, Html, Await, Show, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import type { Node as ViewNode, ScopesClosed } from "effect-frame/view";
@@ -65,7 +65,7 @@ class Fixtures extends Context.Service<Fixtures, FixturesService>()(
   "effect-frame/tests/view/owned-attempt.test/Fixtures",
 ) {}
 
-/** A real QueryTest handler: an id with a held entry blocks until its gate. */
+/** A real local-host handler: an id with a held entry blocks until its gate. */
 const AttemptLive = implementQuery(AttemptQuery, {
   run: ({ id }) =>
     Effect.gen(function* () {
@@ -92,7 +92,10 @@ const makeFixtures = Effect.gen(function* () {
 });
 
 const frameLayer = (name: string) =>
-  QueryTest.layer({ queries: [AttemptLive] }).pipe(
+  Layer.merge(
+    QueryCache.layer,
+    ActorHost.layer({ implementations: [], queries: [AttemptLive], store: ActorHost.memoryStore }),
+  ).pipe(
     Layer.provide(policies),
     Layer.provideMerge(Layer.effect(Fixtures, makeFixtures)),
     Layer.provideMerge(TestClock.layer()),

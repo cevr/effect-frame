@@ -11,8 +11,8 @@ import {
   implementTransparent,
   query,
   batchedQuery,
+  QueryCache,
 } from "effect-frame/actor";
-import { QueryTest } from "effect-frame/actor/testing";
 import { Dom, View } from "effect-frame/view";
 import { Empty } from "effect-frame/view/jsx-runtime";
 import { Context, Effect, Layer, Schema, type Scope } from "effect";
@@ -108,9 +108,10 @@ implementQuery(Single, { run: () => Effect.succeed({ value: "wrong" }) });
 
 const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
 
-const testLayerWithApplicationRequirement = QueryTest.layer({
-  queries: [TestLayerQuery],
-}).pipe(Layer.provide(policies));
+const testLayerWithApplicationRequirement = Layer.merge(
+  QueryCache.layer,
+  ActorHost.layer({ implementations: [], queries: [TestLayerQuery], store: ActorHost.memoryStore }),
+).pipe(Layer.provide(policies));
 
 const host = ActorHost.layer({
   implementations: [ProbeLive],

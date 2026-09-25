@@ -10,10 +10,10 @@ import {
   query,
   Policies,
   Policy,
+  ActorHost,
 } from "effect-frame/actor";
 import type { QueryEntry } from "effect-frame/actor";
 import { Behavior, QueryState, Value, Source } from "effect-frame/actor/client";
-import { QueryTest } from "effect-frame/actor/testing";
 import { Await, Dom, Html, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import type { Bound, ReadyValue, ScopesClosed } from "effect-frame/view";
@@ -94,7 +94,7 @@ const mountScoped = <E, R>(
   });
 
 /**
- * The scope tests below use the public QueryTest layer. The handler keeps its
+ * The scope tests below use a local `ActorHost.layer` under the real QueryCache. The handler keeps its
  * responses in a test service so each test can make a read pending, ready, or
  * failed without replacing the cache or transport.
  */
@@ -145,7 +145,10 @@ const ReadinessLive = implementQuery(ReadinessQuery, {
     }),
 });
 
-const readinessLayer = QueryTest.layer({ queries: [ReadinessLive] }).pipe(
+const readinessLayer = Layer.merge(
+  QueryCache.layer,
+  ActorHost.layer({ implementations: [], queries: [ReadinessLive], store: ActorHost.memoryStore }),
+).pipe(
   Layer.provide(policies),
   Layer.provideMerge(
     Layer.effect(
@@ -435,7 +438,7 @@ describe("readiness through context", () => {
       const root = yield* makeRoot;
       // This source-level fixture covers a view transition that QueryCache
       // deliberately does not expose: Failed stays Failed until its refresh
-      // succeeds. Ordinary query/readiness behavior uses QueryTest above.
+      // succeeds. Ordinary query/readiness behavior uses the local host above.
       const controlled = yield* ViewTest.fakeQuery(QueryState.Loading<string, string>());
 
       const Page = () =>
@@ -554,7 +557,7 @@ describe("readiness through context", () => {
       const root = yield* makeRoot;
       // Query consumes a Source directly and has no cache or transport
       // boundary. Keep this as a source-level union test; ordinary query and
-      // readiness behavior uses QueryTest above.
+      // readiness behavior uses the local host above.
       const controlled = yield* ViewTest.fakeQuery(QueryState.Loading<string, string>());
       const Page = () =>
         Effect.succeed(

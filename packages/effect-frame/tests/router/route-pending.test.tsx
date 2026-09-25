@@ -10,9 +10,10 @@ import {
   query as queryContract,
   Policies,
   Policy,
+  ActorHost,
+  QueryCache,
 } from "effect-frame/actor";
-import type { ActorTransport, QueryCache, Source } from "effect-frame/actor";
-import { QueryTest } from "effect-frame/actor/testing";
+import type { ActorTransport, Source } from "effect-frame/actor";
 import { Location, Route, mount as mountRouter, NavigationBehavior } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
 import { Dom, Html, View } from "effect-frame/view";
@@ -123,7 +124,14 @@ const makeFixtures = Effect.gen(function* () {
   });
 });
 
-const client = QueryTest.layer({ queries: [TenantLive, PostLive] }).pipe(Layer.provide(policies));
+const client = Layer.merge(
+  QueryCache.layer,
+  ActorHost.layer({
+    implementations: [],
+    queries: [TenantLive, PostLive],
+    store: ActorHost.memoryStore,
+  }),
+).pipe(Layer.provide(policies));
 
 const frameLayer = (name: string) =>
   client.pipe(

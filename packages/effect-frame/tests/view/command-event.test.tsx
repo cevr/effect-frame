@@ -71,7 +71,7 @@ const delayedTransport = Effect.gen(function* () {
   return transport;
 });
 
-const appLayer = ActorTransport.layerLocal(delayedTransport).pipe(
+const appLayer = Layer.effect(ActorTransport, delayedTransport).pipe(
   Layer.provide(policies),
   Layer.provideMerge(Frame.layer({ name: "command-event" })),
 );

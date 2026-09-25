@@ -15,9 +15,10 @@ import {
   query as queryContract,
   Policies,
   Policy,
+  ActorHost,
+  QueryCache,
 } from "effect-frame/actor";
-import type { QueryCache, RemoteActorRef, Source, TransportService } from "effect-frame/actor";
-import { QueryTest } from "effect-frame/actor/testing";
+import type { RemoteActorRef, Source, TransportService } from "effect-frame/actor";
 import { Location, Route, mount as mountRouter, NavigationBehavior } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
 import { Dom, Await, View } from "effect-frame/view";
@@ -242,10 +243,14 @@ const makeWire = Effect.gen(function* () {
   });
 });
 
-const client = QueryTest.layer({
-  queries: [TenantLive, PostLive, CommentsLive],
-  implementations: [DraftLive],
-}).pipe(Layer.provide(policies));
+const client = Layer.merge(
+  QueryCache.layer,
+  ActorHost.layer({
+    queries: [TenantLive, PostLive, CommentsLive],
+    implementations: [DraftLive],
+    store: ActorHost.memoryStore,
+  }),
+).pipe(Layer.provide(policies));
 
 const frameLayer = (name: string) =>
   Layer.mergeAll(client, wired.pipe(Layer.provide(client))).pipe(

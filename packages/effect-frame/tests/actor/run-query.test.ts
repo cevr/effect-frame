@@ -1,5 +1,12 @@
-import { Policies, Policy, QueryCache, implementQuery, query, runQuery } from "effect-frame/actor";
-import { QueryTest } from "effect-frame/actor/testing";
+import {
+  Policies,
+  Policy,
+  QueryCache,
+  implementQuery,
+  query,
+  runQuery,
+  ActorHost,
+} from "effect-frame/actor";
 import { Effect, Exit, Layer, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
@@ -29,18 +36,23 @@ const Broken = query("RunQueryBroken", {
 
 let titleReads = 0;
 
-const layer = QueryTest.layer({
-  queries: [
-    implementQuery(Titles, {
-      run: (args) =>
-        Effect.sync(() => {
-          titleReads += 1;
-          return [`${args.prefix}-a`, `${args.prefix}-b`];
-        }),
-    }),
-    implementQuery(Broken, { run: () => Effect.fail("the store is down") }),
-  ],
-}).pipe(Layer.provide(policies));
+const layer = Layer.merge(
+  QueryCache.layer,
+  ActorHost.layer({
+    implementations: [],
+    queries: [
+      implementQuery(Titles, {
+        run: (args) =>
+          Effect.sync(() => {
+            titleReads += 1;
+            return [`${args.prefix}-a`, `${args.prefix}-b`];
+          }),
+      }),
+      implementQuery(Broken, { run: () => Effect.fail("the store is down") }),
+    ],
+    store: ActorHost.memoryStore,
+  }),
+).pipe(Layer.provide(policies));
 
 describe("runQuery (#23 §1.1)", () => {
   it.scoped.layer(layer)("reads the value once and lets the key go", () =>

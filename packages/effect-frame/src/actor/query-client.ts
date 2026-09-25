@@ -31,7 +31,7 @@ import type {
 import { Failed, Loading, Ready, StreamEnded, canonicalize, keyOf, markStale } from "./query.js";
 import type { Source } from "./source.js";
 import type { ActorSeed } from "./streaming.js";
-import type { Projection, Refreshed, TransportService } from "./transport.js";
+import type { Projection, Refreshed } from "./transport.js";
 import { ActorTransport } from "./transport.js";
 import { Unreachable } from "./vocabulary.js";
 import { advance, advancedChanges } from "./advance.js";
@@ -1333,15 +1333,6 @@ export namespace QueryCache {
    * ```
    */
   export const layer: LayerType.Layer<QueryCache> = Layer.effect(QueryCache, make());
-
-  /**
-   * Builds the real cache against an in-process host. The host owns all
-   * handler behavior; this helper only composes the cache and transport.
-   */
-  export const layerTest = <E, R>(
-    host: Effect.Effect<TransportService, E, R | Scope.Scope>,
-  ): LayerType.Layer<QueryCache | ActorTransport, E, R> =>
-    Layer.merge(layer, ActorTransport.layerLocal(host));
 }
 
 /**

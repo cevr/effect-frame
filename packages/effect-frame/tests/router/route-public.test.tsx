@@ -10,9 +10,10 @@ import {
   Policies,
   Policy,
   Source,
+  ActorHost,
+  QueryCache,
 } from "effect-frame/actor";
-import type { ActorTransport, QueryCache, QueryState } from "effect-frame/actor";
-import { QueryTest } from "effect-frame/actor/testing";
+import type { ActorTransport, QueryState } from "effect-frame/actor";
 import * as Frame from "effect-frame/frame";
 import {
   Link,
@@ -102,7 +103,14 @@ const logEvent = Effect.fn("PublicTest.logEvent")(function* (event: string) {
 const eventsOf = Effect.flatMap(Access, (access) => Ref.get(access.events));
 
 const frameLayer = (name: string) =>
-  QueryTest.layer({ queries: [TenantLive, PostLive] }).pipe(
+  Layer.merge(
+    QueryCache.layer,
+    ActorHost.layer({
+      implementations: [],
+      queries: [TenantLive, PostLive],
+      store: ActorHost.memoryStore,
+    }),
+  ).pipe(
     Layer.provide(policies),
     Layer.provideMerge(Layer.effect(Access, makeAccess)),
     Layer.provideMerge(TestClock.layer()),

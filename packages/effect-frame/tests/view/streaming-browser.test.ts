@@ -8,9 +8,15 @@
  */
 import { resolve } from "node:path";
 import { describe, expect, it } from "bun:test";
-import { HttpServer, Policies, Policy, implementQuery } from "effect-frame/actor";
-import type { ActorTransport, QueryCache } from "effect-frame/actor";
-import { QueryTest } from "effect-frame/actor/testing";
+import {
+  HttpServer,
+  Policies,
+  Policy,
+  implementQuery,
+  ActorHost,
+  QueryCache,
+} from "effect-frame/actor";
+import type { ActorTransport } from "effect-frame/actor";
 import { Html } from "effect-frame/view";
 import type { Context } from "effect";
 import { Deferred, Effect, Exit, Layer, Option, Scope, Stream } from "effect";
@@ -65,20 +71,25 @@ const servePage = async (mode: Mode): Promise<PageServer> => {
   const reads: Array<string> = [];
   const calls: Array<string> = [];
   const scope = Effect.runSync(Scope.make());
-  const layer = QueryTest.layer({
-    queries: [
-      implementQuery(Label, {
-        run: (args) =>
-          Effect.gen(function* () {
-            reads.push(args.id);
-            const nth = reads.length;
-            if (mode !== "await-all") yield* Deferred.await(gate);
-            if (mode === "split") return { label: largeLabel };
-            return { label: `label ${String(nth)}` };
-          }),
-      }),
-    ],
-  });
+  const layer = Layer.merge(
+    QueryCache.layer,
+    ActorHost.layer({
+      implementations: [],
+      queries: [
+        implementQuery(Label, {
+          run: (args) =>
+            Effect.gen(function* () {
+              reads.push(args.id);
+              const nth = reads.length;
+              if (mode !== "await-all") yield* Deferred.await(gate);
+              if (mode === "split") return { label: largeLabel };
+              return { label: `label ${String(nth)}` };
+            }),
+        }),
+      ],
+      store: ActorHost.memoryStore,
+    }),
+  );
   const context: Context.Context<QueryCache | ActorTransport> = await Effect.runPromise(
     Scope.provide(
       Layer.build(

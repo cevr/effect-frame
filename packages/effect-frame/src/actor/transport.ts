@@ -1,5 +1,5 @@
-import type { Duration, Effect, Scope, Stream } from "effect";
-import { Context, Layer } from "effect";
+import type { Duration, Effect, Stream } from "effect";
+import { Context } from "effect";
 import type { Address } from "./contract.js";
 import type { QueryFailure, QueryKey } from "./query.js";
 import type {
@@ -96,10 +96,3 @@ export interface TransportService {
 export class ActorTransport extends Context.Service<ActorTransport, TransportService>()(
   "effect-frame/src/actor/transport/ActorTransport",
 ) {}
-
-export namespace ActorTransport {
-  /** Installs an in-process host as the transport used by a client runtime. */
-  export const layerLocal = <E, R>(
-    host: Effect.Effect<TransportService, E, R | Scope.Scope>,
-  ): Layer.Layer<ActorTransport, E, R> => Layer.effect(ActorTransport, host);
-}

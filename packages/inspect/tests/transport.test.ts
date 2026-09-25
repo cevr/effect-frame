@@ -118,7 +118,7 @@ const recordIds = (snapshot: Snapshot) => ({
 });
 
 describe.skipIf(!H.hasBrowser)("live Frame inspection over a browser-originated socket", () => {
-  it("1. reads a held QueryTest query from the same browser root as direct inspection", async () => {
+  it("1. reads a held local-host query from the same browser root as direct inspection", async () => {
     const r = await rig();
     try {
       const view = await r.open("held");

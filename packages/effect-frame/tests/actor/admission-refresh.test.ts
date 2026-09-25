@@ -92,8 +92,9 @@ const CounterValueLive = implementQuery(CounterValue, {
     }),
 });
 
-const appLayer = QueryCache.layerTest(
-  ActorHost.make({
+const appLayer = Layer.merge(
+  QueryCache.layer,
+  ActorHost.layer({
     implementations: [HeldCounterLive],
     store: () => MailboxStore.layerMemory,
     queries: [CounterValueLive],

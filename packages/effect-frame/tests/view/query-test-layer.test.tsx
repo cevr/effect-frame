@@ -15,9 +15,9 @@ import {
   Policies,
   Policy,
   batchedQuery,
+  ActorHost,
 } from "effect-frame/actor";
 import type { QueryEntry, QueryFailure, QueryState, Source } from "effect-frame/actor";
-import { QueryTest } from "effect-frame/actor/testing";
 import { Dom, Await, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import { Deferred, Effect, Layer, Exit, Fiber, Option, Schema, Scope, Stream } from "effect";
@@ -75,35 +75,39 @@ interface CountControl {
 const countControl = { current: Option.none<CountControl>() };
 let rowBatchGroups: ReadonlyArray<ReadonlyArray<number>> = [];
 
-const testLayer = QueryTest.layer({
-  queries: [
-    implementQuery(Count, {
-      run: (args) =>
-        Effect.gen(function* () {
-          const counter = yield* Actor.remote(Counter, args);
-          const state = yield* counter.state.get;
-          const control = countControl.current;
-          if (Option.isSome(control)) {
-            yield* Deferred.await(control.value.gate);
-          }
-          return { count: state };
-        }),
-    }),
-    implementBatchedQuery(Rows, {
-      resolve: (args) => {
-        rowBatchGroups = [...rowBatchGroups, args.map((arg) => arg.id)];
-        return Effect.succeed((arg: (typeof args)[number]) => {
-          if (arg.id === 2) {
-            return Effect.fail("row failed");
-          }
-          return Effect.succeed({ id: arg.id, value: `row-${String(arg.id)}` });
-        });
-      },
-    }),
-    implementQuery(Failure, { run: () => Effect.fail("expected failure") }),
-  ],
-  implementations: [CounterLive],
-}).pipe(Layer.provide(policies));
+const testLayer = Layer.merge(
+  QueryCache.layer,
+  ActorHost.layer({
+    queries: [
+      implementQuery(Count, {
+        run: (args) =>
+          Effect.gen(function* () {
+            const counter = yield* Actor.remote(Counter, args);
+            const state = yield* counter.state.get;
+            const control = countControl.current;
+            if (Option.isSome(control)) {
+              yield* Deferred.await(control.value.gate);
+            }
+            return { count: state };
+          }),
+      }),
+      implementBatchedQuery(Rows, {
+        resolve: (args) => {
+          rowBatchGroups = [...rowBatchGroups, args.map((arg) => arg.id)];
+          return Effect.succeed((arg: (typeof args)[number]) => {
+            if (arg.id === 2) {
+              return Effect.fail("row failed");
+            }
+            return Effect.succeed({ id: arg.id, value: `row-${String(arg.id)}` });
+          });
+        },
+      }),
+      implementQuery(Failure, { run: () => Effect.fail("expected failure") }),
+    ],
+    implementations: [CounterLive],
+    store: ActorHost.memoryStore,
+  }),
+).pipe(Layer.provide(policies));
 
 type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;

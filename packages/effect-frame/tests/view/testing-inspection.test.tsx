@@ -12,8 +12,8 @@ import {
   Policies,
   Policy,
   QueryCache,
+  ActorHost,
 } from "effect-frame/actor";
-import { QueryTest } from "effect-frame/actor/testing";
 import {
   Location,
   Route,
@@ -113,7 +113,10 @@ const makeControl = Effect.gen(function* () {
 });
 
 const makeQueryRoot = (name: string, control: BlockControl["Service"]) =>
-  QueryTest.layer({ queries: [BlockedLive] }).pipe(
+  Layer.merge(
+    QueryCache.layer,
+    ActorHost.layer({ implementations: [], queries: [BlockedLive], store: ActorHost.memoryStore }),
+  ).pipe(
     Layer.provide(policies),
     Layer.provideMerge(Layer.succeed(BlockControl, control)),
     Layer.provideMerge(TestClock.layer()),
@@ -162,7 +165,14 @@ const conditionFailure = (exit: Exit.Exit<unknown, unknown>): ViewTest.Condition
 
 describe("ViewTest Frame inspection", () => {
   it.scoped.layer(
-    QueryTest.layer({ queries: [BlockedLive] }).pipe(
+    Layer.merge(
+      QueryCache.layer,
+      ActorHost.layer({
+        implementations: [],
+        queries: [BlockedLive],
+        store: ActorHost.memoryStore,
+      }),
+    ).pipe(
       Layer.provide(policies),
       Layer.provideMerge(Layer.effect(BlockControl, makeControl)),
       Layer.provideMerge(TestClock.layer()),
@@ -555,7 +565,14 @@ describe("ViewTest Frame inspection", () => {
   );
 
   it.scoped.layer(
-    QueryTest.layer({ queries: [BlockedLive] }).pipe(
+    Layer.merge(
+      QueryCache.layer,
+      ActorHost.layer({
+        implementations: [],
+        queries: [BlockedLive],
+        store: ActorHost.memoryStore,
+      }),
+    ).pipe(
       Layer.provide(policies),
       Layer.provideMerge(Layer.effect(BlockControl, makeControl)),
       Layer.provideMerge(TestClock.layer()),

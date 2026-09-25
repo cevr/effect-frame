@@ -11,9 +11,9 @@ import {
   Streaming,
   implementQuery,
   query,
+  ActorHost,
 } from "effect-frame/actor";
 import type { QueryFailure, QueryState } from "effect-frame/actor";
-import { QueryTest } from "effect-frame/actor/testing";
 import { Html, View } from "effect-frame/view";
 import { Effect, Layer, Option, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -49,9 +49,14 @@ const secretLabel = "classified-label";
 
 /** A host whose one query only a signed-in caller may read. */
 const guarded = Layer.build(
-  QueryTest.layer({
-    queries: [implementQuery(Secret, { run: () => Effect.succeed({ label: secretLabel }) })],
-  }).pipe(
+  Layer.merge(
+    QueryCache.layer,
+    ActorHost.layer({
+      implementations: [],
+      queries: [implementQuery(Secret, { run: () => Effect.succeed({ label: secretLabel }) })],
+      store: ActorHost.memoryStore,
+    }),
+  ).pipe(
     Layer.provide(Layer.succeed(Policies, Policies.of({ member: Policy.authenticated }))),
     Layer.orDie,
   ),

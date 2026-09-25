@@ -9,8 +9,14 @@
  */
 import type { Source } from "effect-frame/actor";
 import { QueryState } from "effect-frame/actor/client";
-import { Policies, Policy, implementQuery, query as declareQuery } from "effect-frame/actor";
-import { QueryTest } from "effect-frame/actor/testing";
+import {
+  Policies,
+  Policy,
+  implementQuery,
+  query as declareQuery,
+  ActorHost,
+  QueryCache,
+} from "effect-frame/actor";
 import {
   Location,
   NavigationBehavior,
@@ -221,17 +227,22 @@ const start = (): void => {
   control.releaseRows = () => {
     Deferred.doneUnsafe(rowsGate, Exit.void);
   };
-  const rowsLayer = QueryTest.layer({
-    queries: [
-      implementQuery(Rows, {
-        run: () =>
-          Effect.andThen(
-            Effect.suspend(() => Deferred.await(rowsGate)),
-            Effect.succeed({ height: 6000 }),
-          ),
-      }),
-    ],
-  }).pipe(
+  const rowsLayer = Layer.merge(
+    QueryCache.layer,
+    ActorHost.layer({
+      implementations: [],
+      queries: [
+        implementQuery(Rows, {
+          run: () =>
+            Effect.andThen(
+              Effect.suspend(() => Deferred.await(rowsGate)),
+              Effect.succeed({ height: 6000 }),
+            ),
+        }),
+      ],
+      store: ActorHost.memoryStore,
+    }),
+  ).pipe(
     Layer.provide(Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }))),
     Layer.orDie,
   );

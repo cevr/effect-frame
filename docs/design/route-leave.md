@@ -195,7 +195,7 @@ writes and reads no scroll position.
 
 ## Evidence
 
-The fixture proofs use a real `QueryTest` host, the real actor transport,
+The fixture proofs use a real local `ActorHost.layer`, the real actor transport,
 `ViewTest`, and one `Frame` over one root. The history is a fixture `Location`
 that records every push and replace, feeds pops, and carries a fixture
 traversal queue. Waits are `Deferred` receipts. The browser proofs drive real

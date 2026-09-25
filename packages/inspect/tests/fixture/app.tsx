@@ -1,8 +1,8 @@
 /* oxlint-disable effect/noGlobals, effect/noNewPromise, effect/noNewError -- this module is the fixture's browser boundary: it reads page config and exposes test controls on window. */
 /**
  * A production-shaped application root for the transport proof. It mirrors
- * the EGW browser entry: one `Frame.layer`, the real query cache (QueryTest's
- * local host), the browser Location, and one routed mount. The only test
+ * the EGW browser entry: one `Frame.layer`, the real query cache over a
+ * local `ActorHost.layer`, the browser Location, and one routed mount. The only test
  * seams are on `window.__fixture`: a gate that holds the query resolver, a
  * direct read of the same Frame service, and root close.
  */
@@ -14,8 +14,8 @@ import {
   implementQuery,
   query,
   QueryCache,
+  ActorHost,
 } from "effect-frame/actor";
-import { QueryTest } from "effect-frame/actor/testing";
 import * as Frame from "effect-frame/frame";
 import { Location, Route, browserLocation, mount, NavigationBehavior } from "effect-frame/router";
 import type { Source } from "effect-frame/actor";
@@ -152,7 +152,10 @@ export const start = (
   );
 
   const services = Layer.mergeAll(
-    QueryTest.layer({ queries: [HeldLive] }).pipe(
+    Layer.merge(
+      QueryCache.layer,
+      ActorHost.layer({ implementations: [], queries: [HeldLive], store: ActorHost.memoryStore }),
+    ).pipe(
       Layer.provide(Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }))),
       Layer.provideMerge(Frame.layer({ name: config.name })),
     ),

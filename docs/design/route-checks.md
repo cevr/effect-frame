@@ -131,7 +131,7 @@ that the router's close ends is interrupted; it never reports a result.
 
 ## Evidence
 
-All proofs use a real `QueryTest` host, the real actor transport, `ViewTest`,
+All proofs use a real local `ActorHost.layer`, the real actor transport, `ViewTest`,
 `TestClock`, and one `Frame` over one root. Waits are `Deferred` receipts (held
 decisions, held queries, view finalizers) and `page.waitFor` conditions. No
 proof sleeps or counts yields. The history is the fixture `Location` that the

@@ -11,8 +11,9 @@ import {
   Streaming,
   implementQuery,
   query,
+  ActorHost,
+  QueryCache,
 } from "effect-frame/actor";
-import { QueryTest } from "effect-frame/actor/testing";
 import { Route } from "effect-frame/router";
 import * as Prerender from "effect-frame/router/prerender";
 import { View } from "effect-frame/view";
@@ -328,9 +329,14 @@ const Draft = query("PrerenderDraft", {
 const draftLabel = "unpublished-draft";
 
 const guarded = Layer.build(
-  QueryTest.layer({
-    queries: [implementQuery(Draft, { run: () => Effect.succeed({ label: draftLabel }) })],
-  }).pipe(
+  Layer.merge(
+    QueryCache.layer,
+    ActorHost.layer({
+      implementations: [],
+      queries: [implementQuery(Draft, { run: () => Effect.succeed({ label: draftLabel }) })],
+      store: ActorHost.memoryStore,
+    }),
+  ).pipe(
     Layer.provide(Layer.succeed(Policies, Policies.of({ member: Policy.authenticated }))),
     Layer.orDie,
   ),

@@ -132,7 +132,7 @@ under `Loading` still present that Loading's fallback in the first frame
 
 ## Evidence
 
-All proofs use a real `QueryTest` host, `ViewTest` over the DOM host (proof 7
+All proofs use a real local `ActorHost.layer`, `ViewTest` over the DOM host (proof 7
 uses the HTML host), `TestClock`, and one `Frame`. Waits are receipts: the
 import's own start and settle queues, setup and close queues, held queries,
 an `attach` on the fallback that records each time it reaches the document,

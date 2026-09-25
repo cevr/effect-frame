@@ -11,9 +11,9 @@ import {
   Policies,
   Policy,
   QueryCache,
+  ActorHost,
 } from "effect-frame/actor";
 import type { QueryEntry, QueryFailure, QueryState, Source } from "effect-frame/actor";
-import { QueryTest } from "effect-frame/actor/testing";
 import { Dom, Html, Portal, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import type { ScopesClosed } from "effect-frame/view";
@@ -83,7 +83,10 @@ const OwnershipLive = implementQuery(OwnershipQuery, {
     }),
 });
 
-const ownershipLayer = QueryTest.layer({ queries: [OwnershipLive] }).pipe(
+const ownershipLayer = Layer.merge(
+  QueryCache.layer,
+  ActorHost.layer({ implementations: [], queries: [OwnershipLive], store: ActorHost.memoryStore }),
+).pipe(
   Layer.provide(policies),
   Layer.provideMerge(
     Layer.effect(

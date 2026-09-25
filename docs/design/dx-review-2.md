@@ -156,7 +156,7 @@ Tests today drive a real host through the HTTP transport, or build `QueryState` 
 
 Ask: `QueryCache.layerTest({ [contract.name]: (args) => Effect<Result> })` and `ActorTransport.layerLocal(host)`, so a view test names its data in the test.
 
-Resolution: `ActorTransport.layerLocal(host)` is the in-process transport boundary. `QueryTest.layer({ queries: [implementQuery(...), implementBatchedQuery(...)], implementations })` composes that transport with the real `QueryCache` and host. The query descriptors remain the canonical server implementations, so argument, result, and service requirements stay typed. A view test can therefore exercise readiness, controls, batching, failures, actor invalidation, and scope release without HTTP.
+Resolution: a test writes the production wiring. `ActorHost.layer({ implementations, queries: [implementQuery(...), implementBatchedQuery(...)], store: ActorHost.memoryStore })` provides the in-process `ActorTransport`, and `Layer.merge(QueryCache.layer, ...)` adds the real cache. (`QueryTest`, `QueryCache.layerTest` and `ActorTransport.layerLocal` were deleted in architecture pass 1: they were second names for this composition.) The query descriptors remain the canonical server implementations, so argument, result, and service requirements stay typed. A view test can therefore exercise readiness, controls, batching, failures, actor invalidation, and scope release without HTTP.
 
 ## Band C: small, but people will ask
 

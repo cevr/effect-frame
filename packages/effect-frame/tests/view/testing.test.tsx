@@ -13,9 +13,9 @@ import {
   Policy,
   QueryCache,
   Value,
+  ActorHost,
 } from "effect-frame/actor";
 import type { QueryState, Source as SourceType } from "effect-frame/actor";
-import { QueryTest } from "effect-frame/actor/testing";
 import { Dom, Await, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import {
@@ -89,7 +89,10 @@ const SearchLive = implementQuery(Search, {
     }),
 });
 
-const searchLayer = QueryTest.layer({ queries: [SearchLive] }).pipe(Layer.provide(policies));
+const searchLayer = Layer.merge(
+  QueryCache.layer,
+  ActorHost.layer({ implementations: [], queries: [SearchLive], store: ActorHost.memoryStore }),
+).pipe(Layer.provide(policies));
 
 class SetupService extends Context.Service<SetupService, { readonly value: number }>()(
   "effect-frame/tests/view/testing.test/SetupService",
@@ -362,7 +365,7 @@ describe("scoped view test harness", () => {
     }),
   );
 
-  it.scoped.layer(searchLayer)("observes loading while a real QueryTest handler is blocked", () =>
+  it.scoped.layer(searchLayer)("observes loading while a real local-host handler is blocked", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const gate = yield* Deferred.make<void>();

@@ -1,7 +1,14 @@
 /* oxlint-disable effect/noGlobals -- this fixture drives happy-dom's document the way a parser would, the boundary under test. */
-import { Policies, Policy, QueryCache, Streaming, implementQuery, query } from "effect-frame/actor";
+import {
+  Policies,
+  Policy,
+  QueryCache,
+  Streaming,
+  implementQuery,
+  query,
+  ActorHost,
+} from "effect-frame/actor";
 import type { ActorTransport, QueryFailure, QueryState } from "effect-frame/actor";
-import { QueryTest } from "effect-frame/actor/testing";
 import { Dom, Html, View } from "effect-frame/view";
 import type { Context, Scope } from "effect";
 import { Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
@@ -53,28 +60,35 @@ export const publicPolicies = Layer.succeed(Policies, Policies.of({ public: Poli
 /** A real cache over an in-process query host that answers from `control`. */
 export const sideOf = (control: Control): Effect.Effect<Side, never, Scope.Scope> =>
   Layer.build(
-    QueryTest.layer({
-      queries: [
-        implementQuery(Label, {
-          run: (args) =>
-            Effect.gen(function* () {
-              control.calls.push(args.id);
-              yield* Option.match(Option.fromNullishOr(control.gates.get(args.id)), {
-                onNone: () => Effect.void,
-                onSome: Deferred.await,
-              }).pipe(
-                Effect.onInterrupt(() => Effect.sync(() => void control.interrupted.push(args.id))),
-              );
-              return {
-                label: Option.getOrElse(
-                  Option.fromNullishOr(control.labels.get(args.id)),
-                  () => "none",
-                ),
-              };
-            }),
-        }),
-      ],
-    }).pipe(Layer.provide(publicPolicies), Layer.orDie),
+    Layer.merge(
+      QueryCache.layer,
+      ActorHost.layer({
+        implementations: [],
+        queries: [
+          implementQuery(Label, {
+            run: (args) =>
+              Effect.gen(function* () {
+                control.calls.push(args.id);
+                yield* Option.match(Option.fromNullishOr(control.gates.get(args.id)), {
+                  onNone: () => Effect.void,
+                  onSome: Deferred.await,
+                }).pipe(
+                  Effect.onInterrupt(() =>
+                    Effect.sync(() => void control.interrupted.push(args.id)),
+                  ),
+                );
+                return {
+                  label: Option.getOrElse(
+                    Option.fromNullishOr(control.labels.get(args.id)),
+                    () => "none",
+                  ),
+                };
+              }),
+          }),
+        ],
+        store: ActorHost.memoryStore,
+      }),
+    ).pipe(Layer.provide(publicPolicies), Layer.orDie),
   );
 
 export interface PageProps {

@@ -14,8 +14,8 @@ import {
   contract,
   implementQuery,
   query,
+  ActorHost,
 } from "effect-frame/actor";
-import { QueryTest } from "effect-frame/actor/testing";
 import {
   DocumentTimedOut,
   Location,
@@ -1117,9 +1117,14 @@ const Secret = query("RouteSecret", {
 const secretLabel = "classified-label";
 
 const guarded = Layer.build(
-  QueryTest.layer({
-    queries: [implementQuery(Secret, { run: () => Effect.succeed({ label: secretLabel }) })],
-  }).pipe(
+  Layer.merge(
+    QueryCache.layer,
+    ActorHost.layer({
+      implementations: [],
+      queries: [implementQuery(Secret, { run: () => Effect.succeed({ label: secretLabel }) })],
+      store: ActorHost.memoryStore,
+    }),
+  ).pipe(
     Layer.provide(Layer.succeed(Policies, Policies.of({ member: Policy.authenticated }))),
     Layer.orDie,
   ),

@@ -47,7 +47,8 @@ reader (CLI) --HTTP--> gateway (Bun, loopback) <--WebSocket-- browser root
 
 All evidence comes from real headless WebKit (`Bun.WebView`), real loopback
 sockets, and a production-shaped root (`packages/inspect/tests/fixture/app.tsx`: one
-`Frame.layer`, the real query cache through `QueryTest.layer`, the browser
+`Frame.layer`, the real query cache over a local
+`ActorHost.layer`, the browser
 `Location`, one routed mount, and a resolver held on a `Deferred`).
 
 - Type compatibility was not the proof. The dialing `SocketServer` passed

@@ -4,6 +4,10 @@ Source review: 2026-09-21. The target is an actor framework with declarative,
 explicit JSX and Effect composition. The recommendations below preserve that
 model.
 
+> Later: `QueryTest` was deleted in architecture pass 1. A test now writes the
+> production wiring, `Layer.merge(QueryCache.layer, ActorHost.layer({ ... }))`.
+> The references below describe the commit this review read.
+
 ## Recommendation
 
 Use the production actor, query, router, and view runtimes in tests. Replace

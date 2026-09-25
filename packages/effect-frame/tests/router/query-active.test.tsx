@@ -9,10 +9,10 @@ import {
   query as queryContract,
   Policies,
   Policy,
+  ActorHost,
 } from "effect-frame/actor";
 import type { QueryKey, TransportService } from "effect-frame/actor";
 import { canonicalize } from "effect-frame/actor/client";
-import { QueryTest } from "effect-frame/actor/testing";
 import type { FollowedQuery, QueryFailure } from "effect-frame/actor/client";
 import { Location, Route, mount as mountRouter, NavigationBehavior } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
@@ -138,10 +138,14 @@ const held = Layer.effect(
   }),
 );
 
-const client = QueryTest.layer({
-  queries: [TenantLive, PostLive, CommentsLive],
-  implementations: [DraftLive],
-}).pipe(Layer.provide(policies));
+const client = Layer.merge(
+  QueryCache.layer,
+  ActorHost.layer({
+    queries: [TenantLive, PostLive, CommentsLive],
+    implementations: [DraftLive],
+    store: ActorHost.memoryStore,
+  }),
+).pipe(Layer.provide(policies));
 
 const testLayer = Layer.mergeAll(client, held.pipe(Layer.provide(client))).pipe(
   Layer.provideMerge(Layer.effect(Holds, Ref.make<ReadonlyMap<string, Held>>(new Map()))),

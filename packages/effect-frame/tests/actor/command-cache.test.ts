@@ -150,7 +150,7 @@ const heldTransport = Effect.gen(function* () {
   return transport;
 });
 
-const appLayer = Layer.merge(QueryCache.layer, ActorTransport.layerLocal(heldTransport)).pipe(
+const appLayer = Layer.merge(QueryCache.layer, Layer.effect(ActorTransport, heldTransport)).pipe(
   Layer.provide(Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }))),
   Layer.provideMerge(Frame.layer({ name: "command-cache" })),
   Layer.provideMerge(controlLayer),

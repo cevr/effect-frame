@@ -15,17 +15,17 @@ import {
   query as queryContract,
   Policies,
   Policy,
+  ActorHost,
+  QueryCache,
 } from "effect-frame/actor";
 import type {
   FollowedQuery,
-  QueryCache,
   QueryFailure,
   RemoteActorRef,
   RemoteCommandRef,
   Source,
   TransportService,
 } from "effect-frame/actor";
-import { QueryTest } from "effect-frame/actor/testing";
 import { Location, Route, mount as mountRouter, NavigationBehavior } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
 import { Dom, Html, Await, View } from "effect-frame/view";
@@ -198,10 +198,14 @@ const wired = Layer.effect(
   }),
 );
 
-const client = QueryTest.layer({
-  queries: [TenantLive, PostLive, CommentsLive],
-  implementations: [DraftLive],
-}).pipe(Layer.provide(policies));
+const client = Layer.merge(
+  QueryCache.layer,
+  ActorHost.layer({
+    queries: [TenantLive, PostLive, CommentsLive],
+    implementations: [DraftLive],
+    store: ActorHost.memoryStore,
+  }),
+).pipe(Layer.provide(policies));
 
 const makeFixtures = Effect.gen(function* () {
   return Fixtures.of({

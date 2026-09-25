@@ -13,9 +13,9 @@ import {
   implementTransparent,
   QueryCache,
   Anonymous,
+  ActorHost,
 } from "effect-frame/actor";
 import type { TransportService } from "effect-frame/actor";
-import { QueryTest } from "effect-frame/actor/testing";
 import {
   Location,
   Route,
@@ -152,7 +152,10 @@ const locationAt = (href: string): Effect.Effect<LocationService> =>
 
 /** One in-process host that both sides reach, as a server and a browser reach one app. */
 const sharedHost = Layer.build(
-  QueryTest.layer({ queries: [], implementations: [CounterLive] }).pipe(
+  Layer.merge(
+    QueryCache.layer,
+    ActorHost.layer({ queries: [], implementations: [CounterLive], store: ActorHost.memoryStore }),
+  ).pipe(
     Layer.provide(Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }))),
     Layer.orDie,
   ),

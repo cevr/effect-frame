@@ -53,13 +53,15 @@ const appLayer = Layer.merge(QueryCache.layer.pipe(Layer.provideMerge(frameLayer
 ```
 
 `Layer.provideMerge` gives the cache the Frame registry and keeps the Frame
-service available to the mounted application. A test host uses the same
-composition with `QueryTest.layer`:
+service available to the mounted application. A test uses the same
+composition, with the host in the same runtime in place of the HTTP
+transport:
 
 ```ts
-const testLayer = QueryTest.layer({ queries: [NotesQueryLive] }).pipe(
-  Layer.provideMerge(Frame.layer({ name: "notes-test" })),
-);
+const testLayer = Layer.merge(
+  QueryCache.layer,
+  ActorHost.layer({ implementations: [], queries: [NotesQueryLive], store: ActorHost.memoryStore }),
+).pipe(Layer.provide(policiesLayer), Layer.provideMerge(Frame.layer({ name: "notes-test" })));
 ```
 
 Keep the cache layer alive for the full mounted application scope. Providing a
@@ -81,7 +83,8 @@ Public subpaths of `effect-frame`: `actor`, `actor/client`, `actor/testing`,
 `view/jsx-dev-runtime`, `view/driven`, `view/opentui`,
 `view/opentui/jsx-runtime`, `view/opentui/jsx-dev-runtime`, `router`, and
 `router/prerender`. The test harnesses are subpaths of their own:
-`QueryTest` from `actor/testing` and `ViewTest` from `view/testing`.
+`HttpTest` and the conformance suites from `actor/testing`, and `ViewTest`
+from `view/testing`.
 
 ## JSX
 

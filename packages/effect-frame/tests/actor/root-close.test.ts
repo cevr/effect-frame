@@ -1,6 +1,6 @@
 import { Deferred, Effect, Exit, Layer, Schema, Scope } from "effect";
 import * as Frame from "../../src/frame.js";
-import * as QueryTest from "../../src/actor/testing/query.js";
+import * as ActorHost from "../../src/actor/host.js";
 import { query } from "../../src/actor/query.js";
 import { implementQuery } from "../../src/actor/query-host.js";
 import { QueryCache } from "../../src/actor/query-client.js";
@@ -15,27 +15,32 @@ const RootCloseQuery = query("InspectionRootCloseProbe", {
   depends: [],
 });
 
-describe("QueryTest root ownership", () => {
+describe("local host root ownership", () => {
   it.scoped("closes a blocked handler when its root closes while its consumer stays live", () =>
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>();
       let released = 0;
-      const layer = QueryTest.layer({
-        queries: [
-          implementQuery(RootCloseQuery, {
-            run: () =>
-              Effect.gen(function* () {
-                yield* Effect.addFinalizer<never>(() =>
-                  Effect.sync(() => {
-                    released += 1;
-                  }),
-                );
-                yield* Deferred.succeed(started, void 0);
-                return yield* Effect.never;
-              }),
-          }),
-        ],
-      }).pipe(
+      const layer = Layer.merge(
+        QueryCache.layer,
+        ActorHost.layer({
+          implementations: [],
+          queries: [
+            implementQuery(RootCloseQuery, {
+              run: () =>
+                Effect.gen(function* () {
+                  yield* Effect.addFinalizer<never>(() =>
+                    Effect.sync(() => {
+                      released += 1;
+                    }),
+                  );
+                  yield* Deferred.succeed(started, void 0);
+                  return yield* Effect.never;
+                }),
+            }),
+          ],
+          store: ActorHost.memoryStore,
+        }),
+      ).pipe(
         Layer.provide(Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }))),
         Layer.provideMerge(Frame.layer({ name: "root-close" })),
       );

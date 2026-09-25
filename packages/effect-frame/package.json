@@ -69,6 +69,16 @@
       "types": "./dist/view/hosts/opentui.d.ts",
       "default": "./dist/view/hosts/opentui.js"
     },
+    "./view/opentui/jsx-runtime": {
+      "source": "./src/view/hosts/opentui-jsx-runtime.ts",
+      "types": "./dist/view/hosts/opentui-jsx-runtime.d.ts",
+      "default": "./dist/view/hosts/opentui-jsx-runtime.js"
+    },
+    "./view/opentui/jsx-dev-runtime": {
+      "source": "./src/view/hosts/opentui-jsx-runtime.ts",
+      "types": "./dist/view/hosts/opentui-jsx-runtime.d.ts",
+      "default": "./dist/view/hosts/opentui-jsx-runtime.js"
+    },
     "./router": {
       "source": "./src/router/index.ts",
       "types": "./dist/router/index.d.ts",

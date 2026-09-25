@@ -8,7 +8,7 @@ import { Effect, Option, Predicate, Ref } from "effect";
  * when that leaf enters. See `docs/design/navigation-behavior.md`.
  *
  * A leaf whose view returns an element gets `tabindex="-1"` on it (unless
- * the view wrote a `tabindex` or `tabIndex` itself, or the element is
+ * the view wrote a `tabindex` itself, or the element is
  * focusable by the platform already), so it is focusable by the router and
  * not reachable with Tab, and a behaviour that records the element's host
  * node while it is in the document. A view that returns anything else (a
@@ -52,9 +52,9 @@ const recorder = (cell: RootCell): Attached<unknown> =>
 
 type Prop = ElementProps[string];
 
-/** The first prop the view wrote under any of its spellings. */
-const propOf = (element: ElementNode, names: ReadonlyArray<string>): Option.Option<Prop> =>
-  Option.firstSomeOf(names.map((name) => Option.fromNullishOr(element.props[name])));
+/** The prop the view wrote under `name`, the attribute's HTML spelling. */
+const propOf = (element: ElementNode, name: string): Option.Option<Prop> =>
+  Option.fromNullishOr(element.props[name]);
 
 /**
  * A value bound to a source is only known once it is drawn. The router
@@ -93,16 +93,16 @@ const alwaysFocusable = new Set([
 
 /**
  * Whether the root needs no `tabindex` from the router: the view wrote one
- * (either spelling, any value), or the element is focusable by the
+ * (any value), or the element is focusable by the
  * platform already. A natively focusable root keeps its place in the Tab
  * order. A disabled control still counts as focusable: its `disabled`
  * state is not read (a known limit).
  */
 const focusableAlready = (element: ElementNode): boolean => {
-  if (Option.isSome(propOf(element, ["tabindex", "tabIndex"]))) {
+  if (Option.isSome(propOf(element, "tabindex"))) {
     return true;
   }
-  if (Option.exists(propOf(element, ["contenteditable", "contentEditable"]), editable)) {
+  if (Option.exists(propOf(element, "contenteditable"), editable)) {
     return true;
   }
   const tag = element.tag.toLowerCase();
@@ -110,7 +110,7 @@ const focusableAlready = (element: ElementNode): boolean => {
     return true;
   }
   return Option.exists(Option.fromNullishOr(focusableWith.get(tag)), (name) =>
-    Option.exists(propOf(element, [name]), present),
+    Option.exists(propOf(element, name), present),
   );
 };
 

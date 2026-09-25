@@ -11,8 +11,8 @@ import { describe, expect, it } from "effect-bun-test";
 
 /**
  * #31 leaf root marking. The router makes a leaf's root element focusable
- * with `tabindex="-1"` only when the view did not write a tab index (in
- * either spelling) and the element is not focusable by the platform. The
+ * with `tabindex="-1"` only when the view did not write a `tabindex` and
+ * the element is not focusable by the platform. The
  * server render, a hydration of it, and a fresh client render agree. See
  * `docs/design/navigation-behavior.md`.
  */
@@ -35,12 +35,12 @@ const app = Route.client(
   Route.layout(
     site,
     [
-      Route.leaf(own, () => Effect.succeed(<section id="leaf" tabIndex={0} />)),
+      Route.leaf(own, () => Effect.succeed(<section id="leaf" tabindex={0} />)),
       Route.leaf(native, () => Effect.succeed(<button id="leaf" type="button" />)),
       Route.leaf(plain, () => Effect.succeed(<section id="leaf" />)),
       Route.leaf(editableOff, () => Effect.succeed(<section id="leaf" contenteditable="false" />)),
       Route.leaf(editableFalse, () =>
-        Effect.succeed(<section id="leaf" contentEditable={false} />),
+        Effect.succeed(<section id="leaf" contenteditable={false} />),
       ),
       Route.leaf(editableInherit, () =>
         Effect.succeed(<section id="leaf" contenteditable="inherit" />),
@@ -159,7 +159,7 @@ const hydrated = (path: string) =>
   });
 
 describe("leaf root", () => {
-  it.scoped("an authored tabIndex is kept on the server, in hydration, and in a fresh render", () =>
+  it.scoped("an authored tabindex is kept on the server, in hydration, and in a fresh render", () =>
     Effect.gen(function* () {
       const html = yield* serverHtml("/site/own");
       expect(html).not.toContain("-1");

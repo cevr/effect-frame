@@ -1,10 +1,13 @@
+/** @jsxImportSource effect-frame/view/opentui */
 import { Actor, Behavior, Value, modify, Source } from "effect-frame/actor";
-import type { LocalActorRef, SetValue } from "effect-frame/actor";
+import type { LocalActorRef, QueryState, SetValue } from "effect-frame/actor";
 import { View } from "effect-frame/view";
+import type { Host } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import { make as makeHost } from "effect-frame/view/opentui";
+import type { TuiNode } from "effect-frame/view/opentui";
 import { InputRenderable, TextNodeRenderable, TextRenderable } from "@opentui/core";
-import type { BaseRenderable } from "@opentui/core";
+import type { BaseRenderable, RenderContext } from "@opentui/core";
 import type { TestRendererSetup } from "@opentui/core/testing";
 import { createTestRenderer } from "@opentui/core/testing";
 import { Effect, Predicate, Stream } from "effect";
@@ -106,6 +109,61 @@ describe("terminal view", () => {
       yield* Effect.promise(() => setup.mockInput.typeText("ab"));
       yield* Stream.runHead(Stream.filter(draft.state.changes, (value) => value === "ab"));
       expect(yield* draft.state.get).toBe("ab");
+    }),
+  );
+});
+
+describe("readiness on the OpenTUI host", () => {
+  it.scoped(
+    "runs a retained pending-to-ready boundary and closes it on the headless OpenTUI host",
+    () =>
+      Effect.gen(function* () {
+        const setup: TestRendererSetup = yield* Effect.promise(() =>
+          createTestRenderer({ width: 32, height: 6 }),
+        );
+        yield* Effect.addFinalizer(() => Effect.sync(() => setup.renderer.destroy()));
+        const state = yield* Actor.local(
+          Behavior.value<QueryState<string, string>>({ _tag: "Loading" }),
+        );
+        const Page = () =>
+          Effect.gen(function* () {
+            const boundary = yield* View.loading({
+              fallback: <text>loading</text>,
+              content: Effect.gen(function* () {
+                const value = yield* View.ready(state.state, "");
+                return <text>{View.bind(value)}</text>;
+              }),
+            });
+            return <box>{boundary}</box>;
+          });
+        const page = yield* ViewTest.make({
+          host: makeHost(setup.renderer),
+          root: setup.renderer.root,
+          setup: (host, root) => View.mount(Page, {}, host, root),
+        });
+        yield* View.flush;
+        yield* Effect.promise(() => setup.renderOnce());
+        expect(setup.captureCharFrame()).toContain("loading");
+
+        yield* page.act(state.call(Value.Set({ _tag: "Ready", value: "ready", stale: false })), {
+          label: "OpenTUI retained content appears",
+          until: (root) => terminalText(root).includes("ready"),
+        });
+        yield* View.flush;
+        yield* Effect.promise(() => setup.renderOnce());
+        expect(setup.captureCharFrame()).toContain("ready");
+
+        yield* page.close;
+        yield* View.flush;
+        yield* Effect.promise(() => setup.renderOnce());
+        expect(setup.captureCharFrame()).not.toContain("ready");
+      }),
+  );
+
+  it.scoped("keeps the retained presentation generic over the OpenTUI Host contract", () =>
+    Effect.sync(() => {
+      const factory: (context: RenderContext) => Host<TuiNode> = makeHost;
+      expect(factory).toBe(makeHost);
     }),
   );
 });

@@ -219,7 +219,7 @@ const TitledByNumber = (props: PageProps) =>
     yield* Actor.remote(Notes, props.key);
     const title = [Number.NaN, Number.POSITIVE_INFINITY][titled % 2] ?? 0;
     titled += 1;
-    return <div id="titled" title={title} />;
+    return <div id="titled" data-title={title} />;
   });
 
 const withHost = it.scoped.layer(

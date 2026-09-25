@@ -16,26 +16,8 @@ import type { QueryEntry, QueryFailure, QueryState, Source } from "effect-frame/
 import { QueryTest } from "effect-frame/actor/testing";
 import { Dom, Html, Portal, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
-import type { Host, ScopesClosed } from "effect-frame/view";
-import { make as makeTuiHost } from "effect-frame/view/opentui";
-import type { TuiNode } from "effect-frame/view/opentui";
-import { TextNodeRenderable, TextRenderable } from "@opentui/core";
-import type { BaseRenderable, RenderContext } from "@opentui/core";
-import type { TestRendererSetup } from "@opentui/core/testing";
-import { createTestRenderer } from "@opentui/core/testing";
-import {
-  Context,
-  Deferred,
-  Effect,
-  Exit,
-  Layer,
-  Option,
-  Predicate,
-  Ref,
-  Scope,
-  Schema,
-  Stream,
-} from "effect";
+import type { ScopesClosed } from "effect-frame/view";
+import { Context, Deferred, Effect, Exit, Layer, Option, Ref, Scope, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 /** The one policy table: every contract and query here declares `public`. */
@@ -158,24 +140,6 @@ const textAt = (root: Node, selector: string): string => {
 
 const hasAt = (root: Node, selector: string): boolean =>
   root instanceof HTMLElement && Option.isSome(Option.fromNullishOr(root.querySelector(selector)));
-
-const terminalText = (node: BaseRenderable): string => {
-  if (node instanceof TextNodeRenderable) {
-    let text = "";
-    for (const child of node.children) {
-      if (Predicate.isString(child)) {
-        text += child;
-      } else {
-        text += terminalText(child);
-      }
-    }
-    return text;
-  }
-  if (node instanceof TextRenderable) {
-    return node.getTextChildren().map(terminalText).join("");
-  }
-  return node.getChildren().map(terminalText).join("");
-};
 
 const rowPage = (
   items: Source<ReadonlyArray<string>>,
@@ -638,59 +602,6 @@ describe("readiness ownership", () => {
       expect(root.querySelector("#following")).toBe(following);
       expect(root.querySelector("#fallback")).toBeNull();
       yield* page.close;
-    }),
-  );
-
-  it.scoped(
-    "runs a retained pending-to-ready boundary and closes it on the headless OpenTUI host",
-    () =>
-      Effect.gen(function* () {
-        const setup: TestRendererSetup = yield* Effect.promise(() =>
-          createTestRenderer({ width: 32, height: 6 }),
-        );
-        yield* Effect.addFinalizer(() => Effect.sync(() => setup.renderer.destroy()));
-        const state = yield* Actor.local(
-          Behavior.value<QueryState<string, string>>({ _tag: "Loading" }),
-        );
-        const Page = () =>
-          Effect.gen(function* () {
-            const boundary = yield* View.loading({
-              fallback: <text>loading</text>,
-              content: Effect.gen(function* () {
-                const value = yield* View.ready(state.state, "");
-                return <text>{View.bind(value)}</text>;
-              }),
-            });
-            return <box>{boundary}</box>;
-          });
-        const page = yield* ViewTest.make({
-          host: makeTuiHost(setup.renderer),
-          root: setup.renderer.root,
-          setup: (host, root) => View.mount(Page, {}, host, root),
-        });
-        yield* View.flush;
-        yield* Effect.promise(() => setup.renderOnce());
-        expect(setup.captureCharFrame()).toContain("loading");
-
-        yield* page.act(state.call(Value.Set({ _tag: "Ready", value: "ready", stale: false })), {
-          label: "OpenTUI retained content appears",
-          until: (root) => terminalText(root).includes("ready"),
-        });
-        yield* View.flush;
-        yield* Effect.promise(() => setup.renderOnce());
-        expect(setup.captureCharFrame()).toContain("ready");
-
-        yield* page.close;
-        yield* View.flush;
-        yield* Effect.promise(() => setup.renderOnce());
-        expect(setup.captureCharFrame()).not.toContain("ready");
-      }),
-  );
-
-  it.scoped("keeps the retained presentation generic over the OpenTUI Host contract", () =>
-    Effect.sync(() => {
-      const factory: (context: RenderContext) => Host<TuiNode> = makeTuiHost;
-      expect(factory).toBe(makeTuiHost);
     }),
   );
 });

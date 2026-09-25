@@ -16,14 +16,21 @@ export interface Bound<A> {
 }
 
 /**
- * A prepared event: the handler and whether the host suppresses its default
- * action first. It is data. The runtime forks the handler into the scope of
- * the view that owns the element, when the host fires.
+ * How a prepared handler meets the host's default action. An `"event"`
+ * handler leaves it alone. A `"submit"` handler has the host suppress it
+ * first, so a form posts nothing and a link does not navigate; a form's
+ * `onSubmit` takes only this kind.
  */
-export interface Prepared {
+export type PreparedKind = "event" | "submit";
+
+/**
+ * A prepared event: the handler and its kind. It is data. The runtime
+ * forks the handler into the scope of the view that owns the element, when
+ * the host fires.
+ */
+export interface Prepared<Kind extends PreparedKind = PreparedKind> {
   readonly _tag: "Prepared";
-  /** `true` when the host must suppress its default action first. */
-  readonly preventDefault: boolean;
+  readonly kind: Kind;
   readonly handler: Handler;
   /**
    * The plain-post description of a command form (#21). Present on a form
@@ -110,20 +117,21 @@ export const bind: Bind = <A, B>(source: Source<A>, project?: (value: A) => B): 
  * only flushes writes already reached by Solid and does not wait for a
  * suspended handler fiber.
  */
-export const event = (handler: Handler): Prepared => ({
+export const event = (handler: Handler): Prepared<"event"> => ({
   _tag: "Prepared",
-  preventDefault: false,
+  kind: "event",
   handler,
   post: Option.none(),
 });
 
 /**
- * `event`, but the host suppresses its default action first. The form posts
- * nothing without a script; a form that sends a command uses `form`.
+ * `event`, but the host suppresses its default action first: its kind is
+ * `"submit"`, which a form's `onSubmit` requires. The form posts nothing
+ * without a script; a form that sends a command uses `form`.
  */
-export const submit = (handler: Handler): Prepared => ({
+export const submit = (handler: Handler): Prepared<"submit"> => ({
   _tag: "Prepared",
-  preventDefault: true,
+  kind: "submit",
   handler,
   post: Option.none(),
 });

@@ -1490,7 +1490,7 @@ const buildElement =
       const run = tracker.handle(prepared.handler);
       tracker.register(() =>
         host.addEventListener(node, name, (event) => {
-          if (prepared.preventDefault) {
+          if (prepared.kind === "submit") {
             event.preventDefault();
           }
           run(event);

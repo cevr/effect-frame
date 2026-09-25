@@ -145,17 +145,6 @@ const removeChild = (parent: HtmlNode, node: HtmlNode): void => {
   }
 };
 
-/** Attribute names as the DOM host would treat them, so both hosts agree. */
-const attributeName = (name: string): string => {
-  if (name === "className") {
-    return "class";
-  }
-  if (name === "htmlFor") {
-    return "for";
-  }
-  return name;
-};
-
 /**
  * The comment pair around a readiness boundary (#22). The open mark names
  * the branch the boundary shows when the tree is serialized.
@@ -302,7 +291,7 @@ const makeHost = (
   createElement: (tag: string, staticProps: StaticProps) => {
     const node = element(tag);
     for (const [name, value] of Object.entries(staticProps)) {
-      node.attributes.set(attributeName(name), value);
+      node.attributes.set(name, value);
     }
     return node;
   },
@@ -310,14 +299,14 @@ const makeHost = (
   createDetachedElement: (tag: string, staticProps: StaticProps) => {
     const node = element(tag);
     for (const [name, value] of Object.entries(staticProps)) {
-      node.attributes.set(attributeName(name), value);
+      node.attributes.set(name, value);
     }
     return node;
   },
   createDetachedText: (text: string): HtmlText => ({ _tag: "Text", text }),
   setProperty: (node, name, value) => {
     if (node._tag === "Element") {
-      node.attributes.set(attributeName(name), value);
+      node.attributes.set(name, value);
     }
   },
   insert: (parent, node, anchor) => {

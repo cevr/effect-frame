@@ -110,8 +110,8 @@ newer admission also ends the wait for `drawn` at once.
    with `preventScroll: true`. The author's `<h1 autofocus>` still wins, by
    one attribute, as the ticket says. The mark is skipped when the root is
    focusable already, and only then:
-   - The view wrote a tab index in either spelling (`tabindex` or
-     `tabIndex`), with any value.
+   - The view wrote a `tabindex`, with any value. JSX spells an attribute
+     as HTML does, so there is one spelling to read.
    - It is an editing host: `contenteditable` is `""`, `"true"`,
      `"plaintext-only"` (any case), or `true`. `"false"`, `false`,
      `"inherit"`, and any other value get `-1`.
@@ -290,10 +290,10 @@ Round 1 proofs outside that file:
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `tests/router/browser-commit.test.ts` — "each own write lands on its own event, once, and never on a newer one"                                             | With a fake `navigation`: the first write's landing leaves the second alone; the second scrolls once (finding 2).                                                                                                             |
 | `tests/router/navigation-landing.test.tsx` — "a newer request admitted before a landing places supersedes that landing"                                     | A recording surface logs `land /site/first none`, then `land /site/second placed` (finding 3).                                                                                                                                |
-| `tests/router/leaf-root.test.tsx` — the three "leaf root" tests                                                                                             | `tabIndex={0}` stays one `0`, a `<button>` root gets no `tabindex`, a plain root gets `-1`: server, hydration, and fresh render (finding 4).                                                                                  |
+| `tests/router/leaf-root.test.tsx` — the three "leaf root" tests                                                                                             | `tabindex={0}` stays one `0`, a `<button>` root gets no `tabindex`, a plain root gets `-1`: server, hydration, and fresh render (finding 4).                                                                                  |
 | `tests/router/navigation-behavior.test.tsx` — `restoreExact` and `preserveExact`                                                                            | `NavigationBehavior.Restore` has the type `Restore`, and `Preserve` has `Preserve` (finding 6).                                                                                                                               |
 | `tests/router/browser-commit.test.ts` — "a nested push from another listener is never the router's (ours first)" and "(another listener first)"             | A listener pushes `/nested` inside the router's push: `/nested` is not intercepted or placed, `/outer` places nothing, and no intercepted event is left waiting (round 2, finding 2).                                         |
-| `tests/router/leaf-root.test.tsx` — "…: an attribute that does not make it focusable still gets -1" (5 cases) and "an editing host keeps its own Tab order" | `contenteditable="false"`, `contentEditable={false}`, `"inherit"`, `controls={false}`, and an `<a>` with no `href` get `-1`, and `contenteditable="true"` does not: server, hydration, and fresh render (round 2, finding 4). |
+| `tests/router/leaf-root.test.tsx` — "…: an attribute that does not make it focusable still gets -1" (5 cases) and "an editing host keeps its own Tab order" | `contenteditable="false"`, `contenteditable={false}`, `"inherit"`, `controls={false}`, and an `<a>` with no `href` get `-1`, and `contenteditable="true"` does not: server, hydration, and fresh render (round 2, finding 4). |
 
 ### Mutation checks
 
@@ -312,7 +312,6 @@ Each mutation was applied alone and the named tests ran against it.
 | the initial redirect's handle is not released               | "an initial redirect's replace finishes …" (both engines)                    |
 | one write's landing places on and releases the newest write | "each own write lands on its own event …"                                    |
 | the admission count is read when the landing starts         | "a newer request admitted before a landing places …"                         |
-| `tabIndex` not read as a tab index                          | "an authored tabIndex is kept …"                                             |
 | `button` not treated as focusable                           | "a natively focusable root keeps its place in the Tab order"                 |
 | the raw fragment not looked up                              | "a fragment push finds the raw id …" (both engines)                          |
 | `<a name>` not looked up                                    | "a fragment push finds the raw id …" (both engines)                          |

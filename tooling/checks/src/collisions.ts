@@ -10,7 +10,7 @@ import { decodeSubpaths } from "./subpaths.js";
  * view and for a router) makes the reader and the agent guess which one a
  * file means. So a value name belongs to one subpath, unless one subpath
  * re-exports another on purpose (`actor` is `actor/client` and the server
- * half; the two JSX runtimes are one module).
+ * half; every JSX runtime, the terminal's included, is one module).
  *
  * It reads the runtime keys of each module, so it sees values. A type-only
  * export is outside it.
@@ -35,6 +35,8 @@ export type Alias = readonly [superset: string, subset: string];
 export const declaredAliases: ReadonlyArray<Alias> = [
   ["./actor", "./actor/client"],
   ["./view/jsx-dev-runtime", "./view/jsx-runtime"],
+  ["./view/opentui/jsx-runtime", "./view/jsx-runtime"],
+  ["./view/opentui/jsx-dev-runtime", "./view/jsx-runtime"],
 ];
 
 /**

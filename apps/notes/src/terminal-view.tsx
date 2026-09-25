@@ -1,3 +1,4 @@
+/** @jsxImportSource effect-frame/view/opentui */
 import type { Applied, SnapshotOf } from "effect-frame/actor/client";
 import { Actor, Behavior, Source } from "effect-frame/actor/client";
 import { For, View } from "effect-frame/view";

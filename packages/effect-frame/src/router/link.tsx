@@ -160,7 +160,7 @@ export const Link = (props: LinkProps): Node => (
       }),
     )}
     href={View.bind(props.link.href)}
-    class={Option.getOrElse(Option.fromNullishOr(props.class), () => false)}
+    class={props.class}
     aria-current={View.bind(props.link.current, currentAttribute)}
   >
     {props.children}

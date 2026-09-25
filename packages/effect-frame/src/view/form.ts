@@ -58,7 +58,7 @@ export interface CommandForm<C extends AnyContract, M, Typed extends string> {
 /** What a view draws a command form with. */
 export interface FormBinding {
   /** `<form onSubmit={binding.submit}>`. */
-  readonly submit: Prepared;
+  readonly submit: Prepared<"submit">;
   /** The issues of a refused post of this form. Empty on an ordinary render. */
   readonly issues: ReadonlyArray<Form.FormIssue>;
   /**
@@ -206,7 +206,7 @@ export const form = <
       Option.match(event.form, { onNone: () => Effect.void, onSome: send });
 
     return {
-      submit: { _tag: "Prepared", preventDefault: true, handler, post: Option.some(post) },
+      submit: { _tag: "Prepared", kind: "submit", handler, post: Option.some(post) },
       issues,
       commandId,
     };

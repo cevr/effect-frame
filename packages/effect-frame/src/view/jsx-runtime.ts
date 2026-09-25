@@ -2,6 +2,7 @@ import type { Source } from "effect-frame/actor";
 import type { Effect, Scope } from "effect";
 import { Option, Predicate } from "effect";
 import type { Attached, Bound, Prepared } from "./view.js";
+import type { Children, HtmlElements } from "./intrinsics.js";
 
 /**
  * The JSX element model. A tree is data: the runtime walks it once at mount
@@ -167,28 +168,17 @@ export type RawProp =
   | ReadonlyArray<Attached<unknown>>;
 
 /**
- * One element's props as JSX wrote them. `children` is a prop like any
- * other, so the index signature covers it and an absent prop is simply a
- * name the record does not hold.
+ * One element's props as the runtime reads them. The typed props of each
+ * tag (`intrinsics.ts`) are what JSX checks; at run time a prop is a name
+ * the record holds or does not, and `children` holds only what a child
+ * position may.
  */
-export interface ElementProps {
-  readonly [name: string]: RawProp;
-}
+export type ElementProps = { readonly [name: string]: RawProp } & { readonly children?: Child };
 
-const isList = (value: RawProp): value is ReadonlyArray<Child> | ReadonlyArray<Attached<unknown>> =>
-  Array.isArray(value);
+const isList = (child: Child): child is ReadonlyArray<Child> => Array.isArray(child);
 
-/** A prop marker has no meaning as a child. */
-const drawsNothing = (
-  value: Node | Prepared | Attached<unknown>,
-): value is Prepared | Attached<unknown> =>
-  Predicate.or(Predicate.isTagged("Prepared"), Predicate.isTagged("Attached"))(value);
-
-/**
- * Parse one JSX child position into a tagged node. A prepared event has no
- * meaning as a child, so it draws nothing.
- */
-export const parse = (child: RawProp): Node => {
+/** Parse one JSX child position into a tagged node. */
+export const parse = (child: Child): Node => {
   if (isList(child)) {
     return { _tag: "List", children: child.map(parse) };
   }
@@ -201,15 +191,12 @@ export const parse = (child: RawProp): Node => {
   if (Predicate.isBoolean(child)) {
     return Empty;
   }
-  if (drawsNothing(child)) {
-    return Empty;
-  }
   return child;
 };
 
 /** A missing `children` prop is an empty slot, not a value to parse. */
 const parseChildren = (props: ElementProps): Node =>
-  Option.match(Option.fromNullishOr(props["children"]), { onNone: () => Empty, onSome: parse });
+  Option.match(Option.fromNullishOr(props.children), { onNone: () => Empty, onSome: parse });
 
 export const jsx = (tag: Tag, props: ElementProps): Node => {
   if (Predicate.isFunction(tag)) {
@@ -229,14 +216,14 @@ export declare namespace JSX {
   /** What every JSX expression evaluates to. TypeScript looks for this name. */
   type Element = Node;
   /**
-   * Every tag and component this runtime accepts. A component is any function
-   * from its own props to a node, so `For` and `Show` fit with no widening.
+   * Every tag and component this runtime accepts: an HTML tag this map
+   * lists, or any function from its own props to a node, so `For` and
+   * `Show` fit with no widening.
    */
-  type ElementType = string | ((props: never) => Node);
+  type ElementType = keyof IntrinsicElements | ((props: never) => Node);
   interface ElementChildrenAttribute {
-    readonly children: Child;
+    readonly children: Children;
   }
-  interface IntrinsicElements {
-    readonly [tag: string]: ElementProps;
-  }
+  /** The HTML tags and their props (`intrinsics.ts`). */
+  interface IntrinsicElements extends HtmlElements {}
 }

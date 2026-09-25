@@ -78,9 +78,33 @@ from this subpath and carries none of it. The gateway and the reader are the
 
 Public subpaths of `effect-frame`: `actor`, `actor/client`, `actor/testing`,
 `frame`, `inspection`, `view`, `view/testing`, `view/jsx-runtime`,
-`view/jsx-dev-runtime`, `view/driven`, `view/opentui`, `router`, and
+`view/jsx-dev-runtime`, `view/driven`, `view/opentui`,
+`view/opentui/jsx-runtime`, `view/opentui/jsx-dev-runtime`, `router`, and
 `router/prerender`. The test harnesses are subpaths of their own:
 `QueryTest` from `actor/testing` and `ViewTest` from `view/testing`.
+
+## JSX
+
+The tags are a closed, typed map. A `tsconfig.json` with
+`"jsxImportSource": "effect-frame/view"` gets the HTML tags, which the DOM,
+HTML, and Remote hosts share. A terminal file names its own runtime in a
+block comment at its top, `@jsxImportSource effect-frame/view/opentui`, and
+gets `box`, `text`, and `input`, whose props are the OpenTUI renderables'
+own options.
+
+- A prop is the attribute as HTML spells it: `class`, `for`, `tabindex`,
+  `contenteditable`. `className` does not compile.
+- A value is written once, or bound to a source with `View.bind`. A raw
+  `Source` reports `Property '"wrap the source with View.bind(source)"' is
+missing`.
+- An `on*` prop is the event in lowercase (`onKeyDown` listens for
+  `keydown`) and takes `View.event` or `View.submit`. A plain function
+  reports `"wrap the handler with View.event(handler)"`.
+- `View.submit` has the host suppress the default action first. A form's
+  `onSubmit` takes only that kind, `View.submit` or a `View.form` binding's
+  `submit`, so a form never posts natively by mistake. A view writes no
+  `method` or `action`: the runtime writes a command form's plain post.
+- A void element (`input`, `img`, `br`) holds no children.
 
 ## Optimistic commands
 
@@ -304,9 +328,8 @@ Route.leaf(tab, TabView, { landing: NavigationBehavior.Preserve });
 - `mount` and `hydrate` require `landing` and `traversalReadLimit` (how long
   Back and Forward wait for a page's declared reads before they land). The
   router has no hidden default.
-- A leaf's root element gets `tabindex="-1"`, unless the view wrote a tab
-  index (either spelling) or the element is focusable already, such as a
-  `<button>`.
+- A leaf's root element gets `tabindex="-1"`, unless the view wrote a
+  `tabindex` or the element is focusable already, such as a `<button>`.
   Focus uses `preventScroll`. A stayed leaf (a search or param change on the
   same leaf) keeps focus and the caret.
 - The router holds no scroll position and never sets

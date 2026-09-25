@@ -17,7 +17,8 @@ import * as StorageStore from "./storage-store.js";
  *
  * One object holds one actor instance: the worker routes one (contract,
  * version, key) to one object, so the mailbox store ignores the address and
- * uses the object's own storage. The class serves the generic actor wire
+ * uses the object's own storage. The first request records its address, and
+ * the object answers 409 to a request that names any other. The class serves the generic actor wire
  * (`/send`, `/call`, `/snapshot`, `/changes`), so the ordinary HTTP client
  * talks to it with no host-specific code.
  *
@@ -52,6 +53,9 @@ const toAddress = (row: SqlRow): Option.Option<Address> =>
     version: Interop.numberColumn(row, "version"),
     key: Interop.stringColumn(row, "key"),
   });
+
+const sameAddress = (left: Address, right: Address): boolean =>
+  left.contract === right.contract && left.version === right.version && left.key === right.key;
 
 const writeAddress = (storage: DurableStorage, address: Address): void => {
   Interop.exec(
@@ -223,6 +227,19 @@ export const defineFrameHost = <R>(options: FrameHostOptions<R>): FrameHostClass
         .catch(() => ({}));
       const address = addressOf(body, url);
       if (Option.isSome(address)) {
+        // One object hosts one actor. A request that names another address
+        // was routed here by mistake: serving it would open that actor over
+        // this object's mailbox and point the alarm at it.
+        const hosted = Option.filter(
+          readAddress(this.#storage),
+          (recorded) => !sameAddress(recorded, address.value),
+        );
+        if (Option.isSome(hosted)) {
+          return new Response(
+            `this object hosts ${hosted.value.contract} v${String(hosted.value.version)} ${hosted.value.key}`,
+            { status: 409 },
+          );
+        }
         writeAddress(this.#storage, address.value);
       }
       const handler = await this.#ensureHandler();

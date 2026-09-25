@@ -209,6 +209,42 @@ describe("the generic frame host over durable-object storage", () => {
     }),
   );
 
+  it.scoped("an object refuses a request that names another actor's address", () =>
+    Effect.gen(function* () {
+      const storage = yield* scopedFake;
+      const host = new FrameHost({ storage }, {});
+      yield* Effect.promise(() => host.fetch(post("/snapshot", { address })));
+
+      // The worker routed this request to Alice's object, but its body names
+      // Bob. Serving it would open Bob over Alice's mailbox tables.
+      const bob = { ...address, key: JSON.stringify("bob") };
+      const refused = yield* Effect.promise(() =>
+        host.fetch(
+          post("/call", {
+            address: bob,
+            commandId: "b1",
+            payload: JSON.stringify({ _tag: "Add", amount: 1 }),
+            timeoutMillis: 2000,
+          }),
+        ),
+      );
+      expect(refused.status).toBe(409);
+      expect(storage.sql.exec("SELECT command_id FROM commands").toArray()).toEqual([]);
+      expect(
+        storage.sql.exec("SELECT contract, version, key FROM hosted_address").toArray(),
+      ).toEqual([{ contract: "Counter", version: 1, key: address.key }]);
+      // A changes stream names its address in the query string: the same rule holds.
+      const watch = yield* Effect.promise(() =>
+        host.fetch(
+          new Request(
+            `http://host.test/changes?contract=Counter&version=1&key=${encodeURIComponent(bob.key)}&after=0`,
+          ),
+        ),
+      );
+      expect(watch.status).toBe(409);
+    }),
+  );
+
   it.scoped("a restart drains a command admitted before it, on the alarm alone", () =>
     Effect.gen(function* () {
       const storage = yield* scopedFake;

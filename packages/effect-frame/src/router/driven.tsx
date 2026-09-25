@@ -4,7 +4,17 @@ import { ActorTransport } from "effect-frame/actor/client";
 import type { Host, Node, View } from "effect-frame/view";
 import { Dom, Remote } from "effect-frame/view";
 import type { Duration, Scope } from "effect";
-import { Context, Effect, Equal, FiberSet, Option, Schedule, Schema, Stream } from "effect";
+import {
+  Context,
+  Effect,
+  Equal,
+  FiberSet,
+  Option,
+  Predicate,
+  Schedule,
+  Schema,
+  Stream,
+} from "effect";
 import { drivenContainer } from "../view/boundary-mark.js";
 import { driveOnly } from "../view/drive-transport.js";
 import type { LocationService } from "./router.js";
@@ -49,10 +59,18 @@ export interface DrivenProps<Params> {
   readonly params: Source<Params>;
 }
 
-/** A driven leaf's view: `Route.drivenView` makes one, and only it. */
-export type DrivenView<Params, E = never> = (
-  props: DrivenProps<Params>,
-) => Effect.Effect<Node, E, ActorTransport | Location | Scope.Scope>;
+/**
+ * A driven leaf's view: `Route.drivenView` makes one, and only it. It is
+ * callable as a view and tagged with what it draws, so `Route.driven` reads
+ * the drive off the value a leaf was given. A view wrapped around a
+ * `DrivenView` is a plain view, and `Route.driven` refuses its leaf.
+ */
+export interface DrivenView<Params, E = never> {
+  (props: DrivenProps<Params>): Effect.Effect<Node, E, ActorTransport | Location | Scope.Scope>;
+  readonly _tag: "DrivenView";
+  /** The drive and the view it draws, with the params and failure erased. */
+  readonly driven: ErasedDriven;
+}
 
 /**
  * What a driven view draws, with its params erased: only the params its own
@@ -63,14 +81,20 @@ export type DrivenView<Params, E = never> = (
 export type ErasedDriven = DrivenOptions<never, AnyContract>;
 
 /** Any view, as a leaf holds it: a function of its props. */
-export type AnyView = (props: never) => unknown;
+type AnyView = (props: never) => unknown;
 
-/** Every driven view `drivenView` made, with what it draws. */
-const drivenViews = new WeakMap<AnyView, ErasedDriven>();
+const isDrivenView = (
+  view: AnyView,
+): view is AnyView & Pick<DrivenView<never>, "_tag" | "driven"> =>
+  Predicate.hasProperty(view, "_tag") && view._tag === "DrivenView";
 
 /** The options of a driven view, or None for any other view. */
-export const drivenOf = (view: AnyView): Option.Option<ErasedDriven> =>
-  Option.fromNullishOr(drivenViews.get(view));
+export const drivenOf = (view: AnyView): Option.Option<ErasedDriven> => {
+  if (isDrivenView(view)) {
+    return Option.some(view.driven);
+  }
+  return Option.none();
+};
 
 /**
  * A driven leaf's `errored` view, when its view failed on the server, drawn
@@ -246,7 +270,9 @@ const followParams = <Params, C extends AnyContract, E>(
 export const drivenView = <Params, C extends AnyContract, E = never>(
   options: DrivenOptions<Params, C, E>,
 ): DrivenView<Params, E> => {
-  const view: DrivenView<Params, E> = (props) =>
+  const view = (
+    props: DrivenProps<Params>,
+  ): Effect.Effect<Node, E, ActorTransport | Location | Scope.Scope> =>
     Effect.gen(function* () {
       const params = yield* props.params.get;
       const drawnOnServer = Option.isSome(yield* SettledRequest);
@@ -284,9 +310,9 @@ export const drivenView = <Params, C extends AnyContract, E = never>(
       );
       return <div {...{ [drivenContainer]: "" }} attach={handover} />;
     });
-  drivenViews.set(view, {
-    drive: options.drive,
-    view: (params) => Effect.orDie(options.view(params)),
-  });
-  return view;
+  const tagged: Pick<DrivenView<Params, E>, "_tag" | "driven"> = {
+    _tag: "DrivenView",
+    driven: { drive: options.drive, view: (params) => Effect.orDie(options.view(params)) },
+  };
+  return Object.assign(view, tagged);
 };

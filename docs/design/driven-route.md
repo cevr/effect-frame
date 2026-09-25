@@ -76,8 +76,10 @@ they hydrate, and their queries stream. Only its leaves are driven.
    something the session cannot replay. `Route.drivenView` refuses it
    at the type level. `Route.driven` refuses a tree with a
    leaf whose view is not a `Route.drivenView` when the tree is declared,
-   with `BranchRejected`. A leaf's view type cannot show that it came from
-   `drivenView`, so that check is at definition time, not at the type level.
+   with `BranchRejected`. A `Route.DrivenView` is tagged `"DrivenView"` and
+   carries its drive, and the leaf reads it off the value it was given, so
+   a view wrapped around one is a client view. `Route.leaf` takes any view,
+   so that check is at definition time, not at the type level.
 2. **`Route.drivenView` is a view, not a leaf.** A driven leaf is a
    `Route.leaf` with a driven view, so the leaf keeps its segment, data,
    options, and `errored` view. A driven view that can fail makes its leaf

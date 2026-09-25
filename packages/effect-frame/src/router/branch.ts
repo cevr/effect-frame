@@ -103,7 +103,7 @@ import type { Shell } from "./landing.js";
 import { registerShell } from "./landing.js";
 import * as LeafRoot from "./leaf-root.js";
 import type { NavigationBehavior } from "./navigation-behavior.js";
-import type { AnyView, DrivenServices, ErasedDriven } from "./driven.js";
+import type { DrivenServices, ErasedDriven } from "./driven.js";
 import { drivenOf, drivenShell } from "./driven.js";
 import type { RenderingMode } from "./rendering-mode.js";
 import type {
@@ -1278,22 +1278,22 @@ export const buildLeaf = <
   ViewR,
   OwnServices<Segment<Name, Params, Search, Own, Data, CheckR, Root>>
 > => {
-  const made = makeBranch<Name, Params, Search, Own, Data, CheckR, E, R, never, ViewR, Root>(
+  const driven = drivenOf(view);
+  return makeBranch<Name, Params, Search, Own, Data, CheckR, E, R, never, ViewR, Root>(
     seg,
     [],
     (props) => view(props),
     {
       ...boundaryOf<E>(options),
-      setupShell: Option.match(drivenOf(view), {
+      setupShell: Option.match(driven, {
         onNone: () => (failed: Node) => failed,
         onSome: () => drivenShell,
       }),
     },
     lazyDefinitionOf(view),
     landingOf(options),
+    driven,
   );
-  leafViews.set(made, view);
-  return made;
 };
 
 /**
@@ -1301,8 +1301,9 @@ export const buildLeaf = <
  * name, so a leaf is found by its identity, never by its name.
  */
 interface Leaf {
-  readonly branch: AnyBranch<unknown>;
   readonly identity: BranchIdentity;
+  /** What the leaf draws over the op wire, when its view is a `Route.drivenView`. */
+  readonly driven: Option.Option<ErasedDriven>;
 }
 
 /** A branch with no children is its own leaf; a layout's are its children's. */
@@ -1315,9 +1316,6 @@ const leavesOf = (
   }
   return children.flatMap((below) => below.leaves);
 };
-
-/** The view each leaf was built with, as `Route.driven` reads it. */
-const leafViews = new WeakMap<object, AnyView>();
 
 /** A leaf segment: it has no outlet. */
 export const leaf = <
@@ -1406,6 +1404,7 @@ export const buildLayout = <
     (props, outlet) => view({ ...props, outlet }),
     boundaryOf<E>(recovery),
     lazyDefinitionOf(view),
+    Option.none(),
     Option.none(),
   );
 };
@@ -2249,6 +2248,7 @@ const makeBranch = <
   boundary: Boundary<E>,
   lazy: Option.Option<LazyDefinition>,
   behavior: Option.Option<NavigationBehavior>,
+  driven: Option.Option<ErasedDriven>,
 ): Branch<Segment<Name, Params, Search, Own, Data, CheckR, Root>, ViewR, never> => {
   // A leaf's own view has the root focus moves to; a layout never claims it.
   const isLeaf = children.length === 0;
@@ -2818,7 +2818,7 @@ const makeBranch = <
       print: segRuntime.print,
       children: childRuntimes.map((below) => below.level),
     },
-    leaves: leavesOf({ branch: made, identity }, childRuntimes),
+    leaves: leavesOf({ identity, driven }, childRuntimes),
   };
   runtimes.set(made, runtime);
   return made;
@@ -3234,7 +3234,7 @@ const drivenTree = <R>(
   const runtime = runtimeOf(root);
   const options = new Map<BranchIdentity, ErasedDriven>();
   for (const below of runtime.leaves) {
-    const found = Option.flatMap(Option.fromNullishOr(leafViews.get(below.branch)), drivenOf);
+    const found = below.driven;
     if (Option.isNone(found)) {
       return Option.getOrThrowWith(Option.none(), () =>
         BranchRejected.make({

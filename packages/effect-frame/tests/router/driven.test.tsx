@@ -622,6 +622,24 @@ describe("Route.driven forbids a client-only view (#18)", () => {
     }),
   );
 
+  it.effect("a driven view is a tagged value; a view wrapped around one is a client view", () =>
+    Effect.sync(() => {
+      const driven = Route.drivenView({ drive: roomDrive, view: RoomView });
+      // The route reads what a driven view draws off the value it was given.
+      expect(driven._tag).toBe("DrivenView");
+      const wrapped = Route.leaf(
+        roomSegment,
+        (props: Route.DrivenProps<{ readonly room: string }>) => driven(props),
+      );
+      expect(() =>
+        Route.driven(
+          "wrapped",
+          Route.layout(shellSegment, [wrapped], (props) => props.outlet),
+        ),
+      ).toThrow(expect.objectContaining({ _tag: "BranchRejected", segment: "room" }));
+    }),
+  );
+
   it.effect("sibling leaves that share a segment name each resolve to their own drive", () =>
     Effect.sync(() => {
       const shared = Route.segment("shared", { path: "/r", params: Schema.Struct({}) });

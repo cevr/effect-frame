@@ -23,13 +23,9 @@ import {
   mount as mountRouter,
   renderDocument,
   NavigationBehavior,
+  memoryLocation,
 } from "effect-frame/router";
-import type {
-  DocumentOutcome,
-  LocationService,
-  NotFoundProps,
-  RenderedDocument,
-} from "effect-frame/router";
+import type { DocumentOutcome, NotFoundProps, RenderedDocument } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import {
   Cause,
@@ -40,7 +36,6 @@ import {
   Fiber,
   Layer,
   Option,
-  Ref,
   Result,
   Schema,
   Scope,
@@ -85,15 +80,6 @@ const labelOf = (state: Labelled): string => {
 };
 
 const NotFound = (_props: NotFoundProps) => Effect.succeed(<p id="missing">missing</p>);
-
-/** A Location that stays where it is put, and moves when the router moves it. */
-const locationAt = (href: string): Effect.Effect<LocationService> =>
-  Effect.map(Ref.make(new URL(href)), (current) => ({
-    current: Ref.get(current),
-    push: (url) => Ref.set(current, url),
-    replace: (url) => Ref.set(current, url),
-    pops: Stream.never,
-  }));
 
 /** Every query key the client cache holds a declaration of, by its `id` arg. */
 const activeIds = Effect.gen(function* () {
@@ -265,7 +251,7 @@ describe("declared data on the server (#18 §3.3)", () => {
 
         const clientControl = makeControl({});
         const client = yield* sideOf(clientControl);
-        const location = yield* locationAt(postUrl.href);
+        const { location } = yield* memoryLocation(postUrl.href);
         yield* install(html);
         const { report } = yield* hydrateWith(client, (host, root) =>
           mountRouter({
@@ -321,7 +307,7 @@ describe("declared data on the server (#18 §3.3)", () => {
 
           const clientControl = makeControl({});
           const client = yield* sideOf(clientControl);
-          const location = yield* locationAt(postUrl.href);
+          const { location } = yield* memoryLocation(postUrl.href);
           yield* install(html);
           const { report } = yield* hydrateWith(client, (host, root) =>
             mountRouter({
@@ -391,7 +377,7 @@ describe("declared data on the server (#18 §3.3)", () => {
 
         const clientControl = makeControl({});
         const client = yield* sideOf(clientControl);
-        const location = yield* locationAt(postUrl.href);
+        const { location } = yield* memoryLocation(postUrl.href);
         yield* install(html);
         const { report, resumed } = yield* hydrateWith(client, (host, root) =>
           mountRouter({
@@ -1002,7 +988,7 @@ describe("nesting and inheritance (#18 §2.2, §3.2)", () => {
             notFound: NotFound,
             host: Dom.host,
             root,
-          }).pipe(Effect.provideService(Location, yield* locationAt(memberUrl)));
+          }).pipe(Effect.provideService(Location, (yield* memoryLocation(memberUrl)).location));
           yield* eventuallyEffect(
             "every view shows the org",
             Effect.map(View.flush, () => root.textContent === "Org OneOrg Oneo1/t2/m3Org One"),
@@ -1089,7 +1075,12 @@ describe("an exited segment releases its scope and its unshared keys (#18 §4.3)
           notFound: NotFound,
           host: Dom.host,
           root,
-        }).pipe(Effect.provideService(Location, yield* locationAt(`${origin}/lists/inbox`)));
+        }).pipe(
+          Effect.provideService(
+            Location,
+            (yield* memoryLocation(`${origin}/lists/inbox`)).location,
+          ),
+        );
         yield* eventuallyEffect(
           "the counts",
           Effect.map(View.flush, () => root.textContent === "3"),

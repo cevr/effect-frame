@@ -8,10 +8,11 @@ import {
   Router,
   mount as mountRouter,
   NavigationBehavior,
+  memoryLocation,
 } from "effect-frame/router";
 import { Dom } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
-import { Cause, Effect, Exit, Option, Queue, Ref, Result, Schema, Stream } from "effect";
+import { Cause, Effect, Exit, Option, Result, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 // ---------------------------------------------------------------------------
@@ -95,16 +96,7 @@ const Old = Route.redirecting(
 
 const mountApp = (gate: Gate, initial: string, app: Route.AnyRoute<Router> = makeApp(gate)) =>
   Effect.gen(function* () {
-    const current = yield* Ref.make(new URL(`${origin}${initial}`));
-    const pops = yield* Queue.unbounded<URL>();
-    const history: Array<string> = [];
-    const write = (kind: string) => (url: URL) =>
-      Effect.andThen(
-        Ref.set(current, url),
-        Effect.sync(() => {
-          history.push(`${kind} ${url.pathname}`);
-        }),
-      );
+    const memory = yield* memoryLocation(`${origin}${initial}`);
     const root = yield* Effect.acquireRelease(
       Effect.sync(() => document.body.appendChild(document.createElement("main"))),
       (created) => Effect.sync(() => created.remove()),
@@ -120,22 +112,9 @@ const mountApp = (gate: Gate, initial: string, app: Route.AnyRoute<Router> = mak
           notFound: NotFound,
           host,
           root: mountRoot,
-        }).pipe(
-          Effect.provideService(Location, {
-            current: Ref.get(current),
-            push: write("push"),
-            replace: write("replace"),
-            pops: Stream.fromQueue(pops),
-          }),
-        ),
+        }).pipe(Effect.provideService(Location, memory.location)),
     });
-    /** The browser moved back to `path`: the entry is current, then the pop arrives. */
-    const pop = (path: string) =>
-      Effect.andThen(
-        Ref.set(current, new URL(`${origin}${path}`)),
-        Queue.offer(pops, new URL(`${origin}${path}`)),
-      );
-    return { page, root, router: page.setup, history, pop };
+    return { page, root, router: page.setup, history: memory.history, pop: memory.pop };
   });
 
 const makeGate = (denied: ReadonlyArray<string> = []): Gate => ({
@@ -159,7 +138,7 @@ describe("route check edges", () => {
       const receipt = yield* router.push("/g/deny");
       expect(receipt).toMatchObject({ _tag: "Committed" });
       expect(receipt.url.pathname).toBe("/login");
-      expect(history).toEqual(["push /login"]);
+      expect(yield* history).toEqual(["push /login"]);
       expect(gate.asked).toEqual(["deny:push"]);
     }),
   );
@@ -171,11 +150,11 @@ describe("route check edges", () => {
 
       const moved = yield* Effect.exit(router.push("/g/nav"));
       expect(moved.pipe(defectOf)).toMatchObject({ _tag: "CheckNavigation", href: "/home" });
-      expect(history).toEqual([]);
+      expect(yield* history).toEqual([]);
 
       const next = yield* router.push("/g/ok");
       expect(next).toMatchObject({ _tag: "Committed" });
-      expect(history).toEqual(["push /g/ok"]);
+      expect(yield* history).toEqual(["push /g/ok"]);
     }),
   );
 
@@ -197,7 +176,7 @@ describe("route check edges", () => {
       });
       const navigation = yield* router.navigations.get;
       expect(`${navigation.kind} ${navigation.url.pathname}`).toBe("pop /login");
-      expect(history).toEqual(["push /g/a", "push /g/b", "replace /login"]);
+      expect(yield* history).toEqual(["push /g/a", "push /g/b", "replace /login"]);
       expect(gate.asked).toEqual(["a:push", "b:push", "a:pop"]);
     }),
   );
@@ -210,7 +189,7 @@ describe("route check edges", () => {
       const receipt = yield* router.push("/g/deny");
       expect(receipt).toMatchObject({ _tag: "Unchanged" });
       expect(receipt.url.pathname).toBe("/login");
-      expect(history).toEqual([]);
+      expect(yield* history).toEqual([]);
     }),
   );
 
@@ -222,12 +201,12 @@ describe("route check edges", () => {
       const receipt = yield* router.push("/old/ok");
       expect(receipt).toMatchObject({ _tag: "Committed" });
       expect(receipt.url.pathname).toBe("/g/ok");
-      expect(history).toEqual(["push /g/ok"]);
+      expect(yield* history).toEqual(["push /g/ok"]);
       expect(Option.isSome(Option.fromNullishOr(root.querySelector("#gate")))).toBe(true);
 
       // The target's own check still runs, and may redirect further.
       yield* router.push("/old/denied");
-      expect(history).toEqual(["push /g/ok", "push /login"]);
+      expect(yield* history).toEqual(["push /g/ok", "push /login"]);
       expect(gate.asked).toEqual(["ok:push", "denied:push"]);
     }),
   );

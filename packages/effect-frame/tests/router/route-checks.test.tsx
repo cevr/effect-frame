@@ -19,8 +19,14 @@ import {
   QueryCache,
 } from "effect-frame/actor";
 import type { RemoteActorRef, Source, TransportService } from "effect-frame/actor";
-import { Location, Route, mount as mountRouter, NavigationBehavior } from "effect-frame/router";
-import type { LocationService, NavigationResult } from "effect-frame/router";
+import {
+  Location,
+  Route,
+  mount as mountRouter,
+  NavigationBehavior,
+  memoryLocation,
+} from "effect-frame/router";
+import type { NavigationResult } from "effect-frame/router";
 import { Dom, Await, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import * as Frame from "../../src/frame.js";
@@ -561,34 +567,6 @@ const makeProbes = Effect.gen(function* () {
 // Harness
 // ---------------------------------------------------------------------------
 
-interface FakeLocation {
-  readonly service: LocationService;
-  /** The history operations the router made, as `push /path?search#hash`. */
-  readonly history: Array<string>;
-}
-
-const makeLocation = (initial: string): Effect.Effect<FakeLocation> =>
-  Effect.gen(function* () {
-    const current = yield* Ref.make(new URL(initial));
-    const history: Array<string> = [];
-    const write = (kind: string) => (url: URL) =>
-      Effect.andThen(
-        Ref.set(current, url),
-        Effect.sync(() => {
-          history.push(`${kind} ${url.pathname}${url.search}${url.hash}`);
-        }),
-      );
-    return {
-      service: {
-        current: Ref.get(current),
-        push: write("push"),
-        replace: write("replace"),
-        pops: Stream.never,
-      },
-      history,
-    };
-  });
-
 const makeRoot = Effect.acquireRelease(
   Effect.sync(() => {
     const created = document.createElement("main");
@@ -602,7 +580,7 @@ const origin = "http://frame.test";
 
 const mountApp = <R,>(app: Route.AnyRoute<R>, root: HTMLElement, path: string) =>
   Effect.gen(function* () {
-    const location = yield* makeLocation(`${origin}${path}`);
+    const location = yield* memoryLocation(`${origin}${path}`);
     const page = yield* ViewTest.make({
       host: Dom.host,
       root,
@@ -614,7 +592,7 @@ const mountApp = <R,>(app: Route.AnyRoute<R>, root: HTMLElement, path: string) =
           notFound: NotFound,
           host,
           root: mountRoot,
-        }).pipe(Effect.provideService(Location, location.service)),
+        }).pipe(Effect.provideService(Location, location.location)),
     });
     return { page, router: page.setup, location };
   });
@@ -816,7 +794,7 @@ describe("private route checks and errors", () => {
         const fragment = yield* router.push("/app/t1/posts/2?tab=edit#c1");
         expect(pathOf(fragment)).toBe("Committed /app/t1/posts/2?tab=edit#c1");
         expect(yield* askedLog()).toHaveLength(6);
-        expect(location.history).toEqual([
+        expect(yield* location.history).toEqual([
           "push /app/t1/posts/2",
           "replace /app/t1/posts/2?tab=edit",
           "push /app/t1/posts/2?tab=edit#c1",
@@ -844,7 +822,7 @@ describe("private route checks and errors", () => {
         const decision = yield* holdDecision("t2");
         const moving = yield* Effect.forkChild(router.push("/app/t2/posts/9"));
         yield* Deferred.await(decision.started);
-        expect(location.history).toEqual([]);
+        expect(yield* location.history).toEqual([]);
         expect(yield* callsOf("tenant:t2")).toBe(0);
         expect(yield* callsOf("post:t2/9")).toBe(0);
         expect(questions((yield* askedLog()).slice(before))).toEqual([
@@ -861,7 +839,7 @@ describe("private route checks and errors", () => {
           until: (actual) => textAt(actual, "#login") === "/app/t2/posts/9",
         });
         // Exactly one new entry, for the final URL. The denied URL is not a Back entry.
-        expect(location.history).toEqual(["push /login?next=%2Fapp%2Ft2%2Fposts%2F9"]);
+        expect(yield* location.history).toEqual(["push /login?next=%2Fapp%2Ft2%2Fposts%2F9"]);
         // No child check, declaration, or setup for the refused branch.
         expect(questions((yield* askedLog()).slice(before))).toEqual([
           "tenant:/app/t2/posts/9:push",
@@ -879,7 +857,7 @@ describe("private route checks and errors", () => {
         yield* router.push("/app/t1/posts/1");
         yield* readyPost(page, "t1", "1");
         yield* router.replace("/app/t2/posts/3");
-        expect(location.history.slice(1)).toEqual([
+        expect((yield* location.history).slice(1)).toEqual([
           "push /app/t1/posts/1",
           "replace /login?next=%2Fapp%2Ft2%2Fposts%2F3",
         ]);
@@ -903,7 +881,7 @@ describe("private route checks and errors", () => {
           label: "sign-in page",
           until: (actual) => textAt(actual, "#login") === "/app/t2/posts/1",
         });
-        expect(location.history).toEqual(["replace /login?next=%2Fapp%2Ft2%2Fposts%2F1"]);
+        expect(yield* location.history).toEqual(["replace /login?next=%2Fapp%2Ft2%2Fposts%2F1"]);
         expect(questions(yield* askedLog())).toEqual(["tenant:/app/t2/posts/1:initial"]);
         expect(yield* Ref.get(probes.layoutSetups)).toEqual([]);
         expect(yield* callsOf("tenant:t2")).toBe(0);
@@ -944,7 +922,7 @@ describe("private route checks and errors", () => {
         const refused = yield* router.push("/app/t2/posts/2");
         expect(pathOf(refused)).toBe("Committed /login?next=%2Fapp%2Ft2%2Fposts%2F2");
         expect(questions((yield* askedLog()).slice(4))).toEqual(["tenant:/app/t2/posts/2:push"]);
-        expect(location.history).toEqual([
+        expect(yield* location.history).toEqual([
           "push /app/t2/posts/1",
           "push /login?next=%2Fapp%2Ft2%2Fposts%2F2",
         ]);
@@ -983,7 +961,7 @@ describe("private route checks and errors", () => {
         expect(limit.chain).toHaveLength(Check.redirectLimit + 2);
 
         // Nothing moved: no history, no declaration, the same page.
-        expect(location.history).toEqual([]);
+        expect(yield* location.history).toEqual([]);
         expect(yield* callsOf("post:t1/loop-a")).toBe(0);
         expect(yield* callsOf("post:t1/step-1")).toBe(0);
         expect(textAt(root, "#post-param")).toBe("1");
@@ -1171,7 +1149,7 @@ describe("private route checks and errors", () => {
         // Interrupted, never a false Committed.
         expect(Exit.hasInterrupts(exit)).toBe(true);
         yield* Deferred.succeed(decision.gate, void 0);
-        expect(location.history).toEqual([]);
+        expect(yield* location.history).toEqual([]);
         expect(yield* callsOf("tenant:t3")).toBe(0);
         const closed = yield* Frame.inspect;
         expect(closed.actors.filter((one) => one.kind === "local")).toHaveLength(0);

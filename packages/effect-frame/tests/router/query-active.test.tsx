@@ -14,8 +14,14 @@ import {
 import type { QueryKey, TransportService } from "effect-frame/actor";
 import { canonicalize } from "../../src/actor/canonical-json.js";
 import type { FollowedQuery, QueryFailure } from "effect-frame/actor/client";
-import { Location, Route, mount as mountRouter, NavigationBehavior } from "effect-frame/router";
-import type { LocationService } from "effect-frame/router";
+import {
+  Location,
+  Route,
+  mount as mountRouter,
+  NavigationBehavior,
+  memoryLocation,
+} from "effect-frame/router";
+
 import { Html, View } from "effect-frame/view";
 import { Context, Deferred, Effect, Fiber, Layer, Option, Ref, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -207,13 +213,7 @@ const origin = "http://frame.test";
 
 const mountAt = (path: string) =>
   Effect.gen(function* () {
-    const current = yield* Ref.make(new URL(`${origin}${path}`));
-    const location: LocationService = {
-      current: Ref.get(current),
-      push: (url) => Ref.set(current, url),
-      replace: (url) => Ref.set(current, url),
-      pops: Stream.never,
-    };
+    const { location } = yield* memoryLocation(`${origin}${path}`);
     return yield* mountRouter({
       landing: NavigationBehavior.Restore,
       traversalReadLimit: "3 seconds",
@@ -335,13 +335,7 @@ describe("a route query binding's override (#19)", () => {
           (props) => Effect.map(props.outlet, (outlet) => <section>{outlet}</section>),
         ),
       );
-      const current = yield* Ref.make(new URL(`${origin}/app/t1/posts/1`));
-      const location: LocationService = {
-        current: Ref.get(current),
-        push: (url) => Ref.set(current, url),
-        replace: (url) => Ref.set(current, url),
-        pops: Stream.never,
-      };
+      const { location } = yield* memoryLocation(`${origin}/app/t1/posts/1`);
       const router = yield* mountRouter({
         landing: NavigationBehavior.Restore,
         traversalReadLimit: "3 seconds",
@@ -393,13 +387,7 @@ describe("a route query binding's override (#19)", () => {
             (props) => Effect.map(props.outlet, (outlet) => <section>{outlet}</section>),
           ),
         );
-        const current = yield* Ref.make(new URL(`${origin}/app/t1/posts/1`));
-        const location: LocationService = {
-          current: Ref.get(current),
-          push: (url) => Ref.set(current, url),
-          replace: (url) => Ref.set(current, url),
-          pops: Stream.never,
-        };
+        const { location } = yield* memoryLocation(`${origin}/app/t1/posts/1`);
         const router = yield* mountRouter({
           landing: NavigationBehavior.Restore,
           traversalReadLimit: "3 seconds",

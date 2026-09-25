@@ -774,6 +774,10 @@ Navigation API, and the History API where that is absent. `followLinks`
 follows ordinary same-origin anchors. `Dom.root` finds the element the
 server's document wrote for its `rootId`, or fails with `RootNotFound`. The
 first app's browser entry above is the one every example app uses.
+Outside a browser, in a test or a terminal, provide
+`(yield* memoryLocation(href)).location`: it moves when the router moves
+it, `history` lists each `push` and `replace`, and `pop(href)` moves as
+Back and Forward do. It has no surface, so a landing places nothing.
 
 - At shell commit (the new branch is in the document, fallbacks included),
   `NavigationBehavior.Restore` puts the viewport at the top, at

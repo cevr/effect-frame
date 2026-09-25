@@ -3,7 +3,14 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import { ActorTransport, Anonymous, QueryCache } from "effect-frame/actor/client";
-import { Location, Route, hydrate, renderDocument, NavigationBehavior } from "effect-frame/router";
+import {
+  Location,
+  Route,
+  hydrate,
+  renderDocument,
+  NavigationBehavior,
+  memoryLocation,
+} from "effect-frame/router";
 import type { RenderedDocument, Router } from "effect-frame/router";
 import { Context, Effect, Layer, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -11,7 +18,7 @@ import { inProcess } from "../src/notes.server.js";
 import { listBranch } from "../src/routes.js";
 import { notesDocument, renderPage } from "../src/server.js";
 import { NotFound } from "../src/views.js";
-import { has, install, locationAt, settle, textOf } from "./fixture.js";
+import { has, install, settle, textOf } from "./fixture.js";
 
 /**
  * #18, #22, #25 §1: one route tree, one view, every rendering mode. The
@@ -156,7 +163,7 @@ describe("one ListView in every rendering mode", () => {
           const root = yield* install(rendered.html);
           const snapshots: Array<string> = [];
           const client = yield* clientOver(host, snapshots);
-          const { location } = yield* locationAt(inbox);
+          const { location } = yield* memoryLocation(inbox);
           const { report } = yield* hydrate({
             landing: NavigationBehavior.Restore,
             traversalReadLimit: "3 seconds",

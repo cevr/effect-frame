@@ -26,8 +26,14 @@ import type {
   Source,
   TransportService,
 } from "effect-frame/actor";
-import { Location, Route, mount as mountRouter, NavigationBehavior } from "effect-frame/router";
-import type { LocationService } from "effect-frame/router";
+import {
+  Location,
+  Route,
+  mount as mountRouter,
+  NavigationBehavior,
+  memoryLocation,
+} from "effect-frame/router";
+
 import { Dom, Html, Await, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import * as Frame from "../../src/frame.js";
@@ -534,33 +540,6 @@ const makeProbes = Effect.gen(function* () {
 // Harness
 // ---------------------------------------------------------------------------
 
-interface FakeLocation {
-  readonly service: LocationService;
-  readonly history: Array<string>;
-}
-
-const makeLocation = (initial: string): Effect.Effect<FakeLocation> =>
-  Effect.gen(function* () {
-    const current = yield* Ref.make(new URL(initial));
-    const history: Array<string> = [];
-    const record = (kind: string) => (url: URL) =>
-      Effect.andThen(
-        Ref.set(current, url),
-        Effect.sync(() => {
-          history.push(`${kind} ${url.pathname}${url.search}`);
-        }),
-      );
-    return {
-      service: {
-        current: Ref.get(current),
-        push: record("push"),
-        replace: record("replace"),
-        pops: Stream.never,
-      },
-      history,
-    };
-  });
-
 const makeRoot = Effect.acquireRelease(
   Effect.sync(() => {
     const created = document.createElement("main");
@@ -574,7 +553,7 @@ const origin = "http://frame.test";
 
 const mountApp = <R,>(app: Route.AnyRoute<R>, root: HTMLElement, path: string) =>
   Effect.gen(function* () {
-    const location = yield* makeLocation(`${origin}${path}`);
+    const location = yield* memoryLocation(`${origin}${path}`);
     const page = yield* ViewTest.make({
       host: Dom.host,
       root,
@@ -586,7 +565,7 @@ const mountApp = <R,>(app: Route.AnyRoute<R>, root: HTMLElement, path: string) =
           notFound: NotFound,
           host,
           root: mountRoot,
-        }).pipe(Effect.provideService(Location, location.service)),
+        }).pipe(Effect.provideService(Location, location.location)),
     });
     return { page, router: page.setup, location };
   });
@@ -893,7 +872,7 @@ describe("private nested transition", () => {
         expect(Option.isNone(queryRecord(after, "NestedComments", "t1"))).toBe(true);
         expect(yield* subscriptionsOf("t1", "1")).toBe(0);
         expect(queryKeys(after)).toHaveLength(2);
-        expect(location.history).toEqual(["push /app/t1/posts/1/edit"]);
+        expect(yield* location.history).toEqual(["push /app/t1/posts/1/edit"]);
       }),
   );
 
@@ -1190,12 +1169,7 @@ describe("private nested transition", () => {
       Effect.gen(function* () {
         const probes = yield* makeProbes;
         const postHeld = yield* hold("post:t1/1");
-        const location: LocationService = {
-          current: Effect.succeed(new URL(`${origin}/app/t1/posts/1`)),
-          push: () => Effect.void,
-          replace: () => Effect.void,
-          pops: Stream.never,
-        };
+        const { location } = yield* memoryLocation(`${origin}/app/t1/posts/1`);
         const scope = yield* Scope.make();
         const htmlRoot = Html.element("#root");
         yield* mountRouter({

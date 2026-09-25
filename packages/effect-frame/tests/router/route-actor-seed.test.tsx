@@ -22,10 +22,11 @@ import {
   mount as mountRouter,
   renderDocument,
   NavigationBehavior,
+  memoryLocation,
 } from "effect-frame/router";
-import type { LocationService, NotFoundProps } from "effect-frame/router";
+import type { NotFoundProps } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
-import { Context, Deferred, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
+import { Context, Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import {
   collect,
@@ -142,14 +143,6 @@ const modes: ReadonlyArray<{
 
 const NotFound = (_props: NotFoundProps) => Effect.succeed(<p id="missing">missing</p>);
 
-const locationAt = (href: string): Effect.Effect<LocationService> =>
-  Effect.map(Ref.make(new URL(href)), (current) => ({
-    current: Ref.get(current),
-    push: (url) => Ref.set(current, url),
-    replace: (url) => Ref.set(current, url),
-    pops: Stream.never,
-  }));
-
 /** One in-process host that both sides reach, as a server and a browser reach one app. */
 const sharedHost = Layer.build(
   Layer.merge(
@@ -240,7 +233,7 @@ describe("a route actor is seeded into the document (#37)", () => {
 
           const reads: Array<string> = [];
           const client = yield* sideOver(counting(transport, reads));
-          const location = yield* locationAt(url.href);
+          const { location } = yield* memoryLocation(url.href);
           yield* install(html);
           const { report } = yield* hydrateWith(client, (over, root) =>
             mountRouter({
@@ -319,7 +312,7 @@ describe("a route actor is seeded into the document (#37)", () => {
 
       const reads: Array<string> = [];
       const client = yield* sideOver(counting(transport, reads));
-      const location = yield* locationAt(url.href);
+      const { location } = yield* memoryLocation(url.href);
       yield* install(html);
       const { report } = yield* hydrateWith(client, (over, root) =>
         mountRouter({
@@ -381,7 +374,7 @@ describe("a route actor is seeded into the document (#37)", () => {
         expect(actorSeedsIn(html)).toHaveLength(1);
 
         const client = yield* sideOver(transport);
-        const location = yield* locationAt(url.href);
+        const { location } = yield* memoryLocation(url.href);
         yield* install(html);
         const { report } = yield* hydrateWith(client, (over, root) =>
           mountRouter({
@@ -412,7 +405,7 @@ describe("a route actor is seeded into the document (#37)", () => {
 
         const reads: Array<string> = [];
         const client = yield* sideOver(counting(transport, reads));
-        const location = yield* locationAt(url.href);
+        const { location } = yield* memoryLocation(url.href);
         yield* install(html);
         let navigate: (href: string) => Effect.Effect<void> = () => Effect.void;
         yield* hydrateWith(client, (over, root) =>
@@ -457,7 +450,7 @@ describe("a route actor is seeded into the document (#37)", () => {
 
       const reads: Array<string> = [];
       const client = yield* sideOver(counting(transport, reads));
-      const location = yield* locationAt(url.href);
+      const { location } = yield* memoryLocation(url.href);
       yield* install(html);
       yield* Effect.gen(function* () {
         const resumed = yield* Streaming.resume(yield* Dom.readRecords);
@@ -496,7 +489,7 @@ describe("a route actor is seeded into the document (#37)", () => {
           ),
       };
       const client = yield* sideOver(holding);
-      const location = yield* locationAt(`${origin}/counter/p`);
+      const { location } = yield* memoryLocation(`${origin}/counter/p`);
       yield* install('<body><main id="app"></main></body>');
       yield* hydrateWith(client, (over, root) =>
         mountRouter({

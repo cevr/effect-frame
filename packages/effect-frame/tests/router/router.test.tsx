@@ -10,82 +10,21 @@ import {
   Router,
   followLinks,
   link,
+  memoryLocation,
   mount,
   NavigationBehavior,
 } from "effect-frame/router";
-import type { LocationService } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import type { Node } from "effect-frame/view";
-import {
-  Cause,
-  Deferred,
-  Effect,
-  Exit,
-  Fiber,
-  Option,
-  Queue,
-  Ref,
-  Result,
-  Schema,
-  Stream,
-} from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, Option, Result, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 /**
- * The router in a real document with a fake location. The fake records
- * every push and replace and can pop on request, so back navigation is
- * tested without a browser history.
+ * The router in a real document with a memory Location. It records every
+ * push and replace and can pop on request, so back navigation is tested
+ * without a browser history.
  */
-
-interface FakeLocation {
-  readonly service: LocationService;
-  readonly history: Array<string>;
-  readonly awaitMove: Effect.Effect<void>;
-  readonly pop: (href: string) => Effect.Effect<void>;
-}
-
-const makeLocation = (initial: string): Effect.Effect<FakeLocation> =>
-  Effect.gen(function* () {
-    const current = yield* Ref.make(new URL(initial));
-    const pops = yield* Queue.unbounded<URL>();
-    const moves = yield* Queue.unbounded<void>();
-    const history: Array<string> = [];
-    return {
-      service: {
-        current: Ref.get(current),
-        push: (url) =>
-          Effect.andThen(
-            Ref.set(current, url),
-            Effect.andThen(
-              Effect.sync(() => {
-                history.push(`push ${url.pathname}${url.search}`);
-              }),
-              Effect.succeed(Queue.offerUnsafe(moves, void 0)),
-            ),
-          ),
-        replace: (url) =>
-          Effect.andThen(
-            Ref.set(current, url),
-            Effect.andThen(
-              Effect.sync(() => {
-                history.push(`replace ${url.pathname}${url.search}`);
-              }),
-              Effect.succeed(Queue.offerUnsafe(moves, void 0)),
-            ),
-          ),
-        pops: Stream.fromQueue(pops),
-      },
-      history,
-      awaitMove: Effect.asVoid(Queue.take(moves)),
-      pop: (href) =>
-        Effect.gen(function* () {
-          const url = new URL(href, initial);
-          yield* Ref.set(current, url);
-          yield* Queue.offer(pops, url);
-        }),
-    };
-  });
 
 const makeRoot = Effect.sync(() => document.createElement("main"));
 
@@ -196,7 +135,7 @@ const book: Route.Tree<"book", Router> = Route.client("book", Route.leaf(bookSeg
 const start = (initial: string, routes: ReadonlyArray<Route.AnyRoute<Router>> = [home, book]) =>
   Effect.gen(function* () {
     const root = yield* makeRoot;
-    const location = yield* makeLocation(initial);
+    const location = yield* memoryLocation(initial);
     const page = yield* ViewTest.make({
       host: Dom.host,
       root,
@@ -208,7 +147,7 @@ const start = (initial: string, routes: ReadonlyArray<Route.AnyRoute<Router>> = 
           notFound: NotFound,
           host,
           root: mountRoot,
-        }).pipe(Effect.provideService(Location, location.service)),
+        }).pipe(Effect.provideService(Location, location.location)),
     });
     yield* followLinks(root, page.setup);
     return { root, location, router: page.setup, page };
@@ -271,7 +210,7 @@ describe("router", () => {
         until: (actualRoot) => textAt(actualRoot, "#book") === "5",
       });
       expect((yield* router.current.get).name).toBe("book");
-      expect(location.history).toEqual(["push /books/5"]);
+      expect(yield* location.history).toEqual(["push /books/5"]);
     }),
   );
 
@@ -285,7 +224,7 @@ describe("router", () => {
         until: (actualRoot) => textAt(actualRoot, "#home") !== "",
       });
       expect((yield* router.current.get).name).toBe("home");
-      expect(location.history).toEqual(["replace /"]);
+      expect(yield* location.history).toEqual(["replace /"]);
     }),
   );
 
@@ -297,7 +236,7 @@ describe("router", () => {
         until: (actualRoot) => textAt(actualRoot, "#book") === "3",
       });
       expect(root.querySelector("#home")).toBeNull();
-      expect(location.history).toEqual(["push /books/3"]);
+      expect(yield* location.history).toEqual(["push /books/3"]);
     }),
   );
 
@@ -326,7 +265,7 @@ describe("router", () => {
       );
       expect(root.querySelector("#book")).toBe(before);
       expect((yield* router.current.get).name).toBe("book");
-      expect(location.history).toEqual(["push /books/1?q=a"]);
+      expect(yield* location.history).toEqual(["push /books/1?q=a"]);
     }),
   );
 
@@ -348,7 +287,7 @@ describe("router", () => {
       expect(search.length).toBe(2);
       expect(search.includes("a")).toBe(true);
       expect(search.includes("b")).toBe(true);
-      expect(location.history.length).toBe(2);
+      expect((yield* location.history).length).toBe(2);
     }),
   );
 
@@ -357,7 +296,7 @@ describe("router", () => {
       const { location } = yield* start("http://app.test/books/1");
       yield* updateBookSearch((previous) => ({ q: `${previous.q}a` }));
       yield* replaceBookSearch((previous) => ({ q: `${previous.q}r` }));
-      expect(location.history).toEqual(["push /books/1?q=a", "replace /books/1?q=ar"]);
+      expect(yield* location.history).toEqual(["push /books/1?q=a", "replace /books/1?q=ar"]);
     }),
   );
 
@@ -366,7 +305,7 @@ describe("router", () => {
       const { location } = yield* start("http://app.test/books/1");
       yield* updateBookSearch({ q: "set" });
       yield* replaceBookSearch({ q: "again" });
-      expect(location.history).toEqual(["push /books/1?q=set", "replace /books/1?q=again"]);
+      expect(yield* location.history).toEqual(["push /books/1?q=set", "replace /books/1?q=again"]);
     }),
   );
 
@@ -375,7 +314,7 @@ describe("router", () => {
       const { location, router } = yield* start("http://app.test/books/1");
       yield* router.push("/");
       yield* updateBookSearch((previous) => ({ q: `${previous.q}stale` }));
-      expect(location.history).toEqual(["push /"]);
+      expect(yield* location.history).toEqual(["push /"]);
       expect((yield* router.current.get).name).toBe("home");
     }),
   );
@@ -393,7 +332,7 @@ describe("router", () => {
         label: "new route search",
         until: (actualRoot) => textAt(actualRoot, "#book-search") === "new",
       });
-      expect(location.history).toEqual(["push /", "push /books/2?q=new"]);
+      expect(yield* location.history).toEqual(["push /", "push /books/2?q=new"]);
     }),
   );
 
@@ -401,7 +340,7 @@ describe("router", () => {
     Effect.gen(function* () {
       const { location, router } = yield* start("http://app.test/books/1");
       yield* router.push("/books/1");
-      expect(location.history).toEqual([]);
+      expect(yield* location.history).toEqual([]);
     }),
   );
 
@@ -419,16 +358,15 @@ describe("router", () => {
 
       const plain = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
       anchor.dispatchEvent(plain);
-      yield* location.awaitMove;
       yield* page.waitFor({
         label: "ordinary link route",
         until: (actualRoot) => textAt(actualRoot, "#book") === "7",
       });
       expect(plain.defaultPrevented).toBe(true);
       expect(textOf(root, "#book")).toBe("7");
-      expect(location.history).toEqual(["push /books/7"]);
+      expect(yield* location.history).toEqual(["push /books/7"]);
 
-      expect(location.history).toEqual(["push /books/7"]);
+      expect(yield* location.history).toEqual(["push /books/7"]);
     }),
   );
 
@@ -450,7 +388,7 @@ describe("router", () => {
       const plain = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
       anchor.dispatchEvent(plain);
       expect(preventedByRouter).toBe(false);
-      expect(location.history).toEqual([]);
+      expect(yield* location.history).toEqual([]);
       expect(textOf(root, "#book")).toBe("");
     }),
   );
@@ -466,7 +404,7 @@ describe("router", () => {
         until: (actualRoot) => textAt(actualRoot, "#book") === "5",
       });
       expect((yield* router.current.get).url.search).toBe("?q=x");
-      expect(location.history).toEqual(["push /books/5?q=x"]);
+      expect(yield* location.history).toEqual(["push /books/5?q=x"]);
     }),
   );
 
@@ -484,7 +422,7 @@ describe("router", () => {
         until: (actualRoot) => textAt(actualRoot, "#book-search") === "xx",
       });
       expect(textOf(root, "#book-search")).toBe("xx");
-      expect(location.history).toEqual(["push /books/1?q=x", "push /books/1?q=xx"]);
+      expect(yield* location.history).toEqual(["push /books/1?q=x", "push /books/1?q=xx"]);
     }),
   );
 
@@ -496,7 +434,7 @@ describe("router", () => {
         label: "router replace event",
         until: (actualRoot) => textAt(actualRoot, "#book") === "9",
       });
-      expect(location.history).toEqual(["replace /books/9"]);
+      expect(yield* location.history).toEqual(["replace /books/9"]);
     }),
   );
 
@@ -552,7 +490,7 @@ describe("router", () => {
 
       expect(textOf(root, "#book")).toBe("2");
       expect(textOf(root, "#home")).toBe("");
-      expect(location.history).toEqual(["push /slow", "push /books/2"]);
+      expect(yield* location.history).toEqual(["push /slow", "push /books/2"]);
       expect((yield* router.current.get).url.pathname).toBe("/books/2");
     }),
   );

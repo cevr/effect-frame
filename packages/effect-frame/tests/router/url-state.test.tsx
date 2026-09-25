@@ -10,65 +10,15 @@ import {
   link,
   mount,
   NavigationBehavior,
+  memoryLocation,
 } from "effect-frame/router";
-import type { LocationService } from "effect-frame/router";
+
 import { Actor, Behavior, Value } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
 import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
-import {
-  Deferred,
-  Effect,
-  Exit,
-  Fiber,
-  Option,
-  Queue,
-  Ref,
-  Schema,
-  SchemaGetter,
-  Stream,
-} from "effect";
+import { Deferred, Effect, Exit, Fiber, Option, Schema, SchemaGetter } from "effect";
 import { describe, expect, it } from "effect-bun-test";
-
-interface FakeLocation {
-  readonly service: LocationService;
-  readonly history: Array<string>;
-  readonly pop: (href: string) => Effect.Effect<void>;
-}
-
-const makeLocation = (initial: string): Effect.Effect<FakeLocation> =>
-  Effect.gen(function* () {
-    const current = yield* Ref.make(new URL(initial));
-    const pops = yield* Queue.unbounded<URL>();
-    const history: Array<string> = [];
-    return {
-      service: {
-        current: Ref.get(current),
-        push: (url) =>
-          Effect.andThen(
-            Ref.set(current, url),
-            Effect.sync(() => {
-              history.push(`push ${url.pathname}${url.search}`);
-            }),
-          ),
-        replace: (url) =>
-          Effect.andThen(
-            Ref.set(current, url),
-            Effect.sync(() => {
-              history.push(`replace ${url.pathname}${url.search}`);
-            }),
-          ),
-        pops: Stream.fromQueue(pops),
-      },
-      history,
-      pop: (href) =>
-        Effect.gen(function* () {
-          const url = new URL(href, initial);
-          yield* Ref.set(current, url);
-          yield* Queue.offer(pops, url);
-        }),
-    };
-  });
 
 const textAt = (root: Node, selector: string): string => {
   if (!(root instanceof HTMLElement)) {
@@ -434,7 +384,7 @@ const NotFound = (props: { readonly url: Source<URL> }) =>
 const startWith = <R,>(initial: string, routes: ReadonlyArray<Route.AnyRoute<R>>) =>
   Effect.gen(function* () {
     const root = document.createElement("main");
-    const location = yield* makeLocation(initial);
+    const location = yield* memoryLocation(initial);
     const page = yield* ViewTest.make({
       host: Dom.host,
       root,
@@ -446,7 +396,7 @@ const startWith = <R,>(initial: string, routes: ReadonlyArray<Route.AnyRoute<R>>
           notFound: NotFound,
           host,
           root: mountRoot,
-        }).pipe(Effect.provideService(Location, location.service)),
+        }).pipe(Effect.provideService(Location, location.location)),
     });
     return { root, location, router: page.setup, page };
   });
@@ -463,7 +413,7 @@ describe("UrlState", () => {
         label: "counter state update",
         until: (actualRoot) => textAt(actualRoot, "#counter") === "2",
       });
-      expect(location.history).toEqual(["replace /counter?c=2"]);
+      expect(yield* location.history).toEqual(["replace /counter?c=2"]);
     }),
   );
 
@@ -481,7 +431,7 @@ describe("UrlState", () => {
           { concurrency: "unbounded" },
         );
         yield* state.push({ count: 7 });
-        expect(location.history).toEqual([
+        expect(yield* location.history).toEqual([
           "push /counter?c=2",
           "push /counter?c=3",
           "push /counter?c=7",
@@ -494,7 +444,7 @@ describe("UrlState", () => {
       const { location } = yield* start("http://app.test/counter?other=x&c=1&tail=y");
       const state = Option.getOrThrow(counterState);
       yield* state.replace({ count: 2 });
-      expect(location.history).toEqual(["replace /counter?other=x&c=2&tail=y"]);
+      expect(yield* location.history).toEqual(["replace /counter?other=x&c=2&tail=y"]);
     }),
   );
 
@@ -504,7 +454,7 @@ describe("UrlState", () => {
       expect(root.querySelector("#counter")?.textContent).toBe("0");
       const state = Option.getOrThrow(counterState);
       yield* state.replace((previous) => ({ count: previous.count + 1 }));
-      expect(location.history).toEqual(["replace /counter?c=1"]);
+      expect(yield* location.history).toEqual(["replace /counter?c=1"]);
     }),
   );
 
@@ -549,7 +499,7 @@ describe("UrlState", () => {
       expect(root.querySelector("#dual")).toBe(before);
       expect(root.querySelector("#dual-count")?.textContent).toBe("1");
       expect(root.querySelector("#dual-pane")?.textContent).toBe("x");
-      expect(location.history).toEqual(["replace /dual?c=1&p=", "replace /dual?c=1&p=x"]);
+      expect(yield* location.history).toEqual(["replace /dual?c=1&p=", "replace /dual?c=1&p=x"]);
     }),
   );
 
@@ -570,7 +520,7 @@ describe("UrlState", () => {
         label: "typed route search update",
         until: (actualRoot) => textAt(actualRoot, "#route-page") === "one-link",
       });
-      expect(location.history).toEqual(["push /route-and-view?page=one-link&c=1&unknown=x"]);
+      expect(yield* location.history).toEqual(["push /route-and-view?page=one-link&c=1&unknown=x"]);
       yield* page.act(
         props.pushSearch((previous) => ({ page: `${previous.page}-next` })),
         {
@@ -581,12 +531,12 @@ describe("UrlState", () => {
       expect(root.querySelector("#route-and-view")).toBe(before);
       expect(root.querySelector("#route-page")?.textContent).toBe("one-link-next");
       expect(root.querySelector("#route-count")?.textContent).toBe("1");
-      expect(location.history).toEqual([
+      expect(yield* location.history).toEqual([
         "push /route-and-view?page=one-link&c=1&unknown=x",
         "push /route-and-view?page=one-link-next&c=1&unknown=x",
       ]);
       yield* state.replace((previous) => ({ count: previous.count + 1 }));
-      expect(location.history).toEqual([
+      expect(yield* location.history).toEqual([
         "push /route-and-view?page=one-link&c=1&unknown=x",
         "push /route-and-view?page=one-link-next&c=1&unknown=x",
         "replace /route-and-view?page=one-link-next&c=2&unknown=x",
@@ -608,7 +558,7 @@ describe("UrlState", () => {
       const linkResult = yield* Effect.exit(typed.push);
       expect(Exit.isFailure(replaceResult)).toBe(true);
       expect(Exit.isFailure(linkResult)).toBe(true);
-      expect(location.history).toEqual([]);
+      expect(yield* location.history).toEqual([]);
     }),
   );
 
@@ -625,7 +575,7 @@ describe("UrlState", () => {
           { q: "second", filters: "date" },
         ],
       });
-      expect(location.history).toEqual([
+      expect(yield* location.history).toEqual([
         "replace /workspace-with-filters-state?q=first&filters=rank&q2=second&filters2=date",
       ]);
     }),
@@ -644,7 +594,7 @@ describe("UrlState", () => {
         label: "other route after stale update",
         until: (actualRoot) => textAt(actualRoot, "#other") === "0",
       });
-      expect(location.history).toEqual(["push /other"]);
+      expect(yield* location.history).toEqual(["push /other"]);
     }),
   );
 
@@ -715,7 +665,7 @@ describe("UrlState", () => {
         label: "annotated state update",
         until: (actualRoot) => textAt(actualRoot, "#titled") === "2",
       });
-      expect(location.history).toEqual(["replace /titled?c=2"]);
+      expect(yield* location.history).toEqual(["replace /titled?c=2"]);
     }),
   );
 
@@ -743,7 +693,7 @@ describe("UrlState", () => {
       const state = Option.getOrThrow(workspaceWrongKeysState);
       const result = yield* Effect.exit(state.replace({ panes: ["one"] }));
       expect(Exit.isFailure(result)).toBe(true);
-      expect(location.history).toEqual([]);
+      expect(yield* location.history).toEqual([]);
     }),
   );
 

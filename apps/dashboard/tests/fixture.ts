@@ -1,4 +1,4 @@
-import type { Route, LocationService } from "effect-frame/router";
+import type { Route } from "effect-frame/router";
 import type { AnyQueryImplementation } from "effect-frame/actor";
 import type { QueryKey, Refreshed, TransportService } from "effect-frame/actor/client";
 import {
@@ -8,11 +8,12 @@ import {
   QueryFailed,
   QueryCache,
 } from "effect-frame/actor/client";
-import { Location, mount, NavigationBehavior } from "effect-frame/router";
+import { Location, mount, NavigationBehavior, memoryLocation } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
-import { Context, Deferred, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
+import { Context, Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
 import { hostWith } from "../src/host.server.js";
 import { ScanTime, queries } from "../src/queries.server.js";
+import { dashboardDocument } from "../src/server.js";
 import { NotFound } from "../src/views.js";
 
 /**
@@ -286,29 +287,14 @@ export const install = (page: string) =>
   Effect.acquireRelease(
     Effect.sync(() => {
       const body = page.slice(page.indexOf("<body>") + "<body>".length, page.indexOf("</body>"));
-      document.body.innerHTML = body.replace(
-        '<script type="module" src="/client.js"></script>',
-        "",
-      );
-      return Option.getOrElse(Option.fromNullishOr(document.getElementById("app")), () =>
-        document.createElement("main"),
+      document.body.innerHTML = body.replace(dashboardDocument.bootstrap, "");
+      return Option.getOrElse(
+        Option.fromNullishOr(document.getElementById(dashboardDocument.rootId)),
+        () => document.createElement("main"),
       );
     }),
     () => Effect.sync(() => void (document.body.innerHTML = "")),
   );
-
-/** A Location that starts at `href`, and moves when the router moves it. */
-export const locationAt = (href: string) =>
-  Effect.gen(function* () {
-    const current = yield* Ref.make(new URL(href));
-    const location: LocationService = {
-      current: Ref.get(current),
-      push: (url) => Ref.set(current, url),
-      replace: (url) => Ref.set(current, url),
-      pops: Stream.never,
-    };
-    return { location, current: Ref.get(current) };
-  });
 
 /**
  * Mount the route tree into a fresh `#app` in happy-dom, over one client:
@@ -320,11 +306,11 @@ export const mountApp = Effect.fn("DashboardTest.mountApp")(function* <R>(option
   readonly href: string;
   readonly routes: ReadonlyArray<Route.AnyRoute<R>>;
 }) {
-  const root = yield* install('<body><main id="app"></main></body>');
+  const root = yield* install(`<body><main id="${dashboardDocument.rootId}"></main></body>`);
   const client = yield* Layer.build(
     Layer.provideMerge(QueryCache.layer, Layer.succeed(ActorTransport, options.transport)),
   );
-  const { location, current } = yield* locationAt(options.href);
+  const { location, current } = yield* memoryLocation(options.href);
   const router = yield* mount({
     landing: NavigationBehavior.Restore,
     traversalReadLimit: "3 seconds",

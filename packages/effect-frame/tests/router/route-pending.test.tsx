@@ -14,8 +14,14 @@ import {
   QueryCache,
 } from "effect-frame/actor";
 import type { ActorTransport, Source } from "effect-frame/actor";
-import { Location, Route, mount as mountRouter, NavigationBehavior } from "effect-frame/router";
-import type { LocationService, NavigationResult } from "effect-frame/router";
+import {
+  Location,
+  Route,
+  mount as mountRouter,
+  NavigationBehavior,
+  memoryLocation,
+} from "effect-frame/router";
+import type { NavigationResult } from "effect-frame/router";
 import { Dom, Html, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import type { LazyModule, Node } from "effect-frame/view";
@@ -33,7 +39,6 @@ import {
   Ref,
   Schema,
   Scope,
-  Stream,
 } from "effect";
 import type { Scope as ScopeType } from "effect";
 import { TestClock } from "effect/testing";
@@ -542,33 +547,6 @@ const NotFound = (props: { readonly url: Source<URL> }) =>
 // Harness
 // ---------------------------------------------------------------------------
 
-interface FakeLocation {
-  readonly service: LocationService;
-  readonly history: Array<string>;
-}
-
-const makeLocation = (initial: string): Effect.Effect<FakeLocation> =>
-  Effect.gen(function* () {
-    const current = yield* Ref.make(new URL(initial));
-    const history: Array<string> = [];
-    const write = (kind: string) => (url: URL) =>
-      Effect.andThen(
-        Ref.set(current, url),
-        Effect.sync(() => {
-          history.push(`${kind} ${url.pathname}${url.search}`);
-        }),
-      );
-    return {
-      service: {
-        current: Ref.get(current),
-        push: write("push"),
-        replace: write("replace"),
-        pops: Stream.never,
-      },
-      history,
-    };
-  });
-
 const makeRoot = Effect.acquireRelease(
   Effect.sync(() => {
     const created = document.createElement("main");
@@ -582,7 +560,7 @@ const origin = "http://frame.test";
 
 const mountApp = <R,>(app: Route.AnyRoute<R>, root: HTMLElement, path: string) =>
   Effect.gen(function* () {
-    const location = yield* makeLocation(`${origin}${path}`);
+    const location = yield* memoryLocation(`${origin}${path}`);
     const page = yield* ViewTest.make({
       host: Dom.host,
       root,
@@ -594,7 +572,7 @@ const mountApp = <R,>(app: Route.AnyRoute<R>, root: HTMLElement, path: string) =
           notFound: NotFound,
           host,
           root: mountRoot,
-        }).pipe(Effect.provideService(Location, location.service)),
+        }).pipe(Effect.provideService(Location, location.location)),
     });
     return { page, router: page.setup, location };
   });
@@ -1110,12 +1088,7 @@ describe("private route pending and lazy views", () => {
         const probes = yield* makeProbes;
         const access = yield* Access;
         const importer = yield* makeImporter;
-        const location: LocationService = {
-          current: Effect.succeed(new URL(`${origin}/app/t1/posts/1`)),
-          push: () => Effect.void,
-          replace: () => Effect.void,
-          pops: Stream.never,
-        };
+        const { location } = yield* memoryLocation(`${origin}/app/t1/posts/1`);
         const scope = yield* Scope.make();
         const htmlRoot = Html.element("#root");
         const mounting = yield* Effect.forkChild(

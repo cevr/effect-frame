@@ -23,23 +23,13 @@ import {
   link,
   mount as mountRouter,
   NavigationBehavior,
+  memoryLocation,
 } from "effect-frame/router";
-import type { LocationService } from "effect-frame/router";
+
 import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import type { LazyModule, Node } from "effect-frame/view";
-import {
-  Context,
-  Deferred,
-  Effect,
-  Layer,
-  Option,
-  Queue,
-  Ref,
-  Result,
-  Schema,
-  Stream,
-} from "effect";
+import { Context, Deferred, Effect, Layer, Option, Queue, Ref, Result, Schema } from "effect";
 import type { Scope } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
@@ -320,33 +310,6 @@ const NotFound = (props: { readonly url: Source<URL> }) =>
 // Harness
 // ---------------------------------------------------------------------------
 
-interface FakeLocation {
-  readonly service: LocationService;
-  readonly history: Array<string>;
-}
-
-const makeLocation = (initial: string): Effect.Effect<FakeLocation> =>
-  Effect.gen(function* () {
-    const current = yield* Ref.make(new URL(initial));
-    const history: Array<string> = [];
-    const write = (kind: string) => (url: URL) =>
-      Effect.andThen(
-        Ref.set(current, url),
-        Effect.sync(() => {
-          history.push(`${kind} ${url.pathname}${url.search}`);
-        }),
-      );
-    return {
-      service: {
-        current: Ref.get(current),
-        push: write("push"),
-        replace: write("replace"),
-        pops: Stream.never,
-      },
-      history,
-    };
-  });
-
 const makeRoot = Effect.acquireRelease(
   Effect.sync(() => {
     const created = document.createElement("main");
@@ -360,7 +323,7 @@ const origin = "http://frame.test";
 
 const mountApp = <R,>(app: Route.AnyRoute<R>, root: HTMLElement, path: string) =>
   Effect.gen(function* () {
-    const location = yield* makeLocation(`${origin}${path}`);
+    const location = yield* memoryLocation(`${origin}${path}`);
     const page = yield* ViewTest.make({
       host: Dom.host,
       root,
@@ -372,7 +335,7 @@ const mountApp = <R,>(app: Route.AnyRoute<R>, root: HTMLElement, path: string) =
           notFound: NotFound,
           host,
           root: mountRoot,
-        }).pipe(Effect.provideService(Location, location.service)),
+        }).pipe(Effect.provideService(Location, location.location)),
     });
     return { page, router: page.setup, location };
   });
@@ -749,7 +712,7 @@ describe("public nested routes", () => {
           until: (actual) => textAt(actual, "#tenant-tab") === "people",
         });
         expect(textAt(root, "#post-mode")).toBe("edit");
-        expect(location.history.slice(-2)).toEqual([
+        expect((yield* location.history).slice(-2)).toEqual([
           "push /app/t1/posts/1?mode=edit",
           "replace /app/t1/posts/1?mode=edit&tab=people",
         ]);
@@ -772,7 +735,7 @@ describe("public nested routes", () => {
           until: (actual) => textAt(actual, "#login") === "/app/t2/posts/9",
         });
         expect((yield* eventsOf).slice(before)).toEqual(["check:tenant:t2"]);
-        expect(location.history.at(-1)).toBe("push /login?next=%2Fapp%2Ft2%2Fposts%2F9");
+        expect((yield* location.history).at(-1)).toBe("push /login?next=%2Fapp%2Ft2%2Fposts%2F9");
         expect(yield* Ref.get(importer.calls)).toBe(1);
 
         yield* page.close;
@@ -866,7 +829,7 @@ describe("public nested routes", () => {
           label: "the s2 lobby",
           until: (actual) => textAt(actual, "#room") === "lobby",
         });
-        expect(location.history.at(-1)).toBe("push /space/s2/rooms/lobby");
+        expect((yield* location.history).at(-1)).toBe("push /space/s2/rooms/lobby");
       }),
   );
 

@@ -3,10 +3,10 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import { CommandId, Form, QueryCache } from "effect-frame/actor/client";
-import { Location, Route, hydrate, NavigationBehavior } from "effect-frame/router";
-import type { LocationService } from "effect-frame/router";
+import { Location, Route, hydrate, NavigationBehavior, memoryLocation } from "effect-frame/router";
+
 import { Html } from "effect-frame/view";
-import { Effect, Option, Schema, Stream } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 /**
@@ -28,13 +28,6 @@ const IssuesView = () =>
 const app = Route.ssr("page", Route.leaf(page, IssuesView));
 
 const NotFound = () => Effect.succeed(<p id="missing">missing</p>);
-
-const location: LocationService = {
-  current: Effect.sync(() => new URL("http://site.test/")),
-  push: () => Effect.void,
-  replace: () => Effect.void,
-  pops: Stream.never,
-};
 
 const refused: Form.FormIssues = {
   contract: "notes",
@@ -71,6 +64,7 @@ const installDocument = (issues: Option.Option<string>) =>
 const hydrated = (issues: Option.Option<string>) =>
   Effect.gen(function* () {
     const root = yield* installDocument(issues);
+    const { location } = yield* memoryLocation("http://site.test/");
     const { report } = yield* hydrate({
       landing: NavigationBehavior.Restore,
       traversalReadLimit: "3 seconds",

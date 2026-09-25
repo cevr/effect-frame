@@ -2,22 +2,10 @@ import { platformFetch } from "./dom-setup.js";
 
 import type { QueryKey, TransportService } from "effect-frame/actor/client";
 import { Actor, ActorTransport, CommandId, QueryCache } from "effect-frame/actor/client";
-import { Location, hydrate, NavigationBehavior } from "effect-frame/router";
-import type { LocationService } from "effect-frame/router";
+import { Location, hydrate, NavigationBehavior, memoryLocation } from "effect-frame/router";
+
 import * as Prerender from "effect-frame/router/prerender";
-import {
-  Clock,
-  Context,
-  Deferred,
-  Effect,
-  FileSystem,
-  Layer,
-  Option,
-  Path,
-  Ref,
-  Schema,
-  Stream,
-} from "effect";
+import { Clock, Context, Deferred, Effect, FileSystem, Layer, Option, Path, Schema } from "effect";
 import type { Slug } from "../src/contract.js";
 import { Reactions } from "../src/contract.js";
 import type { SiteRoute } from "../src/prerender.server.js";
@@ -25,6 +13,7 @@ import { buildSite } from "../src/prerender.server.js";
 import type { PostSourceService } from "../src/posts.server.js";
 import { PostSource, fromDirectory } from "../src/posts.server.js";
 import { siteOver } from "../src/reactions.server.js";
+import { rootId } from "../src/document.js";
 import { routes } from "../src/routes.js";
 import { NotFound } from "../src/views.js";
 import { serve } from "../src/server.js";
@@ -276,22 +265,13 @@ export const install = (html: string) =>
       document.body.innerHTML = body.replace(Prerender.clientScript, "");
       return Option.getOrThrow(
         Option.filter(
-          Option.fromNullishOr(document.getElementById("app")),
+          Option.fromNullishOr(document.getElementById(rootId)),
           (found): found is HTMLElement => found instanceof HTMLElement,
         ),
       );
     }),
     () => Effect.sync(() => void (document.body.innerHTML = "")),
   );
-
-/** A Location that stays where it is put, and moves when the router moves it. */
-export const locationAt = (href: string): Effect.Effect<LocationService> =>
-  Effect.map(Ref.make(new URL(href, origin)), (current) => ({
-    current: Ref.get(current),
-    push: (url) => Ref.set(current, url),
-    replace: (url) => Ref.set(current, url),
-    pops: Stream.never,
-  }));
 
 /** A query read as the tests name it: `PostBody{"slug":"first-light"}`. */
 export const keyText = (key: QueryKey): string => `${key.query}${key.args}`;
@@ -351,7 +331,7 @@ export type Client = Effect.Success<ReturnType<typeof clientOver>>;
 export const hydrateAt = (client: Client, html: string, href: string) =>
   Effect.gen(function* () {
     const root = yield* install(html);
-    const location = yield* locationAt(href);
+    const { location } = yield* memoryLocation(new URL(href, origin));
     return yield* hydrate({
       landing: NavigationBehavior.Restore,
       traversalReadLimit: "3 seconds",

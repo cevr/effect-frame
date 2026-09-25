@@ -2,11 +2,11 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Location, Route, mount, NavigationBehavior } from "effect-frame/router";
-import type { LocationService } from "effect-frame/router";
+import { Location, Route, mount, NavigationBehavior, memoryLocation } from "effect-frame/router";
+
 import { Dom, Html, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
-import { Effect, Option, Schema, Stream } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 /**
@@ -55,17 +55,11 @@ const app = Route.client(
 
 const NotFound = () => Effect.succeed(<p>missing</p>);
 
-const locationAt = (href: string): LocationService => ({
-  current: Effect.succeed(new URL(href)),
-  push: () => Effect.void,
-  replace: () => Effect.void,
-  pops: Stream.never,
-});
-
 const serverHtml = (path: string) =>
   Effect.scoped(
     Effect.gen(function* () {
       const root = Html.element("main");
+      const { location } = yield* memoryLocation(`http://site.test${path}`);
       yield* mount({
         landing: NavigationBehavior.Restore,
         traversalReadLimit: "3 seconds",
@@ -73,7 +67,7 @@ const serverHtml = (path: string) =>
         notFound: NotFound,
         host: Html.host,
         root,
-      }).pipe(Effect.provideService(Location, locationAt(`http://site.test${path}`)));
+      }).pipe(Effect.provideService(Location, location));
       yield* View.flush;
       return Html.serializeChildren(root.children);
     }),
@@ -109,6 +103,7 @@ const rootOf = (main: HTMLElement) => {
 const fresh = (path: string) =>
   Effect.gen(function* () {
     const main = yield* attached("");
+    const { location } = yield* memoryLocation(`http://site.test${path}`);
     const page = yield* ViewTest.make({
       host: Dom.host,
       root: main,
@@ -120,7 +115,7 @@ const fresh = (path: string) =>
           notFound: NotFound,
           host,
           root,
-        }).pipe(Effect.provideService(Location, locationAt(`http://site.test${path}`))),
+        }).pipe(Effect.provideService(Location, location)),
     });
     yield* page.waitFor({
       label: "leaf shown",
@@ -135,6 +130,7 @@ const hydrated = (path: string) =>
   Effect.gen(function* () {
     const main = yield* attached(yield* serverHtml(path));
     const hydration = Dom.hydrate(main);
+    const { location } = yield* memoryLocation(`http://site.test${path}`);
     const page = yield* ViewTest.make({
       host: hydration.host,
       root: main,
@@ -146,7 +142,7 @@ const hydrated = (path: string) =>
           notFound: NotFound,
           host,
           root,
-        }).pipe(Effect.provideService(Location, locationAt(`http://site.test${path}`))),
+        }).pipe(Effect.provideService(Location, location)),
     });
     yield* page.waitFor({
       label: "leaf hydrated",

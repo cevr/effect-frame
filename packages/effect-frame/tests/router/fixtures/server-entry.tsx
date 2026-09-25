@@ -4,10 +4,10 @@
  * bundles it, runs the bundle's `renderHtml`, and asserts the browser
  * navigation modules are not in it.
  */
-import type { LocationService } from "effect-frame/router";
-import { Location, NavigationBehavior, Route, mount } from "effect-frame/router";
+
+import { Location, NavigationBehavior, Route, mount, memoryLocation } from "effect-frame/router";
 import { Html, View } from "effect-frame/view";
-import { Effect, Schema, Stream } from "effect";
+import { Effect, Schema } from "effect";
 
 const site = Route.segment("site", { path: "/site", params: Schema.Struct({}) });
 const page = Route.child(site, "page", {
@@ -35,12 +35,7 @@ export const app = Route.client(
 export const renderUrl = (href: string) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const location: LocationService = {
-        current: Effect.succeed(new URL(href)),
-        push: () => Effect.void,
-        replace: () => Effect.void,
-        pops: Stream.never,
-      };
+      const { location } = yield* memoryLocation(href);
       const root = Html.element("#root");
       yield* mount({
         landing: NavigationBehavior.Restore,

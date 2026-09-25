@@ -17,11 +17,18 @@ import {
   ActorHost,
 } from "effect-frame/actor";
 import type { TransportService } from "effect-frame/actor";
-import { Location, Route, hydrate, renderDocument, NavigationBehavior } from "effect-frame/router";
-import type { LocationService, NotFoundProps } from "effect-frame/router";
+import {
+  Location,
+  Route,
+  hydrate,
+  renderDocument,
+  NavigationBehavior,
+  memoryLocation,
+} from "effect-frame/router";
+import type { NotFoundProps } from "effect-frame/router";
 import { For, View } from "effect-frame/view";
 import * as Driven from "effect-frame/view/driven";
-import { Context, Deferred, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
+import { Context, Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import {
   Label,
@@ -201,14 +208,6 @@ const app = Route.driven(
 
 const NotFound = (_props: NotFoundProps) => Effect.succeed(<p id="missing">missing</p>);
 
-const locationAt = (href: string): Effect.Effect<LocationService> =>
-  Effect.map(Ref.make(new URL(href)), (current) => ({
-    current: Ref.get(current),
-    push: (url) => Ref.set(current, url),
-    replace: (url) => Ref.set(current, url),
-    pops: Stream.never,
-  }));
-
 /** One in-process host both sides reach: the room, and a layout query held on `title`. */
 const sharedHost = (title: Deferred.Deferred<void>) =>
   Layer.build(
@@ -294,7 +293,7 @@ const hydratePage = (
 ) =>
   Effect.gen(function* () {
     const root = yield* Effect.fromOption(Option.fromNullishOr(document.getElementById("app")));
-    const location = yield* locationAt(url.href);
+    const { location } = yield* memoryLocation(url.href);
     return yield* hydrate({
       landing: NavigationBehavior.Restore,
       traversalReadLimit: "3 seconds",

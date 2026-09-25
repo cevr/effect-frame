@@ -17,9 +17,9 @@ import {
   Location,
   Route,
   mount as mountRouter,
-  type LocationService,
   type NotFoundProps,
   NavigationBehavior,
+  memoryLocation,
 } from "effect-frame/router";
 import { Dom, Await, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -39,7 +39,6 @@ import {
   Ref,
   Schema,
   Scope,
-  Stream,
 } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
@@ -580,12 +579,7 @@ describe("ViewTest Frame inspection", () => {
   )("includes the mounted route in a routed ViewTest failure", () =>
     Effect.gen(function* () {
       const control = yield* BlockControl;
-      const location: LocationService = {
-        current: Effect.succeed(new URL("http://app.test/search?q=blocked")),
-        push: () => Effect.void,
-        replace: () => Effect.void,
-        pops: Stream.empty,
-      };
+      const { location } = yield* memoryLocation("http://app.test/search?q=blocked");
       const routeSegment = Route.segment("search", {
         path: "/search",
         params: Schema.Struct({}),

@@ -4,8 +4,8 @@ registerDom();
 
 import type { Source } from "effect-frame/actor";
 import * as Frame from "effect-frame/frame";
-import { Location, Route, mount, NavigationBehavior } from "effect-frame/router";
-import type { LocationService } from "effect-frame/router";
+import { Location, Route, mount, NavigationBehavior, memoryLocation } from "effect-frame/router";
+
 import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import { Effect, Ref, Schema, Stream } from "effect";
@@ -46,18 +46,6 @@ const makeBook = (published: Ref.Ref<ReadonlyArray<string>>) =>
 const NotFound = (props: { readonly url: Source<URL> }) =>
   Effect.succeed(<p id="missing">{View.bind(props.url, (url) => url.pathname)}</p>);
 
-const fakeLocation = (initial: string) =>
-  Effect.gen(function* () {
-    const current = yield* Ref.make(new URL(initial));
-    const service: LocationService = {
-      current: Ref.get(current),
-      push: (url) => Ref.set(current, url),
-      replace: (url) => Ref.set(current, url),
-      pops: Stream.never,
-    };
-    return service;
-  });
-
 /** Lets every forked consumer read what the commit published. */
 const settle = Effect.forEach(Array.from({ length: 40 }), () => Effect.yieldNow, {
   discard: true,
@@ -73,7 +61,7 @@ describe("one-leaf route publish rule", () => {
         const drain = Effect.map(Ref.getAndSet(published, []), (all) => all.toSorted());
         const root = document.createElement("main");
         document.body.append(root);
-        const location = yield* fakeLocation("http://app.test/books/5?q=a");
+        const { location } = yield* memoryLocation("http://app.test/books/5?q=a");
         const page = yield* ViewTest.make({
           host: Dom.host,
           root,

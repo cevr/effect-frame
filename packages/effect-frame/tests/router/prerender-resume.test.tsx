@@ -15,12 +15,18 @@ import {
 } from "effect-frame/actor";
 import { contract, resumeCodec } from "effect-frame/actor/client";
 import type { Applied, SnapshotOf } from "effect-frame/actor/client";
-import { Location, Route, mount as mountRouter, NavigationBehavior } from "effect-frame/router";
-import type { LocationService } from "effect-frame/router";
+import {
+  Location,
+  Route,
+  mount as mountRouter,
+  NavigationBehavior,
+  memoryLocation,
+} from "effect-frame/router";
+
 import * as Prerender from "effect-frame/router/prerender";
 import { Dom, Html, View } from "effect-frame/view";
 import { BunServices } from "@effect/platform-bun";
-import { Context, Effect, Layer, Match, Option, Ref, Schema, Stream } from "effect";
+import { Context, Effect, Layer, Match, Option, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import {
   eventually,
@@ -55,15 +61,6 @@ import {
 /** Every proof here builds real files first. */
 const platform = it.scopedLive.layer(BunServices.layer);
 
-/** A Location that stays where it is put, and moves when the router moves it. */
-const locationAt = (href: string): Effect.Effect<LocationService> =>
-  Effect.map(Ref.make(new URL(href)), (current) => ({
-    current: Ref.get(current),
-    push: (url) => Ref.set(current, url),
-    replace: (url) => Ref.set(current, url),
-    pops: Stream.never,
-  }));
-
 describe("a prerendered page's baked queries (#23 §3.2)", () => {
   platform(
     "a baked query value paints at once, marked stale, and revalidates once to Ready{stale:false}",
@@ -78,7 +75,7 @@ describe("a prerendered page's baked queries (#23 §3.2)", () => {
         // The client's read of the key is held, so the stale paint is observable.
         const clientControl = makeControl({ "post-first": "fresh body" }, ["post-first"]);
         const client = yield* sideOf(clientControl);
-        const location = yield* locationAt(`${origin}/blog/first`);
+        const { location } = yield* memoryLocation(`${origin}/blog/first`);
         yield* install(html);
         const { report } = yield* hydrateWith(client, (host, root) =>
           mountRouter({
@@ -265,7 +262,7 @@ const mountNote = (html: string, client: Context.Context<QueryCache | ActorTrans
       onNone: () => Effect.die("the page baked no snapshot"),
       onSome: (json) => Effect.orDie(Schema.decodeEffect(Resume)(json)),
     });
-    const location = yield* locationAt(`${origin}/notes/n1`);
+    const { location } = yield* memoryLocation(`${origin}/notes/n1`);
     const { report } = yield* hydrateWith(client, (host, root) =>
       mountRouter({
         landing: NavigationBehavior.Restore,

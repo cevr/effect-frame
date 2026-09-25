@@ -2,67 +2,21 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Location, Route, UrlState, mount, NavigationBehavior } from "effect-frame/router";
-import type { LocationService } from "effect-frame/router";
+import {
+  Location,
+  Route,
+  UrlState,
+  mount,
+  NavigationBehavior,
+  memoryLocation,
+} from "effect-frame/router";
+
 import type { Source } from "effect-frame/actor";
 import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
-import {
-  Deferred,
-  Effect,
-  Exit,
-  Fiber,
-  Layer,
-  Option,
-  Queue,
-  Ref,
-  Schema,
-  SchemaGetter,
-  Scope,
-  Stream,
-} from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Option, Schema, SchemaGetter, Scope } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import * as Frame from "../../src/frame.js";
-
-interface FakeLocation {
-  readonly service: LocationService;
-  readonly history: Array<string>;
-  readonly pop: (href: string) => Effect.Effect<void>;
-}
-
-const makeLocation = (initial: string): Effect.Effect<FakeLocation> =>
-  Effect.gen(function* () {
-    const current = yield* Ref.make(new URL(initial));
-    const pops = yield* Queue.unbounded<URL>();
-    const history: Array<string> = [];
-    return {
-      service: {
-        current: Ref.get(current),
-        push: (url) =>
-          Effect.andThen(
-            Ref.set(current, url),
-            Effect.sync(() => {
-              history.push(`push ${url.pathname}${url.search}`);
-            }),
-          ),
-        replace: (url) =>
-          Effect.andThen(
-            Ref.set(current, url),
-            Effect.sync(() => {
-              history.push(`replace ${url.pathname}${url.search}`);
-            }),
-          ),
-        pops: Stream.fromQueue(pops),
-      },
-      history,
-      pop: (href) =>
-        Effect.gen(function* () {
-          const url = new URL(href, initial);
-          yield* Ref.set(current, url);
-          yield* Queue.offer(pops, url);
-        }),
-    };
-  });
 
 const Nothing = Schema.Struct({});
 const BookParams = Schema.Struct({ id: Schema.String });
@@ -121,7 +75,7 @@ const makeBook = (ready: Deferred.Deferred<UrlState.State<FilterState>>) =>
 const makeStart = <R,>(initial: string, routes: ReadonlyArray<Route.AnyRoute<R>>) =>
   Effect.gen(function* () {
     const root = document.createElement("main");
-    const location = yield* makeLocation(initial);
+    const location = yield* memoryLocation(initial);
     const page = yield* ViewTest.make({
       host: Dom.host,
       root,
@@ -133,7 +87,7 @@ const makeStart = <R,>(initial: string, routes: ReadonlyArray<Route.AnyRoute<R>>
           notFound: NotFound,
           host,
           root: mountRoot,
-        }).pipe(Effect.provideService(Location, location.service)),
+        }).pipe(Effect.provideService(Location, location.location)),
     });
     return { root, location, router: page.setup, page };
   });
@@ -260,7 +214,7 @@ describe("Frame router inspection", () => {
           _tag: "Value",
           value: { filter: { _tag: "Value", value: "back" } },
         });
-        expect(location.history).toEqual([
+        expect(yield* location.history).toEqual([
           "push /books/8?tab=two&filter=second",
           "replace /books/8?tab=two&filter=replaced",
           "push /books/8?tab=two&filter=replaced-pushed",
@@ -750,7 +704,7 @@ describe("Frame router inspection", () => {
             }),
           ),
         );
-        const location = yield* makeLocation("http://app.test/blocked");
+        const location = yield* memoryLocation("http://app.test/blocked");
         const mounting = yield* Effect.forkChild(
           mount({
             landing: NavigationBehavior.Restore,
@@ -759,7 +713,7 @@ describe("Frame router inspection", () => {
             notFound: NotFound,
             host: Dom.host,
             root: document.createElement("main"),
-          }).pipe(Effect.provideService(Location, location.service), Scope.provide(parent)),
+          }).pipe(Effect.provideService(Location, location.location), Scope.provide(parent)),
         );
         yield* Deferred.await(started);
         yield* Fiber.interrupt(mounting);
@@ -828,7 +782,7 @@ describe("Frame router inspection", () => {
           Layer.build(Frame.layer({ name: "same-route-root" })),
           rootScope,
         );
-        const location = yield* makeLocation("http://app.test/same");
+        const location = yield* memoryLocation("http://app.test/same");
         const router = yield* Effect.provideContext(
           mount({
             landing: NavigationBehavior.Restore,
@@ -837,7 +791,7 @@ describe("Frame router inspection", () => {
             notFound: NotFound,
             host: Dom.host,
             root: document.createElement("main"),
-          }).pipe(Effect.provideService(Location, location.service), Scope.provide(rootScope)),
+          }).pipe(Effect.provideService(Location, location.location), Scope.provide(rootScope)),
           context,
         );
         return { context, rootScope, router };

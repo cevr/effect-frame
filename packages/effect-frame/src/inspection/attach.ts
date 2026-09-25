@@ -16,7 +16,22 @@
  * to the native socket protocol as one client. A reconnect is a new client;
  * `RpcServer` interrupts the old client's handlers when its socket closes.
  */
-import { Clock, Context, Duration, Effect, Layer, Option, Predicate, Schema, Scope } from "effect";
+import type { Stream } from "effect";
+import {
+  Clock,
+  Context,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  Predicate,
+  Pull,
+  Ref,
+  Schedule,
+  Schema,
+  Scope,
+  SubscriptionRef,
+} from "effect";
 import { NetAddress } from "effect/unstable/net";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { Socket, SocketServer } from "effect/unstable/socket";
@@ -26,7 +41,8 @@ import * as Frame from "../frame.js";
 export type AttachStatus =
   | { readonly _tag: "Connecting"; readonly attempt: number }
   | { readonly _tag: "Connected"; readonly attempt: number }
-  | { readonly _tag: "Disconnected"; readonly attempt: number; readonly retryInMillis: number };
+  | { readonly _tag: "Disconnected"; readonly attempt: number; readonly retryInMillis: number }
+  | { readonly _tag: "Stopped"; readonly attempt: number };
 
 export interface AttachOptions {
   /** The gateway origin, for example `ws://127.0.0.1:4318`. Loopback only. */
@@ -34,17 +50,34 @@ export interface AttachOptions {
   /** The attach capability issued by the gateway. */
   readonly token: string;
   /**
-   * Optional status observer for development diagnostics. A throw from it is
-   * ignored; it never stops the connection loop.
+   * The delay before each redial. A connection that stayed open for one
+   * second starts the schedule over; a shorter one keeps it going. When the
+   * schedule ends, the attachment stops dialing and reports `Stopped`.
+   * `defaultRetry` doubles from 250 ms up to 5 s and never ends.
    */
-  readonly onStatus?: (status: AttachStatus) => void;
-  /** The first retry delay. Finite and positive. Defaults to 250. */
-  readonly initialRetryMillis?: number;
-  /** The largest retry delay. Finite, positive, and not below the first. Defaults to 5000. */
-  readonly maxRetryMillis?: number;
-  /** How long one dial may take to open. Finite and positive. Defaults to 2000. */
-  readonly openTimeoutMillis?: number;
+  readonly retry: Schedule.Schedule<unknown>;
+  /** How long one dial may take to open. `defaultOpenTimeout` is 2 s. */
+  readonly openTimeout: Duration.Input;
 }
+
+/** A running attachment. Its lifetime is the scope `attachGateway` ran in. */
+export interface Attachment {
+  /**
+   * The connection's status: the current value first, then each change.
+   * Development diagnostics read it; the connection never waits for a reader.
+   */
+  readonly status: Stream.Stream<AttachStatus>;
+}
+
+/** Redial after 250 ms, doubling up to 5 s, for as long as the attachment lives. */
+export const defaultRetry: Schedule.Schedule<unknown> = Schedule.exponential("250 millis").pipe(
+  Schedule.modifyDelay(({ duration }) =>
+    Effect.succeed(Duration.min(duration, Duration.seconds(5))),
+  ),
+);
+
+/** One dial may take 2 s to open. */
+export const defaultOpenTimeout: Duration.Duration = Duration.seconds(2);
 
 /** The attachment was configured with a gateway it must not dial. */
 export class InvalidAttachOptions extends Schema.TaggedError<InvalidAttachOptions>()(
@@ -78,38 +111,6 @@ const gatewayAddress = Effect.fn("InspectionAttach.gatewayAddress")(function* (u
     return yield* invalid("gateway URL needs an explicit port");
   }
   return { origin: parsed.origin, port };
-});
-
-/** One optional duration: finite and positive, or its default. */
-const millis = (name: string, value: Option.Option<number>, fallback: number) =>
-  Option.match(value, {
-    onNone: () => Effect.succeed(fallback),
-    onSome: (given) => {
-      if (Number.isFinite(given) && given > 0) return Effect.succeed(given);
-      return Effect.fail(invalid(`${name} must be a finite number above 0`));
-    },
-  });
-
-const timing = Effect.fn("InspectionAttach.timing")(function* (options: AttachOptions) {
-  const initialRetry = yield* millis(
-    "initialRetryMillis",
-    Option.fromNullishOr(options.initialRetryMillis),
-    250,
-  );
-  const maxRetry = yield* millis(
-    "maxRetryMillis",
-    Option.fromNullishOr(options.maxRetryMillis),
-    Math.max(5_000, initialRetry),
-  );
-  if (maxRetry < initialRetry) {
-    return yield* invalid("maxRetryMillis must not be below initialRetryMillis");
-  }
-  const openTimeout = yield* millis(
-    "openTimeoutMillis",
-    Option.fromNullishOr(options.openTimeoutMillis),
-    2_000,
-  );
-  return { initialRetry, maxRetry, openTimeout };
 });
 
 const isRootId = Schema.is(RootId);
@@ -152,12 +153,22 @@ const measure = (snapshot: Frame.Snapshot): number =>
  *
  * It checks the options and the root identity first and fails with
  * `InvalidAttachOptions` when either is unusable. Then it forks one scoped
- * connection loop and returns at once; mount never waits for the gateway.
- * The loop ends when the caller's scope closes. Retry delays double from
- * `initialRetryMillis` up to `maxRetryMillis`, and reset only after a
- * connection stayed open for one second. The timers use
- * Effect's live clock, so an application TestClock neither freezes nor
- * advances them.
+ * connection loop and returns at once with the loop's status; mount never
+ * waits for the gateway. The loop ends when the caller's scope closes. The
+ * timers use Effect's live clock, so an application TestClock neither
+ * freezes nor advances them.
+ *
+ * ```ts
+ * const attachment = yield* attachGateway({
+ *   url: config.gatewayUrl,
+ *   token: config.gatewayToken,
+ *   retry: defaultRetry,
+ *   openTimeout: defaultOpenTimeout,
+ * });
+ * yield* Stream.runForEach(attachment.status, (status) => Effect.logDebug(status._tag)).pipe(
+ *   Effect.forkScoped,
+ * );
+ * ```
  */
 export const attachGateway = Effect.fn("InspectionAttach.attachGateway")(function* (
   options: AttachOptions,
@@ -166,18 +177,12 @@ export const attachGateway = Effect.fn("InspectionAttach.attachGateway")(functio
   if (!TOKEN_PATTERN.test(options.token)) {
     return yield* invalid("attach token has an invalid shape");
   }
-  const { initialRetry, maxRetry, openTimeout } = yield* timing(options);
   const frame = yield* Frame.Service;
   // The construction context supplies application services to inspection only.
   const applicationContext = Context.omit(Scope.Scope)(yield* Effect.context<Frame.Service>());
   const liveClock = Context.get(Context.empty(), Clock.Clock);
-  const report = Option.fromNullishOr(options.onStatus);
-  // A throwing observer is a development diagnostic's bug; the loop outlives it.
-  const notify = (status: AttachStatus): Effect.Effect<void> =>
-    Option.match(report, {
-      onNone: () => Effect.void,
-      onSome: (onStatus) => Effect.asVoid(Effect.exit(Effect.sync(() => onStatus(status)))),
-    });
+  const status = yield* SubscriptionRef.make<AttachStatus>({ _tag: "Connecting", attempt: 1 });
+  const report = (next: AttachStatus) => SubscriptionRef.set(status, next);
 
   const sample = Effect.provideContext(frame.inspect, applicationContext);
 
@@ -204,26 +209,27 @@ export const attachGateway = Effect.fn("InspectionAttach.attachGateway")(functio
 
   const dialOnce = (attempt: number) =>
     Effect.gen(function* () {
-      let connectedAt = Option.none<number>();
+      const connectedAt = yield* Ref.make(Option.none<number>());
       const outgoing = yield* Socket.makeWebSocket(dialUrl.href, {
         protocols: [wire.subprotocol, `${wire.attachTokenPrefix}${options.token}`],
-        openTimeout: Duration.millis(openTimeout),
+        openTimeout: options.openTimeout,
       });
       const socket = Socket.make({
         reader: Effect.tap(outgoing.reader, () =>
           Effect.flatMap(Clock.currentTimeMillis, (now) =>
             Effect.andThen(
-              Effect.sync(() => {
-                connectedAt = Option.some(now);
-              }),
-              notify({ _tag: "Connected", attempt }),
+              Ref.set(connectedAt, Option.some(now)),
+              report({ _tag: "Connected", attempt }),
             ),
           ),
         ),
         writer: outgoing.writer,
       });
-      return { socket, connectedAt: () => connectedAt };
+      return { socket, connectedAt: Ref.get(connectedAt) };
     });
+
+  /** The retry schedule, started over. */
+  const freshStep = Schedule.toStep(options.retry);
 
   // A SocketServer whose connections are outgoing dials. `run` never
   // returns; it ends only by interruption when the attachment scope closes.
@@ -231,23 +237,42 @@ export const attachGateway = Effect.fn("InspectionAttach.attachGateway")(functio
     address: NetAddress.inetAddressUnsafe(NetAddress.ipv4Loopback, address.port),
     run: (handler) =>
       Effect.gen(function* () {
-        let attempt = 0;
-        let delay = initialRetry;
-        while (true) {
-          attempt += 1;
-          yield* notify({ _tag: "Connecting", attempt });
-          const dial = yield* dialOnce(attempt);
+        const attempt = yield* Ref.make(1);
+        const step = yield* Ref.make(yield* freshStep);
+        const cycle = Effect.gen(function* () {
+          // The status starts at `Connecting` 1; each redial reports its own.
+          const current = yield* Ref.get(attempt);
+          const dial = yield* dialOnce(current);
           // A failed open ends the handler with a defect; either way this
           // incarnation is over and its RpcServer client is disconnected.
           yield* Effect.exit(Effect.scoped(handler(dial.socket)));
           const endedAt = yield* Clock.currentTimeMillis;
-          if (Option.exists(dial.connectedAt(), (at) => endedAt - at >= STABLE_CONNECTION_MILLIS)) {
-            delay = initialRetry;
-          }
-          yield* notify({ _tag: "Disconnected", attempt, retryInMillis: delay });
-          yield* Effect.sleep(Duration.millis(delay));
-          delay = Math.min(maxRetry, delay * 2);
-        }
+          const stable = Option.exists(
+            yield* dial.connectedAt,
+            (at) => endedAt - at >= STABLE_CONNECTION_MILLIS,
+          );
+          if (stable) yield* Ref.set(step, yield* freshStep);
+          const delay = yield* Effect.flatMap(Ref.get(step), (next) => next(endedAt, current));
+          yield* report({
+            _tag: "Disconnected",
+            attempt: current,
+            retryInMillis: Duration.toMillis(delay[1]),
+          });
+          yield* Effect.sleep(delay[1]);
+          yield* Ref.set(attempt, current + 1);
+          yield* report({ _tag: "Connecting", attempt: current + 1 });
+        });
+        return yield* Effect.forever(cycle).pipe(
+          // The schedule ended: the attachment stops dialing and waits for its scope.
+          Pull.catchDone(() =>
+            Effect.andThen(
+              Effect.flatMap(Ref.get(attempt), (last) =>
+                report({ _tag: "Stopped", attempt: last }),
+              ),
+              Effect.never,
+            ),
+          ),
+        );
       }).pipe(Effect.provideService(Socket.WebSocketConstructor, dialWebSocket)),
   });
 
@@ -267,4 +292,6 @@ export const attachGateway = Effect.fn("InspectionAttach.attachGateway")(functio
   );
 
   yield* Effect.forkScoped(server);
+  const attachment: Attachment = { status: SubscriptionRef.changes(status) };
+  return attachment;
 });

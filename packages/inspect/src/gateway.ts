@@ -28,13 +28,19 @@ export interface GatewayOptions {
   readonly attachToken: string;
   /** The capability readers use for `roots` and `inspect`. */
   readonly readToken: string;
-  /** Defaults to 0: an ephemeral loopback port. */
-  readonly port?: number;
-  /** The largest encoded snapshot a root may return. Defaults to 4 MiB. */
-  readonly maxSnapshotBytes?: number;
-  /** The most roots attached at once. Defaults to 64. */
-  readonly maxRoots?: number;
+  /** The loopback port. 0 asks for an ephemeral one. */
+  readonly port: number;
+  /** The largest encoded snapshot a root may return. `defaultMaxSnapshotBytes` is 4 MiB. */
+  readonly maxSnapshotBytes: number;
+  /** The most roots attached at once. `defaultMaxRoots` is 64. */
+  readonly maxRoots: number;
 }
+
+/** A root may return a snapshot of up to 4 MiB. */
+export const defaultMaxSnapshotBytes = 4 * 1024 * 1024;
+
+/** Up to 64 roots may be attached at once. */
+export const defaultMaxRoots = 64;
 
 export interface GatewayStats {
   readonly roots: number;
@@ -311,13 +317,23 @@ const bearer = (request: Request): string => {
 /**
  * Start one gateway in the caller's scope. Closing the scope stops the
  * server, closes every root socket, and fails pending reads.
+ *
+ * ```ts
+ * const gateway = yield* Gateway.make({
+ *   allowedOrigin: "http://127.0.0.1:5173",
+ *   attachToken: Gateway.makeToken(),
+ *   readToken: Gateway.makeToken(),
+ *   port: 4318,
+ *   maxSnapshotBytes: Gateway.defaultMaxSnapshotBytes,
+ *   maxRoots: Gateway.defaultMaxRoots,
+ * });
+ * ```
  */
 export const make = Effect.fn("InspectionGateway.make")(function* (options: GatewayOptions) {
   const gatewayScope = yield* Effect.scope;
   const context = yield* Effect.context<never>();
   const runFork = Effect.runForkWith(context);
-  const maxSnapshotBytes = options.maxSnapshotBytes ?? 4 * 1024 * 1024;
-  const maxRoots = options.maxRoots ?? 64;
+  const { maxSnapshotBytes, maxRoots } = options;
   const registry = new Map<string, Connection>();
   let incarnations = 0;
   const counters = {
@@ -630,7 +646,7 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
       try: () =>
         Bun.serve<RootData>({
           hostname: "127.0.0.1",
-          port: options.port ?? 0,
+          port: options.port,
           fetch(request, bunServer) {
             if (!hostAllowed(request)) {
               return errorResponse({
@@ -654,7 +670,7 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
         }),
       catch: (cause) =>
         GatewayListenError.make({
-          port: options.port ?? 0,
+          port: options.port,
           detail: cause instanceof Error ? cause.message.slice(0, 256) : "listen failed",
         }),
     }),

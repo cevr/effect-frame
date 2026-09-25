@@ -16,7 +16,10 @@
 export * as Protocol from "./protocol.js";
 export {
   attachGateway,
+  defaultOpenTimeout,
+  defaultRetry,
   InvalidAttachOptions,
   type AttachOptions,
+  type Attachment,
   type AttachStatus,
 } from "./attach.js";

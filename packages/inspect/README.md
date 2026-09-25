@@ -41,12 +41,21 @@ effect-frame inspect --url <gateway> --root <id|prefix|name> [--json]
 ## Attach a development root
 
 ```ts
-import { attachGateway } from "effect-frame/inspection";
+import { attachGateway, defaultOpenTimeout, defaultRetry } from "effect-frame/inspection";
 
 // Development entry only. The production entry imports nothing from
 // effect-frame/inspection.
-yield * attachGateway({ url: "ws://127.0.0.1:4318", token: attachTokenFromDevServer });
+const attachment =
+  yield *
+  attachGateway({
+    url: "ws://127.0.0.1:4318",
+    token: attachTokenFromDevServer,
+    retry: defaultRetry,
+    openTimeout: defaultOpenTimeout,
+  });
 ```
 
 `attachGateway` needs the root's `Frame.Service` in context. It returns at
 once and retries in the background; mount never waits for the gateway.
+`attachment.status` is a `Stream` of the connection's status: the current
+value, then each change.

@@ -78,23 +78,25 @@ Attachment (`packages/effect-frame/src/inspection/attach.ts`, browser):
    page config names a gateway.
 2. `attachGateway` validates its options and fails with
    `InvalidAttachOptions` before any dial: a non-loopback or malformed URL
-   (only `127.0.0.1` and `localhost`), a malformed token, a non-finite or
-   non-positive retry or open timeout, or `maxRetryMillis` below
-   `initialRetryMillis`. It reads the existing `Frame.Service` and captures its construction
+   (only `127.0.0.1` and `localhost`), or a malformed token. The retry
+   `Schedule` and the `openTimeout` are required values;
+   `defaultRetry` and `defaultOpenTimeout` name the defaults. It reads the existing `Frame.Service` and captures its construction
    context (`Context.omit(Scope)`), like `ViewTest`. It builds no Frame layer
    and copies no records. Each `Inspect` request takes one fresh sample.
 3. The root ID and name come from one sample of the service at attach, before
    any dial. An ID that is not a `RootId`, or a name with control characters
    (`RootName`), fails with `InvalidAttachOptions`, so the loop never retries
    a registration the gateway will always refuse.
-4. `attachGateway` forks one loop in the caller's scope and returns at once.
-   Mount never waits for the gateway. The loop's backoff timers use Effect's
-   live clock, so an application `TestClock` neither freezes nor advances
-   them. The delay starts at `initialRetryMillis` and doubles after each
-   dial up to `maxRetryMillis`. Reset rule: the delay returns to
-   `initialRetryMillis` only after a connection stayed open for at least one
-   second; a gateway that drops the socket at once still sees a doubling
-   delay. A throwing `onStatus` observer is ignored and never stops the loop.
+4. `attachGateway` forks one loop in the caller's scope and returns at once
+   with `{ status }`, a `Stream` over a `SubscriptionRef` of `AttachStatus`.
+   Mount never waits for the gateway, and the loop never waits for a status
+   reader. The loop's backoff timers use Effect's live clock, so an
+   application `TestClock` neither freezes nor advances them. Each redial
+   waits the next delay of the `retry` schedule (`defaultRetry` doubles from
+   250 ms up to 5 s). Reset rule: the schedule starts over only after a
+   connection stayed open for at least one second; a gateway that drops the
+   socket at once still sees a doubling delay. When the schedule ends, the
+   loop stops dialing and reports `Stopped`.
 5. Closing the root scope interrupts the loop, closes the socket, and ends
    every in-flight handler. No further dials occur.
 
@@ -260,10 +262,9 @@ them (26 tests in `packages/inspect`, 13 in `effect-frame`'s
    and 30000 and refuse 0, 30001, and 1.5; they accept a root selector of 1
    to 256 characters and refuse BEL, CSI, DEL, and C1 characters.
    `attachGateway` refuses non-`ws:`, non-loopback (including `[::1]`),
-   portless, and unparsable URLs, a malformed token, retry values of 0, -1,
-   NaN, and Infinity, a maximum below the initial value, and a root name with
-   control characters (with zero dials). A throwing `onStatus` does not stop
-   dialing. Against a peer that drops each socket on open, the delays are
+   portless, and unparsable URLs, a malformed token, and a root name with
+   control characters (with zero dials). A retry schedule that ends after
+   two redials leaves three dials and a `Stopped` status. Against a peer that drops each socket on open, the delays are
    20, 40, 80, 160, 160, 160 ms. Against a raw loopback peer it
    dials `/v1/attach` with its root ID, name, and both subprotocols, answers
    `Inspect` and `SnapshotTooLarge`, and closes the socket when its scope
@@ -305,7 +306,8 @@ three dependency classes:
   `RootRpcs`, `RootId`, `RootName`, `RootSelector`, `DeadlineMillis`,
   `RootInfo`, `InspectRequest`, `GatewayError`, `RootsResponse`,
   `InspectResponse`, `ErrorResponse`, `ReaderResponse`), `attachGateway`,
-  `InvalidAttachOptions`, and the types `AttachOptions` and `AttachStatus`.
+  `defaultRetry`, `defaultOpenTimeout`, `InvalidAttachOptions`, and the types
+  `AttachOptions`, `Attachment` and `AttachStatus`.
   `Protocol.wire` is the one object of fixed wire strings (`version`,
   `subprotocol`, `attachTokenPrefix`, `versionHeader`, `attachPath`,
   `rootsPath`, `inspectPath`). Every request bound lives in a schema:

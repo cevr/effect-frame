@@ -153,14 +153,26 @@ export interface RunningGateway {
   readonly close: () => Promise<void>;
 }
 
-export const startGateway = async (
-  options: Omit<Gateway.GatewayOptions, "attachToken" | "readToken">,
-): Promise<RunningGateway> => {
+/** The gateway's named defaults; a proof overrides the one it is about. */
+type GatewayTuning = Pick<Gateway.GatewayOptions, "allowedOrigin"> &
+  Partial<Pick<Gateway.GatewayOptions, "port" | "maxSnapshotBytes" | "maxRoots">>;
+
+export const startGateway = async (options: GatewayTuning): Promise<RunningGateway> => {
   const attachToken = Gateway.makeToken();
   const readToken = Gateway.makeToken();
   const scope = Effect.runSync(Scope.make());
   const gateway = await Effect.runPromise(
-    Scope.provide(Gateway.make({ ...options, attachToken, readToken }), scope),
+    Scope.provide(
+      Gateway.make({
+        port: 0,
+        maxSnapshotBytes: Gateway.defaultMaxSnapshotBytes,
+        maxRoots: Gateway.defaultMaxRoots,
+        ...options,
+        attachToken,
+        readToken,
+      }),
+      scope,
+    ),
   );
   return {
     gateway,

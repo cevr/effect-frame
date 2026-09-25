@@ -212,6 +212,8 @@ const serve = (args: GatewayArgs, io: Io): Effect.Effect<ExitCode> =>
       attachToken: tokens.attach,
       readToken: tokens.read,
       port: args.port,
+      maxSnapshotBytes: Gateway.defaultMaxSnapshotBytes,
+      maxRoots: Gateway.defaultMaxRoots,
     });
     const files = yield* Capabilities.write(args.stateDir, tokens);
     io.stderr(readyText(args, gateway, files));

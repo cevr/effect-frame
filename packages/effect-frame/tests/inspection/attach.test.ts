@@ -1,14 +1,21 @@
-/* oxlint-disable effect/noGlobals, effect/noThrowStatement, effect/noNewError -- the fake gateway is a raw Bun WebSocket server at the test boundary. */
+/* oxlint-disable effect/noGlobals -- the fake gateway is a raw Bun WebSocket server at the test boundary. */
 /**
  * The public `attachGateway` against a raw loopback peer. The peer plays the
  * gateway's side of the root link by hand: it accepts one upgrade, sends raw
  * RPC request frames, and reads the replies. The full gateway, reader, and
  * real-browser proofs live in `@effect-frame/inspect`.
  */
-import { Deferred, Effect, Exit, Option, Queue, Schema } from "effect";
+import { Deferred, Duration, Effect, Exit, Option, Queue, Schedule, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import * as Frame from "effect-frame/frame";
-import { Protocol, attachGateway, type AttachStatus } from "effect-frame/inspection";
+import {
+  Protocol,
+  attachGateway,
+  defaultOpenTimeout,
+  defaultRetry,
+  type AttachOptions,
+  type AttachStatus,
+} from "effect-frame/inspection";
 import { Rpc, RpcSerialization } from "effect/unstable/rpc";
 
 const TOKEN = "attach-token-0123456789abcdef";
@@ -110,11 +117,35 @@ const inspectOver = (
 
 const frameLayer = Frame.layer({ name: "attach-test" });
 
+const timing = { retry: defaultRetry, openTimeout: defaultOpenTimeout };
+
+/** Doubling from `first` up to `cap`, as `defaultRetry` does from 250 ms to 5 s. */
+const doubling = (first: Duration.Input, cap: Duration.Input): AttachOptions["retry"] =>
+  Schedule.exponential(first).pipe(
+    Schedule.modifyDelay(({ duration }) =>
+      Effect.succeed(Duration.min(duration, Duration.fromInputUnsafe(cap))),
+    ),
+  );
+
+/** Every status the attachment reports from now on, in order. */
+const recordStatus = (status: Stream.Stream<AttachStatus>) =>
+  Effect.gen(function* () {
+    const seen: Array<AttachStatus> = [];
+    yield* Effect.forkScoped(
+      Stream.runForEach(status, (next) =>
+        Effect.sync(() => {
+          seen.push(next);
+        }),
+      ),
+    );
+    return seen;
+  });
+
 describe("effect-frame/inspection attach", () => {
   it.scopedLive.layer(frameLayer)("refuses a gateway it must not dial", () =>
     Effect.gen(function* () {
       const refused = (url: string, token = TOKEN) =>
-        attachGateway({ url, token }).pipe(
+        attachGateway({ url, token, ...timing }).pipe(
           Effect.flip,
           Effect.map((error) => error.detail),
         );
@@ -140,11 +171,8 @@ describe("effect-frame/inspection attach", () => {
         const statuses: Array<string> = [];
         yield* Effect.scoped(
           Effect.gen(function* () {
-            yield* attachGateway({
-              url: gateway.url,
-              token: TOKEN,
-              onStatus: (status) => statuses.push(status._tag),
-            });
+            const attachment = yield* attachGateway({ url: gateway.url, token: TOKEN, ...timing });
+            const seen = yield* recordStatus(attachment.status);
             const upgrade = yield* Deferred.await(gateway.upgrade);
             expect(upgrade.url.pathname).toBe(Protocol.wire.attachPath);
             expect(upgrade.url.searchParams.get("root")).toBe(direct.root.id);
@@ -162,6 +190,7 @@ describe("effect-frame/inspection attach", () => {
             const tooLarge = yield* inspectOver(socket, gateway.frames, "2", 16);
             expect(Exit.isFailure(tooLarge)).toBe(true);
             expect(JSON.stringify(tooLarge)).toContain("SnapshotTooLarge");
+            statuses.push(...seen.map((status) => status._tag));
           }),
         );
         // Closing the attachment scope closes the socket and ends the loop.
@@ -171,40 +200,14 @@ describe("effect-frame/inspection attach", () => {
     10_000,
   );
 
-  it.scopedLive.layer(frameLayer)("refuses retry timing it cannot honour", () =>
-    Effect.gen(function* () {
-      const refused = (
-        timing: Partial<
-          Record<"initialRetryMillis" | "maxRetryMillis" | "openTimeoutMillis", number>
-        >,
-      ) =>
-        attachGateway({ url: "ws://127.0.0.1:4318", token: TOKEN, ...timing }).pipe(
-          Effect.flip,
-          Effect.map((error) => error.detail),
-        );
-      for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
-        expect(yield* refused({ initialRetryMillis: bad })).toBe(
-          "initialRetryMillis must be a finite number above 0",
-        );
-        expect(yield* refused({ maxRetryMillis: bad })).toBe(
-          "maxRetryMillis must be a finite number above 0",
-        );
-        expect(yield* refused({ openTimeoutMillis: bad })).toBe(
-          "openTimeoutMillis must be a finite number above 0",
-        );
-      }
-      expect(yield* refused({ initialRetryMillis: 400, maxRetryMillis: 100 })).toBe(
-        "maxRetryMillis must not be below initialRetryMillis",
-      );
-    }),
-  );
-
   it.scopedLive.layer(Frame.layer({ name: "bad\u001b]0;title\u0007name" }))(
     "refuses a root name with control characters before any dial",
     () =>
       Effect.gen(function* () {
         const gateway = yield* peer();
-        const error = yield* Effect.flip(attachGateway({ url: gateway.url, token: TOKEN }));
+        const error = yield* Effect.flip(
+          attachGateway({ url: gateway.url, token: TOKEN, ...timing }),
+        );
         expect(error.detail).toBe("the Frame root name has control characters");
         yield* Effect.sleep("150 millis");
         expect(gateway.upgrades()).toBe(0);
@@ -212,24 +215,24 @@ describe("effect-frame/inspection attach", () => {
   );
 
   it.scopedLive.layer(frameLayer)(
-    "keeps dialing when the status observer throws",
+    "stops dialing when the retry schedule ends, and says so",
     () =>
       Effect.gen(function* () {
         const gateway = yield* peer(true);
-        const seen: Array<string> = [];
-        yield* attachGateway({
+        const attachment = yield* attachGateway({
           url: gateway.url,
           token: TOKEN,
-          initialRetryMillis: 10,
-          maxRetryMillis: 20,
-          onStatus: (status) => {
-            seen.push(status._tag);
-            throw new Error("observer bug");
-          },
+          retry: Schedule.spaced("10 millis").pipe(Schedule.upTo({ times: 2 })),
+          openTimeout: defaultOpenTimeout,
         });
-        yield* Effect.sleep("300 millis");
-        expect(gateway.upgrades()).toBeGreaterThanOrEqual(3);
-        expect(seen.filter((tag) => tag === "Disconnected").length).toBeGreaterThanOrEqual(2);
+        const stopped = yield* attachment.status.pipe(
+          Stream.filter((status) => status._tag === "Stopped"),
+          Stream.runHead,
+          Effect.timeout("5 seconds"),
+        );
+        expect(stopped).toEqual(Option.some({ _tag: "Stopped", attempt: 3 }));
+        yield* Effect.sleep("100 millis");
+        expect(gateway.upgrades()).toBe(3);
       }),
     10_000,
   );
@@ -239,14 +242,13 @@ describe("effect-frame/inspection attach", () => {
     () =>
       Effect.gen(function* () {
         const gateway = yield* peer(true);
-        const statuses: Array<AttachStatus> = [];
-        yield* attachGateway({
+        const attachment = yield* attachGateway({
           url: gateway.url,
           token: TOKEN,
-          initialRetryMillis: 20,
-          maxRetryMillis: 160,
-          onStatus: (status) => statuses.push(status),
+          retry: doubling("20 millis", "160 millis"),
+          openTimeout: defaultOpenTimeout,
         });
+        const statuses = yield* recordStatus(attachment.status);
         const delays = () =>
           statuses.flatMap((status) => {
             if (status._tag === "Disconnected") return [status.retryInMillis];

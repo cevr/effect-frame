@@ -1,5 +1,7 @@
 # DOM and reactivity benchmarks Solid publishes against
 
+<!-- paths: other repositories -->
+
 Date: 2026-09-21.
 Ticket: [Verify which DOM benchmarks Solid publishes against and how to run them locally](https://github.com/cevr/effect-frame/issues/60).
 Harness: [Set up the DOM benchmark harness and record the frame against Solid 2 and Octane](https://github.com/cevr/effect-frame/issues/61).

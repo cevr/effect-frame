@@ -243,7 +243,7 @@ An idle-time heartbeat alarm is not implemented. An object whose machine sits mi
 
 #### A machine spends one revision before any command
 
-`Behavior.machine` emits the state it hydrated on its `changes` stream when it opens. The durable actor commits that as an autonomous advance. A fresh machine therefore commits its initial state as revision 1, and the first command lands at revision 2. This is `packages/actor/src/durable.ts` behavior and predates this proof. Row g asserts the relations between revisions, not fixed numbers, so it measures recovery and not that starting cost. Decide whether that first advance should be suppressed before a machine contract ships.
+`Behavior.machine` emits the state it hydrated on its `changes` stream when it opens. The durable actor commits that as an autonomous advance. A fresh machine therefore commits its initial state as revision 1, and the first command lands at revision 2. This is `packages/effect-frame/src/actor/durable.ts` behavior and predates this proof. Row g asserts the relations between revisions, not fixed numbers, so it measures recovery and not that starting cost. Decide whether that first advance should be suppressed before a machine contract ships.
 
 ### Still not executed
 

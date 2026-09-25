@@ -5,7 +5,7 @@ Status: public boundary for #58. The browser half ships as the
 gateway and the reader ship as the `effect-frame` executable of the new
 workspace package `packages/inspect` (`@effect-frame/inspect`), which stays
 `private` until its first npm publish. The private proof workspace
-`tooling/inspection-gateway` is retired. "Public boundary" below lists what
+`921638a:tooling/inspection-gateway` is retired. "Public boundary" below lists what
 is public, what stays private, and the choices made while promoting it.
 
 A browser Frame root holds the state that a reader wants: mounted routes,

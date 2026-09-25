@@ -14,8 +14,8 @@ Sources:
 - `packages/effect-frame/src/view/driven.server.ts` (server only,
   `effect-frame/view/driven`): `session`.
 - `packages/effect-frame/tests/view/remote.test.tsx`: every proof below.
-- The prototype this promotes: `packages/view/prototypes/remote-host.ts` and
-  `packages/view/tests/server-wire.test.tsx` on the local branch
+- The prototype this promotes: `93bcf80:packages/view/prototypes/remote-host.ts` and
+  `93bcf80:packages/view/tests/server-wire.test.tsx` on the local branch
   `prototype/server-wire` (Rift `.rifts/effect-frame/prototype-server-wire`,
   commit `93bcf80`). `morph.ts` is not promoted, as #27 decided.
 

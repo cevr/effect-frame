@@ -24,7 +24,7 @@ All commits referenced in this repository's design notes live on the local
 | `apps/notes`                        | app             | example        | one contract, a Bun server with server render and the HTTP transport, a hydrated browser client, a terminal client                         |
 
 The rule behind the split: a module a browser may load never imports a store, a
-host, or an implementation. `packages/actor/tests/boundary.test.ts` bundles the
+host, or an implementation. `packages/effect-frame/tests/actor/boundary.test.ts` bundles the
 `./client` entry and fails when a server marker reaches it. New server code goes
 behind the `.` entry; new client code must keep that test green.
 

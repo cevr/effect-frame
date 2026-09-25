@@ -1,5 +1,7 @@
 # Prior art
 
+<!-- paths: other repositories -->
+
 Fetch with `okra repo fetch <slug>`; get the path with `okra repo path <slug>`. `okra repo list` prints hundreds of kilobytes; use `path`. When a cached repo is on the wrong branch, `git fetch origin <branch>` and read `origin/<branch>`.
 
 | Slug              | Branch      | Read it for                                                                                                                                                                                                                                                                            |

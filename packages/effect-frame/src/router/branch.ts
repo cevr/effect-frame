@@ -70,7 +70,7 @@ import type {
   RouteFailure,
   Verdict,
 } from "./check.js";
-import { Continue, register as registerChecks } from "./check.js";
+import { Continue } from "./check.js";
 import type {
   AnyRoute,
   Entered,
@@ -90,6 +90,7 @@ import type {
 import { matchPrefix, segmentsOf } from "./path.js";
 import {
   RouteBrand,
+  RouteChecks,
   address,
   parseTemplate,
   printPath,
@@ -116,12 +117,7 @@ import type {
   Prerendered,
   Level as PrerenderLevel,
 } from "./prerender.js";
-import {
-  inputs as makeInputs,
-  planFor,
-  prerendered,
-  register as registerPrerender,
-} from "./prerender.js";
+import { inputs as makeInputs, planFor, prerendered } from "./prerender.js";
 
 /**
  * The nested route model: segments, branches, and the client mode. The
@@ -2931,13 +2927,14 @@ const laterNavigation: Effect.Effect<boolean> = Effect.flatMap(
  * URL the tree matches. The router runs the tree's checks before it moves
  * history and before `enter` or `update`. An acquisition failure that no
  * segment handles is a defect: nothing is published. `extra` is copied onto
- * the route before its checks are registered under it.
+ * the route, and `checks` are the route's checks.
  */
 const mountTree = <Name extends string, ViewR, DataR, Extra extends object>(
   name: Name,
   branch: AnyBranch<ViewR>,
   extra: Extra,
   mode: RenderingMode,
+  checks: Checker<DataR>,
 ): Extra & Tree<Name, ViewR | DataR> => {
   // A child segment matches only below its ancestors' path, so a tree
   // mounted from one would never match. The type refuses it; so does this.
@@ -2962,6 +2959,7 @@ const mountTree = <Name extends string, ViewR, DataR, Extra extends object>(
   const mountable: Extra & Tree<Name, ViewR | DataR> = {
     ...extra,
     [RouteBrand]: mode,
+    [RouteChecks]: Option.some(checks),
     name,
     searchKeys: treeSearchKeys(root.searchKeys),
     enter: (url, navigation = unavailable) =>
@@ -3069,16 +3067,21 @@ const mountTree = <Name extends string, ViewR, DataR, Extra extends object>(
         }),
       ),
   };
-  // `DataR` lists every segment's `CheckR`: widening the erased checks to it
-  // restores what they need, and the router runs them in the mount context.
-  const checks: Checker<DataR> = (url, kind) =>
+  return mountable;
+};
+
+/**
+ * A tree's checks: the segments a URL matched, parent first. `DataR` lists
+ * every segment's `CheckR`: widening the erased checks to it restores what
+ * they need, and the router runs them in the mount context.
+ */
+const treeChecks =
+  <R, DataR>(root: BranchRuntime<R>): Checker<DataR> =>
+  (url, kind) =>
     Option.match(matchUrl(root, url), {
       onNone: () => Effect.succeed<Verdict>(Continue),
       onSome: (matched) => matched.check(url, kind),
     });
-  registerChecks(mountable, checks);
-  return mountable;
-};
 
 /** A mounted tree: an ordinary route for `mount({ routes })`. */
 export interface Tree<Name extends string, R> extends AnyRoute<R> {
@@ -3134,7 +3137,7 @@ const modeConstructor =
     name: Name,
     root: Branch<Seg, ViewR, DataR> & ScopesClosed<ViewR>,
   ): Tree<Name, ViewR | DataR> =>
-    mountTree(name, root, {}, mode);
+    mountTree(name, root, {}, mode, treeChecks<ViewR, DataR>(runtimeOf(root)));
 
 /**
  * `ClientOnly` (#22, #62): the route renders on the client only. A server
@@ -3189,9 +3192,6 @@ export const redirecting = <const Name extends string, Params, Search, CheckR = 
   );
   const runtime = runtimeOf(branch);
   const segRuntime = segmentRuntimeOf(seg);
-  // Its mode is never read: a document settles the checks before it reads
-  // one, and this route's checks never continue.
-  const tree = mountTree<Name, never, CheckR | R, object>(name, branch, {}, "SSR");
   const checks: Checker<CheckR | R> = (url, kind) =>
     Option.match(matchUrl(runtime, url), {
       onNone: () => Effect.succeed<Verdict>(Continue),
@@ -3209,8 +3209,9 @@ export const redirecting = <const Name extends string, Params, Search, CheckR = 
           );
         }),
     });
-  registerChecks(tree, checks);
-  return tree;
+  // Its mode is never read: a document settles the checks before it reads
+  // one, and this route's checks never continue.
+  return mountTree<Name, never, CheckR | R, object>(name, branch, {}, "SSR", checks);
 };
 
 /**
@@ -3223,8 +3224,16 @@ export interface DrivenAt {
   readonly drive: Remote.Drive<AnyContract>;
 }
 
-/** Each driven tree's resolver: the driven leaf a URL ends at. */
-const drivenTrees = new WeakMap<object, (url: URL) => Option.Option<DrivenAt>>();
+/** Holds a driven tree's resolver: the driven leaf a URL ends at. */
+const DrivenResolver: unique symbol = Symbol.for("effect-frame/router/DrivenResolver");
+
+/** What `Route.driven` adds to its route: how to find the driven leaf a URL ends at. */
+interface DrivenTree {
+  readonly [DrivenResolver]: (url: URL) => Option.Option<DrivenAt>;
+}
+
+const isDrivenTree = <R>(route: AnyRoute<R>): route is AnyRoute<R> & DrivenTree =>
+  Predicate.hasProperty(route, DrivenResolver);
 
 /** The deepest segment a URL matched, and its values. */
 const deepestOutline = (outline: Outline): Outline =>
@@ -3290,11 +3299,15 @@ export const driven: ModeConstructor = <
   name: Name,
   root: Branch<Seg, ViewR, DataR> & ScopesClosed<ViewR>,
 ): Tree<Name, ViewR | DataR> => {
-  // Checked before the tree is mounted: a refused tree registers nothing.
-  const resolve = drivenTree(name, root);
-  const tree = mountTree<Name, ViewR, DataR, object>(name, root, {}, "Streamed");
-  drivenTrees.set(tree, resolve);
-  return tree;
+  // Checked before the tree is mounted: a refused tree is never made.
+  const extra: DrivenTree = { [DrivenResolver]: drivenTree(name, root) };
+  return mountTree<Name, ViewR, DataR, DrivenTree>(
+    name,
+    root,
+    extra,
+    "Streamed",
+    treeChecks<ViewR, DataR>(runtimeOf(root)),
+  );
 };
 
 /**
@@ -3308,11 +3321,11 @@ export const drivenAt = <R>(
   url: URL,
 ): Option.Option<DrivenAt> => {
   for (const route of routes) {
-    const found = Option.flatMap(Option.fromNullishOr(drivenTrees.get(route)), (resolve) =>
-      resolve(url),
-    );
-    if (Option.isSome(found)) {
-      return found;
+    if (isDrivenTree(route)) {
+      const found = route[DrivenResolver](url);
+      if (Option.isSome(found)) {
+        return found;
+      }
     }
   }
   return Option.none();
@@ -3364,16 +3377,15 @@ export const prerender: PrerenderConstructor = <
   root: Branch<Seg, ViewR, DataR> & ScopesClosed<ViewR>,
   options: PrerenderOptions<I>,
 ): Tree<Name, ViewR | DataR> & Prerendered<InputsError<I[number]>, InputsServices<I[number]>> => {
-  // Checked before the tree is mounted: a refused tree registers nothing.
-  const plan = planFor(name, runtimeOf(root).level, options.inputs);
-  const tree = mountTree<
+  // Checked before the tree is mounted: a refused tree is never made.
+  const runtime = runtimeOf(root);
+  const plan = planFor(name, runtime.level, options.inputs);
+  return mountTree<
     Name,
     ViewR,
     DataR,
     Prerendered<InputsError<I[number]>, InputsServices<I[number]>>
-  >(name, root, prerendered(), "AwaitAll");
-  registerPrerender(tree, plan);
-  return tree;
+  >(name, root, prerendered(plan), "AwaitAll", treeChecks<ViewR, DataR>(runtime));
 };
 
 /** How one segment enumerates its own params for a prerender tree. See `prerender`. */

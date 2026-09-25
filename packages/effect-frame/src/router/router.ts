@@ -19,7 +19,7 @@ import {
   SubscriptionRef,
 } from "effect";
 import type { AnyRoute, Entered, RouteInstance, RouteNavigation, UrlUpdater } from "./codec.js";
-import { RouteBrand } from "./codec.js";
+import { RouteBrand, RouteChecks } from "./codec.js";
 import { notFoundMode } from "./rendering-mode.js";
 import {
   Runtime as UrlStateRuntime,
@@ -194,6 +194,7 @@ const admitNames = (routes: ReadonlyArray<AnyRoute<unknown>>): Effect.Effect<voi
 /** The not-found view as a route that matches everything, so one rule mounts both. */
 const notFoundRoute = <R>(view: View.View<NotFoundProps, never, R>): AnyRoute<R> => ({
   [RouteBrand]: notFoundMode,
+  [RouteChecks]: Option.none(),
   name: notFoundName,
   searchKeys: { known: true, keys: [] },
   enter: (url) =>

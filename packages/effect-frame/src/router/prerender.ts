@@ -1,4 +1,4 @@
-import { Effect, Option, Schema } from "effect";
+import { Effect, Option, Predicate, Schema } from "effect";
 import type { AnyRoute } from "./codec.js";
 import type { AnySegment, Declarations, Segment } from "./branch.js";
 
@@ -44,7 +44,10 @@ export type Enumerate<Own, Inherited, E, R> =
   | Effect.Effect<ReadonlyArray<Own>, E, R>
   | ((inherited: Inherited) => Effect.Effect<ReadonlyArray<Own>, E, R>);
 
-/** Brands an inputs value: only `Route.inputs` makes one. */
+/**
+ * Brands an inputs value and holds its enumeration: only `Route.inputs`
+ * makes one.
+ */
 const InputsBrand: unique symbol = Symbol.for("effect-frame/router/Inputs");
 
 /**
@@ -54,7 +57,10 @@ const InputsBrand: unique symbol = Symbol.for("effect-frame/router/Inputs");
  */
 export interface Inputs<E, R> {
   readonly _tag: "Inputs";
-  readonly [InputsBrand]: "Inputs";
+  /** The enumeration, with the inherited params erased to a record. */
+  readonly [InputsBrand]: (
+    inherited: ParamsRecord,
+  ) => Effect.Effect<ReadonlyArray<ParamsRecord>, E, R>;
   readonly segment: AnySegment;
   /** Phantom: what the enumeration fails with and needs. */
   readonly "~inputs": (_: never) => { readonly error: E; readonly services: R };
@@ -66,53 +72,44 @@ export type AnyInputs = Inputs<unknown, unknown>;
 export type InputsError<I> = I extends Inputs<infer E, unknown> ? E : never;
 export type InputsServices<I> = I extends Inputs<unknown, infer R> ? R : never;
 
-/**
- * An enumeration with its failure and services moved to the route's
- * phantom (`Prerendered`). `enumerate` narrows them back where the build,
- * which reads that phantom, runs it.
- */
-// @effect-diagnostics anyUnknownInErrorContext:off
-type Erased = (
-  inherited: ParamsRecord,
-) => Effect.Effect<ReadonlyArray<ParamsRecord>, unknown, unknown>;
-
 /** One own params value as the record the next level inherits. */
 const asRecord = <Own>(own: Own): ParamsRecord =>
   // oxlint-disable-next-line effect/noAs -- Route.inputs typed Own as this segment's own params, a record.
   own as ParamsRecord;
 
-const erase = <Own, E, R>(
+const asRecords = <Own, E, R>(
   effect: Effect.Effect<ReadonlyArray<Own>, E, R>,
-): Effect.Effect<ReadonlyArray<ParamsRecord>, unknown, unknown> =>
+): Effect.Effect<ReadonlyArray<ParamsRecord>, E, R> =>
   Effect.map(effect, (list) => list.map(asRecord));
 
+/**
+ * Run one inputs value's enumeration with its failure and services at the
+ * ones the route's phantom (`Prerendered`) names: the build reads that
+ * phantom, which lists every inputs value's.
+ */
+// @effect-diagnostics anyUnknownInErrorContext:off
 // @effect-diagnostics unsafeEffectTypeAssertion:off
-const restore = <E, R>(
-  effect: Effect.Effect<ReadonlyArray<ParamsRecord>, unknown, unknown>,
+const runInputs = <E, R>(
+  given: AnyInputs,
+  inherited: ParamsRecord,
 ): Effect.Effect<ReadonlyArray<ParamsRecord>, E, R> =>
   // oxlint-disable-next-line effect/noAs -- the caller names the E and R of the tree's Prerendered phantom, which lists every inputs value's.
-  effect as Effect.Effect<ReadonlyArray<ParamsRecord>, E, R>;
+  given[InputsBrand](inherited) as Effect.Effect<ReadonlyArray<ParamsRecord>, E, R>;
 // @effect-diagnostics unsafeEffectTypeAssertion:error
-
-/** An enumeration in either spelling, erased. */
-const eraseEnumerate =
-  <Own, Inherited, E, R>(enumerate: Enumerate<Own, Inherited, E, R>): Erased =>
-  (inherited) => {
-    if (Effect.isEffect(enumerate)) {
-      return erase(enumerate);
-    }
-    // oxlint-disable-next-line effect/noAs -- the build passes exactly the params this segment's ancestors enumerated, which is Inherited.
-    return erase(enumerate(inherited as Inherited));
-  };
-
-/** Run an erased enumeration with the channels its tree's phantom names. */
-const runErased =
-  <E, R>(run: Erased) =>
-  (inherited: ParamsRecord): Effect.Effect<ReadonlyArray<ParamsRecord>, E, R> =>
-    restore<E, R>(run(inherited));
 // @effect-diagnostics anyUnknownInErrorContext:error
 
-const enumerations = new WeakMap<AnyInputs, Erased>();
+/** An enumeration in either spelling, with its params erased to records. */
+const eraseEnumerate =
+  <Own, Inherited, E, R>(
+    enumerate: Enumerate<Own, Inherited, E, R>,
+  ): ((inherited: ParamsRecord) => Effect.Effect<ReadonlyArray<ParamsRecord>, E, R>) =>
+  (inherited) => {
+    if (Effect.isEffect(enumerate)) {
+      return asRecords(enumerate);
+    }
+    // oxlint-disable-next-line effect/noAs -- the build passes exactly the params this segment's ancestors enumerated, which is Inherited.
+    return asRecords(enumerate(inherited as Inherited));
+  };
 
 const phantom =
   <A>() =>
@@ -137,20 +134,19 @@ export const inputs = <Params, Inherited, E = never, R = never>(
     Inherited
   >,
   enumerate: Enumerate<OwnParams<Params, Inherited>, Inherited, E, R>,
-): Inputs<E, R> => {
-  const made: Inputs<E, R> = {
-    _tag: "Inputs",
-    [InputsBrand]: "Inputs",
-    segment,
-    "~inputs": phantom(),
-  };
-  enumerations.set(made, eraseEnumerate(enumerate));
-  return made;
-};
+): Inputs<E, R> => ({
+  _tag: "Inputs",
+  [InputsBrand]: eraseEnumerate(enumerate),
+  segment,
+  "~inputs": phantom(),
+});
 
 // ---------------------------------------------------------------------------
 // The tree a prerender constructor made
 // ---------------------------------------------------------------------------
+
+/** Holds a prerender tree's plan: what the build walks. */
+const PrerenderPlan: unique symbol = Symbol.for("effect-frame/router/PrerenderPlan");
 
 /**
  * A mounted prerender tree. The phantom carries what its inputs fail with
@@ -158,13 +154,23 @@ export const inputs = <Params, Inherited, E = never, R = never>(
  */
 export interface Prerendered<E, R> {
   readonly "~prerender": (_: never) => { readonly error: E; readonly services: R };
+  /** What the build reads: the tree's levels and each segment's inputs. */
+  readonly [PrerenderPlan]: Plan;
 }
 
 export type PrerenderError<Route> = Route extends Prerendered<infer E, unknown> ? E : never;
 export type PrerenderServices<Route> = Route extends Prerendered<unknown, infer R> ? R : never;
 
-/** The phantom a prerender constructor copies onto its route. */
-export const prerendered = <E, R>(): Prerendered<E, R> => ({ "~prerender": phantom() });
+/** The phantom and the plan a prerender constructor copies onto its route. */
+export const prerendered = <E, R>(plan: Plan): Prerendered<E, R> => ({
+  "~prerender": phantom(),
+  [PrerenderPlan]: plan,
+});
+
+const isPrerendered = <R>(
+  route: AnyRoute<R>,
+): route is AnyRoute<R> & Prerendered<unknown, unknown> =>
+  Predicate.hasProperty(route, PrerenderPlan);
 
 /**
  * One segment of a prerender tree as the build walks it: its own param
@@ -187,11 +193,13 @@ export interface Plan {
   readonly inputs: ReadonlyMap<AnySegment, AnyInputs>;
 }
 
-const plans = new WeakMap<object, Plan>();
-
 /** The plan of a route a prerender constructor made. None: another mode. */
-export const planOf = <R>(route: AnyRoute<R>): Option.Option<Plan> =>
-  Option.fromNullishOr(plans.get(route));
+export const planOf = <R>(route: AnyRoute<R>): Option.Option<Plan> => {
+  if (isPrerendered(route)) {
+    return Option.some(route[PrerenderPlan]);
+  }
+  return Option.none();
+};
 
 // ---------------------------------------------------------------------------
 // The definition-time check (#23 §1.2)
@@ -290,11 +298,6 @@ export const planFor = (name: string, level: Level, given: ReadonlyArray<AnyInpu
   return { name, level, inputs: bySegment };
 };
 
-/** Record the plan of a route its prerender constructor made. */
-export const register = <R>(route: AnyRoute<R>, plan: Plan): void => {
-  plans.set(route, plan);
-};
-
 // ---------------------------------------------------------------------------
 // Enumeration (#23 §1.2): the product down the branch, parent first
 // ---------------------------------------------------------------------------
@@ -315,11 +318,7 @@ export const enumerate = <E, R>(plan: Plan): Effect.Effect<ReadonlyArray<Page>, 
   const own = (node: Level, inherited: ParamsRecord) =>
     Option.match(Option.fromNullishOr(plan.inputs.get(node.segment)), {
       onNone: () => Effect.succeed<ReadonlyArray<ParamsRecord>>([noParams]),
-      onSome: (given) =>
-        Option.match(Option.fromNullishOr(enumerations.get(given)), {
-          onNone: () => Effect.die("an inputs value not made by Route.inputs"),
-          onSome: (run) => runErased<E, R>(run)(inherited),
-        }),
+      onSome: (given) => runInputs<E, R>(given, inherited),
     });
   const walk = (node: Level, inherited: ParamsRecord): Effect.Effect<ReadonlyArray<Page>, E, R> =>
     Effect.flatMap(own(node, inherited), (records) =>

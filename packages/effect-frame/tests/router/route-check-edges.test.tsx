@@ -94,7 +94,7 @@ const Old = Route.redirecting(
   ({ params }) => Effect.succeed(Route.redirect(gateSegment, { id: params.id }, {})),
 );
 
-const mountApp = (gate: Gate, initial: string) =>
+const mountApp = (gate: Gate, initial: string, app: Route.AnyRoute<Router> = makeApp(gate)) =>
   Effect.gen(function* () {
     const current = yield* Ref.make(new URL(`${origin}${initial}`));
     const pops = yield* Queue.unbounded<URL>();
@@ -117,7 +117,7 @@ const mountApp = (gate: Gate, initial: string) =>
         mountRouter({
           landing: NavigationBehavior.Restore,
           traversalReadLimit: "3 seconds",
-          routes: [makeApp(gate), Login, Home, Old],
+          routes: [app, Login, Home, Old],
           notFound: NotFound,
           host,
           root: mountRoot,
@@ -151,6 +151,20 @@ const defectOf = <A, E>(exit: Exit.Exit<A, E>): unknown =>
   });
 
 describe("route check edges", () => {
+  it.scoped("a spread of a guarded route keeps its checks", () =>
+    Effect.gen(function* () {
+      const gate = makeGate(["deny"]);
+      const guarded = makeApp(gate);
+      const { receipts, history } = yield* mountApp(gate, "/home", { ...guarded });
+
+      const receipt = yield* receipts.push("/g/deny");
+      expect(receipt).toMatchObject({ _tag: "Committed" });
+      expect(receipt.url.pathname).toBe("/login");
+      expect(history).toEqual(["push /login"]);
+      expect(gate.asked).toEqual(["deny:push"]);
+    }),
+  );
+
   it.scoped("a check that tries to move dies, and the router keeps serving", () =>
     Effect.gen(function* () {
       const gate = makeGate();

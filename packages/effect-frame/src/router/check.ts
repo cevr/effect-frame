@@ -2,6 +2,7 @@ import type { TransportReadError, Unauthorized } from "effect-frame/actor";
 import { Option, Schema } from "effect";
 import type { Effect, Scope } from "effect";
 import type { AnyRoute, Linkable } from "./codec.js";
+import { RouteChecks } from "./codec.js";
 import type { Router } from "./router.js";
 import type { Runtime as UrlStateRuntime } from "./url-state-runtime.js";
 
@@ -87,24 +88,17 @@ export type Before<Params, Search, R> = (
  */
 export type Checker<R> = (url: URL, kind: NavigationKind) => Effect.Effect<Verdict, never, R>;
 
-const checkers = new WeakMap<object, Checker<unknown>>();
-
-/** Attach checks to a route value without changing the public route type. */
-export const register = <R>(route: AnyRoute<R>, checker: Checker<R>): void => {
-  checkers.set(route, checker);
-};
-
 /**
  * The checks of one route, with the services the mount context supplies.
  * A route without checks always continues. The router provides `Router`
  * and a temporary `Scope`. A check runs before any route instance exists,
- * so it never has an instance's url-state runtime; the one registrar,
+ * so it never has an instance's url-state runtime; the one maker,
  * `Branch.route`, lists only the checks' own services.
  */
 export const read = <R>(route: AnyRoute<R>): Option.Option<Checker<MountServices<R>>> =>
   Option.map(
-    Option.fromNullishOr(checkers.get(route)),
-    // oxlint-disable-next-line effect/noAs -- register stored a Checker<R> under this same route value; see above for what is removed.
+    route[RouteChecks],
+    // oxlint-disable-next-line effect/noAs -- the route's R lists what the router provides; see above for what is removed.
     (checker) => checker as Checker<MountServices<R>>,
   );
 

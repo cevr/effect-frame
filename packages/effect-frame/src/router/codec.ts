@@ -7,6 +7,7 @@ export { UrlValueRejected } from "./path.js";
 import type { RouteMatch } from "./router.js";
 import type { Shell } from "./landing.js";
 import type { Asker } from "./leave-registry.js";
+import type { Checker } from "./check.js";
 import type { RenderingMode } from "./rendering-mode.js";
 
 /**
@@ -534,12 +535,21 @@ export interface EnteredValues {
  */
 export const RouteBrand: unique symbol = Symbol.for("effect-frame/router/Route");
 
+/**
+ * Holds a route's checks. A mode constructor sets them on the route value,
+ * so a copy of the route (a spread) keeps them. The symbol is not public:
+ * only the router runs a check.
+ */
+export const RouteChecks: unique symbol = Symbol.for("effect-frame/router/RouteChecks");
+
 /** How a branded route renders a document. */
 export const modeOf = <R>(route: AnyRoute<R>): RenderingMode => route[RouteBrand];
 
 /** A route with its shapes erased: what a router holds. A mode constructor makes one. */
 export interface AnyRoute<R> {
   readonly [RouteBrand]: RenderingMode;
+  /** The route's checks, parent first. None: it always continues. */
+  readonly [RouteChecks]: Option.Option<Checker<R>>;
   readonly name: string;
   /** Encoded search ownership. Unknown means an opaque codec needs a declaration. */
   readonly searchKeys: SearchKeyInfo;

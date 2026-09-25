@@ -2393,7 +2393,7 @@ const makeBranch = <
      * no longer matches is left as it is.
      */
     const moveSearch =
-      (move: RouteNavigation["navigate"]) =>
+      (move: RouteNavigation["push"]) =>
       (update: SearchUpdater<Search>): Effect.Effect<void> =>
         move(
           (latest) =>
@@ -2415,7 +2415,7 @@ const makeBranch = <
         );
     const props: SegmentProps<Params, Search, Data> = {
       href: (params, search) => seg.href(params, search),
-      updateSearch: moveSearch(tree.navigation.navigate),
+      pushSearch: moveSearch(tree.navigation.push),
       replaceSearch: moveSearch(tree.navigation.replace),
       params: {
         get: Effect.map(stateSource.get, (current) => current.values.params),
@@ -3087,7 +3087,7 @@ export interface Tree<Name extends string, R> extends AnyRoute<R> {
 }
 
 const unavailable: RouteNavigation = {
-  navigate: () => Effect.die("route navigation is unavailable before router mount"),
+  push: () => Effect.die("route navigation is unavailable before router mount"),
   replace: () => Effect.die("route navigation is unavailable before router mount"),
 };
 

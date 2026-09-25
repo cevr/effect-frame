@@ -278,7 +278,7 @@ describe("#28 active follows the mounted branch", () => {
       // its query has been declared and its read has started.
       const snapshot = yield* hold(`snapshot:${draftKey("t1", "9")}`);
       const read = yield* hold("post:t1/9");
-      const moving = yield* Effect.forkChild(router.navigate("/app/t1/pairs/9"));
+      const moving = yield* Effect.forkChild(router.push("/app/t1/pairs/9"));
       yield* Deferred.await(snapshot.started);
       yield* Deferred.await(read.started);
 
@@ -301,7 +301,7 @@ describe("#28 active follows the mounted branch", () => {
       const most = { current: 0 };
       for (let step = 1; step <= 50; step += 1) {
         const { path, keys } = stepAt(step);
-        yield* router.navigate(path);
+        yield* router.push(path);
         const expected = sorted(keys);
         const now = yield* active;
         expect({ step, active: now }).toEqual({ step, active: expected });
@@ -349,7 +349,7 @@ describe("a route query binding's override (#19)", () => {
       const post = Option.getOrThrow(yield* Ref.get(bound));
 
       // A stayed move of the child's param: the binding now names post 2.
-      yield* router.navigate("/app/t1/posts/2");
+      yield* router.push("/app/t1/posts/2");
       const second = yield* QueryCache.use((cache) =>
         cache.open(Post, { tenant: "t1", postId: "2" }),
       );
@@ -419,7 +419,7 @@ describe("a route query binding's override (#19)", () => {
         // Post 2's read is held: the move names post 2 while the binding
         // still shows post 1's value, carried and stale.
         const postTwo = yield* hold("post:t1/2");
-        const moving = yield* Effect.forkChild(router.navigate("/app/t1/posts/2"));
+        const moving = yield* Effect.forkChild(router.push("/app/t1/posts/2"));
         yield* Deferred.await(postTwo.started);
         const second = yield* QueryCache.use((cache) =>
           cache.open(Post, { tenant: "t1", postId: "2" }),

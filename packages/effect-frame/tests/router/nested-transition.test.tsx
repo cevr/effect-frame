@@ -855,7 +855,7 @@ describe("private nested transition", () => {
           (record) => record.id,
         );
 
-        yield* page.act(router.navigate("/app/t1/posts/1/edit"), {
+        yield* page.act(router.push("/app/t1/posts/1/edit"), {
           label: "edit child replaces the post child",
           until: (actual) =>
             textAt(actual, "#edit-title") === "value:post:t1/1" && !hasAt(actual, "#post"),
@@ -907,7 +907,7 @@ describe("private nested transition", () => {
 
         const snapshot2 = yield* holdSnapshot("t1", "2");
         const post2 = yield* hold("post:t1/2");
-        const moving = yield* Effect.forkChild(router.navigate("/app/t1/posts/2"));
+        const moving = yield* Effect.forkChild(router.push("/app/t1/posts/2"));
         yield* Deferred.await(snapshot2.started);
         yield* Deferred.await(post2.started);
 
@@ -986,7 +986,7 @@ describe("private nested transition", () => {
         // A search-only change moves no key, yet publishes the new search
         // and keeps every declaration and every entry.
         expect(textAt(root, "#post-tab")).toBe("read");
-        yield* page.act(router.navigate("/app/t1/posts/2?tab=comments"), {
+        yield* page.act(router.push("/app/t1/posts/2?tab=comments"), {
           label: "search refinement publishes the new tab",
           until: (actual) =>
             textAt(actual, "#post-tab") === "comments" && textAt(actual, "#post-param") === "2",
@@ -1013,7 +1013,7 @@ describe("private nested transition", () => {
           (record) => record.id,
         );
 
-        yield* page.act(router.navigate("/app/t1"), {
+        yield* page.act(router.push("/app/t1"), {
           label: "the layout alone",
           until: (actual) =>
             !hasAt(actual, "#post") && hasAt(actual, "#layout") && !hasAt(actual, "#child-loading"),
@@ -1096,7 +1096,7 @@ describe("private nested transition", () => {
 
         // The second read is held; the first completes and opens its changes.
         const second2 = yield* holdSnapshot("t1", "2-second");
-        const moving = yield* Effect.forkChild(router.navigate("/app/t1/pairs/2"));
+        const moving = yield* Effect.forkChild(router.push("/app/t1/pairs/2"));
         yield* Deferred.await(second2.started);
         yield* awaitOpened("t1", "2");
 
@@ -1140,7 +1140,7 @@ describe("private nested transition", () => {
         yield* failSnapshot("t1", "2");
         const post2 = yield* hold("post:t1/2");
         const comments2 = yield* hold("comments:t1/2");
-        const moving = yield* Effect.forkChild(router.navigate("/app/t1/posts/2"));
+        const moving = yield* Effect.forkChild(router.push("/app/t1/posts/2"));
         yield* Deferred.await(snapshot2.started);
         yield* Deferred.await(post2.started);
         yield* Deferred.await(comments2.started);

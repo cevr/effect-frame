@@ -451,7 +451,7 @@ describe("a driven route (#36)", () => {
         expect(Option.getOrThrow(countNode())).toBe(drawn);
 
         // New params name a new drive: the leaf follows it, over a new session.
-        yield* router.navigate("/room/b");
+        yield* router.push("/room/b");
         yield* eventually("the second drive", () =>
           Option.exists(countNode(), (node) => node.textContent === "20"),
         );
@@ -589,7 +589,7 @@ describe("a driven route (#36)", () => {
         yield* eventually("the held send", () => log.sends.length === 1);
 
         // The leaf moves on: the first connection closes, and its send with it.
-        yield* router.navigate("/room/h2");
+        yield* router.push("/room/h2");
         yield* eventually("the send's interruption", () => log.interrupted.length === 1);
         expect(log.interrupted).toEqual(["/room/h1"]);
         yield* Deferred.succeed(held, void 0);

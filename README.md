@@ -209,7 +209,11 @@ const program = Effect.gen(function* () {
 - A view that can fail, and every `View.lazy` view, needs an `errored`
   handler. It receives a `Route.RouteFailure`.
 - Every segment view gets `params`, `search`, `data`, `href`,
-  `updateSearch`, and `replaceSearch`. A layout also gets `outlet`.
+  `pushSearch`, and `replaceSearch`. A layout also gets `outlet`.
+- Every move is `push` or `replace`: `router.push(href)`, a link's
+  `link.push` and `link.replace`, a view's `pushSearch` and
+  `replaceSearch`, and a `UrlState`'s `push` and `replace`, which take a
+  value or an updater of the latest value.
 - Each `data` binding has a `state` Source. A `Route.query` binding also has
   `refresh` and `override`. A `Route.actor` binding is `{ ref, state }`:
   `state` follows the reference the route holds now, and a send names it,

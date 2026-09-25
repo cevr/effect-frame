@@ -274,7 +274,7 @@ export const followLinks = /* @__PURE__ */ Effect.fn("Router.followLinks")(funct
       if (request.replace) {
         return router.replace(request.href);
       }
-      return router.navigate(request.href);
+      return router.push(request.href);
     }),
   );
 });

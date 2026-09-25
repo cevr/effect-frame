@@ -89,7 +89,7 @@ describe("one-leaf route publish rule", () => {
         });
         const after = (href: string) =>
           Effect.gen(function* () {
-            yield* page.setup.navigate(href);
+            yield* page.setup.push(href);
             yield* settle;
             return yield* drain;
           });

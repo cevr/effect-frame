@@ -161,7 +161,7 @@ const roundTrip = <V extends Values, E extends Encoded>(
               if (Option.isNone(printedHref)) {
                 return false;
               }
-              yield* app.router.navigate(printedHref.value);
+              yield* app.router.push(printedHref.value);
               const expected = `${asJson(drawn.params)}\n${asJson(drawn.search)}`;
               const parsed = () => `${textOf(app.root, "#params")}\n${textOf(app.root, "#search")}`;
               const same = Effect.sync(() => on() && parsed() === expected);
@@ -244,7 +244,7 @@ describe("?filter=done on the list page (#18)", () => {
         });
         observer.observe(app.root, { childList: true, subtree: true });
 
-        yield* app.router.navigate(list.href({ list: inbox }, { filter: "done" }));
+        yield* app.router.push(list.href({ list: inbox }, { filter: "done" }));
         yield* settle(
           Effect.sync(() => wire.readsOf('ListCounts{"filter":"done","list":"inbox"}') === 1),
           "the filtered counts read",

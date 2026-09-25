@@ -415,7 +415,7 @@ describe("a route actor is seeded into the document (#37)", () => {
               root,
             }).pipe(Effect.provideService(Location, location)),
             (router) => {
-              navigate = router.navigate;
+              navigate = router.push;
             },
           ),
         );

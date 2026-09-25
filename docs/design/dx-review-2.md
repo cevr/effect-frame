@@ -40,7 +40,7 @@ The frame has `route.href(params, search)`, which is total and typed. The router
 ```tsx
 const next = yield * link(Book, { id: "5" }, { q: "" });
 const later = yield * link(Book, { id: "5" }, (previous) => ({ q: `${previous.q}x` }));
-yield * next.go; // push
+yield * next.push;
 yield * next.replace; // replace
 <Link link={later} replace>
   next
@@ -49,7 +49,7 @@ yield * next.replace; // replace
 
 `link(route, params, search)` returns `{ href, active, go, replace }`. `href` is a live `Source<string>`, so a functional search link follows later URL changes. `go` and `replace` use the same URL updater as the anchor's normal click. `<Link>` renders a real anchor with `href` and `aria-current`; the delegated router listener leaves modified and middle clicks to the browser. `router.current` and `isActive(router, route)` are sources.
 
-The #50 resolution rejects a `router.navigate(route, params, search)` overload. It duplicates `route.href(...)` and `link(...).go`, and it would make the router own route typing that already belongs to the route. The router keeps `navigate(href)` and `replace(href)` as its two operations. Intent preload remains out of scope until declared route data exists in #18.
+The #50 resolution rejects a `router.push(route, params, search)` overload. It duplicates `route.href(...)` and `link(...).push`, and it would make the router own route typing that already belongs to the route. The router keeps `navigate(href)` and `replace(href)` as its two operations. Intent preload remains out of scope until declared route data exists in #18.
 
 ### B4. Search params as state, with updaters and retention
 
@@ -74,7 +74,7 @@ const Book = Route.client("book", {
 
 `href` omits values equal to `withDefault` and decoding fills them. `Schema.encodeKeys` keeps the decoded field name while changing the URL key. `Route.search` accepts fixed Struct fields that encode to strings, string literals, all-string unions, or arrays of those values, and it prints fields in encoded Schema order. An empty typed array uses one explicit `~` value; values beginning with `~` are doubled, so omission, `[]`, and `[""]` stay distinct. Dynamic Record schemas and arrays with non-string members are rejected. A custom `SearchRecord` codec remains valid and keeps its emitted record order for serializers such as a two-pane workspace.
 
-The view receives `props.href(params, search)`, `props.updateSearch(update)`, and `props.replaceSearch(update)`. A functional update runs against the latest canonical URL when its queued operation executes. The router serializes URL computation, history mutation, and route publication, so concurrent updates do not overwrite each other. `updateSearch` pushes and `replaceSearch` replaces. A typed `link` accepts the same decoded value or updater. `retain` carries declared decoded keys across routes only when the caller omits them; an explicit caller value, including a default value that encodes to omission, wins.
+The view receives `props.href(params, search)`, `props.pushSearch(update)`, and `props.replaceSearch(update)`. A functional update runs against the latest canonical URL when its queued operation executes. The router serializes URL computation, history mutation, and route publication, so concurrent updates do not overwrite each other. `pushSearch` pushes and `replaceSearch` replaces. A typed `link` accepts the same decoded value or updater. `retain` carries declared decoded keys across routes only when the caller omits them; an explicit caller value, including a default value that encodes to omission, wins.
 
 Rate limiting has no router option. A view composes the source it navigates from with the time-based Source combinators in #57.
 
@@ -86,13 +86,13 @@ Route search belongs to route identity. A view can own another URL slice without
 const panes =
   yield *
   UrlState.make(Workspace, {
-    keys: ["q", "filters", "q2", "filters2"],
+    searchKeys: ["q", "filters", "q2", "filters2"],
   });
 
 panes.state; // Source<Workspace>
-panes.set(next); // replace
-panes.update((previous) => next); // replace
-panes.push.set(next); // push
+panes.replace(next); // replace with a value
+panes.replace((previous) => next); // or with an updater
+panes.push(next); // push takes the same value-or-updater
 ```
 
 `Route.search` supplies encoded key metadata for fixed Struct codecs. An opaque `SearchRecord` codec declares its finite encoded keys explicitly. The router refuses a route or view collision when the view mounts, and releases the claim with the view scope. The source derives from `router.current`, so the URL remains canonical. Every queued update reads the latest URL and merges only its own keys; a disposed view cannot update a later route instance. Missing or malformed owned values use the codec's omitted-record value as the fallback. A codec without that value is refused at mount.

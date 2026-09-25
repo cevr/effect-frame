@@ -18,7 +18,9 @@ export interface Link {
   readonly current: Source<Current>;
   /** `true` while `current` is `"page"` or `"ancestor"`. */
   readonly active: Source<boolean>;
-  readonly go: Effect.Effect<void>;
+  /** Move to the destination and push a history entry. */
+  readonly push: Effect.Effect<void>;
+  /** Move to the destination and replace the current history entry. */
   readonly replace: Effect.Effect<void>;
 }
 
@@ -44,7 +46,7 @@ export const link = <Params, Search>(
       href,
       current,
       active: Source.select(current, (where) => where !== "none"),
-      go: router.navigate(hrefAt),
+      push: router.push(hrefAt),
       replace: router.replace(hrefAt),
     };
   });
@@ -108,7 +110,7 @@ export const Link = (props: LinkProps): Node => (
             if (props.replace === true) {
               return props.link.replace;
             }
-            return props.link.go;
+            return props.link.push;
           };
           Effect.runForkWith(context)(Effect.forkIn(move(), scope));
         };

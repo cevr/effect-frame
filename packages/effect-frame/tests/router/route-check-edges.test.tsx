@@ -70,7 +70,7 @@ const makeApp = (gate: Gate) => {
       Effect.gen(function* () {
         gate.asked.push(`${params.id}:${kind}`);
         if (params.id === "nav") {
-          yield* (yield* Router).navigate("/home");
+          yield* (yield* Router).push("/home");
         }
         if (params.id === "self") {
           return Route.redirect(selfPath, {}, {});
@@ -156,11 +156,11 @@ describe("route check edges", () => {
       const gate = makeGate();
       const { receipts, history } = yield* mountApp(gate, "/login");
 
-      const moved = yield* Effect.exit(receipts.navigate("/g/nav"));
+      const moved = yield* Effect.exit(receipts.push("/g/nav"));
       expect(moved.pipe(defectOf)).toMatchObject({ _tag: "CheckNavigation", href: "/home" });
       expect(history).toEqual([]);
 
-      const next = yield* receipts.navigate("/g/ok");
+      const next = yield* receipts.push("/g/ok");
       expect(next).toMatchObject({ _tag: "Committed" });
       expect(history).toEqual(["push /g/ok"]);
     }),
@@ -170,8 +170,8 @@ describe("route check edges", () => {
     Effect.gen(function* () {
       const gate = makeGate();
       const { page, router, history, pop } = yield* mountApp(gate, "/login");
-      yield* Receipt.of(router).navigate("/g/a");
-      yield* Receipt.of(router).navigate("/g/b");
+      yield* Receipt.of(router).push("/g/a");
+      yield* Receipt.of(router).push("/g/b");
       gate.denied.add("a");
 
       // Back to /g/a, which the principal has since lost.
@@ -194,7 +194,7 @@ describe("route check edges", () => {
       const gate = makeGate(["deny"]);
       const { receipts, history } = yield* mountApp(gate, "/login");
 
-      const receipt = yield* receipts.navigate("/g/deny");
+      const receipt = yield* receipts.push("/g/deny");
       expect(receipt).toMatchObject({ _tag: "Unchanged" });
       expect(receipt.url.pathname).toBe("/login");
       expect(history).toEqual([]);
@@ -206,14 +206,14 @@ describe("route check edges", () => {
       const gate = makeGate(["denied"]);
       const { root, receipts, history } = yield* mountApp(gate, "/login");
 
-      const receipt = yield* receipts.navigate("/old/ok");
+      const receipt = yield* receipts.push("/old/ok");
       expect(receipt).toMatchObject({ _tag: "Committed" });
       expect(receipt.url.pathname).toBe("/g/ok");
       expect(history).toEqual(["push /g/ok"]);
       expect(Option.isSome(Option.fromNullishOr(root.querySelector("#gate")))).toBe(true);
 
       // The target's own check still runs, and may redirect further.
-      yield* receipts.navigate("/old/denied");
+      yield* receipts.push("/old/denied");
       expect(history).toEqual(["push /g/ok", "push /login"]);
       expect(gate.asked).toEqual(["ok:push", "denied:push"]);
     }),

@@ -174,5 +174,5 @@ swap. No view sees that difference without a render in between.
 - Only the first HTML frame is proved. There is no streaming.
 - Segment `href` targets and `before` checks are slice 3, in
   `route-checks.md`. Pending state and lazy views are slice 4. Segment
-  `href`, `updateSearch`, and `replaceSearch` props arrived with the public
+  `href`, `pushSearch`, and `replaceSearch` props arrived with the public
   surface (`route-public.md`).

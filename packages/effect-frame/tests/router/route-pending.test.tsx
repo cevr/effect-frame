@@ -790,7 +790,7 @@ describe("private route pending and lazy views", () => {
 
         // The transition enters the post after both checks continued, then
         // starts the import. The navigation commits without waiting for it.
-        const moved = yield* receipts.navigate("/app/t1/posts/1");
+        const moved = yield* receipts.push("/app/t1/posts/1");
         expect(pathOf(moved)).toBe("Committed /app/t1/posts/1");
         expect(yield* Queue.take(importer.started)).toBe(1);
         expect((yield* eventsOf()).slice(-3)).toEqual([
@@ -824,15 +824,15 @@ describe("private route pending and lazy views", () => {
         expect(yield* setupsOf(probes)).toEqual(["1"]);
 
         // A stayed post keeps its setup: a param move presents nothing.
-        yield* receipts.navigate("/app/t1/posts/2");
+        yield* receipts.push("/app/t1/posts/2");
         yield* postVisible(page, "2");
         expect(yield* setupsOf(probes)).toEqual(["1"]);
 
         // Work that finishes before `after` never shows the fallback: the
         // module is loaded, so a new post instance's setup is prompt.
-        yield* receipts.navigate("/app/t1");
+        yield* receipts.push("/app/t1");
         expect(yield* Queue.take(probes.postClosed)).toBe("1");
-        yield* receipts.navigate("/app/t1/posts/2");
+        yield* receipts.push("/app/t1/posts/2");
         yield* postVisible(page, "2");
         expect(probes.pendingShown).toEqual(["shown"]);
         expect(yield* Ref.get(importer.calls)).toBe(1);
@@ -854,9 +854,9 @@ describe("private route pending and lazy views", () => {
         const b = yield* mountApp(app, rootB, "/app/t1");
 
         // Both roots enter the post while the one import is in flight.
-        yield* a.receipts.navigate("/app/t1/posts/1");
+        yield* a.receipts.push("/app/t1/posts/1");
         expect(yield* Queue.take(importer.started)).toBe(1);
-        yield* b.receipts.navigate("/app/t1/posts/1");
+        yield* b.receipts.push("/app/t1/posts/1");
         yield* regionLive(a.page);
         yield* regionLive(b.page);
         expect(yield* Ref.get(importer.calls)).toBe(1);
@@ -888,9 +888,9 @@ describe("private route pending and lazy views", () => {
         expect(textAt(rootB, "#post-param")).toBe("1");
 
         // A new instance reuses the loaded module with a fresh setup.
-        yield* b.receipts.navigate("/app/t1");
+        yield* b.receipts.push("/app/t1");
         expect(yield* Queue.take(probes.postClosed)).toBe("1");
-        yield* b.receipts.navigate("/app/t1/posts/3");
+        yield* b.receipts.push("/app/t1/posts/3");
         yield* postVisible(b.page, "3");
         expect(yield* Ref.get(importer.calls)).toBe(1);
         expect(yield* setupsOf(probes)).toEqual(["1", "1", "3"]);
@@ -910,7 +910,7 @@ describe("private route pending and lazy views", () => {
           root,
           "/app/t1",
         );
-        yield* receipts.navigate("/app/t1/posts/1");
+        yield* receipts.push("/app/t1/posts/1");
         yield* Queue.take(importer.started);
         yield* regionLive(page);
         yield* TestClock.adjust(PendingAfter);
@@ -931,7 +931,7 @@ describe("private route pending and lazy views", () => {
 
         // The failure is not kept: the failed instance is entered again and
         // its import runs again.
-        yield* receipts.navigate("/app/t1/posts/2");
+        yield* receipts.push("/app/t1/posts/2");
         expect(yield* Queue.take(importer.started)).toBe(2);
         yield* Queue.offer(importer.outcomes, "ok");
         yield* TestClock.adjust("1 second");
@@ -942,8 +942,8 @@ describe("private route pending and lazy views", () => {
 
         // The view's own typed failure while the fallback shows also draws
         // `errored` at once.
-        yield* receipts.navigate("/app/t1");
-        yield* receipts.navigate("/app/t1/posts/slow-bad");
+        yield* receipts.push("/app/t1");
+        yield* receipts.push("/app/t1/posts/slow-bad");
         yield* regionLive(page);
         const now = yield* Clock.currentTimeMillis;
         yield* TestClock.adjust(PendingAfter);
@@ -976,12 +976,12 @@ describe("private route pending and lazy views", () => {
         );
 
         // Exit while the import is in flight and the fallback is shown.
-        yield* receipts.navigate("/app/t1/posts/1");
+        yield* receipts.push("/app/t1/posts/1");
         yield* Queue.take(importer.started);
         yield* regionLive(page);
         yield* TestClock.adjust(PendingAfter);
         yield* pendingVisible(page);
-        yield* receipts.navigate("/login");
+        yield* receipts.push("/login");
         yield* loginVisible(page);
         // The import completes after the exit: nothing sets up or mounts.
         yield* Queue.offer(importer.outcomes, "ok");
@@ -995,21 +995,21 @@ describe("private route pending and lazy views", () => {
         expect(exited.queries).toHaveLength(0);
 
         // A redirect away from a post whose own setup is suspended.
-        yield* receipts.navigate("/app/t1/posts/slow-1");
+        yield* receipts.push("/app/t1/posts/slow-1");
         expect(yield* Ref.get(importer.calls)).toBe(1);
         yield* regionLive(page);
         yield* TestClock.adjust(PendingAfter);
         yield* pendingVisible(page);
         expect(yield* setupsOf(probes)).toEqual(["slow-1"]);
         yield* deny("t9");
-        const redirected = yield* receipts.navigate("/app/t9/posts/1");
+        const redirected = yield* receipts.push("/app/t9/posts/1");
         expect(pathOf(redirected)).toBe("Committed /login?next=%2Fapp%2Ft9%2Fposts%2F1");
         yield* loginVisible(page);
         expect(yield* Queue.take(probes.postClosed)).toBe("slow-1");
         expect(actorsAt(yield* Frame.inspect, PostRevision)).toHaveLength(0);
 
         // A root close while the fallback is shown.
-        yield* receipts.navigate("/app/t1/posts/slow-2");
+        yield* receipts.push("/app/t1/posts/slow-2");
         yield* regionLive(page);
         yield* TestClock.adjust(PendingAfter);
         yield* pendingVisible(page);
@@ -1043,7 +1043,7 @@ describe("private route pending and lazy views", () => {
           root,
           "/app/t1",
         );
-        yield* receipts.navigate("/app/t1/posts/1");
+        yield* receipts.push("/app/t1/posts/1");
         yield* Queue.take(importer.started);
         yield* Deferred.await(held.started);
         yield* regionLive(page);
@@ -1077,7 +1077,7 @@ describe("private route pending and lazy views", () => {
           "/app/t2/posts/1",
         );
         yield* loginVisible(page);
-        const refused = yield* receipts.navigate("/app/t2/posts/2");
+        const refused = yield* receipts.push("/app/t2/posts/2");
         expect(pathOf(refused)).toBe("Committed /login?next=%2Fapp%2Ft2%2Fposts%2F2");
         yield* loginVisible(page);
         // The parent refused twice. No child check, import, or setup ran.
@@ -1090,7 +1090,7 @@ describe("private route pending and lazy views", () => {
 
         // A permitted navigation imports once.
         yield* Queue.offer(importer.outcomes, "ok");
-        yield* receipts.navigate("/app/t1/posts/1");
+        yield* receipts.push("/app/t1/posts/1");
         yield* TestClock.adjust("1 second");
         yield* postVisible(page, "1");
         expect(yield* Ref.get(importer.calls)).toBe(1);
@@ -1163,7 +1163,7 @@ describe("private route pending and lazy views", () => {
           root,
           "/app/t1",
         );
-        yield* receipts.navigate("/app/t1/posts/slow-boom");
+        yield* receipts.push("/app/t1/posts/slow-boom");
         yield* regionLive(page);
         yield* TestClock.adjust(PendingAfter);
         yield* pendingVisible(page);
@@ -1182,8 +1182,8 @@ describe("private route pending and lazy views", () => {
         expect(probes.erroredBuilt).toEqual([]);
 
         // The Frame and the layout stay alive: the next entry sets up.
-        yield* receipts.navigate("/app/t1");
-        yield* receipts.navigate("/app/t1/posts/3");
+        yield* receipts.push("/app/t1");
+        yield* receipts.push("/app/t1/posts/3");
         yield* postVisible(page, "3");
       }),
   );
@@ -1200,7 +1200,7 @@ describe("private route pending and lazy views", () => {
           root,
           "/app/t1",
         );
-        yield* receipts.navigate("/app/t1/posts/slow-boom");
+        yield* receipts.push("/app/t1/posts/slow-boom");
         // The waiting setup has registered no read, so the layout's Loading
         // has nothing to wait for: it shows the outlet, not its fallback.
         yield* page.waitFor({
@@ -1215,8 +1215,8 @@ describe("private route pending and lazy views", () => {
         expect(yield* Queue.take(probes.postClosed)).toBe("slow-boom");
         expect(probes.erroredBuilt).toEqual([]);
 
-        yield* receipts.navigate("/app/t1");
-        yield* receipts.navigate("/app/t1/posts/3");
+        yield* receipts.push("/app/t1");
+        yield* receipts.push("/app/t1/posts/3");
         yield* postVisible(page, "3");
       }),
   );
@@ -1297,7 +1297,7 @@ describe("private route pending and lazy views", () => {
             "/login",
           );
           yield* loginVisible(page);
-          yield* receipts.navigate("/app/t1/posts/1");
+          yield* receipts.push("/app/t1/posts/1");
           // Both imports start when the transition enters the branch.
           yield* Queue.take(parentImporter.started);
           yield* Queue.take(childImporter.started);
@@ -1334,7 +1334,7 @@ describe("private route pending and lazy views", () => {
             "/login",
           );
           yield* loginVisible(page);
-          yield* receipts.navigate("/app/t1/posts/1");
+          yield* receipts.push("/app/t1/posts/1");
           yield* Queue.take(childImporter.started);
           yield* TestClock.adjust(PendingAfter);
           yield* page.waitFor({

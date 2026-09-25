@@ -3,8 +3,8 @@ import type { RouteInstance, UrlUpdater } from "./codec.js";
 import type { RouterService } from "./router.js";
 
 /**
- * PRIVATE. What one navigate or replace request did.
- * The public `navigate`/`replace` are this same path with the result
+ * PRIVATE. What one push or replace request did.
+ * The public `push`/`replace` are this same path with the result
  * dropped, so there is one command path, not two. Not exported: the public
  * surface changes once, when the route surface is chosen.
  *
@@ -29,7 +29,7 @@ export const Stayed = (url: URL): NavigationResult => ({ _tag: "Stayed", url });
 
 /** The receipt-returning form of the router's commands. */
 export interface Receipts {
-  readonly navigate: (
+  readonly push: (
     href: string | UrlUpdater,
     instance?: RouteInstance,
   ) => Effect.Effect<NavigationResult>;
@@ -48,6 +48,6 @@ export const register = (router: RouterService, receipts: Receipts): void => {
 /** The receipts of a mounted router service. Anything else is a defect. */
 export const of = (router: RouterService): Receipts =>
   Option.getOrElse(Option.fromNullishOr(registered.get(router)), () => ({
-    navigate: () => Effect.die("not a mounted router"),
+    push: () => Effect.die("not a mounted router"),
     replace: () => Effect.die("not a mounted router"),
   }));

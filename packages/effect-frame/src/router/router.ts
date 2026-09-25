@@ -67,12 +67,19 @@ export interface RouteMatch {
 
 export interface RouterService {
   /**
-   * Move to a printed href. It cannot fail: a URL no route matches shows
-   * the not-found view. An href equal to the current one is not a move.
-   * A typed move prints its href with `route.href`, or uses `link`.
+   * Move to a printed href and push a history entry. It cannot fail: a URL
+   * no route matches shows the not-found view. An href equal to the
+   * current one is not a move. A typed move prints its href with
+   * `segment.href`, or uses `link`. `push` and `replace` are the router's
+   * two moves, and neither is a default.
+   *
+   * ```ts
+   * const router = yield* Router;
+   * yield* router.push(post.href({ tenant: "t1", postId: "p1" }, {}));
+   * ```
    */
-  readonly navigate: (href: string | UrlUpdater) => Effect.Effect<void>;
-  /** Replace the current history entry with a printed href. */
+  readonly push: (href: string | UrlUpdater) => Effect.Effect<void>;
+  /** Move to a printed href and replace the current history entry. */
   readonly replace: (href: string | UrlUpdater) => Effect.Effect<void>;
   /** Every navigation, the current one first. */
   readonly navigations: Source<Navigation>;
@@ -306,7 +313,7 @@ const fragmentOnly = (next: URL, committed: URL): boolean =>
  * one, so the two are briefly both held.
  *
  * Navigations are applied one at a time on the router's own fiber, which is
- * what lets `navigate` require nothing: a view calls it from an event and
+ * what lets `push` require nothing: a view calls it from an event and
  * the route's own requirements are met where the router was mounted.
  * `Router` is provided to every route's view.
  */
@@ -473,7 +480,7 @@ export const mount: <R, HostNode, N = R>(
     });
 
   const service: RouterService = {
-    navigate: (href) => Effect.asVoid(enqueue("push", href)),
+    push: (href) => Effect.asVoid(enqueue("push", href)),
     replace: (href) => Effect.asVoid(enqueue("replace", href)),
     navigations: {
       get: Effect.map(SubscriptionRef.get(navigations), navigationOf),
@@ -492,11 +499,11 @@ export const mount: <R, HostNode, N = R>(
   };
 
   const navigation: RouteNavigation = {
-    navigate: (href, instance) => Effect.asVoid(enqueue("push", href, instance)),
+    push: (href, instance) => Effect.asVoid(enqueue("push", href, instance)),
     replace: (href, instance) => Effect.asVoid(enqueue("replace", href, instance)),
   };
   registerReceipts(service, {
-    navigate: (href, instance) => Effect.flatMap(enqueue("push", href, instance), received),
+    push: (href, instance) => Effect.flatMap(enqueue("push", href, instance), received),
     replace: (href, instance) => Effect.flatMap(enqueue("replace", href, instance), received),
   });
 
@@ -510,7 +517,7 @@ export const mount: <R, HostNode, N = R>(
         href: Option.getOrElse(Option.liftPredicate(href, Predicate.isString), () => "<updater>"),
       }),
     );
-  const checkService: RouterService = { ...service, navigate: refuse, replace: refuse };
+  const checkService: RouterService = { ...service, push: refuse, replace: refuse };
 
   /**
    * Run the candidate route's checks and follow redirects before history
@@ -1137,7 +1144,7 @@ const serverRouter = (url: URL): RouterService => {
   const navigation: Navigation = { url, kind: "initial" };
   const match: RouteMatch = { name: notFoundName, url };
   return {
-    navigate: refuse,
+    push: refuse,
     replace: refuse,
     navigations: { get: Effect.succeed(navigation), changes: Stream.make(navigation) },
     current: { get: Effect.succeed(match), changes: Stream.make(match) },

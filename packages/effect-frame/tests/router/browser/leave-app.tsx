@@ -150,7 +150,7 @@ const start = (): void => {
     control.navigate = (href) =>
       Effect.runPromiseWith(context)(
         Effect.map(
-          receipts.navigate(href),
+          receipts.push(href),
           (result) => `${result._tag} ${result.url.pathname}${result.url.search}`,
         ),
       );

@@ -88,7 +88,7 @@ describe("the queries a command refreshes", () => {
         routes,
       });
       yield* settle(Effect.sync(() => textOf(app.root, "#counts") === "0 of 0 done"));
-      yield* app.router.navigate("/scratch");
+      yield* app.router.push("/scratch");
       yield* settle(Effect.sync(() => textOf(app.root, "#scratch-length") === "0"));
       expect(yield* app.run(activeKeys)).toEqual([]);
     }),
@@ -103,7 +103,7 @@ describe("the queries a command refreshes", () => {
         routes,
       });
       yield* settle(Effect.sync(() => textOf(app.root, "#counts") === "0 of 0 done"));
-      yield* app.router.navigate("/lists");
+      yield* app.router.push("/lists");
       yield* settle(Effect.sync(() => textOf(app.root, "#found") === "inboxerrandsreading"));
       // Another tree: the router enters it before it closes the list's, so
       // the key both declare keeps its interest and is never read again.

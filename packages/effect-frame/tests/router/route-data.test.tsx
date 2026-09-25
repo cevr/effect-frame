@@ -1081,13 +1081,13 @@ describe("an exited segment releases its scope and its unshared keys (#18 §4.3)
         expect(yield* activeIds).toEqual(["counts-inbox", "shared"]);
 
         // The leaf exits: its view scope closes and only its unshared key goes.
-        yield* router.navigate("/lists");
+        yield* router.push("/lists");
         expect(closed).toEqual(["list view"]);
         expect(yield* activeIds).toEqual(["shared"]);
         expect(control.calls.filter((id) => id === "shared")).toHaveLength(1);
 
         // The layout exits: the key no surviving segment declares goes too.
-        yield* router.navigate("/scratch");
+        yield* router.push("/scratch");
         expect(yield* activeIds).toEqual([]);
       }).pipe(Effect.provideContext(client));
     }),

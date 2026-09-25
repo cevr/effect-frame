@@ -206,7 +206,7 @@ export interface RouteInstance {
 
 /** The router operations a mounted route gives to its own view. */
 export interface RouteNavigation {
-  readonly navigate: (href: string | UrlUpdater, owner?: RouteInstance) => Effect.Effect<void>;
+  readonly push: (href: string | UrlUpdater, owner?: RouteInstance) => Effect.Effect<void>;
   readonly replace: (href: string | UrlUpdater, owner?: RouteInstance) => Effect.Effect<void>;
 }
 
@@ -484,9 +484,17 @@ export interface RouteProps<Params, Search> {
   readonly search: Source<Search>;
   /** Print this route with its own parameter and search codecs. */
   readonly href: (params: Params, search: Search) => string;
-  /** Push a functional search update against the latest canonical URL. */
-  readonly updateSearch: (update: SearchUpdater<Search>) => Effect.Effect<void>;
-  /** Replace the current history entry with a functional search update. */
+  /**
+   * A functional search update against the latest canonical URL, pushed as
+   * a new history entry. `pushSearch` and `replaceSearch` are the two
+   * search moves, and neither is a default.
+   *
+   * ```ts
+   * yield* props.pushSearch((search) => ({ ...search, page: search.page + 1 }));
+   * ```
+   */
+  readonly pushSearch: (update: SearchUpdater<Search>) => Effect.Effect<void>;
+  /** A functional search update that replaces the current history entry. */
   readonly replaceSearch: (update: SearchUpdater<Search>) => Effect.Effect<void>;
 }
 

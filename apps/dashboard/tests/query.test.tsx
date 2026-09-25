@@ -42,13 +42,13 @@ describe("the dashboard's queries (#17, #18)", () => {
       expect(textOf(app.root, "#tenant-name")).toBe("Acme Co");
 
       // dash > orders > index: the orders layout inherits the binding.
-      yield* app.router.navigate("/d/acme/orders");
+      yield* app.router.push("/d/acme/orders");
       yield* settle(
         Effect.sync(() => textOf(app.root, "#orders-of") === "Acme Co"),
         "the orders page",
       );
       // dash > orders > order: the leaf declares the same key again.
-      yield* app.router.navigate("/d/acme/orders/o7");
+      yield* app.router.push("/d/acme/orders/o7");
       yield* settle(
         Effect.sync(
           () =>
@@ -57,7 +57,7 @@ describe("the dashboard's queries (#17, #18)", () => {
         ),
         "the order page",
       );
-      yield* app.router.navigate("/d/acme");
+      yield* app.router.push("/d/acme");
       yield* painted(app.root);
 
       // Four pages, four views reading it, three deep, and one read of one key.
@@ -279,7 +279,7 @@ describe("an ack's override on the header (#17, #19 §4)", () => {
         // Globex's header read is held: the layout names Globex while the
         // page still shows Acme's header and alerts.
         const held = yield* handlers.hold("TenantInfo");
-        const moving = yield* Effect.forkChild(app.router.navigate("/d/globex"));
+        const moving = yield* Effect.forkChild(app.router.push("/d/globex"));
         yield* settle(
           Effect.sync(() => wire.reads.includes(globexInfo)),
           "Globex's header read started",

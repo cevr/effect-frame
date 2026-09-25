@@ -794,7 +794,7 @@ describe("private route checks and errors", () => {
         ]);
 
         // A post-ID move keeps the layout, and its check is asked again.
-        const moved = yield* receipts.navigate("/app/t1/posts/2");
+        const moved = yield* receipts.push("/app/t1/posts/2");
         expect(pathOf(moved)).toBe("Committed /app/t1/posts/2");
         yield* readyPost(page, "t1", "2");
         // A search refinement is a branch move too.
@@ -807,9 +807,9 @@ describe("private route checks and errors", () => {
         ]);
 
         // A same-URL request and a fragment-only move ask nobody.
-        const same = yield* receipts.navigate("/app/t1/posts/2?tab=edit");
+        const same = yield* receipts.push("/app/t1/posts/2?tab=edit");
         expect(pathOf(same)).toBe("Unchanged /app/t1/posts/2?tab=edit");
-        const fragment = yield* receipts.navigate("/app/t1/posts/2?tab=edit#c1");
+        const fragment = yield* receipts.push("/app/t1/posts/2?tab=edit#c1");
         expect(pathOf(fragment)).toBe("Committed /app/t1/posts/2?tab=edit#c1");
         expect(yield* askedLog()).toHaveLength(6);
         expect(location.history).toEqual([
@@ -838,7 +838,7 @@ describe("private route checks and errors", () => {
         // The decision for t2 is held: nothing of t2 has started, and
         // history has not moved.
         const decision = yield* holdDecision("t2");
-        const moving = yield* Effect.forkChild(receipts.navigate("/app/t2/posts/9"));
+        const moving = yield* Effect.forkChild(receipts.push("/app/t2/posts/9"));
         yield* Deferred.await(decision.started);
         expect(location.history).toEqual([]);
         expect(yield* callsOf("tenant:t2")).toBe(0);
@@ -872,7 +872,7 @@ describe("private route checks and errors", () => {
         expect(atLogin.routes.map((one) => one.routeName)).toEqual(["login"]);
 
         // A replace that redirects replaces once.
-        yield* router.navigate("/app/t1/posts/1");
+        yield* router.push("/app/t1/posts/1");
         yield* readyPost(page, "t1", "1");
         yield* receipts.replace("/app/t2/posts/3");
         expect(location.history.slice(1)).toEqual([
@@ -924,7 +924,7 @@ describe("private route checks and errors", () => {
         const layoutActor = onlyId(actorsAt(yield* Frame.inspect, LayoutRevision));
 
         // The layout stays for t2; its check is asked with the new tenant.
-        yield* receipts.navigate("/app/t2/posts/1");
+        yield* receipts.push("/app/t2/posts/1");
         yield* readyPost(page, "t2", "1");
         expect(root.querySelector("#layout")).toBe(layoutElement);
         expect(onlyId(actorsAt(yield* Frame.inspect, LayoutRevision))).toBe(layoutActor);
@@ -937,7 +937,7 @@ describe("private route checks and errors", () => {
         // The principal loses t2. The same stayed layout is asked again and
         // refuses: its earlier answer is not permission.
         yield* deny("t2");
-        const refused = yield* receipts.navigate("/app/t2/posts/2");
+        const refused = yield* receipts.push("/app/t2/posts/2");
         expect(pathOf(refused)).toBe("Committed /login?next=%2Fapp%2Ft2%2Fposts%2F2");
         expect(questions((yield* askedLog()).slice(4))).toEqual(["tenant:/app/t2/posts/2:push"]);
         expect(location.history).toEqual([
@@ -962,7 +962,7 @@ describe("private route checks and errors", () => {
         );
         yield* readyPost(page, "t1", "1");
 
-        const cycle = yield* Effect.exit(receipts.navigate("/app/t1/posts/loop-a"));
+        const cycle = yield* Effect.exit(receipts.push("/app/t1/posts/loop-a"));
         const repeated = cycleOf(cycle);
         expect(repeated).toMatchObject({
           _tag: "RedirectCycle",
@@ -973,7 +973,7 @@ describe("private route checks and errors", () => {
             `${origin}/app/t1/posts/loop-a`,
           ],
         });
-        const runaway = yield* Effect.exit(receipts.navigate("/app/t1/posts/step-0"));
+        const runaway = yield* Effect.exit(receipts.push("/app/t1/posts/step-0"));
         const limit = cycleOf(runaway);
         expect(limit).toMatchObject({ _tag: "RedirectCycle", reason: "limit" });
         expect(limit.chain).toHaveLength(Check.redirectLimit + 2);
@@ -984,7 +984,7 @@ describe("private route checks and errors", () => {
         expect(yield* callsOf("post:t1/step-1")).toBe(0);
         expect(textAt(root, "#post-param")).toBe("1");
         // The router still serves the next navigation.
-        const next = yield* receipts.navigate("/app/t1/posts/2");
+        const next = yield* receipts.push("/app/t1/posts/2");
         expect(pathOf(next)).toBe("Committed /app/t1/posts/2");
         yield* readyPost(page, "t1", "2");
       }),
@@ -1008,7 +1008,7 @@ describe("private route checks and errors", () => {
           (one) => one.id,
         );
 
-        yield* receipts.navigate("/app/t1/posts/bad");
+        yield* receipts.push("/app/t1/posts/bad");
         yield* page.waitFor({
           label: "the post's errored node",
           until: (actual) => textAt(actual, "#post-errored") === "Setup:PostFailed",
@@ -1031,7 +1031,7 @@ describe("private route checks and errors", () => {
         expect(failed.routes.map((one) => one.routeName)).toEqual(["app"]);
 
         // A new non-no-op navigation enters the failed segment again.
-        yield* receipts.navigate("/app/t1/posts/1");
+        yield* receipts.push("/app/t1/posts/1");
         yield* readyPost(page, "t1", "1");
         expect(hasAt(root, "#post-errored")).toBe(false);
         expect(yield* Ref.get(probes.postSetups)).toEqual(["bad", "1"]);
@@ -1054,7 +1054,7 @@ describe("private route checks and errors", () => {
         expect(Option.isNone(queryRecord(failed, "CheckedTenantInfo", "broken"))).toBe(true);
         expect(failed.mounts).toHaveLength(1);
 
-        yield* receipts.navigate("/app/t1");
+        yield* receipts.push("/app/t1");
         yield* page.waitFor({
           label: "the t1 layout",
           until: (actual) =>
@@ -1079,7 +1079,7 @@ describe("private route checks and errors", () => {
         const layoutElement = root.querySelector("#layout");
 
         yield* failSnapshot("t1", "b");
-        const result = yield* receipts.navigate("/app/t1/posts/b");
+        const result = yield* receipts.push("/app/t1/posts/b");
         expect(pathOf(result)).toBe("Committed /app/t1/posts/b");
         yield* page.waitFor({
           label: "the post's declaration errored node",
@@ -1101,7 +1101,7 @@ describe("private route checks and errors", () => {
         expect(yield* Ref.get(probes.layoutSetups)).toEqual(["t1"]);
 
         // The failed instance is entered again on the next move.
-        yield* receipts.navigate("/app/t1/posts/2");
+        yield* receipts.push("/app/t1/posts/2");
         yield* readyPost(page, "t1", "2");
         expect(yield* Ref.get(probes.postSetups)).toEqual(["1", "2"]);
       }),
@@ -1159,7 +1159,7 @@ describe("private route checks and errors", () => {
         );
         yield* readyPost(page, "t1", "1");
         const decision = yield* holdDecision("t3");
-        const moving = yield* Effect.forkChild(receipts.navigate("/app/t3/posts/1"));
+        const moving = yield* Effect.forkChild(receipts.push("/app/t3/posts/1"));
         yield* Deferred.await(decision.started);
 
         yield* page.close;

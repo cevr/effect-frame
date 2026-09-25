@@ -56,7 +56,7 @@ describe("active follows the mounted branch (#28)", () => {
       // The overview enters holding on its alerts actor's first snapshot,
       // which the orders page does not bind.
       const alerts = yield* wire.holdSnapshot("Alerts");
-      const moving = yield* Effect.forkChild(app.router.navigate("/d/acme"));
+      const moving = yield* Effect.forkChild(app.router.push("/d/acme"));
       yield* settle(
         Effect.sync(() => wire.snapshots.some((address) => address.startsWith("Alerts"))),
         "the entering alerts snapshot",
@@ -101,7 +101,7 @@ describe("active follows the mounted branch (#28)", () => {
       for (let round = 0; round < 10; round += 1) {
         for (const stop of stops) {
           step += 1;
-          yield* app.router.navigate(stop.path);
+          yield* app.router.push(stop.path);
           const now = yield* app.run(activeKeys);
           expect({ step, active: now }).toEqual({
             step,
@@ -139,7 +139,7 @@ describe("active follows the mounted branch (#28)", () => {
         );
 
         // The order leaf exits. The layout still declares the key: it stays, unread.
-        yield* app.router.navigate("/d/acme/orders");
+        yield* app.router.push("/d/acme/orders");
         yield* settle(
           Effect.sync(() => textOf(app.root, "#detail").includes("o7")),
           "the orders index",
@@ -149,8 +149,8 @@ describe("active follows the mounted branch (#28)", () => {
 
         // Back to the order, then to another tenant: the layout's acme
         // declaration exits with the leaf's, and the key goes.
-        yield* app.router.navigate("/d/acme/orders/o7");
-        yield* app.router.navigate("/d/globex");
+        yield* app.router.push("/d/acme/orders/o7");
+        yield* app.router.push("/d/globex");
         yield* settle(
           Effect.sync(() => textOf(app.root, "#tenant-name") === "Globex"),
           "the other tenant",

@@ -64,7 +64,7 @@ Route.client(name, Route.leaf(Route.segment(name, definition), definition.view))
 ### Why one model, with the flat form as its shorthand
 
 - **Two runtimes would drift** (derive-dont-sync). The flat route had its
-  own enter, update, props, `href`, `updateSearch`, retention, and search
+  own enter, update, props, `href`, `pushSearch`, retention, and search
   keys. The nested transition had its own identity, checks, failures, and
   pending. A flat route that needed a check would have had to change
   runtimes. Now the flat route is a one-leaf tree, so every capability of
@@ -79,7 +79,7 @@ Route.client(name, Route.leaf(Route.segment(name, definition), definition.view))
   or `pending` is written in the segment form. There is no second place to
   put those fields.
 - **The segment form needed the flat route's search behavior anyway.**
-  Nested segments had no `href` prop, `updateSearch`, `replaceSearch`,
+  Nested segments had no `href` prop, `pushSearch`, `replaceSearch`,
   `retain`, or search keys, so nested routes could not use `UrlState` or
   typed links. The shorthand forced these into the segment. They are
   now part of every segment.

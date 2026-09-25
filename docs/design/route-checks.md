@@ -73,7 +73,7 @@ import). `errored` lives on the leaf or layout, because it handles that view's
    route value, like the inspection projection), it runs them in the mount
    context, with a read-only `Router` provided and a temporary `Scope` that
    closes before the answer is used. The check's `Router` reads `current` and
-   `navigations`; its `navigate` and `replace` die with `CheckNavigation`.
+   `navigations`; its `push` and `replace` die with `CheckNavigation`.
    The queue fiber runs the check, so a move from inside it could never be
    served. A check that wants another URL answers `Redirect`.
 2. A tree's checks run parent first, for every matched segment: entering and
@@ -97,9 +97,9 @@ import). `errored` lives on the leaf or layout, because it handles that view's
 
 ### Receipts
 
-`Receipt.of(router)` gives `navigate` and `replace` that return
+`Receipt.of(router)` gives `push` and `replace` that return
 `NavigationResult = Committed | Unchanged | Stayed`, each with a URL. The public
-`navigate`/`replace` are the same queued path with the result dropped; there
+`push`/`replace` are the same queued path with the result dropped; there
 is one command path. `Committed` carries the settled URL. `Unchanged` covers a
 same-URL request, a redirect to the current URL, and a stale route instance's
 request. `Stayed` is reserved for slice 5; nothing produces it yet. A request
@@ -220,7 +220,7 @@ scratchpad; this table is the record.
   (`tests/router/route-check-edges.test.tsx` feeds it pops).
   Real Back/Forward, precommit cancellation, and focus are slice 5.
 - Pending state and lazy views are slice 4 (`docs/design/route-pending.md`).
-  Segment `updateSearch` arrived with the public surface.
+  Segment `pushSearch` arrived with the public surface.
 
 ## Open questions
 

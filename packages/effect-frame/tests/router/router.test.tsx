@@ -147,7 +147,7 @@ const Book = (
   props: Route.RouteProps<{ readonly id: string }, BookSearchValue>,
 ): Effect.Effect<Node, never, Router> =>
   Effect.gen(function* () {
-    updateBookSearch = props.updateSearch;
+    updateBookSearch = props.pushSearch;
     replaceBookSearch = props.replaceSearch;
     const params = yield* props.params.get;
     const nextSearch = yield* link(bookSegment, params, (previous) => ({ q: `${previous.q}x` }));
@@ -158,7 +158,7 @@ const Book = (
         <p id="book-search">{View.bind(props.search, (search) => search.q)}</p>
         <button
           id="update-search"
-          onClick={View.event(() => props.updateSearch((previous) => ({ q: `${previous.q}a` })))}
+          onClick={View.event(() => props.pushSearch((previous) => ({ q: `${previous.q}a` })))}
         >
           update
         </button>
@@ -292,7 +292,7 @@ describe("router", () => {
   it.scoped("navigate pushes and swaps the view; the previous one is gone", () =>
     Effect.gen(function* () {
       const { root, location, router, page } = yield* start("http://app.test/");
-      yield* page.act(router.navigate("/books/3"), {
+      yield* page.act(router.push("/books/3"), {
         label: "navigate to book",
         until: (actualRoot) => textAt(actualRoot, "#book") === "3",
       });
@@ -305,7 +305,7 @@ describe("router", () => {
     Effect.gen(function* () {
       const { root, router, page } = yield* start("http://app.test/books/1");
       const before = root.querySelector("#book");
-      yield* page.act(router.navigate("/books/2"), {
+      yield* page.act(router.push("/books/2"), {
         label: "same route params",
         until: (actualRoot) => textAt(actualRoot, "#book") === "2",
       });
@@ -364,7 +364,7 @@ describe("router", () => {
   it.scoped("an update from a disposed route does not restore its old URL", () =>
     Effect.gen(function* () {
       const { location, router } = yield* start("http://app.test/books/1");
-      yield* router.navigate("/");
+      yield* router.push("/");
       yield* updateBookSearch((previous) => ({ q: `${previous.q}stale` }));
       expect(location.history).toEqual(["push /"]);
       expect((yield* router.current.get).name).toBe("home");
@@ -376,8 +376,8 @@ describe("router", () => {
       const { location, router, page } = yield* start("http://app.test/books/1");
       const stale = updateBookSearch;
       const staleReplace = replaceBookSearch;
-      yield* router.navigate("/");
-      yield* router.navigate("/books/2?q=new");
+      yield* router.push("/");
+      yield* router.push("/books/2?q=new");
       yield* stale((previous) => ({ q: `${previous.q}-stale` }));
       yield* staleReplace((previous) => ({ q: `${previous.q}-replace-stale` }));
       yield* page.waitFor({
@@ -391,7 +391,7 @@ describe("router", () => {
   it.scoped("navigating to the current URL is not a move", () =>
     Effect.gen(function* () {
       const { location, router } = yield* start("http://app.test/books/1");
-      yield* router.navigate("/books/1");
+      yield* router.push("/books/1");
       expect(location.history).toEqual([]);
     }),
   );
@@ -494,7 +494,7 @@ describe("router", () => {
   it.scoped("a pop shows the popped URL and reports it as a pop", () =>
     Effect.gen(function* () {
       const { root, location, router, page } = yield* start("http://app.test/");
-      yield* router.navigate("/books/4");
+      yield* router.push("/books/4");
       yield* location.pop("/");
       yield* page.waitFor({
         label: "popped home route",
@@ -529,9 +529,9 @@ describe("router", () => {
       );
       const { root, location, router, page } = yield* start("http://app.test/", [home, book, slow]);
 
-      const slowMove = yield* Effect.forkScoped(router.navigate("/slow"));
+      const slowMove = yield* Effect.forkScoped(router.push("/slow"));
       yield* Deferred.await(setupStarted);
-      const bookMove = yield* Effect.forkScoped(router.navigate("/books/2"));
+      const bookMove = yield* Effect.forkScoped(router.push("/books/2"));
       yield* location.pop("/");
       yield* Deferred.succeed(releaseSetup, void 0);
       yield* Fiber.join(slowMove);
@@ -552,8 +552,8 @@ describe("router", () => {
     Effect.gen(function* () {
       const seen = homeMounts;
       const { router } = yield* start("http://app.test/");
-      yield* router.navigate("/books/4");
-      yield* router.navigate("/");
+      yield* router.push("/books/4");
+      yield* router.push("/");
       expect(homeMounts).toBe(seen + 2);
     }),
   );

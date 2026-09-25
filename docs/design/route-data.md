@@ -135,7 +135,7 @@ Other`; the render does not follow it, and the browser's next request
    `RedirectCycle` defect. The router the render mounts receives the
    settlement through the internal `SettledRequest` reference and runs no
    check again. A server check sees a `Router` at the request URL whose
-   `navigate` and `replace` die with `CheckNavigation`, as a client
+   `push` and `replace` die with `CheckNavigation`, as a client
    check's do.
 8. **A rendered document names its route by identity, with a status.**
    `route` is `{ _tag: "Matched", route }`, the route value itself, or

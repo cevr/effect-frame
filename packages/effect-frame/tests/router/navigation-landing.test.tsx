@@ -39,7 +39,7 @@ const FirstView = () =>
         id="first"
         attach={Dom.attach(() =>
           Effect.sync(() => {
-            Effect.runForkWith(context)(router.navigate("/site/second"));
+            Effect.runForkWith(context)(router.push("/site/second"));
           }).pipe(Effect.andThen(Effect.yieldNow), Effect.andThen(Effect.yieldNow)),
         )}
       />
@@ -121,7 +121,7 @@ describe("navigation landing order", () => {
             root,
           }).pipe(Effect.provideService(Location, location.service)),
       });
-      yield* page.setup.navigate("/site/first");
+      yield* page.setup.push("/site/first");
       yield* until(() => location.log.includes("land /site/second placed"));
       expect(location.log).toEqual([
         "push /site/first",

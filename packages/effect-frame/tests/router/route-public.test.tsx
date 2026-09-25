@@ -178,7 +178,7 @@ const makePostView = (probes: Probes) => (props: Route.PropsOf<typeof post>) =>
         <p id="post-mode">{View.bind(props.search, (search) => search.mode)}</p>
         <button
           id="edit"
-          onClick={View.event(() => props.updateSearch((search) => ({ ...search, mode: "edit" })))}
+          onClick={View.event(() => props.pushSearch((search) => ({ ...search, mode: "edit" })))}
         >
           edit
         </button>
@@ -682,8 +682,8 @@ describe("public nested routes", () => {
         ]);
 
         // A typed setup failure shows errored with its typed error.
-        yield* router.navigate("/app/t1");
-        yield* router.navigate("/app/t1/posts/bad");
+        yield* router.push("/app/t1");
+        yield* router.push("/app/t1/posts/bad");
         yield* page.waitFor({
           label: "the typed setup failure",
           until: (actual) => textAt(actual, "#post-errored") === "Setup:PostFailed",
@@ -693,7 +693,7 @@ describe("public nested routes", () => {
         // no child check, import, or setup of the refused branch starts.
         yield* Effect.flatMap(Access, (access) => Ref.set(access.denied, new Set(["t2"])));
         const before = (yield* eventsOf).length;
-        yield* router.navigate("/app/t2/posts/9");
+        yield* router.push("/app/t2/posts/9");
         yield* page.waitFor({
           label: "the sign-in page",
           until: (actual) => textAt(actual, "#login") === "/app/t2/posts/9",
@@ -728,7 +728,7 @@ describe("public nested routes", () => {
         expect(attributeAt(root, "a.home", "aria-current")).toBe("page");
         expect(hasAt(root, "a.about[aria-current]")).toBe(false);
 
-        yield* router.navigate("/about");
+        yield* router.push("/about");
         yield* page.waitFor({ label: "about", until: (actual) => hasAt(actual, "#about") });
         expect(yield* where).toEqual(["ancestor", "page"]);
         expect(yield* homeLink.active.get).toBe(true);
@@ -736,10 +736,10 @@ describe("public nested routes", () => {
         expect(attributeAt(root, "a.about", "aria-current")).toBe("page");
 
         // "/" is a prefix of every URL; it is still not current elsewhere.
-        yield* router.navigate("/login");
+        yield* router.push("/login");
         yield* page.waitFor({ label: "login", until: (actual) => hasAt(actual, "#login") });
         expect(yield* where).toEqual(["none", "none"]);
-        yield* router.navigate("/nowhere/at/all");
+        yield* router.push("/nowhere/at/all");
         yield* page.waitFor({ label: "not found", until: (actual) => hasAt(actual, "#missing") });
         expect(yield* where).toEqual(["none", "none"]);
         expect(yield* homeLink.active.get).toBe(false);

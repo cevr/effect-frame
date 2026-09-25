@@ -9,26 +9,32 @@ import type {
 import { mergeSearchRecord, readSearch, printSearch, searchKeysOf } from "./codec.js";
 import type { RouterService } from "./router.js";
 import type { Scope } from "effect";
-import { Context, Effect, Option, Schema } from "effect";
+import { Context, Effect, Option, Predicate, Schema } from "effect";
 import * as Inspection from "../inspection.js";
 
-/** Explicit wire keys for an opaque SearchRecord codec. */
+/** Explicit wire keys for an opaque SearchRecord codec: the same name a segment uses. */
 export interface Options {
-  readonly keys?: ReadonlyArray<string>;
+  readonly searchKeys?: ReadonlyArray<string>;
 }
 
-/** A mounted view's decoded state and its URL mutations. */
+/** A new value, or an update of the latest one. */
+export type Change<A> = A | ((previous: A) => A);
+
+/**
+ * A mounted view's decoded state and its two URL moves. `push` adds a
+ * history entry and `replace` rewrites the current one; neither is a
+ * default. Each takes a value, or an update of the latest value.
+ *
+ * ```ts
+ * const filter = yield* UrlState.make(FilterSearch);
+ * yield* filter.push({ filter: "open" });
+ * yield* filter.replace((previous) => ({ ...previous, page: 1 }));
+ * ```
+ */
 export interface State<A> {
   readonly state: Source<A>;
-  /** Replace the current history entry. */
-  readonly set: (value: A) => Effect.Effect<void>;
-  /** Replace the current history entry after reading the latest value. */
-  readonly update: (update: (previous: A) => A) => Effect.Effect<void>;
-  /** Explicit push operations for callers that want a history entry. */
-  readonly push: {
-    readonly set: (value: A) => Effect.Effect<void>;
-    readonly update: (update: (previous: A) => A) => Effect.Effect<void>;
-  };
+  readonly push: (change: Change<A>) => Effect.Effect<void>;
+  readonly replace: (change: Change<A>) => Effect.Effect<void>;
 }
 
 /** A view state schema must have a valid omitted-record fallback. */
@@ -66,6 +72,18 @@ interface Owner {
 type Mutation<A> =
   | { readonly _tag: "Set"; readonly value: A }
   | { readonly _tag: "Update"; readonly update: (previous: A) => A };
+
+/** A change as the mutation it names: an update when it is a function. */
+const mutationOf = <A>(change: Change<A>): Mutation<A> => {
+  if (isUpdate(change)) {
+    return { _tag: "Update", update: change };
+  }
+  return { _tag: "Set", value: change };
+};
+
+function isUpdate<A>(change: Change<A>): change is (previous: A) => A {
+  return Predicate.isFunction(change);
+}
 
 /**
  * Bind the view-level URL-state constructor to one mounted route instance.
@@ -151,14 +169,6 @@ export const makeRuntime = (
           })),
         );
       }
-      const set = (value: S["Type"]): Effect.Effect<void> =>
-        replaceOrPush("replace", { _tag: "Set", value });
-      const update = (change: (previous: S["Type"]) => S["Type"]): Effect.Effect<void> =>
-        replaceOrPush("replace", { _tag: "Update", update: change });
-      const pushSet = (value: S["Type"]): Effect.Effect<void> =>
-        replaceOrPush("push", { _tag: "Set", value });
-      const pushUpdate = (change: (previous: S["Type"]) => S["Type"]): Effect.Effect<void> =>
-        replaceOrPush("push", { _tag: "Update", update: change });
 
       const replaceOrPush = (
         operation: "push" | "replace",
@@ -177,16 +187,15 @@ export const makeRuntime = (
           return printValue(current, encode(next), keys);
         };
         if (operation === "push") {
-          return navigation.navigate(updater, instance);
+          return navigation.push(updater, instance);
         }
         return navigation.replace(updater, instance);
       };
 
       return {
         state,
-        set,
-        update,
-        push: { set: pushSet, update: pushUpdate },
+        push: (change) => replaceOrPush("push", mutationOf(change)),
+        replace: (change) => replaceOrPush("replace", mutationOf(change)),
       } satisfies State<S["Type"]>;
     });
   };
@@ -197,12 +206,12 @@ const resolveKeys = (
   codec: SearchKeyInfo,
   options: Option.Option<Options>,
 ): ReadonlyArray<string> => {
-  const declared = Option.flatMap(options, (value) => Option.fromNullishOr(value.keys));
+  const declared = Option.flatMap(options, (value) => Option.fromNullishOr(value.searchKeys));
   if (Option.isSome(declared)) {
     if (codec.known && !sameKeys(codec.keys, declared.value)) {
       return Option.getOrThrowWith(Option.none(), () =>
         UrlStateSchemaRejected.make({
-          reason: "UrlState keys must match the codec's declared encoded keys",
+          reason: "UrlState searchKeys must match the codec's declared encoded keys",
         }),
       );
     }
@@ -211,7 +220,7 @@ const resolveKeys = (
   if (!codec.known) {
     return Option.getOrThrowWith(Option.none(), () =>
       UrlStateSchemaRejected.make({
-        reason: "an opaque codec requires UrlState.make({ keys })",
+        reason: "an opaque codec requires UrlState.make(codec, { searchKeys })",
       }),
     );
   }

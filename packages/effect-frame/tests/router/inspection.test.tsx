@@ -214,7 +214,7 @@ describe("Frame router inspection", () => {
           value: { filter: { _tag: "Value", value: "first" } },
         });
 
-        yield* page.act(router.navigate("/books/8?tab=two&filter=second"), {
+        yield* page.act(router.push("/books/8?tab=two&filter=second"), {
           label: "navigated to the second book",
           until: (actualRoot) => textAt(actualRoot, "#book") === "second",
         });
@@ -236,12 +236,12 @@ describe("Frame router inspection", () => {
         });
         expect(initialRoute.canonicalUrl).toBe("http://app.test/books/7?tab=one&filter=first");
 
-        yield* page.act(state.set({ filter: "replaced" }), {
+        yield* page.act(state.replace({ filter: "replaced" }), {
           label: "replaced URL state is rendered",
           until: (actualRoot) => textAt(actualRoot, "#book") === "replaced",
         });
         yield* page.act(
-          state.push.update((previous) => ({ filter: `${previous.filter}-pushed` })),
+          state.push((previous) => ({ filter: `${previous.filter}-pushed` })),
           {
             label: "pushed URL state is rendered",
             until: (actualRoot) => textAt(actualRoot, "#book") === "replaced-pushed",
@@ -266,7 +266,7 @@ describe("Frame router inspection", () => {
           "push /books/8?tab=two&filter=replaced-pushed",
         ]);
 
-        yield* page.act(router.navigate("/missing"), {
+        yield* page.act(router.push("/missing"), {
           label: "not found route is rendered",
           until: (actualRoot) => textAt(actualRoot, "#missing") === "/missing",
         });
@@ -309,7 +309,7 @@ describe("Frame router inspection", () => {
           ),
         );
         const { router } = yield* makeStart("http://app.test/old", [old, slow]);
-        const moving = yield* Effect.forkScoped(router.navigate("/slow"));
+        const moving = yield* Effect.forkScoped(router.push("/slow"));
         yield* Deferred.await(started);
 
         const entering = yield* Frame.inspect;
@@ -613,7 +613,7 @@ describe("Frame router inspection", () => {
           reason: "unreadable-object",
         });
 
-        yield* router.navigate("/unreadable-array/1");
+        yield* router.push("/unreadable-array/1");
         snapshot = yield* Frame.inspect;
         expect(routeNamed(snapshot, "unreadable-array").params).toEqual({
           _tag: "Opaque",
@@ -712,11 +712,11 @@ describe("Frame router inspection", () => {
           ),
         );
         const { router } = yield* makeStart("http://app.test/old", [old, bad]);
-        const failed = yield* Effect.exit(router.navigate("/bad"));
+        const failed = yield* Effect.exit(router.push("/bad"));
         expect(Exit.isFailure(failed)).toBe(true);
         expect(released).toBe(1);
         expect((yield* Frame.inspect).routes.map((route) => route.routeName)).toEqual(["old"]);
-        yield* router.navigate("/old");
+        yield* router.push("/old");
         expect((yield* router.current.get).name).toBe("old");
         expect((yield* Frame.inspect).routes.map((route) => route.routeName)).toEqual(["old"]);
       }),
@@ -804,9 +804,9 @@ describe("Frame router inspection", () => {
           ),
         );
         const { router } = yield* makeStart("http://app.test/old-lifetime", [old, owned]);
-        yield* router.navigate("/owned");
+        yield* router.push("/owned");
         expect(released).toBe(0);
-        yield* router.navigate("/old-lifetime");
+        yield* router.push("/old-lifetime");
         expect(released).toBe(1);
       }),
   );

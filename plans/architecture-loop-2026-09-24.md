@@ -210,6 +210,68 @@ Counsel defects:
 
 Live check: `<pending>`
 
+## Pass 2
+
+Owner request (2026-09-25): one more pass. Seed it with the JSX friction found
+while moving EGW Search to 0.27.0, and evaluate TSRX (https://tsrx.dev/) as a
+template syntax against JSX.
+
+- Baseline: HEAD `d272bd7` (effect-frame 0.27.0 plus the pass 1 ledger), source lines `36778`.
+- Worktree: `~/Developer/personal/.worktrees/effect-frame-arch-pass2`, branch `arch-pass2`.
+- Coverage: the same 16 directories as pass 1, all swept-before; none unswept.
+- Reports: `plans/pass2/<area>.md`.
+
+Seed findings (receipts: bible-tools `2179ef74`, `4008b04a`):
+
+| ID | Friction | Receipt |
+| -- | -------- | ------- |
+| F1 | `View.bind(source, project)` and `View.event(() => …)` at every live prop and handler; `Source.select` inside props | `bible-tools/apps/egw-search/src/app.tsx` |
+| F2 | A local actor's `send` fails with `ActorStopped`, but a `Handler` has no error channel: each write needs a catch (EGW's `whileMounted`) | `app.tsx` `whileMounted` |
+| F3 | `Show`/`For` render functions nest deeply (`Reference` is `Show` in `Show`) | `app.tsx` `Reference`, `HitRow` |
+| F4 | A view is `(props) => Effect.gen(function* () { … })`; a zero-argument exported view trips `lazyEffect`, so a page with no props must type props it ignores | `app.tsx` `SearchPage`, `src/segments.ts` |
+| F5 | A `.tsx` file the server imports from the repo root names `@jsxImportSource effect-frame/view` itself | `app.tsx:1`, `routes.tsx:1` |
+| T1 | TSRX: `@{}` components, `@if`/`@for` blocks, locals beside markup, scoped `<style>`, target plugins | `okra repo path tsrx-org/tsrx` |
+
+Pass 1 carry-over: see "Pass 2 candidates already known" and "More pass 2 candidates" above.
+
+Reports: `plans/pass2/{view,actor,router,apps,edges,guards,docs,tsrx}.md`. Candidate IDs are the reports' own (W*, P2-A*, router batches A–F and R-Q4, AP*, E2-*, P2-G*, docs findings 1–15).
+
+Loop decisions on owner questions (the owner may reverse any; each names its north star):
+
+- T1 TSRX: stay on JSX (tsrx.md option b). TS7 `tsc`, the Effect language service, oxlint and oxfmt do not see `.tsrx`; `@if` cannot bind a narrowed source. Take its ideas as API: a flat union `Match` (documented pattern, no new name), and a `For` fallback. No scoped CSS: it cannot work in the terminal host. Revisit a template language only when TSRX runs on TS7 and oxc.
+- F2: premise corrected — a local `send` never fails; `derive`/`modify` do. P2-A1: they return a handle and never fail (actor-model: one send shape). Export `LocalValueRef<A>` (P2-A2).
+- F4 / W5: keep D4, no `View.make` (one form). Doc: a view names the props it is given; a leaf types them `Route.PropsOf<typeof segment>` (explicit).
+- F5: app config (apps.md §2). Doc sentence; EGW runs its server from the app directory (AP12).
+- W3 one subscription per Source: hold. W2 explains the reproduced tick; re-open only with a receipt W2 does not explain.
+- W6 Portal: a `PortalTarget` only a host makes; the HTML and Remote hosts make none, so a Portal fails loudly there (explicit). Server placement of portal children waits for a caller.
+- Actor O1 (Foldkit `Stale`): (i) `Failed { error, last: Option<A> }` — a failed refresh keeps the value; one state at a time holds (expressive, declarative).
+- Router O1: `push`/`replace` return the `NavigationResult`; the test-only `registered` map goes (explicit, deletion).
+- Apps O1 (AP10): a JSX tag is a framework tag; a sync helper is called as a function (explicit, closed tag set).
+- Apps O2 (AP11): document the one client composition; inspection registration stays optional and is named in the docs (hold the required-input change).
+- Apps O3: keep one transport tap per example (explicit about what each proves).
+- Apps O4 / `FollowedQuery.override`: keep, marked stale (unchanged).
+- E2-1: adopt. The handlers speak `HttpServerRequest` → `HttpServerResponse`; `effect` supplies `HttpRouter` and `toWebHandler`. The package already depends on `effect/unstable/http` (`HttpTransport`). E2-6 falls away.
+- E2-3: rejected (wire change).
+- Docs 2: `Source.zip(a, b)` gives a tuple as Effect's `zip` does; the combining form is `Source.zipWith(a, b, f)` (consistency with Effect).
+- Docs 3: `pushSearch`/`replaceSearch` take a value or an updater, as `UrlState` does (one change shape).
+- AP4 / docs 7 (`FollowedActor.send`): rejected — pass 1 (c3d9917) decided a send names the reference.
+- P2-A6 (A12): its own pass, after a model-based test; not in pass 2.
+- P2-G9 (the wait is the expectation): hold until W2 lands; re-open if a test still settles on one binding.
+
+Apply groups (one after the other in the worktree):
+
+| Group | Candidates |
+| ----- | ---------- |
+| 1 defects | W2, W7, R-Q4 |
+| 2 view | W1, W4, W6, `For` fallback, F3 union-`Match` doc, F4 doc |
+| 3 actor | P2-A1, P2-A2, P2-A3, P2-A4, P2-A5, Actor O1 (i), stale JSDoc (`Actor.spawn`, `Behavior.refuse`, `Behavior.wakeAt`) |
+| 4 router | batches A–F (spread-route and annotated-search defects with red tests), Router O1, acceptance row 122, P2-G5 `frame/no-module-state` |
+| 5 edges | E2-1, E2-2, E2-4, E2-5, AP5, AP6 |
+| 6 docs + apps | docs findings 1–15 (with Docs 2, Docs 3), AP2, AP3, AP7, AP8, AP10, AP11, F5 doc |
+| 7 guards | P2-G1, P2-G2, P2-G3, P2-G4, P2-G6, P2-G7, P2-G8 |
+| 8 EGW | adopt the release in bible-tools `apps/egw-search` (AP12, delete `whileMounted` and `segments.ts` if unneeded, `View.event(effect)`, union `Match`) |
+
+
 ## Close
 
 - Unswept directories: `<pending>`

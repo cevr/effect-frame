@@ -5,6 +5,8 @@ import { Effect, Option, Predicate, Result, Schema, SchemaGetter } from "effect"
 import { matchPrefix, refuseOutOfDomain, segmentFault, segmentsOf, textFault } from "./path.js";
 export { UrlValueRejected } from "./path.js";
 import type { RouteMatch } from "./router.js";
+import type { Shell } from "./landing.js";
+import type { Asker } from "./leave-registry.js";
 import type { RenderingMode } from "./rendering-mode.js";
 
 /**
@@ -512,6 +514,10 @@ export interface Entered<R> {
   readonly update: (url: URL) => Effect.Effect<boolean>;
   /** The deepest mounted segment's decoded values, for the inspection record. */
   readonly inspection: Effect.Effect<EnteredValues>;
+  /** What the last commit offers the Location: whether it entered, its behavior, its root. */
+  readonly shell: Effect.Effect<Shell>;
+  /** The leave checks this mounted route would ask for a candidate, deepest first. */
+  readonly questions: Asker;
 }
 
 /** The decoded params and search the inspection record shows for a mounted route. */

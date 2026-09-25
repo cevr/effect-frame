@@ -6,7 +6,8 @@ registerDom();
 import { NavigationBehavior, Route } from "effect-frame/router";
 import type { MountOptions, NotFoundProps } from "effect-frame/router";
 import { Dom } from "effect-frame/view";
-import { Effect, Schema } from "effect";
+import { BunServices } from "@effect/platform-bun";
+import { Effect, FileSystem, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { renderUrl } from "./fixtures/server-entry.js";
 
@@ -146,6 +147,8 @@ describe("navigation behavior", () => {
 
   it.effect("a server bundle of a routed tree excludes the browser navigation modules", () =>
     Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const outdir = yield* fs.makeTempDirectoryScoped({ prefix: "effect-frame-server-entry-" });
       const built = yield* Effect.promise(() =>
         Bun.build({
           entrypoints: [`${import.meta.dir}/fixtures/server-entry.tsx`],
@@ -153,6 +156,7 @@ describe("navigation behavior", () => {
           format: "esm",
           conditions: ["source"],
           minify: false,
+          outdir,
         }),
       );
       expect(built.success).toBe(true);
@@ -160,8 +164,14 @@ describe("navigation behavior", () => {
         Effect.promise(() => output.text()),
       );
       const bundle = text.join("\n");
-      // The routed tree is in it.
-      expect(bundle).toContain("registerShell");
+      // The routed tree is in it: the bundle alone renders a page of it.
+      const entry = built.outputs.find((output) => output.kind === "entry-point");
+      const bundled = yield* Effect.promise(
+        (): Promise<{ readonly renderHtml: (href: string) => Promise<string> }> =>
+          import(entry?.path ?? ""),
+      );
+      const html = yield* Effect.promise(() => bundled.renderHtml("http://site.test/site/pages/7"));
+      expect(html).toBe('<main><article tabindex="-1">7</article></main>');
       // `navigation.ts` and `browser-commit.ts` are not.
       for (const marker of [
         "historySurface",
@@ -174,6 +184,7 @@ describe("navigation behavior", () => {
       ]) {
         expect({ marker, found: bundle.includes(marker) }).toEqual({ marker, found: false });
       }
-    }),
+      // @effect-diagnostics-next-line strictEffectProvide:off
+    }).pipe(Effect.scoped, Effect.provide(BunServices.layer)),
   );
 });

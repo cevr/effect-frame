@@ -1,7 +1,8 @@
 /**
  * A server entry for the #31 bundle proof: it renders a routed tree to HTML
  * on the server host with a memory `Location`. `navigation-behavior.test.tsx`
- * bundles it and asserts the browser navigation modules are not in it.
+ * bundles it, runs the bundle's `renderHtml`, and asserts the browser
+ * navigation modules are not in it.
  */
 import type { LocationService } from "effect-frame/router";
 import { Location, NavigationBehavior, Route, mount } from "effect-frame/router";
@@ -53,3 +54,6 @@ export const renderUrl = (href: string) =>
       return Html.serializeChildren(root.children);
     }),
   );
+
+/** `renderUrl` run by the bundle's own Effect runtime, for a caller outside it. */
+export const renderHtml = (href: string): Promise<string> => Effect.runPromise(renderUrl(href));

@@ -102,9 +102,7 @@ import { Router } from "./router.js";
 import type { LeaveEntry, LeaveInput, MountedRouteService } from "./leave.js";
 import { MountedRoute } from "./leave.js";
 import type { Candidate, LeaveKind, Question } from "./leave-registry.js";
-import { register as registerLeave } from "./leave-registry.js";
 import type { Shell } from "./landing.js";
-import { registerShell } from "./landing.js";
 import * as LeafRoot from "./leaf-root.js";
 import type { NavigationBehavior } from "./navigation-behavior.js";
 import type { DrivenServices, ErasedDriven } from "./driven.js";
@@ -3045,32 +3043,28 @@ const mountTree = <Name extends string, ViewR, DataR, Extra extends object>(
                 onSome: (current) => deepest(current.root),
               }),
             ),
-          };
-          // Leave questions for a candidate: the mounted root answers for the
-          // whole tree. A candidate of another route exits every instance.
-          registerLeave(entered, (candidate: Candidate) =>
-            Option.match(mounted, {
-              onNone: () => Effect.succeed<ReadonlyArray<Question>>([]),
-              onSome: (current) =>
-                current.root.questions(
-                  Option.map(
-                    Option.filter(matchUrl(root, candidate.destination), () => candidate.stays),
-                    (matched) => matched.outline,
-                  ),
-                  candidate.destination,
-                  candidate.kind,
-                ),
-            }),
-          );
-          registerShell(
-            entered,
-            Effect.suspend(() =>
+            shell: Effect.suspend(() =>
               Option.match(shell, {
                 onNone: () => Effect.die("the tree reported a shell before its first mount"),
                 onSome: Effect.succeed,
               }),
             ),
-          );
+            // Leave questions for a candidate: the mounted root answers for the
+            // whole tree. A candidate of another route exits every instance.
+            questions: (candidate: Candidate) =>
+              Option.match(mounted, {
+                onNone: () => Effect.succeed<ReadonlyArray<Question>>([]),
+                onSome: (current) =>
+                  current.root.questions(
+                    Option.map(
+                      Option.filter(matchUrl(root, candidate.destination), () => candidate.stays),
+                      (matched) => matched.outline,
+                    ),
+                    candidate.destination,
+                    candidate.kind,
+                  ),
+              }),
+          };
           return entered;
         }),
       ),

@@ -31,11 +31,11 @@ import { CheckNavigation, RedirectCycle, read as readChecks, redirectLimit } fro
 import type { NavigationResult } from "./receipt.js";
 import { Committed, Stayed, Unchanged, register as registerReceipts } from "./receipt.js";
 import type { LeaveKind, LeaveVerdict, Question } from "./leave-registry.js";
-import { Leave, read as readLeave } from "./leave-registry.js";
+import { Leave } from "./leave-registry.js";
 import type { Traversal } from "./traversal.js";
 import { read as readTraversals } from "./traversal.js";
 import type { Landing, Shell, WriteKind, Written } from "./landing.js";
-import { readShell, readSurface, registerShell } from "./landing.js";
+import { readSurface } from "./landing.js";
 import * as LeafRoot from "./leaf-root.js";
 import type { NavigationBehavior } from "./navigation-behavior.js";
 
@@ -218,10 +218,7 @@ const notFoundRoute = <R>(view: View.View<NotFoundProps, never, R>): AnyRoute<R>
               Effect.as(SubscriptionRef.set(current, next), true),
             ),
           inspection: Effect.succeed({ params: {}, search: {} }),
-        };
-        registerShell(
-          entered,
-          Effect.sync(() => ({
+          shell: Effect.sync(() => ({
             entered: entering,
             behavior: Option.none(),
             root: Ref.get(cell),
@@ -229,7 +226,9 @@ const notFoundRoute = <R>(view: View.View<NotFoundProps, never, R>): AnyRoute<R>
             drawn: Effect.void,
             settled: Effect.void,
           })),
-        );
+          // Not-found has no leave checks.
+          questions: () => Effect.succeed([]),
+        };
         return entered;
       }),
     ),
@@ -598,7 +597,7 @@ export const mount: <R, HostNode, N = R>(
         const stayed = mounted.value.entered;
         const kept = yield* stayed.update(url);
         if (kept) {
-          return yield* shellOf(stayed, false);
+          return yield* stayed.shell;
         }
       }
       const child = yield* Scope.fork(scope);
@@ -684,7 +683,7 @@ export const mount: <R, HostNode, N = R>(
               onNone: () => Effect.void,
               onSome: (shown) => Scope.close(shown.scope, Exit.void),
             }),
-            shellOf(next.entered, true),
+            next.entered.shell,
           );
         },
       });
@@ -826,10 +825,7 @@ export const mount: <R, HostNode, N = R>(
     Option.match(mounted, {
       onNone: () => Effect.succeed<ReadonlyArray<Question>>([]),
       onSome: (shown) =>
-        Option.match(readLeave(shown.entered), {
-          onNone: () => Effect.succeed<ReadonlyArray<Question>>([]),
-          onSome: (asker) => asker({ destination: url, kind, stays: shown.route === route }),
-        }),
+        shown.entered.questions({ destination: url, kind, stays: shown.route === route }),
     });
 
   /** Ask in order and stop at the first `Stay`. */
@@ -1263,17 +1259,5 @@ const drawingOf = <HostNode>(host: Host<HostNode>): Drawing<HostNode> => {
 const unplaced: Written = { land: () => Effect.void };
 
 const isUrlUpdater = (href: string | UrlUpdater): href is UrlUpdater => Predicate.isFunction(href);
-
-/** What a mounted route reports; a route the framework did not build reports only whether it is new. */
-const shellOf = <R>(entered: Entered<R>, fresh: boolean): Effect.Effect<Shell> =>
-  Option.getOrElse(readShell(entered), () =>
-    Effect.succeed<Shell>({
-      entered: fresh,
-      behavior: Option.none(),
-      root: Effect.succeed(Option.none()),
-      drawn: Effect.void,
-      settled: Effect.void,
-    }),
-  );
 
 const navigationOf = ({ url, kind }: NavigationSample): Navigation => ({ url, kind });

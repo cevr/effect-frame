@@ -1,6 +1,5 @@
 import type { Effect } from "effect";
 import { Option } from "effect";
-import type { Entered } from "./codec.js";
 import type { LocationService } from "./router.js";
 import type { NavigationBehavior } from "./navigation-behavior.js";
 
@@ -74,17 +73,6 @@ export interface Surface {
   readonly write: (kind: WriteKind, url: URL) => Effect.Effect<Written>;
   readonly pop: (landing: Option.Option<Landing>) => Effect.Effect<void>;
 }
-
-const shells = new WeakMap<object, Effect.Effect<Shell>>();
-
-/** Attach the shell reader to a mounted route value without changing `Entered`. */
-export const registerShell = <R>(entered: Entered<R>, shell: Effect.Effect<Shell>): void => {
-  shells.set(entered, shell);
-};
-
-/** The shell a mounted route reports. None: a route the framework did not build. */
-export const readShell = <R>(entered: Entered<R>): Option.Option<Effect.Effect<Shell>> =>
-  Option.fromNullishOr(shells.get(entered));
 
 const surfaces = new WeakMap<LocationService, Surface>();
 

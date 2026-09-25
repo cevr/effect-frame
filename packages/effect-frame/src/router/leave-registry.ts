@@ -1,10 +1,9 @@
 import type { Effect } from "effect";
-import { Option } from "effect";
-import type { Entered } from "./codec.js";
 import type { RouterService } from "./router.js";
 
 /**
- * PRIVATE. The part of leave checks that the router reads.
+ * PRIVATE. The part of leave checks that the router reads: a mounted
+ * route's `Entered.questions` is an `Asker`.
  * It holds no `Router` value, so the router can import it without a cycle.
  * See `leave.ts` for the registration a view makes, and
  * `docs/design/route-leave.md`.
@@ -47,14 +46,3 @@ export type Question = (router: RouterService) => Effect.Effect<LeaveVerdict>;
  * Collecting them asks nothing: the router decides whether it may ask.
  */
 export type Asker = (candidate: Candidate) => Effect.Effect<ReadonlyArray<Question>>;
-
-const askers = new WeakMap<object, Asker>();
-
-/** Attach an asker to a mounted route value without changing `Entered`. */
-export const register = <R>(entered: Entered<R>, asker: Asker): void => {
-  askers.set(entered, asker);
-};
-
-/** The asker of a mounted route. A route without one has no leave checks. */
-export const read = <R>(entered: Entered<R>): Option.Option<Asker> =>
-  Option.fromNullishOr(askers.get(entered));

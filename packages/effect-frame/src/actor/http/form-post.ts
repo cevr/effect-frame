@@ -4,18 +4,17 @@ import type { Principal } from "../principal.js";
 import { CurrentPrincipal } from "../principal.js";
 import { freshCommandId } from "../command-id.js";
 import type { Address, AnyContract } from "../contract.js";
-import type { FormFields, FormIssue, FormIssues, FormMalformed, FormTree } from "../form.js";
+import type { FormFields, FormIssue, FormIssues, FormMalformed } from "../form.js";
 import {
   FormContext,
+  decode,
   decodeKey,
   frameworkFields,
   fromBody,
   isReturnPath,
   issuesOf,
   last,
-  strip,
   submitted,
-  tree,
   without,
 } from "../form.js";
 import { membersOf } from "../generated.js";
@@ -262,13 +261,13 @@ const decodeRetry = (posted: Posted): "fresh" | "same" => {
  */
 const encodeOnce = (
   posted: Posted,
-  nested: { readonly [key: string]: FormTree },
+  fields: FormFields,
   payload: string,
 ): Effect.Effect<void, Reply> =>
   Effect.gen(function* () {
     const again = yield* Effect.orDie(
       Effect.flatMap(
-        Schema.decodeUnknownEffect(posted.contract.raw.message)(nested),
+        decode(posted.contract.raw.message)(fields),
         Schema.encodeUnknownEffect(posted.contract.message),
       ),
     );
@@ -354,17 +353,20 @@ const post = (
     const fields = yield* readBody(request);
     const posted = yield* readFramework(fields, contracts);
     const wireKey = yield* Effect.mapError(decodeKey(posted.contract, posted.key), malformed);
-    const nested = yield* Effect.mapError(tree(strip(fields)), malformed);
-    const decoded = yield* Effect.result(
-      Schema.decodeUnknownEffect(posted.contract.raw.message)(nested),
-    );
+    const decoded = yield* Effect.result(decode(posted.contract.raw.message)(fields));
     if (decoded._tag === "Failure") {
-      return yield* page(posted, 200, issuesOf(decoded.failure), decodeRetry(posted));
+      const failure = decoded.failure;
+      // A body that does not nest is refused before any page; one that
+      // nests but does not decode redraws with its issues.
+      if (failure._tag === "FormMalformed") {
+        return yield* Effect.fail(malformed(failure));
+      }
+      return yield* page(posted, 200, issuesOf(failure), decodeRetry(posted));
     }
     const payload = yield* Effect.orDie(
       Schema.encodeUnknownEffect(posted.contract.message)(decoded.success),
     );
-    yield* encodeOnce(posted, nested, payload);
+    yield* encodeOnce(posted, fields, payload);
     const address: Address = {
       contract: posted.contract.name,
       version: posted.contract.version,

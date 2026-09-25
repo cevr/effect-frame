@@ -2,12 +2,12 @@ import type {
   AnyContract,
   CommandId,
   IdentifiedCommandHandle,
-  MessageOf,
   RemoteCommandRef,
   SnapshotOf,
 } from "effect-frame/actor";
 import { CommandId as CommandIdSchema, Form, Generated, Wire } from "effect-frame/actor/client";
 import { Effect, Option, Predicate, Ref, Schema, Semaphore } from "effect";
+import type { MachineEventSchema } from "effect-machine";
 // Relative on purpose: the mark is module-private to the actor area and no
 // public entry exports it (#67 §3). With one module per source file, this
 // is the module the reference itself reads.
@@ -31,10 +31,12 @@ export interface CommandForm<C extends AnyContract, M, Typed extends string> {
   readonly ref: RemoteCommandRef<C>;
   /**
    * The message member this form sends: one `TaggedStruct` of the
-   * contract's union. A member field that no input carries, no mark
-   * generates, and no default fills does not compile (#32).
+   * contract's union, the schema itself and not a copy with the same type.
+   * A member field that no input carries, no mark generates, and no default
+   * fills does not compile, and neither does a member with no form encoding
+   * (a field that does not encode to strings, a boolean with no default).
    */
-  readonly message: M & Form.Covered<M, Typed>;
+  readonly message: M & Form.Covered<M, Typed> & Form.Codable<M>;
   /** The member fields this form's own inputs carry, by name. */
   readonly typed: ReadonlyArray<Typed>;
   /** The actor base URL, as the client transport uses it: `/actors`. */
@@ -67,8 +69,21 @@ export interface FormBinding {
   readonly commandId: CommandId;
 }
 
-/** A message member: a schema whose type is one of the contract's messages. */
-export type Member<C extends AnyContract> = Schema.Top & { readonly Type: MessageOf<C> };
+/**
+ * A message member of the contract: one schema of its union, or one variant
+ * of its machine event schema. The member itself, so a parallel schema with
+ * the same type but another encoding is not one: the post decodes with the
+ * contract's schema, and only its own members say what that accepts.
+ */
+export type Member<C extends AnyContract> = C["raw"]["message"] extends {
+  readonly members: ReadonlyArray<infer M>;
+}
+  ? M
+  : C["raw"]["message"] extends MachineEventSchema<infer _Definition> & {
+        readonly variants: infer V;
+      }
+    ? V[keyof V]
+    : C["raw"]["message"];
 
 const decodeCommandId = Schema.decodeUnknownOption(CommandIdSchema);
 
@@ -116,7 +131,11 @@ const renderGenerated = (
  * which after hydration are the server's; it never mints over them. Each
  * later send from the same form mints a fresh id.
  */
-export const form = <C extends AnyContract, M extends Member<C>, const Typed extends string>(
+export const form = <
+  C extends AnyContract,
+  M extends Member<C> & Schema.Top,
+  const Typed extends string,
+>(
   options: CommandForm<C, M, Typed>,
 ): Effect.Effect<FormBinding> =>
   Effect.gen(function* () {
@@ -211,7 +230,7 @@ const scriptedSend = <C extends AnyContract, M, Typed extends string>(
     // mints its own. A submit that does not decode releases the permit and
     // leaves the id unspent for the next one.
     const deciding = yield* Semaphore.make(1);
-    const decodeTree = Schema.decodeUnknownEffect(options.ref.contract.raw.message);
+    const decodeFields = Form.decode(options.ref.contract.raw.message);
     const asMessage = Schema.decodeUnknownEffect(Schema.toType(options.ref.contract.message));
     const onSend = Option.fromNullishOr(options.onSend);
 
@@ -243,8 +262,7 @@ const scriptedSend = <C extends AnyContract, M, Typed extends string>(
       deciding.withPermit(
         Effect.gen(function* () {
           const identified = yield* identify(fields);
-          const nested = yield* Form.tree(Form.strip(identified.fields));
-          const decoded = yield* decodeTree(nested);
+          const decoded = yield* decodeFields(identified.fields);
           const message = yield* asMessage(decoded);
           yield* Ref.update(spent, (used) => new Set([...used, identified.commandId]));
           return { commandId: identified.commandId, message, minted: identified.minted };

@@ -407,6 +407,28 @@ export const codec = <S extends Schema.Top>(schema: S & Codable<S>) =>
   Structure.pipe(Schema.decodeTo(schema, SchemaTransformation.passthrough({ strict: false })));
 
 /**
+ * Decodes a posted field map into a message: framework fields removed, the
+ * rest nested (`tree`), then decoded by the message schema. The one decode
+ * of a form body: the plain-post route and a scripted `View.form` submit
+ * both run it, so one body decodes to one message on both paths. A body
+ * that cannot nest fails with `FormMalformed`; one that nests but does not
+ * decode fails with the schema's `SchemaError`, whose issues name fields.
+ *
+ * @example
+ * ```ts
+ * const decodeNotes = Form.decode(Notes.raw.message);
+ * const message = yield* decodeNotes(Form.fromBody("_tag=Add&text=milk"));
+ * ```
+ */
+export const decode = <S extends Schema.Top>(schema: S) => {
+  const decodeTree = Schema.decodeUnknownEffect(schema);
+  return (
+    fields: FormFields,
+  ): Effect.Effect<S["Type"], FormMalformed | Schema.SchemaError, S["DecodingServices"]> =>
+    Effect.flatMap(tree(strip(fields)), (nested) => decodeTree(nested));
+};
+
+/**
  * A checkbox. An unchecked box sends no field at all, so absence is the
  * encoding of `false`; a checked one sends its value, `on` by default. The
  * JSON wire uses the same encoding: `true` is `"on"`, `false` is absent.

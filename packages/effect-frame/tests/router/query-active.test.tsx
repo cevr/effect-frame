@@ -152,8 +152,6 @@ const testLayer = Layer.mergeAll(client, held.pipe(Layer.provide(client))).pipe(
 // ---------------------------------------------------------------------------
 
 const TenantParams = Schema.Struct({ tenant: Schema.String });
-const PostParams = Schema.Struct({ tenant: Schema.String, postId: Schema.String });
-
 const tenantSegment = Route.segment("tenant", {
   path: "/app/:tenant",
   params: TenantParams,
@@ -162,7 +160,7 @@ const tenantSegment = Route.segment("tenant", {
 
 const postSegment = Route.child(tenantSegment, "post", {
   path: "posts/:postId",
-  params: PostParams,
+  params: Schema.Struct({ postId: Schema.String }),
   data: ({ params }) => ({
     post: Route.query(Post, { tenant: params.tenant, postId: params.postId }),
     comments: Route.query(Comments, { tenant: params.tenant, postId: params.postId }),
@@ -172,7 +170,7 @@ const postSegment = Route.child(tenantSegment, "post", {
 /** Declares an actor, so its snapshot read can hold a transition open. */
 const pairSegment = Route.child(tenantSegment, "pair", {
   path: "pairs/:postId",
-  params: PostParams,
+  params: Schema.Struct({ postId: Schema.String }),
   data: ({ params }) => ({
     draft: Route.actor(Draft, { tenant: params.tenant, postId: params.postId }),
     post: Route.query(Post, { tenant: params.tenant, postId: params.postId }),

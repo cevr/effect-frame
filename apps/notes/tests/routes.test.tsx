@@ -15,7 +15,6 @@ import {
   IndexSearch,
   ListParams,
   ListSearch,
-  NoParams,
   home,
   index,
   list,
@@ -183,7 +182,7 @@ const outsideDomain = ["", ".", ".."].map((name) => Schema.decodeSync(ListName)(
 const reserved = Schema.decodeSync(ListName)("a/b?c#d");
 
 describe("every Notes route prints what it parses (#18)", () => {
-  roundTrip("index", Schema.Struct({ params: NoParams, search: IndexSearch }), (drawn) =>
+  roundTrip("index", Schema.Struct({ params: Schema.Struct({}), search: IndexSearch }), (drawn) =>
     index.href({}, drawn.search),
   );
   roundTrip("list", Schema.Struct({ params: ListParams, search: ListSearch }), (drawn) =>
@@ -192,8 +191,10 @@ describe("every Notes route prints what it parses (#18)", () => {
   roundTrip("print", Schema.Struct({ params: ListParams, search: ListSearch }), (drawn) =>
     print.href(drawn.params, drawn.search),
   );
-  roundTrip("scratch", Schema.Struct({ params: NoParams, search: Schema.Struct({}) }), () =>
-    scratch.href({}, {}),
+  roundTrip(
+    "scratch",
+    Schema.Struct({ params: Schema.Struct({}), search: Schema.Struct({}) }),
+    () => scratch.href({}, {}),
   );
 
   it.effect("home prints / and a list name outside the domain is refused, never misprinted", () =>
@@ -285,12 +286,15 @@ const refusalOf = (define: () => void) =>
     Effect.map(Option.map((refused) => ({ template: refused.template, reason: refused.reason }))),
   );
 
+const numbered: string = ":list(\\d+)";
+
 describe("a Notes segment whose template cannot print (#18)", () => {
   it.effect("a regexp group throws at definition", () =>
     Effect.gen(function* () {
       expect(
         yield* refusalOf(() =>
-          Route.child(lists, "numbered", { path: ":list(\\d+)", params: ListParams }),
+          // A template held as a plain string is not checked against the codec.
+          Route.child(lists, "numbered", { path: numbered, params: ListParams }),
         ),
       ).toEqual(
         Option.some({
@@ -303,9 +307,7 @@ describe("a Notes segment whose template cannot print (#18)", () => {
 
   it.effect("a bare * throws at definition", () =>
     Effect.gen(function* () {
-      expect(
-        yield* refusalOf(() => Route.child(lists, "anything", { path: "*", params: NoParams })),
-      ).toEqual(
+      expect(yield* refusalOf(() => Route.child(lists, "anything", { path: "*" }))).toEqual(
         Option.some({ template: "*", reason: "an unnamed wildcard has no name to print from" }),
       );
     }),

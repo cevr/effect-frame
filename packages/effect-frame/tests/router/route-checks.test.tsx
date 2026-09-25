@@ -342,8 +342,6 @@ const LoginRoute = Route.client(
 );
 
 const TenantParams = Schema.Struct({ tenant: Schema.String });
-const PostParams = Schema.Struct({ tenant: Schema.String, postId: Schema.String });
-
 /**
  * The tenant check: an unannotated function whose services are `Access`.
  * A denied tenant goes to sign-in with a typed target.
@@ -372,7 +370,7 @@ const tenantSegment = Route.segment("tenant", {
 
 const postSegment = Route.child(tenantSegment, "post", {
   path: "posts/:postId",
-  params: PostParams,
+  params: Schema.Struct({ postId: Schema.String }),
   search: Route.search(Schema.Struct({ tab: Schema.String.pipe(Route.withDefault("read")) })),
   data: ({ params }) => ({
     draft: Route.actor(Draft, { tenant: params.tenant, postId: params.postId }),

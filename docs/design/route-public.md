@@ -21,6 +21,11 @@ public model in `effect-frame/router` and `effect-frame/view`. Slice 5
 > `href`. A route that only redirects is `Route.redirecting(name, segment, to)`:
 > it has no view, and its check answers before any mode is read.
 >
+> **Amended (same loop): params follow the template.** A segment's `params`
+> codec decodes exactly the names its own template declares (a mismatch does
+> not compile), a child inherits its ancestors' params instead of restating
+> them, and `params` is absent when the template declares none.
+>
 > **Amended (same loop): one export path, and branded routes.** The route
 > types are exported only under `Route` (`Route.AnyRoute`,
 > `Route.PathRecord`, ...); the flat duplicates, `searchKeysOf`,
@@ -158,27 +163,37 @@ removing it later would be a break (small-interface-deep-module).
 ### Segments
 
 ```ts
-interface Route.SegmentOptions<P extends ParamsCodec, S extends SearchCodec, Own, CheckR> {
-  readonly path: string; // relative to the parent
-  readonly params: P; // decodes the path record accumulated from the root
+interface Route.SegmentOptions<Path extends string, P extends ParamsCodec, S extends SearchCodec,
+  Own, CheckR, Params = P["Type"]> {
+  readonly path: Path; // relative to the parent
+  readonly params?: P; // this segment's own template params, exactly; absent when it has none
   readonly search?: S;
   readonly searchKeys?: ReadonlyArray<string>; // for an opaque search codec
   readonly retain?: ReadonlyArray<Extract<keyof S["Type"], string>>;
-  readonly data?: (values: Values<P["Type"], S["Type"]>) => Own;
-  readonly before?: Before<P["Type"], S["Type"], CheckR>;
+  readonly data?: (values: Values<Params, S["Type"]>) => Own; // Params: inherited and own
+  readonly before?: Before<Params, S["Type"], CheckR>;
 }
+type ParamsCodec = Schema.Codec<unknown, PathRecord>;
+type Route.ParamNames<Path>; // ":tenant" and ":rest*" names of a literal template
 
-Route.segment: <const Name extends string, P extends ParamsCodec, S extends SearchCodec = NoSearch,
-  Own extends Declarations = NoDeclarations, CheckR = never>(
-  name: Name, options: SegmentOptions<P, S, Own, CheckR> & DataRequired<Own>,
+Route.segment: <const Name extends string, const Path extends string, P extends ParamsCodec = NoParamsCodec,
+  S extends SearchCodec = NoSearch, Own extends Declarations = NoDeclarations, CheckR = never>(
+  name: Name, options: SegmentOptions<Path, P, S, Own, CheckR> & DataRequired<Own> & ParamsMatch<Path, P>,
 ) => Segment<Name, P["Type"], S["Type"], Own, Own, CheckR, true>;
 
-Route.child: <ParentData extends Declarations, const Name extends string, P extends ParamsCodec,
-  S extends SearchCodec = NoSearch, Own extends Declarations & Disjoint<ParentData> = NoDeclarations,
-  CheckR = never>(
-  parent: Segment<string, unknown, unknown, Declarations, ParentData, unknown>,
-  name: Name, options: SegmentOptions<P, S, Own, CheckR> & DataRequired<Own>,
-) => Segment<Name, P["Type"], S["Type"], Own, ParentData & Own, CheckR, false>;
+Route.child: <ParentParams, ParentData extends Declarations, const Name extends string,
+  const Path extends string, P extends ParamsCodec = NoParamsCodec, S extends SearchCodec = NoSearch,
+  Own extends Declarations & Disjoint<ParentData> = NoDeclarations, CheckR = never>(
+  parent: Segment<string, ParentParams, unknown, Declarations, ParentData, unknown>,
+  name: Name,
+  options: SegmentOptions<Path, P, S, Own, CheckR, MergeParams<ParentParams, P["Type"]>>
+    & DataRequired<Own> & ParamsMatch<Path, P>,
+) => Segment<Name, MergeParams<ParentParams, P["Type"]>, S["Type"], Own, ParentData & Own, CheckR, false>;
+
+// ParamsMatch: the codec's encoded keys equal ParamNames<Path>, or `params`
+// is a ParamsMismatch<Names> and the call does not compile. A template typed
+// as plain `string` is not checked. The decoded record is the ancestors'
+// params spread with the child's own; a root's params are its codec's value.
 
 interface Route.AnySegment {
   readonly _tag: "Segment";

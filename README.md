@@ -132,7 +132,6 @@ import { Effect, Schema } from "effect";
 // A one-page route is a tree of one leaf. There is no other form.
 const login = Route.segment("login", {
   path: "/login",
-  params: Schema.Struct({}),
   search: Route.search(Schema.Struct({ next: Schema.String.pipe(Route.withDefault("/")) })),
 });
 const Login = Route.client(
@@ -155,7 +154,7 @@ const tenant = Route.segment("tenant", {
 
 const post = Route.child(tenant, "post", {
   path: "posts/:postId",
-  params: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
+  params: Schema.Struct({ postId: Schema.String }), // tenant is the parent's
 });
 
 const App = Route.client(
@@ -198,6 +197,11 @@ const program = Effect.gen(function* () {
 });
 ```
 
+- A segment's `params` codec decodes exactly the names its own template
+  declares, so `path: "/app/:tenant"` with `Schema.Struct({ tenantId })`
+  does not compile. A child declares only its own params and inherits its
+  ancestors': `post` above sees `{ tenant, postId }`. A template with no
+  param takes no `params`.
 - `before` runs parent first, before anything commits. It returns
   `Route.Continue` or `Route.redirect(segment, params, search)`.
 - A URL that only moves elsewhere is `Route.redirecting(name, segment, to)`.

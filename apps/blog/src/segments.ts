@@ -16,17 +16,15 @@ import { PostBody, PostIndex } from "./queries.js";
  * ```
  */
 
-export const NoParams = Schema.Struct({});
 export const PostParams = Schema.Struct({ slug: Slug });
 export type PostParams = Schema.Schema.Type<typeof PostParams>;
 
 /** The blog's chrome. It adds no param, so a prerender tree needs no inputs for it. */
-export const chrome = Route.segment("chrome", { path: "/", params: NoParams });
+export const chrome = Route.segment("chrome", { path: "/" });
 
 /** Every post, newest first. */
 export const index = Route.child(chrome, "index", {
   path: "posts",
-  params: NoParams,
   data: () => ({ posts: Route.query(PostIndex, {}) }),
 });
 

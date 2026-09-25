@@ -126,8 +126,6 @@ const seedIn = (html: string): ReadonlyArray<Streaming.Patch> =>
 // ---------------------------------------------------------------------------
 
 const TenantParams = Schema.Struct({ tenant: Schema.String });
-const PostParams = Schema.Struct({ tenant: Schema.String, postId: Schema.String });
-
 const tenantSegment = Route.segment("tenant", {
   path: "/app/:tenant",
   params: TenantParams,
@@ -136,7 +134,7 @@ const tenantSegment = Route.segment("tenant", {
 
 const postSegment = Route.child(tenantSegment, "post", {
   path: "posts/:postId",
-  params: PostParams,
+  params: Schema.Struct({ postId: Schema.String }),
   data: ({ params }) => ({ post: Route.query(Label, { id: `post-${params.postId}` }) }),
 });
 
@@ -913,11 +911,11 @@ const orgSegment = Route.segment("org", {
 });
 const teamSegment = Route.child(orgSegment, "team", {
   path: "teams/:team",
-  params: Schema.Struct({ org: Schema.String, team: Schema.String }),
+  params: Schema.Struct({ team: Schema.String }),
 });
 const memberSegment = Route.child(teamSegment, "member", {
   path: "members/:member",
-  params: Schema.Struct({ org: Schema.String, team: Schema.String, member: Schema.String }),
+  params: Schema.Struct({ member: Schema.String }),
 });
 
 const orgApp = Route.ssr(
@@ -1007,7 +1005,6 @@ describe("nesting and inheritance (#18 §2.2, §3.2)", () => {
       });
       const page = Route.child(docs, "page", {
         path: "page",
-        params: Schema.Struct({ rest: Schema.Array(Schema.String) }),
       });
       expect(() =>
         Route.layout(docs, [Route.leaf(page, () => Effect.succeed(<p />))], (props) =>

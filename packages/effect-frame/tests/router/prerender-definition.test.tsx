@@ -14,12 +14,13 @@ type Equals<A, B> =
 
 const Nothing = Schema.Struct({});
 const OrgParams = Schema.Struct({ org: Schema.String });
-const PostParams = Schema.Struct({ org: Schema.String, slug: Schema.String });
-
 const view = () => Effect.succeed(<p>page</p>);
 
 const tenant = Route.segment("tenant", { path: "/:org", params: OrgParams });
-const post = Route.child(tenant, "post", { path: "posts/:slug", params: PostParams });
+const post = Route.child(tenant, "post", {
+  path: "posts/:slug",
+  params: Schema.Struct({ slug: Schema.String }),
+});
 const blog = Route.segment("blog", { path: "/blog", params: Nothing });
 const entry = Route.child(blog, "entry", {
   path: ":slug",

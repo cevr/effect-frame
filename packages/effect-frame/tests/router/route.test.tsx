@@ -496,13 +496,16 @@ const printed = (print: () => string): Effect.Effect<string | UrlValueRejected> 
 
 describe("a route prints what it parses (#18)", () => {
   for (const sample of templates) {
+    const decodeParams = Schema.decodeUnknownOption(sample.params);
+    const encodeParams = Schema.encodeSync(sample.params);
     it.effect(
       `parse(href(params, search)) is the same values, or href refuses: ${sample.template}`,
       () =>
         Effect.gen(function* () {
           const parts = Result.getOrThrow(Route.parseTemplate(sample.template));
           const printer = address(parts, {
-            params: sample.params,
+            decodeParams,
+            encodeParams,
             search: PropertySearch,
             searchKeys: Option.none(),
             retain: Option.none(),

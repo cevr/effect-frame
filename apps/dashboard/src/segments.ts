@@ -50,7 +50,6 @@ export type OverviewSearch = Schema.Schema.Type<typeof OverviewSearch>;
  */
 export const overview = Route.child(dash, "overview", {
   path: "",
-  params: DashParams,
   search: OverviewSearch,
   data: ({ params, search }) => ({
     revenue: Route.query(Revenue, { tenant: params.tenant, ...search }),
@@ -68,7 +67,6 @@ export const overview = Route.child(dash, "overview", {
  */
 export const orders = Route.child(dash, "orders", {
   path: "orders",
-  params: DashParams,
   data: ({ params }) => ({
     orders: Route.query(OrderList, { tenant: params.tenant, range: "all" }),
     book: Route.commandRef(Orders, { tenant: params.tenant }),
@@ -78,14 +76,13 @@ export const orders = Route.child(dash, "orders", {
 /** `/d/:tenant/orders`: the open orders in detail. */
 export const ordersIndex = Route.child(orders, "orders-index", {
   path: "",
-  params: DashParams,
   data: ({ params }) => ({
     detail: Route.query(OrderDetail, { tenant: params.tenant }),
   }),
 });
 
-export const OrderParams = Schema.Struct({ tenant: TenantId, order: Schema.String });
-export type OrderParams = Schema.Schema.Type<typeof OrderParams>;
+/** An order's own param. Its tenant is the dashboard's, inherited. */
+export const OrderParams = Schema.Struct({ order: Schema.String });
 
 /**
  * `/d/:tenant/orders/:order`: one order. It declares `TenantInfo` for its

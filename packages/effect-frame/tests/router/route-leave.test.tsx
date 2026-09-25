@@ -270,8 +270,6 @@ const check =
 // ---------------------------------------------------------------------------
 
 const TenantParams = Schema.Struct({ tenant: Schema.String });
-const PostParams = Schema.Struct({ tenant: Schema.String, postId: Schema.String });
-
 const tenantSegment = Route.segment("tenant", {
   path: "/app/:tenant",
   params: TenantParams,
@@ -280,7 +278,7 @@ const tenantSegment = Route.segment("tenant", {
 
 const postSegment = Route.child(tenantSegment, "post", {
   path: "posts/:postId",
-  params: PostParams,
+  params: Schema.Struct({ postId: Schema.String }),
   search: Route.search(Schema.Struct({ tab: Schema.String.pipe(Route.withDefault("read")) })),
   data: ({ params }) => ({
     draft: Route.actor(Draft, { tenant: params.tenant, postId: params.postId }),
@@ -290,7 +288,6 @@ const postSegment = Route.child(tenantSegment, "post", {
 
 const settingsSegment = Route.child(tenantSegment, "settings", {
   path: "settings",
-  params: TenantParams,
 });
 
 /** Permit a move that keeps this post: a search refinement. */

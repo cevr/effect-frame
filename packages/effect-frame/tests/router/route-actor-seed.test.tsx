@@ -102,7 +102,6 @@ const sendingBranch = Route.leaf(counterSegment, (props) =>
 /** A layout and its leaf that both declare the same actor. */
 const detailSegment = Route.child(counterSegment, "detail", {
   path: "detail",
-  params: Schema.Struct({ id: Schema.String }),
   data: ({ params }) => ({
     again: Route.actor(Counter, { id: params.id }, { behavior: counterBehavior }),
   }),

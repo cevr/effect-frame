@@ -562,8 +562,10 @@ export interface Decoded<Params, Search> {
  * What an address is made of: its codecs, and its declared search keys and
  * retained keys, each present or absent.
  */
-export interface AddressSpec<Params extends ParamsCodec, Search extends SearchCodec> {
-  readonly params: Params;
+export interface AddressSpec<Params, Search extends SearchCodec> {
+  /** Decode the whole path's record: every ancestor's params and the segment's own. */
+  readonly decodeParams: (record: PathRecord) => Option.Option<Params>;
+  readonly encodeParams: (params: Params) => PathRecord;
   readonly search: Search;
   readonly searchKeys: Option.Option<ReadonlyArray<string>>;
   readonly retain: Option.Option<ReadonlyArray<string>>;
@@ -593,13 +595,13 @@ export interface Address<Params, Search> {
 }
 
 /** Build the address of `parts`, which are the whole path from the root. */
-export const address = <Params extends ParamsCodec, Search extends SearchCodec>(
+export const address = <Params, Search extends SearchCodec>(
   parts: ReadonlyArray<Part>,
   spec: AddressSpec<Params, Search>,
-): Address<Params["Type"], Search["Type"]> => {
-  const decodeParams = Schema.decodeUnknownOption(spec.params);
+): Address<Params, Search["Type"]> => {
+  const decodeParams = spec.decodeParams;
   const decodeSearch = Schema.decodeUnknownOption(spec.search);
-  const encodeParams = Schema.encodeSync(spec.params);
+  const encodeParams = spec.encodeParams;
   const encodeSearch = Schema.encodeSync(spec.search);
   const searchKeys = declaredSearchKeys(spec.search, spec.searchKeys);
   const searchOrder = encodedKeys(spec.search);
@@ -624,7 +626,7 @@ export const address = <Params extends ParamsCodec, Search extends SearchCodec>(
   const decodeRecord = (
     record: PathRecord,
     url: URL,
-  ): Option.Option<Decoded<Params["Type"], Search["Type"]>> =>
+  ): Option.Option<Decoded<Params, Search["Type"]>> =>
     Option.flatMap(decodeParams(record), (params) =>
       Option.map(decodeSearch(readSearch(url.searchParams)), (decodedSearch) => ({
         params,
@@ -632,15 +634,15 @@ export const address = <Params extends ParamsCodec, Search extends SearchCodec>(
       })),
     );
 
-  const parse = (url: URL): Option.Option<Decoded<Params["Type"], Search["Type"]>> =>
+  const parse = (url: URL): Option.Option<Decoded<Params, Search["Type"]>> =>
     Option.flatMap(matchPath(parts, url.pathname), (record) => decodeRecord(record, url));
 
-  const parsePrefix = (url: URL): Option.Option<Decoded<Params["Type"], Search["Type"]>> =>
+  const parsePrefix = (url: URL): Option.Option<Decoded<Params, Search["Type"]>> =>
     Option.flatMap(matchPrefix(parts, segmentsOf(url.pathname), 0), (matched) =>
       decodeRecord(matched.record, url),
     );
 
-  const href = (params: Params["Type"], searchValue: Search["Type"]): string =>
+  const href = (params: Params, searchValue: Search["Type"]): string =>
     `${printPath(parts, encodeParams(params))}${printSearch(encodeOwnedSearch(searchValue), searchOrder)}`;
 
   /** The search of `current` with this address's keys replaced by `encoded`. */
@@ -653,7 +655,7 @@ export const address = <Params extends ParamsCodec, Search extends SearchCodec>(
     return printSearch(encoded, searchOrder);
   };
 
-  const hrefFrom = (current: URL, params: Params["Type"], searchValue: Search["Type"]): string => {
+  const hrefFrom = (current: URL, params: Params, searchValue: Search["Type"]): string => {
     const next = new URL(`${printPath(parts, encodeParams(params))}`, current);
     next.search = replacedSearch(current, encodeOwnedSearch(searchValue));
     next.hash = current.hash;
@@ -666,7 +668,7 @@ export const address = <Params extends ParamsCodec, Search extends SearchCodec>(
     return next.href;
   };
 
-  const hrefAt = (current: URL, params: Params["Type"], searchValue: Search["Type"]): string => {
+  const hrefAt = (current: URL, params: Params, searchValue: Search["Type"]): string => {
     const nextSearch = Option.match(spec.retain, {
       onNone: () => searchValue,
       onSome: (keys) => {

@@ -139,7 +139,7 @@ const tenant = Route.segment("tenant", {
 
 const post = Route.child(tenant, "post", {
   path: "posts/:postId",
-  params: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
+  params: Schema.Struct({ postId: Schema.String }),
   search: Route.search(Schema.Struct({ mode: Schema.String.pipe(Route.withDefault("read")) })),
   data: ({ params }) => ({
     post: Route.query(PostBody, { tenant: params.tenant, postId: params.postId }),

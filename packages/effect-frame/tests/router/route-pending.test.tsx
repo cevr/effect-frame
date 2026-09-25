@@ -229,8 +229,6 @@ const LoginRoute = Route.client(
 );
 
 const TenantParams = Schema.Struct({ tenant: Schema.String });
-const PostParams = Schema.Struct({ tenant: Schema.String, postId: Schema.String });
-
 const checkTenant = (next: Route.BeforeInput<{ readonly tenant: string }, {}>) =>
   Effect.gen(function* () {
     const access = yield* Access;
@@ -259,7 +257,7 @@ const tenantSegment = Route.segment("tenant", {
 
 const postSegment = Route.child(tenantSegment, "post", {
   path: "posts/:postId",
-  params: PostParams,
+  params: Schema.Struct({ postId: Schema.String }),
   // Declared and never read by the view: an unread query.
   data: ({ params }) => ({
     post: Route.query(PostBody, { tenant: params.tenant, postId: params.postId }),

@@ -46,7 +46,7 @@ export const orgSegment = Route.segment("org", {
 
 export const orgPost = Route.child(orgSegment, "post", {
   path: "posts/:slug",
-  params: Schema.Struct({ org: Schema.String, slug: Slug }),
+  params: Schema.Struct({ slug: Slug }),
 });
 
 export const refusedTree = () =>

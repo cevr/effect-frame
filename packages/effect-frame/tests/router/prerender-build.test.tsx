@@ -144,7 +144,7 @@ describe("the prerender build (#23 §2)", () => {
       });
       const doc = Route.child(org, "doc", {
         path: "docs/:doc",
-        params: Schema.Struct({ org: Schema.String, doc: Schema.String }),
+        params: Schema.Struct({ doc: Schema.String }),
       });
       const tree = Route.prerender(
         "orgs",

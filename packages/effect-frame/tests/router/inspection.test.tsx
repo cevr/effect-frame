@@ -82,7 +82,10 @@ interface CycleValue {
   self?: CycleValue;
 }
 
-const WeirdParams = Route.PathRecord.pipe(
+/** The one param these routes' templates declare; each codec decodes it to a diagnostic value. */
+const IdParam = Schema.Struct({ id: Schema.String });
+
+const WeirdParams = IdParam.pipe(
   Schema.decodeTo(Schema.Unknown, {
     decode: SchemaGetter.transform(() => {
       const cycle: CycleValue = {};
@@ -94,7 +97,7 @@ const WeirdParams = Route.PathRecord.pipe(
         cycle,
       };
     }),
-    encode: SchemaGetter.transform((): Route.PathRecord => ({ id: "1" })),
+    encode: SchemaGetter.transform(() => ({ id: "1" })),
   }),
 );
 
@@ -366,13 +369,13 @@ describe("Frame router inspection", () => {
       Effect.gen(function* () {
         let enterCalls = 0;
         let codecCalls = 0;
-        const CountedParams = Route.PathRecord.pipe(
+        const CountedParams = IdParam.pipe(
           Schema.decodeTo(Schema.Unknown, {
             decode: SchemaGetter.transform((record) => {
               codecCalls += 1;
               return record;
             }),
-            encode: SchemaGetter.transform((): Route.PathRecord => ({ id: "1" })),
+            encode: SchemaGetter.transform(() => ({ id: "1" })),
           }),
         );
         const baseSegment = Route.segment("counted", {
@@ -432,10 +435,10 @@ describe("Frame router inspection", () => {
         const wide = Object.fromEntries(
           Array.from({ length: 33 }, (_, index) => [`key-${index}`, "value"]),
         );
-        const DiagnosticParams = Route.PathRecord.pipe(
+        const DiagnosticParams = IdParam.pipe(
           Schema.decodeTo(Schema.Unknown, {
             decode: SchemaGetter.transform(() => ({ longObject, nested, deep, accessor, wide })),
-            encode: SchemaGetter.transform((): Route.PathRecord => ({ id: "1" })),
+            encode: SchemaGetter.transform(() => ({ id: "1" })),
           }),
         );
         const diagnosticRouteSegment = Route.segment("bounds", {
@@ -575,10 +578,10 @@ describe("Frame router inspection", () => {
         const unreadableRecord = new Proxy({}, { ownKeys: unreadable });
         const unreadableArray = new Proxy([], { getOwnPropertyDescriptor: unreadable });
         const paramsFor = <Value,>(value: Value) =>
-          Route.PathRecord.pipe(
+          IdParam.pipe(
             Schema.decodeTo(Schema.Unknown, {
               decode: SchemaGetter.transform(() => value),
-              encode: SchemaGetter.transform((): Route.PathRecord => ({ id: "1" })),
+              encode: SchemaGetter.transform(() => ({ id: "1" })),
             }),
           );
         const recordRouteSegment = Route.segment("unreadable-record", {
@@ -626,10 +629,10 @@ describe("Frame router inspection", () => {
         const heavy = Object.fromEntries(
           Array.from({ length: 20 }, (_, index) => [`value-${index}`, "x".repeat(512)]),
         );
-        const params = Route.PathRecord.pipe(
+        const params = IdParam.pipe(
           Schema.decodeTo(Schema.Unknown, {
             decode: SchemaGetter.transform(() => ({ heavy })),
-            encode: SchemaGetter.transform((): Route.PathRecord => ({ id: "1" })),
+            encode: SchemaGetter.transform(() => ({ id: "1" })),
           }),
         );
         const routeSegment = Route.segment("cost", {
@@ -658,10 +661,10 @@ describe("Frame router inspection", () => {
         const branches = Object.fromEntries(
           Array.from({ length: 32 }, (_, index) => [`branch-${index}`, nested(index)]),
         );
-        const params = Route.PathRecord.pipe(
+        const params = IdParam.pipe(
           Schema.decodeTo(Schema.Unknown, {
             decode: SchemaGetter.transform(() => branches),
-            encode: SchemaGetter.transform((): Route.PathRecord => ({ id: "1" })),
+            encode: SchemaGetter.transform(() => ({ id: "1" })),
           }),
         );
         const routeSegment = Route.segment("node-budget", {

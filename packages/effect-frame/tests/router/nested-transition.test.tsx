@@ -293,8 +293,6 @@ const subscriptionsOf = Effect.fn("NestedTest.subscriptionsOf")(function* (
 // ---------------------------------------------------------------------------
 
 const TenantParams = Schema.Struct({ tenant: Schema.String });
-const PostParams = Schema.Struct({ tenant: Schema.String, postId: Schema.String });
-
 const tenantSegment = Route.segment("tenant", {
   path: "/app/:tenant",
   params: TenantParams,
@@ -303,7 +301,7 @@ const tenantSegment = Route.segment("tenant", {
 
 const postSegment = Route.child(tenantSegment, "post", {
   path: "posts/:postId",
-  params: PostParams,
+  params: Schema.Struct({ postId: Schema.String }),
   search: Route.search(Schema.Struct({ tab: Schema.String.pipe(Route.withDefault("read")) })),
   // The actor comes first: a sequential acquisition would hold both queries behind it.
   data: ({ params }) => ({
@@ -317,7 +315,7 @@ const postSegment = Route.child(tenantSegment, "post", {
 
 const editSegment = Route.child(tenantSegment, "edit", {
   path: "posts/:postId/edit",
-  params: PostParams,
+  params: Schema.Struct({ postId: Schema.String }),
   data: ({ params }) => ({
     post: Route.query(PostBody, { tenant: params.tenant, postId: params.postId }),
   }),
@@ -326,7 +324,7 @@ const editSegment = Route.child(tenantSegment, "edit", {
 /** Two actors: a stay can hold the second read while the first is subscribed. */
 const pairSegment = Route.child(tenantSegment, "pair", {
   path: "pairs/:postId",
-  params: PostParams,
+  params: Schema.Struct({ postId: Schema.String }),
   data: ({ params }) => ({
     first: Route.actor(Draft, { tenant: params.tenant, postId: params.postId }),
     second: Route.actor(Draft, { tenant: params.tenant, postId: `${params.postId}-second` }),
@@ -693,7 +691,6 @@ const leakyWithoutScope: Equals<RouteServices<typeof leaky>, QueryCache | ActorT
 
 const collision = Route.child(tenantSegment, "collision", {
   path: "c",
-  params: TenantParams,
   // @ts-expect-error A child may not redeclare a name its parent declared.
   data: ({ params }) => ({ tenant: Route.query(TenantInfo, { tenant: params.tenant }) }),
 });
@@ -751,7 +748,10 @@ describe("private nested transition", () => {
       // A grandchild is checked against every ancestor, tails included.
       expect(
         yield* rejection(() =>
-          Route.child(postSegment, "deep", { path: "files/:tenant*", params: PostParams }),
+          Route.child(postSegment, "deep", {
+            path: "files/:tenant*",
+            params: Schema.Struct({ tenant: Schema.String }),
+          }),
         ),
       ).toMatchObject({
         _tag: "BranchRejected",
@@ -761,7 +761,7 @@ describe("private nested transition", () => {
       // A new name is accepted.
       const accepted = Route.child(postSegment, "file", {
         path: "files/:fileId",
-        params: Schema.Struct({ ...PostParams.fields, fileId: Schema.String }),
+        params: Schema.Struct({ fileId: Schema.String }),
       });
       expect(accepted.name).toBe("file");
     }),

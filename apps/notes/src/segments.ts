@@ -20,16 +20,14 @@ import { Filter, ListCounts, ListIndex, ListName, keyOf } from "./queries.js";
  * ```
  */
 
-export const NoParams = Schema.Struct({});
 export const ListParams = Schema.Struct({ list: ListName });
 export type ListParams = Schema.Schema.Type<typeof ListParams>;
 
-export const shell = Route.segment("shell", { path: "/", params: NoParams });
+export const shell = Route.segment("shell", { path: "/" });
 
 /** Every page under `/lists` shows the list names, from one shared key. */
 export const lists = Route.child(shell, "lists", {
   path: "lists",
-  params: NoParams,
   data: () => ({ names: Route.query(ListIndex, {}) }),
 });
 
@@ -38,7 +36,6 @@ export const IndexSearch = Route.search(Schema.Struct({ q: Schema.optionalKey(Sc
 /** The list names that match `q`. With no `q`, this is the key `lists` declares. */
 export const index = Route.child(lists, "index", {
   path: "",
-  params: NoParams,
   search: IndexSearch,
   data: ({ search }) => ({ found: Route.query(ListIndex, search) }),
 });
@@ -74,7 +71,7 @@ export const print = Route.child(lists, "print", {
 });
 
 /** A page with no server data: a local draft, drawn on the client only. */
-export const scratch = Route.child(shell, "scratch", { path: "scratch", params: NoParams });
+export const scratch = Route.child(shell, "scratch", { path: "scratch" });
 
 /** `/` has no page of its own: `Home` sends the reader to the lists. */
-export const home = Route.segment("home", { path: "/", params: NoParams });
+export const home = Route.segment("home", { path: "/" });

@@ -451,6 +451,8 @@ export type NoParams = Readonly<Record<never, never>>;
  */
 interface SegmentRuntime<Params, Search, Own> {
   readonly parts: ReadonlyArray<Part>;
+  /** Every ancestor's params and this segment's own, decoded from and encoded to one record. */
+  readonly params: ParamsRuntime;
   /** Decode the accumulated path record and the URL search. None is a non-match. */
   decode(record: PathRecord, search: SearchRecord): Option.Option<Values<Params, Search>>;
   /** The raw path record and the encoded search: a stayed segment publishes when it changes. */
@@ -471,6 +473,65 @@ interface SegmentRuntime<Params, Search, Own> {
    */
   print(params: ParamsRecord): Option.Option<string>;
 }
+
+/**
+ * A segment's whole params: its ancestors' and its own. Each segment's
+ * codec decodes only the keys its own template names; the record is the
+ * whole path's, and a struct codec ignores the keys it does not name.
+ */
+interface ParamsRuntime {
+  readonly decode: (record: PathRecord) => Option.Option<ParamsRecord>;
+  readonly encode: (params: ParamsRecord) => PathRecord;
+  /** The params a prerender input names, when they are this segment's whole params. */
+  readonly validate: (params: ParamsRecord) => Option.Option<ParamsRecord>;
+}
+
+/** Erase a decoded params value to the record the params runtime holds. */
+const erasedParams = <A>(value: A): ParamsRecord =>
+  // oxlint-disable-next-line effect/noAs -- a params codec decodes a record; `typedParams` restores its type.
+  value as ParamsRecord;
+
+/** Restore the params type a segment's runtime erased. */
+const restoredParams = <Params>(record: ParamsRecord): Params =>
+  // oxlint-disable-next-line effect/noAs -- the runtime decoded exactly the record the segment's Params names.
+  record as Params;
+
+/**
+ * The params runtime of `own` under `parent`: the parent's values, then
+ * this segment's. A root's params are its codec's own value, unchanged.
+ */
+const paramsRuntime = (parent: Option.Option<ParamsRuntime>, own: ParamsCodec): ParamsRuntime => {
+  const decodeOwn = Schema.decodeUnknownOption(own);
+  const validateOwn = Schema.decodeUnknownOption(Schema.toType(own));
+  const mine: ParamsRuntime = {
+    decode: (record) => Option.map(decodeOwn(record), erasedParams),
+    encode: Schema.encodeSync(own),
+    validate: (params) => Option.map(validateOwn(params), erasedParams),
+  };
+  return Option.match(parent, {
+    onNone: () => mine,
+    onSome: (above) => paramsUnder(above, mine),
+  });
+};
+
+const paramsUnder = (parent: ParamsRuntime, own: ParamsRuntime): ParamsRuntime => ({
+  decode: (record) =>
+    Option.flatMap(parent.decode(record), (inherited) =>
+      Option.map(own.decode(record), (mine) => ({ ...inherited, ...mine })),
+    ),
+  encode: (params) => ({ ...parent.encode(params), ...own.encode(params) }),
+  validate: (params) =>
+    Option.flatMap(parent.validate(params), (inherited) =>
+      Option.map(own.validate(params), (mine) => ({ ...inherited, ...mine })),
+    ),
+});
+
+/** A segment's params runtime at the segment's own params type. */
+const typedParams = <Params>(runtime: ParamsRuntime): TypedParams<Params> => ({
+  decode: (record) => Option.map(runtime.decode(record), restoredParams<Params>),
+  encode: (params) => runtime.encode(erasedParams(params)),
+  validate: (params) => Option.map(runtime.validate(params), restoredParams<Params>),
+});
 
 const segmentRuntimes = new WeakMap<AnySegment, SegmentRuntime<unknown, unknown, Declarations>>();
 
@@ -518,23 +579,89 @@ const erase = <CheckR>(check: Effect.Effect<Verdict, never, CheckR>): Check =>
   check as Check;
 // @effect-diagnostics unsafeEffectTypeAssertion:error
 
-export interface SegmentOptions<P extends ParamsCodec, S extends SearchCodec, Own, CheckR> {
+export interface SegmentOptions<
+  Path extends string,
+  P extends ParamsCodec,
+  S extends SearchCodec,
+  Own,
+  CheckR,
+  Params = P["Type"],
+> {
   /** A template relative to the parent. The URLPattern grammar that prints. */
-  readonly path: string;
-  /** Decodes the path record accumulated from the root to this segment. */
-  readonly params: P;
+  readonly path: Path;
+  /**
+   * Decodes this segment's own params: exactly the names its template
+   * declares, as a struct. An ancestor's params are the ancestor's; the
+   * view, `data`, and `before` see them all. Absent when the template
+   * declares none.
+   */
+  readonly params?: P;
   readonly search?: S;
   /** Encoded search keys for an opaque codec such as a custom SearchRecord. */
   readonly searchKeys?: ReadonlyArray<string>;
   /** Search keys to carry when this segment is linked to without a caller value. */
   readonly retain?: ReadonlyArray<Extract<keyof S["Type"], string>>;
-  readonly data?: (values: Values<P["Type"], S["Type"]>) => Own;
+  readonly data?: (values: Values<Params, S["Type"]>) => Own;
   /**
    * Asked on every proposed navigation that matches this segment, entering
    * or stayed, after every ancestor continued. Not asked for a same-URL or
    * fragment-only move. It sees the candidate's values; no data is open.
    */
-  readonly before?: Before<P["Type"], S["Type"], CheckR>;
+  readonly before?: Before<Params, S["Type"], CheckR>;
+}
+
+/** The param names a path template declares: `:name` and `:name*`. */
+export type ParamNames<Path extends string> = Path extends `${infer Head}/${infer Rest}`
+  ? ParamName<Head> | ParamNames<Rest>
+  : ParamName<Path>;
+
+type ParamName<Text extends string> = Text extends `:${infer Name}*`
+  ? Name
+  : Text extends `:${infer Name}`
+    ? Name
+    : never;
+
+/** What a params codec that does not match its template is told. */
+export interface ParamsMismatch<Names> {
+  readonly "~the params codec must encode exactly the template's params": Names;
+}
+
+/**
+ * `params` is required when the template declares a param, and its encoded
+ * keys are exactly the template's names: a name the template lacks, or a
+ * template name the codec lacks, does not compile. A template that is not a
+ * literal type is not checked.
+ */
+type ParamsMatch<Path extends string, P extends ParamsCodec> = string extends Path
+  ? unknown
+  : [ParamNames<Path>] extends [never]
+    ? [keyof P["Encoded"]] extends [never]
+      ? unknown
+      : { readonly params: ParamsMismatch<never> }
+    : [
+          Exclude<keyof P["Encoded"], ParamNames<Path>>,
+          Exclude<ParamNames<Path>, keyof P["Encoded"]>,
+        ] extends [never, never]
+      ? { readonly params: unknown }
+      : { readonly params: ParamsMismatch<ParamNames<Path>> };
+
+/** A parent's params and a child's own, as one flat record type. */
+export type MergeParams<Parent, Own> = {
+  readonly [K in keyof Parent | keyof Own]: K extends keyof Own
+    ? Own[K]
+    : K extends keyof Parent
+      ? Parent[K]
+      : never;
+};
+
+const NoParamsCodec = Schema.Struct({});
+type NoParamsCodec = typeof NoParamsCodec;
+
+/** A segment's params runtime at the segment's own params type. */
+interface TypedParams<Params> {
+  readonly decode: (record: PathRecord) => Option.Option<Params>;
+  readonly encode: (params: Params) => PathRecord;
+  readonly validate: (params: ParamsRecord) => Option.Option<Params>;
 }
 
 /**
@@ -574,7 +701,7 @@ const pathOf = (segment: AnySegment): ReadonlyArray<Part> => [
 
 const makeSegment = <
   const Name extends string,
-  P extends ParamsCodec,
+  Params,
   S extends SearchCodec,
   Own extends Declarations,
   Data extends Declarations,
@@ -584,27 +711,35 @@ const makeSegment = <
 >(
   name: Name,
   parent: Option.Option<AnySegment>,
-  options: SegmentOptions<P, S, Own, CheckR>,
-  data: (values: Values<P["Type"], S["Type"]>) => Own,
-): Segment<Name, P["Type"], S["Type"], Own, Data, CheckR, Root, Inherited> => {
+  options: SegmentOptions<string, ParamsCodec, S, Own, CheckR, Params>,
+  data: (values: Values<Params, S["Type"]>) => Own,
+): Segment<Name, Params, S["Type"], Own, Data, CheckR, Root, Inherited> => {
   const parts = Result.getOrThrowWith(parseTemplate(options.path), (rejected) => rejected);
+  const params = paramsRuntime(
+    Option.flatMap(parent, (above) =>
+      Option.map(Option.fromNullishOr(segmentRuntimes.get(above)), (runtime) => runtime.params),
+    ),
+    Option.getOrElse(Option.fromNullishOr(options.params), (): ParamsCodec => NoParamsCodec),
+  );
+  // The whole params type is `Params`: the ancestors' and this segment's own.
+  const typed = typedParams<Params>(params);
   const search: SearchCodec = Option.getOrElse(
     Option.fromNullishOr(options.search),
     () => NoSearch,
   );
-  const decodeParams = Schema.decodeUnknownOption(options.params);
   const decodeSearch = Schema.decodeUnknownOption(search);
   const encodeSearch = Schema.encodeUnknownSync(search);
   const before = Option.fromNullishOr(options.before);
   const full = [...Option.match(parent, { onNone: () => [], onSome: pathOf }), ...parts];
-  // One address prints and parses the whole path, as a flat route does.
-  const printer = address<P, SearchCodec>(full, {
-    params: options.params,
+  // One address prints and parses the whole path.
+  const printer = address<Params, SearchCodec>(full, {
+    decodeParams: typed.decode,
+    encodeParams: typed.encode,
     search,
     searchKeys: Option.fromNullishOr(options.searchKeys),
     retain: Option.fromNullishOr(options.retain),
   });
-  const made: Segment<Name, P["Type"], S["Type"], Own, Data, CheckR, Root, Inherited> = {
+  const made: Segment<Name, Params, S["Type"], Own, Data, CheckR, Root, Inherited> = {
     _tag: "Segment",
     [SegmentBrand]: "Segment",
     name,
@@ -632,15 +767,13 @@ const makeSegment = <
     "~root": phantom<Root>(),
     "~inherited": phantom<Inherited>(),
   };
-  const isParams = Schema.is(options.params);
-  const runtime: SegmentRuntime<P["Type"], S["Type"], Own> = {
+  const runtime: SegmentRuntime<Params, S["Type"], Own> = {
     parts,
-    print: (params) => {
-      if (!isParams(params)) {
-        return Option.none();
-      }
-      return Option.some(printer.href(params, printer.searchAt(prerenderBase)));
-    },
+    params,
+    print: (values) =>
+      Option.map(typed.validate(values), (valid) =>
+        printer.href(valid, printer.searchAt(prerenderBase)),
+      ),
     searchUpdate: (current, values, deepest) => {
       if (deepest) {
         return printer.hrefFrom(current, values.params, values.search);
@@ -649,9 +782,9 @@ const makeSegment = <
     },
     check: (values, url, kind) => Option.map(before, (ask) => erase(ask({ ...values, url, kind }))),
     decode: (record, searchRecord) =>
-      Option.flatMap(decodeParams(record), (params) =>
+      Option.flatMap(typed.decode(record), (decoded) =>
         Option.flatMap(decodeSearch(searchRecord), (searchValue) =>
-          Option.some({ params, search: searchValue }),
+          Option.some({ params: decoded, search: searchValue }),
         ),
       ),
     signature: (record, values) =>
@@ -662,39 +795,85 @@ const makeSegment = <
   return made;
 };
 
-/** A root segment. */
+/**
+ * A root segment: an address with no parent. `params` decodes exactly the
+ * names the template declares, and is absent when it declares none.
+ *
+ * ```ts
+ * const tenant = Route.segment("tenant", {
+ *   path: "/app/:tenant",
+ *   params: Schema.Struct({ tenant: Schema.String }),
+ * });
+ * const home = Route.segment("home", { path: "/" });
+ * ```
+ */
 export const segment = <
   const Name extends string,
-  P extends ParamsCodec,
+  const Path extends string,
+  P extends ParamsCodec = NoParamsCodec,
   S extends SearchCodec = NoSearch,
   Own extends Declarations = NoDeclarations,
   CheckR = never,
 >(
   name: Name,
-  options: SegmentOptions<P, S, Own, CheckR> & DataRequired<Own>,
+  options: SegmentOptions<Path, P, S, Own, CheckR> & DataRequired<Own> & ParamsMatch<Path, P>,
 ): Segment<Name, P["Type"], S["Type"], Own, Own, CheckR, true, NoParams> =>
-  makeSegment<Name, P, S, Own, Own, CheckR, true, NoParams>(
+  makeSegment<Name, P["Type"], S, Own, Own, CheckR, true, NoParams>(
     name,
     Option.none(),
     options,
     Option.getOrElse(Option.fromNullishOr(options.data), () => (): Own => ownEmpty<Own>()),
   );
 
-/** A segment under a parent. It inherits the parent's declarations. */
+/**
+ * A segment under a parent. Its template is relative to the parent's, and
+ * `params` decodes only the names its own template declares: the parent's
+ * params are inherited, and the view, `data`, and `before` see them all.
+ * It inherits the parent's declarations.
+ *
+ * ```ts
+ * const post = Route.child(tenant, "post", {
+ *   path: "posts/:postId",
+ *   params: Schema.Struct({ postId: Schema.String }),
+ * });
+ * // post's params: { tenant: string; postId: string }
+ * ```
+ */
 export const child = <
   ParentParams,
   ParentData extends Declarations,
   const Name extends string,
-  P extends ParamsCodec,
+  const Path extends string,
+  P extends ParamsCodec = NoParamsCodec,
   S extends SearchCodec = NoSearch,
   Own extends Declarations & Disjoint<ParentData> = NoDeclarations,
   CheckR = never,
 >(
   parent: Segment<string, ParentParams, unknown, Declarations, ParentData, unknown>,
   name: Name,
-  options: SegmentOptions<P, S, Own, CheckR> & DataRequired<Own>,
-): Segment<Name, P["Type"], S["Type"], Own, ParentData & Own, CheckR, false, ParentParams> => {
-  const made = makeSegment<Name, P, S, Own, ParentData & Own, CheckR, false, ParentParams>(
+  options: SegmentOptions<Path, P, S, Own, CheckR, MergeParams<ParentParams, P["Type"]>> &
+    DataRequired<Own> &
+    ParamsMatch<Path, P>,
+): Segment<
+  Name,
+  MergeParams<ParentParams, P["Type"]>,
+  S["Type"],
+  Own,
+  ParentData & Own,
+  CheckR,
+  false,
+  ParentParams
+> => {
+  const made = makeSegment<
+    Name,
+    MergeParams<ParentParams, P["Type"]>,
+    S,
+    Own,
+    ParentData & Own,
+    CheckR,
+    false,
+    ParentParams
+  >(
     name,
     Option.some(parent),
     options,

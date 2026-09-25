@@ -17,8 +17,7 @@ import { FetchHttpClient } from "effect/unstable/http";
 import { routes } from "../src/routes.js";
 import { NotFound } from "../src/views.js";
 import { inProcess } from "../src/notes.server.js";
-import type { NotesRuntime, RunningServer } from "../src/server.js";
-import { makeRuntime, makeServer } from "../src/server.js";
+import { serve as serveNotes } from "../src/server.js";
 
 /**
  * What the Notes tests share: one real server on a free port, the client
@@ -61,19 +60,14 @@ export const clientOf = Effect.fn("NotesTest.clientOf")(function* (
 });
 
 /** One host for the whole test: two servers over it share one set of actors. */
-export const notesRuntime = Effect.acquireRelease(
-  Effect.sync((): NotesRuntime => makeRuntime(inProcess)),
-  (runtime) => Effect.promise(() => runtime.dispose()),
-);
+export const notesHost = Layer.build(inProcess);
 
-export const serve = (runtime: NotesRuntime, port = 0) =>
-  Effect.acquireRelease(
-    Effect.promise((): Promise<RunningServer> => makeServer({ port, runtime })),
-    (server) => Effect.promise(() => server.stop()),
-  );
+/** The real server over `host` on `port` (a free one by default), stopped with the Scope. */
+export const serve = (host: Context.Context<ActorTransport>, port = 0) =>
+  Effect.provideContext(serveNotes(port), host);
 
-/** A runtime and a server on a free port, both released with the test. */
-export const serveFresh = Effect.flatMap(notesRuntime, (runtime) => serve(runtime));
+/** A host and a server on a free port, both released with the test. */
+export const serveFresh = Effect.flatMap(notesHost, (host) => serve(host));
 
 export const fetchPage = Effect.fn("NotesTest.fetchPage")(function* (url: string) {
   const response = yield* Effect.promise(() => platformFetch(url, { redirect: "manual" }));

@@ -288,20 +288,6 @@
       }
     },
     {
-      "files": ["apps/notes/src/server.ts", "apps/dashboard/src/server.ts"],
-      "rules": {
-        "effect/noAsyncFunction": "off",
-        "effect/noGlobals": "off"
-      }
-    },
-    {
-      "files": ["apps/blog/src/server.ts"],
-      "rules": {
-        "effect/noAsyncFunction": "off",
-        "effect/noGlobals": "off"
-      }
-    },
-    {
       "files": ["apps/blog/src/prerender.server.ts"],
       "rules": {
         "effect/noGlobals": "off"

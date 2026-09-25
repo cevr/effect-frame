@@ -1,8 +1,8 @@
 // oxlint-disable effect/noGlobals -- the test is a browser: it fetches from a real server.
-import { Effect, Option, Schema, Stream } from "effect";
+import { Effect, Layer, Option, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { inProcess } from "../src/host.server.js";
-import { makeRuntime, makeServer, memberHeader } from "../src/server.js";
+import { memberHeader, serve } from "../src/server.js";
 
 /**
  * #22 over the wire: the overview from a real Bun server on a free port,
@@ -51,12 +51,11 @@ describe("the overview's streamed document on a real server (#22)", () => {
     "five placeholders precede five patches; one actor seed is in the first chunk",
     () =>
       Effect.gen(function* () {
-        const runtime = makeRuntime(inProcess);
-        yield* Effect.addFinalizer(() => Effect.promise(() => runtime.dispose()));
+        const host = yield* Layer.build(inProcess);
         // Port 0: the system picks a free one.
-        const server = yield* Effect.acquireRelease(
-          Effect.promise(() => makeServer({ port: 0, runtime })),
-          (running) => Effect.promise(() => running.stop()),
+        const server = yield* Effect.provideContext(
+          serve({ port: 0, member: Option.none() }),
+          host,
         );
         const response = yield* Effect.promise(() =>
           fetch(`${server.url}/d/acme`, { headers: { [memberHeader]: "acme" } }),

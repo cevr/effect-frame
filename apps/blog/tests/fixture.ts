@@ -27,7 +27,7 @@ import { PostSource, fromDirectory } from "../src/posts.server.js";
 import { siteOver } from "../src/reactions.server.js";
 import { routes } from "../src/routes.js";
 import { NotFound } from "../src/views.js";
-import { makeRuntime, makeServer } from "../src/server.js";
+import { serve } from "../src/server.js";
 
 /**
  * What the Blog tests share. A site is the real host over Markdown files
@@ -419,18 +419,10 @@ export const reservedPorts: ReadonlyArray<number> = [3102, 3187];
 /**
  * The real server over `store` on a free port, serving the prerender output
  * in `out`, stopped when the scope closes. `extra` adds services to its
- * runtime, such as a tracer.
+ * context, such as a tracer.
  */
 export const serverOver = (store: Store, out: string, extra: Layer.Layer<never> = Layer.empty) =>
-  Effect.acquireRelease(
-    Effect.gen(function* () {
-      const runtime = makeRuntime(Layer.merge(Layer.succeedContext(store), extra));
-      const server = yield* Effect.promise(() => makeServer({ port: 0, runtime, out }));
-      return { server, runtime };
-    }),
-    ({ server, runtime }) =>
-      Effect.andThen(
-        Effect.promise(() => server.stop()),
-        Effect.promise(() => runtime.dispose()),
-      ),
-  ).pipe(Effect.map(({ server }) => server));
+  Effect.gen(function* () {
+    const services = yield* Layer.build(Layer.merge(Layer.succeedContext(store), extra));
+    return yield* Effect.provideContext(serve({ port: 0, out }), services);
+  });

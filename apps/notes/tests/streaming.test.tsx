@@ -4,9 +4,8 @@ registerDom();
 
 import { ActorTransport } from "effect-frame/actor/client";
 import type { Duration } from "effect";
-import { Effect, Layer, Option, Queue } from "effect";
+import { Context, Effect, Option, Queue } from "effect";
 import { describe, expect, it } from "effect-bun-test";
-import { makeRuntime } from "../src/server.js";
 import {
   clientOf,
   fetchText,
@@ -37,11 +36,7 @@ const printPage = "/lists/inbox/print";
 /** A server whose reads go through a wiretap the test steers. */
 const tappedServer = Effect.gen(function* () {
   const wire = yield* tappedHost;
-  const runtime = yield* Effect.acquireRelease(
-    Effect.sync(() => makeRuntime(Layer.succeed(ActorTransport, wire.transport))),
-    (built) => Effect.promise(() => built.dispose()),
-  );
-  const server = yield* serve(runtime);
+  const server = yield* serve(Context.make(ActorTransport, wire.transport));
   return { wire, server };
 });
 

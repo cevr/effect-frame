@@ -10,10 +10,10 @@
  */
 import { afterAll, describe, expect, it } from "bun:test";
 import { Actor, ActorTransport, CommandId } from "effect-frame/actor/client";
-import { Effect, Exit, Layer, Schema, Scope } from "effect";
+import { Context, Effect, Exit, Schema, Scope } from "effect";
 import { Notes } from "../src/contract.js";
 import { ListName, keyOf } from "../src/queries.js";
-import { makeRuntime, makeServer } from "../src/server.js";
+import { serve } from "../src/server.js";
 import type { Engine } from "./browser.js";
 import { hasNavigation, open, waitFor } from "./browser.js";
 import { clientOf, tappedHost } from "./fixture.js";
@@ -25,8 +25,10 @@ const listName = Schema.decodeSync(ListName);
 /** A real Notes server over a wiretapped host, and an inbox long enough to scroll. */
 const start = Effect.gen(function* () {
   const wire = yield* tappedHost;
-  const runtime = makeRuntime(Layer.succeed(ActorTransport, wire.transport));
-  const server = yield* Effect.promise(() => makeServer({ port: 0, runtime }));
+  const server = yield* Effect.provideContext(
+    serve(0),
+    Context.make(ActorTransport, wire.transport),
+  );
   const client = yield* clientOf(server.url);
   const writer = yield* client(Actor.remote(Notes, keyOf(listName("inbox"))));
   for (let index = 0; index < 80; index += 1) {
@@ -35,17 +37,15 @@ const start = Effect.gen(function* () {
       { commandId: commandId(`seed-${String(index)}`), timeout: "2 seconds" },
     );
   }
-  return { wire, runtime, server };
+  return { wire, server };
 });
 
-// One server for the file. The host and the client live in `scope`.
+// One server for the file. The host, the server and the client live in `scope`.
 const scope = Effect.runSync(Scope.make());
 const live = await Effect.runPromise(Scope.provide(start, scope));
 
 afterAll(async () => {
-  await live.server.stop();
   await Effect.runPromise(Scope.close(scope, Exit.void));
-  await live.runtime.dispose();
 });
 
 const available = new Map<Engine, boolean>();

@@ -8,7 +8,7 @@ import { CommandId, Form } from "effect-frame/actor/client";
 import { make as makeTuiHost } from "effect-frame/view/opentui";
 import type { TestRendererSetup } from "@opentui/core/testing";
 import { createTestRenderer } from "@opentui/core/testing";
-import { Effect, Option, Schema } from "effect";
+import { Effect, Exit, Option, Schema, Scope } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { Notes, demoKey } from "../src/contract.js";
 import type { RunningServer } from "../src/server.js";
@@ -19,7 +19,7 @@ import {
   fetchText,
   hydrateAt,
   install,
-  notesRuntime,
+  notesHost,
   serve,
   settle,
   textOf,
@@ -49,8 +49,8 @@ const draw = Effect.fn("NotesTest.draw")(function* (setup: TestRendererSetup) {
 describe("notes end to end", () => {
   it.scopedLive("the server renders the list page, and the bundle carries no server code", () =>
     Effect.gen(function* () {
-      const runtime = yield* notesRuntime;
-      const server = yield* serve(runtime);
+      const host = yield* notesHost;
+      const server = yield* serve(host);
 
       const page = yield* fetchText(`${server.url}${inbox}`);
       expect(page).toContain('<div id="app">');
@@ -70,8 +70,8 @@ describe("notes end to end", () => {
 
   it.scopedLive("the browser hydrates the server page and follows a second client", () =>
     Effect.gen(function* () {
-      const runtime = yield* notesRuntime;
-      const server = yield* serve(runtime);
+      const host = yield* notesHost;
+      const server = yield* serve(host);
       const page = yield* fetchText(`${server.url}${inbox}`);
       const root = yield* install(page);
 
@@ -98,8 +98,8 @@ describe("notes end to end", () => {
 
   it.scopedLive("the terminal sees the same actor at the same revision", () =>
     Effect.gen(function* () {
-      const runtime = yield* notesRuntime;
-      const server = yield* serve(runtime);
+      const host = yield* notesHost;
+      const server = yield* serve(host);
       const page = yield* fetchText(`${server.url}${inbox}`);
       const root = yield* install(page);
 
@@ -151,8 +151,9 @@ describe("notes end to end", () => {
 
   it.scopedLive("a restarted server keeps the actors and the page follows again", () =>
     Effect.gen(function* () {
-      const runtime = yield* notesRuntime;
-      const first: RunningServer = yield* serve(runtime);
+      const host = yield* notesHost;
+      const firstLife = yield* Scope.make();
+      const first: RunningServer = yield* Scope.provide(serve(host), firstLife);
       const page = yield* fetchText(`${first.url}${inbox}`);
       const root = yield* install(page);
 
@@ -160,8 +161,8 @@ describe("notes end to end", () => {
         Effect.andThen(hydrateAt(root, `${first.url}${inbox}`), Actor.remote(Notes, demoKey)),
       );
 
-      yield* Effect.promise(() => first.stop());
-      yield* serve(runtime, first.port);
+      yield* Scope.close(firstLife, Exit.void);
+      yield* serve(host, first.port);
 
       yield* client.call(
         { _tag: "Add", id: "n3", text: "after restart" },
@@ -179,8 +180,8 @@ describe("notes end to end", () => {
 
   it.scopedLive("a post that races hydration applies once", () =>
     Effect.gen(function* () {
-      const runtime = yield* notesRuntime;
-      const server = yield* serve(runtime);
+      const host = yield* notesHost;
+      const server = yield* serve(host);
       const page = yield* fetchText(`${server.url}${inbox}`);
       const root = yield* install(page);
 

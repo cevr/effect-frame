@@ -18,7 +18,7 @@ import {
   withoutMinted,
   workspace,
 } from "./fixture.js";
-import { makeRuntime, makeServer } from "../src/server.js";
+import { serve } from "../src/server.js";
 
 /**
  * The built tree is a cache over SSR (#23 §5), on a real Bun server: a
@@ -172,11 +172,9 @@ describe("serving the built Blog over SSR (#23 §5)", () => {
         const port = taken.port ?? 0;
         expect(port).toBeGreaterThan(0);
         expect(reservedPorts).not.toContain(port);
-        const runtime = makeRuntime(Layer.succeedContext(store));
         const started = yield* Effect.exit(
-          Effect.tryPromise(() => makeServer({ port, runtime, out: site.out })),
+          Effect.provideContext(serve({ port, out: site.out }), store),
         );
-        yield* Effect.promise(() => runtime.dispose());
         expect(Exit.isFailure(started)).toBe(true);
         // The generation it loaded is not held: the failed start released it.
         const fs = yield* FileSystem.FileSystem;

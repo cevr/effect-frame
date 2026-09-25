@@ -11,14 +11,13 @@ import {
   Unauthorized,
 } from "effect-frame/actor/client";
 import type { QueryState } from "effect-frame/actor/client";
-import { Effect, Layer, Option, Schema, Stream } from "effect";
+import { Context, Effect, Option, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { notesBehavior, refusedText } from "../src/behavior.js";
 import { Notes, readOnlyList } from "../src/contract.js";
 import type { Counts } from "../src/queries.js";
 import { ListCounts, ListName, keyOf } from "../src/queries.js";
 import { routes } from "../src/routes.js";
-import { makeRuntime } from "../src/server.js";
 import { clientOf, elementOf, mountApp, serve, settle, tappedHost, textOf } from "./fixture.js";
 
 /**
@@ -188,11 +187,7 @@ describe("the compose form's command", () => {
       Effect.gen(function* () {
         // A real server whose host holds each add; the client talks HTTP.
         const wire = yield* tappedHost;
-        const runtime = yield* Effect.acquireRelease(
-          Effect.sync(() => makeRuntime(Layer.succeed(ActorTransport, wire.transport))),
-          (built) => Effect.promise(() => built.dispose()),
-        );
-        const server = yield* serve(runtime);
+        const server = yield* serve(Context.make(ActorTransport, wire.transport));
         const client = yield* clientOf(server.url);
         const heldA = yield* wire.holdSend("a");
         const heldB = yield* wire.holdSend("b");

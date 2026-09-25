@@ -1,12 +1,12 @@
-import type { Layer } from "effect";
 import { HttpServer } from "effect-frame/actor";
 import type { ActorTransport, Principal } from "effect-frame/actor/client";
 import { Anonymous, CurrentPrincipal, Form } from "effect-frame/actor/client";
 import { renderDocument, respondDocument } from "effect-frame/router";
 import { Html } from "effect-frame/view";
-import { Effect, ManagedRuntime, Option, Schema, Stream } from "effect";
+import type { Scope } from "effect";
+import { Config, Console, Effect, Layer, Option, Schema, Stream } from "effect";
 import type { HttpServerRequest } from "effect/unstable/http";
-import { HttpEffect, HttpServerResponse } from "effect/unstable/http";
+import { HttpEffect, HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { Notes } from "./contract.js";
 import { inProcess, upstream } from "./notes.server.js";
 import { rootId } from "./document.js";
@@ -18,12 +18,12 @@ import { NotFound } from "./views.js";
  * environment, or the network lives in this file. The route tree, the
  * views, and the actor never see them.
  *
- * Routes:
+ * Routes, on one `HttpRouter`:
  *   GET  /client.js    the browser bundle, built once at start
  *   *    /actors/*     the actor transport, as the client's `baseUrl`, and
  *                      POST /actors/form, a plain form post for a page with
  *                      no script (#21)
- *   GET  anything else the route tree's document, in the mode its tree names
+ *   *    anything else the route tree's document, in the mode its tree names
  */
 
 const actorPrefix = "/actors";
@@ -117,38 +117,33 @@ const drawAgain = (path: string) =>
     }),
   );
 
-/**
- * A built transport. One runtime holds one set of actors, so the page render
- * and the actor routes must share it, and a test that restarts the server
- * keeps its actors by keeping this value.
- */
-export type NotesRuntime = ManagedRuntime.ManagedRuntime<ActorTransport, never>;
-
-export const makeRuntime = (transport: Layer.Layer<ActorTransport>): NotesRuntime =>
-  ManagedRuntime.make(transport);
-
-export interface ServerOptions {
-  readonly port: number;
-  readonly runtime: NotesRuntime;
+/** The server could not start listening, for example on a port already taken. */
+export class ServerNotStarted extends Schema.TaggedError<ServerNotStarted>()("ServerNotStarted", {
+  port: Schema.Finite,
+  reason: Schema.String,
+}) {
+  override get message(): string {
+    return `notes could not listen on port ${String(this.port)}: ${this.reason}`;
+  }
 }
 
 export interface RunningServer {
   readonly url: string;
   readonly port: number;
-  /** Stops listening. The runtime, and so the actors, outlive this call. */
-  readonly stop: () => Promise<void>;
 }
 
 /**
- * Start the example on one port over one runtime. Stopping the server does
- * not stop the actors: the caller owns the runtime and disposes it.
+ * Serve Notes on one port over the `ActorTransport` in context, until the
+ * calling Scope closes. Closing it stops listening; the actors belong to
+ * whoever provided the transport, so a second server over the same context
+ * serves the same actors.
  */
-export const makeServer = async (options: ServerOptions): Promise<RunningServer> => {
-  const runtime = options.runtime;
-  // Notes has no sessions: every request is anonymous, and that is a written line.
-  // A refused post re-renders the page it came from, with its issues.
-  const actors = await runtime.runPromise(
-    HttpServer.make({
+export const serve = Effect.fn("Notes.serve")(function* (port: number) {
+  const client = yield* buildClient();
+  const table = Layer.mergeAll(
+    // Notes has no sessions: every request is anonymous, and that is a written line.
+    // A refused post re-renders the page it came from, with its issues.
+    HttpServer.layer({
       prefix: actorPrefix,
       principal: HttpServer.anonymous,
       maxBodyBytes: HttpServer.defaultMaxBodyBytes,
@@ -160,55 +155,48 @@ export const makeServer = async (options: ServerOptions): Promise<RunningServer>
         commitWithin: HttpServer.defaultCommitWithin,
       }),
     }),
+    HttpRouter.add(
+      "GET",
+      "/client.js",
+      HttpServerResponse.text(client, { contentType: "text/javascript; charset=utf-8" }),
+    ),
+    HttpRouter.add("*", "/*", answerPage),
   );
-  const client = await runtime.runPromise(buildClient());
-  const context = await runtime.context();
-  const web = HttpEffect.toWebHandlerWith<
+  const app = yield* HttpRouter.toHttpEffect(table);
+  const fetch = HttpEffect.toWebHandlerWith<
     ActorTransport,
-    ActorTransport | HttpServerRequest.HttpServerRequest
-  >(context);
-  const actorsWeb = web(actors);
-  const pagesWeb = web(answerPage);
+    ActorTransport | HttpServerRequest.HttpServerRequest | Scope.Scope
+  >(yield* Effect.context<ActorTransport>())(app);
+  const server = yield* Effect.acquireRelease(
+    Effect.try({
+      // oxlint-disable-next-line effect/noGlobals -- the platform boundary: Bun listens and hands each request to the router.
+      try: () => Bun.serve({ port, fetch: (request) => fetch(request) }),
+      catch: (cause) => ServerNotStarted.make({ port, reason: String(cause) }),
+    }),
+    (running) => Effect.promise(() => running.stop(true)),
+  );
+  const bound = Option.getOrElse(Option.fromNullishOr(server.port), () => port);
+  const running: RunningServer = { url: `http://127.0.0.1:${String(bound)}`, port: bound };
+  return running;
+});
 
-  const server = Bun.serve({
-    port: options.port,
-    fetch: (request: Request): Response | Promise<Response> => {
-      const url = new URL(request.url);
-      if (url.pathname.startsWith(`${actorPrefix}/`)) {
-        return actorsWeb(request);
-      }
-      if (url.pathname === "/client.js") {
-        return new Response(client, {
-          headers: { "content-type": "text/javascript; charset=utf-8" },
-        });
-      }
-      return pagesWeb(request);
-    },
-  });
+/** The transport this process serves: its own actors, or the upstream host `NOTES_UPSTREAM` names. */
+const transportFromEnv = Layer.unwrap(
+  Effect.map(
+    Config.option(Config.String("NOTES_UPSTREAM")),
+    Option.match({ onNone: () => inProcess, onSome: upstream }),
+  ),
+);
 
-  const bound = Option.getOrElse(Option.fromNullishOr(server.port), () => options.port);
-  return {
-    url: `http://127.0.0.1:${String(bound)}`,
-    port: bound,
-    stop: (): Promise<void> => server.stop(true),
-  };
-};
-
-/** The transport this process serves: its own actors, or an upstream host. */
-const transportFromEnv = (): Layer.Layer<ActorTransport> =>
-  // oxlint-disable-next-line node/no-process-env -- the boundary reads the environment once.
-  Option.match(Option.fromNullishOr(process.env["NOTES_UPSTREAM"]), {
-    onNone: () => inProcess,
-    onSome: upstream,
-  });
-
-const main = async (): Promise<void> => {
-  // oxlint-disable-next-line node/no-process-env -- the boundary reads the environment once.
-  const port = Number(process.env["PORT"] ?? 3000);
-  const server = await makeServer({ port, runtime: makeRuntime(transportFromEnv()) });
-  console.log(`notes: ${server.url}`);
-};
+const main = Effect.gen(function* () {
+  const port = yield* Config.withDefault(Config.Port("PORT"), 3000);
+  const server = yield* serve(port);
+  yield* Console.log(`notes: ${server.url}`);
+  return yield* Effect.never;
+});
 
 if (import.meta.main) {
-  await main();
+  // The process entry point: the one place the transport layer is provided.
+  // @effect-diagnostics-next-line strictEffectProvide:off
+  Effect.runFork(Effect.scoped(Effect.provide(main, transportFromEnv)));
 }

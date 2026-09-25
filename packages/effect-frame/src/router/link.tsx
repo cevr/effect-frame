@@ -2,7 +2,8 @@ import { Source } from "effect-frame/actor/client";
 import type { Child, Node } from "effect-frame/view";
 import { Dom, View } from "effect-frame/view";
 import { Effect, Option, Predicate, Stream } from "effect";
-import type { Current, Linkable, SearchUpdater } from "./codec.js";
+import type { Current, Linkable, SearchChange } from "./codec.js";
+import { searchAfter } from "./codec.js";
 import { followable } from "./navigation.js";
 import { Router } from "./router.js";
 
@@ -24,9 +25,6 @@ export interface Link {
   /** Move to the destination and replace the current history entry. */
   readonly replace: Effect.Effect<void>;
 }
-
-/** A fixed decoded search or a typed update evaluated against the URL. */
-export type LinkSearch<Search> = Search | SearchUpdater<Search>;
 
 /**
  * Fixed params, or a `Source` of them the link follows. A view that
@@ -53,7 +51,7 @@ export type LinkParams<Params> = Params | Source<Params>;
 export const link = <Params, Search>(
   to: Linkable<Params, Search>,
   params: LinkParams<NoInfer<Params>>,
-  search: LinkSearch<NoInfer<Search>>,
+  search: SearchChange<NoInfer<Search>>,
 ): Effect.Effect<Link, never, Router> =>
   Effect.gen(function* () {
     const router = yield* Router;
@@ -61,7 +59,7 @@ export const link = <Params, Search>(
     const hrefAt =
       (fixed: Params) =>
       (url: URL): string =>
-        to.hrefAt(url, fixed, searchAt(to, url, search));
+        to.hrefAt(url, fixed, searchAfter(search, to.searchAt(url)));
     const href = Source.zipWith(router.current, held, (match, fixed) => hrefAt(fixed)(match.url));
     const current = Source.zipWith(router.current, held, (match, fixed) =>
       to.currentAt(match, fixed),
@@ -90,21 +88,6 @@ function isParamsSource<Params>(params: LinkParams<Params>): params is Source<Pa
     Effect.isEffect(params.get) &&
     Stream.isStream(params.changes)
   );
-}
-
-const searchAt = <Params, Search>(
-  to: Linkable<Params, Search>,
-  url: URL,
-  search: LinkSearch<Search>,
-): Search => {
-  if (!isUpdater(search)) {
-    return search;
-  }
-  return search(to.searchAt(url));
-};
-
-function isUpdater<Search>(search: LinkSearch<Search>): search is SearchUpdater<Search> {
-  return Predicate.isFunction(search);
 }
 
 export interface LinkProps {

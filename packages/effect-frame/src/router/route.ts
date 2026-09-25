@@ -34,6 +34,7 @@ export type {
   RouteNavigation,
   RouteProps,
   SearchCodec,
+  SearchChange,
   SearchKeyInfo,
   SearchUpdater,
   UrlUpdater,

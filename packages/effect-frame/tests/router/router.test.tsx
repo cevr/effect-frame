@@ -104,9 +104,9 @@ const BookSearch = Route.search(Schema.Struct({ q: Schema.String.pipe(Route.with
 type BookSearchValue = (typeof BookSearch)["Type"];
 
 let homeMounts = 0;
-let updateBookSearch: (update: Route.SearchUpdater<BookSearchValue>) => Effect.Effect<void> = () =>
+let updateBookSearch: (change: Route.SearchChange<BookSearchValue>) => Effect.Effect<void> = () =>
   Effect.void;
-let replaceBookSearch: (update: Route.SearchUpdater<BookSearchValue>) => Effect.Effect<void> = () =>
+let replaceBookSearch: (change: Route.SearchChange<BookSearchValue>) => Effect.Effect<void> = () =>
   Effect.void;
 
 const Home = (_props: Route.RouteProps<{}, {}>) =>
@@ -358,6 +358,15 @@ describe("router", () => {
       yield* updateBookSearch((previous) => ({ q: `${previous.q}a` }));
       yield* replaceBookSearch((previous) => ({ q: `${previous.q}r` }));
       expect(location.history).toEqual(["push /books/1?q=a", "replace /books/1?q=ar"]);
+    }),
+  );
+
+  it.scoped("pushSearch and replaceSearch take a value, as UrlState's moves do", () =>
+    Effect.gen(function* () {
+      const { location } = yield* start("http://app.test/books/1");
+      yield* updateBookSearch({ q: "set" });
+      yield* replaceBookSearch({ q: "again" });
+      expect(location.history).toEqual(["push /books/1?q=set", "replace /books/1?q=again"]);
     }),
   );
 

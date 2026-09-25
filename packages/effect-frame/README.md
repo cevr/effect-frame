@@ -730,8 +730,9 @@ export const App = Route.client(
   `pushSearch`, and `replaceSearch`. A layout also gets `outlet`.
 - Every move is `push` or `replace`: `router.push(href)`, a link's
   `link.push` and `link.replace`, a view's `pushSearch` and
-  `replaceSearch`, and a `UrlState`'s `push` and `replace`, which take a
-  value or an updater of the latest value. `router.push` and
+  `replaceSearch`, and a `UrlState`'s `push` and `replace`. A search move
+  and a link's search take one change shape, `Route.SearchChange`: a value,
+  or an updater of the latest value. `router.push` and
   `router.replace` answer a `NavigationResult`: `Committed` at the final
   URL after any redirect, `Unchanged` when nothing moved, or `Stayed` when
   a leave check kept the page.

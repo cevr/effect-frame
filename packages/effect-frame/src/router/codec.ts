@@ -228,6 +228,25 @@ export interface RouteNavigation {
 export type SearchUpdater<Search> = (previous: Search) => Search;
 
 /**
+ * A search move's one change shape: a new decoded search, or an update of
+ * the latest one. A link, a view's `pushSearch` and `replaceSearch`, and a
+ * `UrlState`'s `push` and `replace` all take it.
+ */
+export type SearchChange<Search> = Search | SearchUpdater<Search>;
+
+/** The search a change leaves over the latest one. */
+export const searchAfter = <Search>(change: SearchChange<Search>, latest: Search): Search => {
+  if (isSearchUpdater(change)) {
+    return change(latest);
+  }
+  return change;
+};
+
+function isSearchUpdater<Search>(change: SearchChange<Search>): change is SearchUpdater<Search> {
+  return Predicate.isFunction(change);
+}
+
+/**
  * Give a search field a decoding default and omit that value when encoding.
  *
  * Effect's `withDecodingDefaultTypeKey` with the `omit` strategy omits
@@ -512,17 +531,18 @@ export interface RouteProps<Params, Search> {
   /** Print this route with its own parameter and search codecs. */
   readonly href: (params: Params, search: Search) => string;
   /**
-   * A functional search update against the latest canonical URL, pushed as
-   * a new history entry. `pushSearch` and `replaceSearch` are the two
-   * search moves, and neither is a default.
+   * A search change, a new value or an update of the latest one, against
+   * the latest canonical URL, pushed as a new history entry. `pushSearch`
+   * and `replaceSearch` are the two search moves, and neither is a default.
    *
    * ```ts
    * yield* props.pushSearch((search) => ({ ...search, page: search.page + 1 }));
+   * yield* props.replaceSearch({ filter: "open" });
    * ```
    */
-  readonly pushSearch: (update: SearchUpdater<Search>) => Effect.Effect<void>;
-  /** A functional search update that replaces the current history entry. */
-  readonly replaceSearch: (update: SearchUpdater<Search>) => Effect.Effect<void>;
+  readonly pushSearch: (change: SearchChange<Search>) => Effect.Effect<void>;
+  /** A search change that replaces the current history entry. */
+  readonly replaceSearch: (change: SearchChange<Search>) => Effect.Effect<void>;
 }
 
 /**

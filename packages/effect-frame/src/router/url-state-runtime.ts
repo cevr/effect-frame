@@ -2,14 +2,15 @@ import { Source } from "effect-frame/actor/client";
 import type {
   RouteInstance,
   RouteNavigation,
+  SearchChange,
   SearchCodec,
   SearchKeyInfo,
   SearchRecord,
 } from "./codec.js";
-import { mergeSearchRecord, readSearch, printSearch, searchKeysOf } from "./codec.js";
+import { mergeSearchRecord, readSearch, printSearch, searchAfter, searchKeysOf } from "./codec.js";
 import type { RouterService } from "./router.js";
 import type { Scope } from "effect";
-import { Context, Effect, Option, Predicate, Schema } from "effect";
+import { Context, Effect, Option, Schema } from "effect";
 import * as Inspection from "../inspection/registry.js";
 
 /** Explicit wire keys for an opaque SearchRecord codec: the same name a segment uses. */
@@ -17,8 +18,8 @@ export interface Options {
   readonly searchKeys?: ReadonlyArray<string>;
 }
 
-/** A new value, or an update of the latest one. */
-export type Change<A> = A | ((previous: A) => A);
+/** A new value, or an update of the latest one: the search moves' one change shape. */
+export type Change<A> = SearchChange<A>;
 
 /**
  * A mounted view's decoded state and its two URL moves. `push` adds a
@@ -67,22 +68,6 @@ export class Runtime extends Context.Service<Runtime, RuntimeService>()(
 interface Owner {
   readonly keys: ReadonlyArray<string>;
   active: boolean;
-}
-
-type Mutation<A> =
-  | { readonly _tag: "Set"; readonly value: A }
-  | { readonly _tag: "Update"; readonly update: (previous: A) => A };
-
-/** A change as the mutation it names: an update when it is a function. */
-const mutationOf = <A>(change: Change<A>): Mutation<A> => {
-  if (isUpdate(change)) {
-    return { _tag: "Update", update: change };
-  }
-  return { _tag: "Set", value: change };
-};
-
-function isUpdate<A>(change: Change<A>): change is (previous: A) => A {
-  return Predicate.isFunction(change);
 }
 
 /**
@@ -172,18 +157,13 @@ export const makeRuntime = (
 
       const replaceOrPush = (
         operation: "push" | "replace",
-        mutation: Mutation<S["Type"]>,
+        change: Change<S["Type"]>,
       ): Effect.Effect<void> => {
         const updater = (current: URL): string => {
           if (!owner.active) {
             return current.href;
           }
-          let next: S["Type"];
-          if (mutation._tag === "Set") {
-            next = mutation.value;
-          } else {
-            next = mutation.update(decodeUrl(codec, keys, fallback, current));
-          }
+          const next = searchAfter(change, decodeUrl(codec, keys, fallback, current));
           return printValue(current, encode(next), keys);
         };
         if (operation === "push") {
@@ -194,8 +174,8 @@ export const makeRuntime = (
 
       return {
         state,
-        push: (change) => replaceOrPush("push", mutationOf(change)),
-        replace: (change) => replaceOrPush("replace", mutationOf(change)),
+        push: (change) => replaceOrPush("push", change),
+        replace: (change) => replaceOrPush("replace", change),
       } satisfies State<S["Type"]>;
     });
   };

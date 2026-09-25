@@ -83,7 +83,7 @@ import type {
   SearchCodec,
   SearchKeyInfo,
   SearchRecord,
-  SearchUpdater,
+  SearchChange,
   Current,
   Decoded,
 } from "./codec.js";
@@ -97,6 +97,7 @@ import {
   printSearch,
   readSearch,
   search as searchCodec,
+  searchAfter,
 } from "./codec.js";
 import type { RouteMatch } from "./router.js";
 import { Router } from "./router.js";
@@ -2372,7 +2373,7 @@ const makeBranch = <
      */
     const moveSearch =
       (move: RouteNavigation["push"]) =>
-      (update: SearchUpdater<Search>): Effect.Effect<void> =>
+      (change: SearchChange<Search>): Effect.Effect<void> =>
         move(
           (latest) =>
             Option.match(
@@ -2382,7 +2383,7 @@ const makeBranch = <
                   (current) =>
                     segRuntime.searchUpdate(
                       latest,
-                      { params: current.params, search: update(current.search) },
+                      { params: current.params, search: searchAfter(change, current.search) },
                       Option.isNone(outline.child),
                     ),
                 ),

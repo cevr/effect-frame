@@ -454,7 +454,7 @@ const startWith = <R,>(initial: string, routes: ReadonlyArray<Route.AnyRoute<R>>
 const start = (initial: string) => startWith(initial, [counter]);
 
 describe("UrlState", () => {
-  it.scoped("derives from the URL and replaces by default", () =>
+  it.scoped("derives from the URL, and replace rewrites the entry", () =>
     Effect.gen(function* () {
       const { root, location, page } = yield* start("http://app.test/counter");
       expect(root.querySelector("#counter")?.textContent).toBe("0");

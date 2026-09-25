@@ -494,9 +494,17 @@ The rule that fixes both is the one a seed already follows (review round
    lands each held settle, and the update is an ordinary reactive one,
    after the claims. A `StreamEnded` that `Closed` writes is late too. A
    late patch that arrives after hydration lands at once, as before.
-   `Resumed.closed` then completes after hydration when a slot took a held
-   settle.
-3. **A boundary may draw it ahead.** A readiness boundary has marks, so it
+   The held settle binds to the slot that took the seed: it is the slot's
+   `heldSeed`, and it reads `None` once a read supersedes the seed or the
+   slot closes. A slot opened later for the key never reads it (review
+   round 1).
+3. **Channel closure and hydration stay independent.** `Resumed.closed`
+   waits for the seeds that landed, never for a held one, so it completes
+   before hydration too. `Resumed.hydrated` lands each held settle and
+   waits until each slot that took one shows it. A client can await them
+   in either order, and after both, every taken seed is on screen
+   (review round 1).
+4. **A boundary may draw it ahead.** A readiness boundary has marks, so it
    can replace the server's branch (`resolvedAhead`). An entry's state
    source carries its held settle as a capability (`src/actor/read-ahead.ts`).
    `useQuery`, `followQuery` and a route's query binding carry it; a
@@ -532,6 +540,15 @@ once hydration is done. But `resolvedAhead` would then never count a
 patch, and a boundary would draw its fallback's setup only to throw it
 away. The acceptance rows for #22 prove the read-ahead; they stay.
 
+**One build writes both sides.** The server document and the client
+bundle must come from one build. `late` is an optional field, so a
+mismatched pair still decodes: an old client strips it, and a new client
+reads a patch without it as a shell patch that lands at once (the
+behaviour before this fix, proven by "a patch with no late flag lands at
+once"). But either pair keeps the hydration fault this section fixes. A
+deploy that serves HTML from one build and assets from another is out of
+scope.
+
 **Remaining limit.** A boundary over a derived source (`ready(select(...))`)
 cannot read ahead: it claims its fallback and draws the content once
 hydration is done. It reports no mismatch. `resolvedAhead` does not count
@@ -539,8 +556,10 @@ it.
 
 Tests: `tests/view/streaming-hydrate-order.test.tsx` holds the wire flag,
 the text with no boundary, the `Query` and its attributes, the claimed
-`Errored` content, and a boundary that draws ahead beside a text that
-reads the same key and waits. The hand-built patches that the streaming
+`Errored` content, a boundary that draws ahead beside a text that
+reads the same key and waits, `closed` and `hydrated` in either order, a
+read-ahead that ends when its slot closes or a read supersedes it, and a
+patch with no `late` flag. The hand-built patches that the streaming
 tests append after the first chunk now carry `late: true`, as the server
 writes them (`lateRecord`).
 
@@ -557,6 +576,10 @@ Each mutation was applied alone, and the new test file,
 | An entry carries no held settle                | 7 tests   |
 | The shell marks no patch late                  | 7 tests   |
 | `ready` reads without the flag (no read-ahead) | 7 tests   |
+| `closed` waits for a held seed                 | 1 test    |
+| `hydrated` does not wait for publication       | 2 tests   |
+| A held seed ignores a superseding read         | 1 test    |
+| A held seed outlives its slot                  | 1 test    |
 
 ### A streamed shell does not wait for a late setup
 

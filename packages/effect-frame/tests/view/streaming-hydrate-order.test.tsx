@@ -2,8 +2,8 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { useQuery } from "effect-frame/actor";
-import type { ActorTransport, QueryCache } from "effect-frame/actor";
+import { QueryCache, Ready, Streaming, useQuery } from "effect-frame/actor";
+import type { ActorTransport } from "effect-frame/actor";
 import {
   Errored,
   Html,
@@ -15,7 +15,7 @@ import {
   ready,
   render,
 } from "effect-frame/view";
-import { Effect, Fiber, Option, Stream } from "effect";
+import { Deferred, Effect, Option, Stream } from "effect";
 import type { Scope } from "effect";
 import type { Node } from "effect-frame/view";
 import { describe, expect, it } from "effect-bun-test";
@@ -25,14 +25,18 @@ import {
   eventually,
   frame,
   hydrateWith,
+  idOf,
   install,
+  lateRecord,
   makeControl,
   noLimit,
   recordsIn,
   release,
   sideOf,
   textOf,
+  valueRecord,
 } from "./streaming-fixture.js";
+import { readAhead } from "../../src/actor/read-ahead.js";
 import type { Side } from "./streaming-fixture.js";
 
 /**
@@ -50,14 +54,14 @@ const attributeOf = (selector: string, name: string): Option.Option<string> =>
     Option.fromNullishOr(found.getAttribute(name)),
   );
 
-/** The document `rendering` writes, with `a` held past the shell and then released. */
+/**
+ * The document `rendering` writes, with `a` held past the shell and then
+ * released: the first chunk is the shell, so `a` is released once it is out.
+ */
 const lateDocument = (control: ReturnType<typeof makeControl>, rendering: Stream.Stream<string>) =>
-  Effect.gen(function* () {
-    const chunks = yield* Effect.forkChild(collect(rendering));
-    yield* Effect.sleep("20 millis");
-    yield* release(control, "a");
-    return (yield* Fiber.join(chunks)).join("");
-  });
+  Effect.map(collect(Stream.tap(rendering, () => release(control, "a"))), (chunks) =>
+    chunks.join(""),
+  );
 
 /** `view` streamed over `server`, with no time limit. */
 const streamed = <Props,>(
@@ -300,5 +304,140 @@ describe("a patch written after the shell and read before hydration", () => {
         yield* eventually("the patched status", () => textOf("#status") === "found Alpha");
         expect(clientControl.calls).toEqual([]);
       }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The document's held settles (review round 1)
+// ---------------------------------------------------------------------------
+
+const placeholderOf = (id: string): Streaming.Placeholder => ({
+  _tag: "Placeholder",
+  id: idOf(id),
+  kind: "query",
+});
+
+const closedRecord: Streaming.Closed = { _tag: "Closed", patched: [idOf("a")] };
+
+/** Resume `present` now, and `later` once `gate` opens. */
+const resumeWith = (
+  present: ReadonlyArray<Streaming.StreamRecord>,
+  later: ReadonlyArray<Streaming.StreamRecord>,
+  gate: Deferred.Deferred<void>,
+) =>
+  Streaming.resume({
+    present,
+    later: Stream.unwrap(Effect.as(Deferred.await(gate), Stream.fromIterable(later))),
+  });
+
+const within = <A,>(label: string, effect: Effect.Effect<A>) =>
+  Effect.timeoutOrElse(effect, {
+    duration: "1 second",
+    orElse: () => Effect.die(`${label} did not complete`),
+  });
+
+describe("the settles a document holds until hydration", () => {
+  it.scopedLive("closed completes when the channel ends, before hydration, in either order", () =>
+    Effect.gen(function* () {
+      const client = yield* sideOf(makeControl({}));
+      yield* Effect.gen(function* () {
+        const gate = yield* Deferred.make<void>();
+        const resumed = yield* resumeWith(
+          [placeholderOf("a")],
+          [lateRecord(idOf("a"), "Alpha"), closedRecord],
+          gate,
+        );
+        const cache = yield* QueryCache;
+        // A slot takes the seed while it is open; the patch and Closed come after.
+        const entry = yield* cache.open(Label, { id: "a" });
+        yield* Deferred.succeed(gate, void 0);
+        yield* within("closed before hydrated", resumed.closed);
+        // Held: the entry shows what the shell drew until hydration is done.
+        expect((yield* entry.state.get)._tag).toBe("Loading");
+        yield* resumed.hydrated;
+        // After both, the entry shows its value: no wait.
+        expect(yield* entry.state.get).toEqual(Ready({ label: "Alpha" }, false));
+      }).pipe(Effect.provideContext(client));
+    }),
+  );
+
+  it.scopedLive("after closed and hydrated, an entry opened after Closed shows its value", () =>
+    Effect.gen(function* () {
+      const client = yield* sideOf(makeControl({}));
+      yield* Effect.gen(function* () {
+        const gate = yield* Deferred.make<void>();
+        const resumed = yield* resumeWith(
+          [placeholderOf("a"), lateRecord(idOf("a"), "Alpha"), closedRecord],
+          [],
+          gate,
+        );
+        yield* within("closed", resumed.closed);
+        const cache = yield* QueryCache;
+        const entry = yield* cache.open(Label, { id: "a" });
+        expect((yield* entry.state.get)._tag).toBe("Loading");
+        yield* resumed.hydrated;
+        expect(yield* entry.state.get).toEqual(Ready({ label: "Alpha" }, false));
+      }).pipe(Effect.provideContext(client));
+    }),
+  );
+
+  it.scopedLive("a slot that did not take the seed never reads it ahead", () =>
+    Effect.gen(function* () {
+      const clientControl = makeControl({ a: "New" }, ["a"]);
+      const client = yield* sideOf(clientControl);
+      yield* Effect.gen(function* () {
+        const gate = yield* Deferred.make<void>();
+        yield* resumeWith([placeholderOf("a"), lateRecord(idOf("a"), "Old")], [], gate);
+        const cache = yield* QueryCache;
+        // The first slot takes the seed, then closes: nothing declares the key.
+        const closed = yield* Effect.scoped(
+          Effect.map(cache.open(Label, { id: "a" }), (first) => readAhead(first.state, () => true)),
+        );
+        // The closed slot's own entry no longer reads it either.
+        expect((yield* closed.get)._tag).toBe("Loading");
+        const reopened = yield* cache.open(Label, { id: "a" });
+        const ahead = readAhead(reopened.state, () => true);
+        expect(yield* ahead.get).toEqual(yield* reopened.state.get);
+        expect((yield* ahead.get)._tag).toBe("Loading");
+      }).pipe(Effect.provideContext(client));
+    }),
+  );
+
+  it.scopedLive("a read that supersedes the seed ends its read-ahead", () =>
+    Effect.gen(function* () {
+      const clientControl = makeControl({ a: "New" }, ["a"]);
+      const client = yield* sideOf(clientControl);
+      yield* Effect.gen(function* () {
+        const gate = yield* Deferred.make<void>();
+        yield* resumeWith([placeholderOf("a"), lateRecord(idOf("a"), "Old")], [], gate);
+        const cache = yield* QueryCache;
+        const entry = yield* cache.open(Label, { id: "a" });
+        const ahead = readAhead(entry.state, () => true);
+        expect(yield* ahead.get).toEqual(Ready({ label: "Old" }, false));
+        // The client reads the key itself: the seed can no longer land.
+        yield* Effect.forkScoped(entry.refresh);
+        yield* eventually("the read started", () => clientControl.calls.includes("a"));
+        expect((yield* ahead.get)._tag).toBe("Loading");
+      }).pipe(Effect.provideContext(client));
+    }),
+  );
+
+  it.scopedLive("a patch with no late flag lands at once, as before 0.26.2", () =>
+    Effect.gen(function* () {
+      const client = yield* sideOf(makeControl({}));
+      yield* Effect.gen(function* () {
+        const gate = yield* Deferred.make<void>();
+        const resumed = yield* resumeWith(
+          [placeholderOf("a"), valueRecord(idOf("a"), "Alpha"), closedRecord],
+          [],
+          gate,
+        );
+        const cache = yield* QueryCache;
+        const entry = yield* cache.open(Label, { id: "a" });
+        // The shell's own patch: the first read shows it, before hydration.
+        expect(yield* entry.state.get).toEqual(Ready({ label: "Alpha" }, false));
+        yield* within("closed", resumed.closed);
+      }).pipe(Effect.provideContext(client));
+    }),
   );
 });

@@ -168,7 +168,16 @@ interface CacheSlot {
    * only when no read has started and no value has landed since, so a late
    * seed never replaces a newer read's value.
    */
-  readonly outsideRead: () => (publish: Effect.Effect<void>) => Effect.Effect<void>;
+  readonly outsideRead: () => OutsideRead;
+  /**
+   * The settle a seed this slot took holds back until hydration is done
+   * (#22, `read-ahead.ts`). `None` once it landed, once a read superseded
+   * it, and once the slot closed: a readiness boundary never reads a value
+   * the slot could no longer show.
+   */
+  readonly heldSeed: () => Option.Option<QueryState<string, QueryFailure>>;
+  /** The slot took an open seed: `held` is its held settle, read when asked. */
+  readonly holdSeed: (held: () => Option.Option<QueryState<string, QueryFailure>>) => void;
   /**
    * The state a view sees: the slot's own read state, shown stale while an
    * unresolved command owns a contract this entry depends on.
@@ -211,6 +220,16 @@ interface CacheSlot {
   /** Records a refresh that the server could not serve. */
   readonly reject: (error: QueryFailure) => Effect.Effect<void>;
 }
+
+/** A read that arrives by another path (#22): see `CacheSlot.outsideRead`. */
+interface OutsideRead {
+  /** Publishes only while `current` holds. */
+  readonly commit: (publish: Effect.Effect<void>) => Effect.Effect<void>;
+  /** No read has started and no generation has passed since it began. */
+  readonly current: () => boolean;
+}
+
+const nothingHeld = (): Option.Option<QueryState<string, QueryFailure>> => Option.none();
 
 /**
  * RcMap installs a resource before its lookup starts. The key therefore keeps
@@ -568,17 +587,29 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
       );
     });
 
-  const outsideRead = () => {
+  const outsideRead = (): OutsideRead => {
     const started = generation;
     const lastRead = readStarted;
-    return (publish: Effect.Effect<void>) =>
-      Effect.suspend(() => {
-        if (started === generation && lastRead === readStarted) {
-          return publish;
-        }
-        return Effect.void;
-      });
+    const current = () => started === generation && lastRead === readStarted;
+    return {
+      current,
+      commit: (publish) =>
+        Effect.suspend(() => {
+          if (current()) {
+            return publish;
+          }
+          return Effect.void;
+        }),
+    };
   };
+
+  let heldSeed = nothingHeld;
+  yield* Scope.addFinalizer(
+    scope,
+    Effect.sync(() => {
+      heldSeed = nothingHeld;
+    }),
+  );
 
   const slot: CacheSlot = {
     key,
@@ -586,6 +617,10 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
     scope,
     released: Deferred.await(ended),
     outsideRead,
+    heldSeed: () => heldSeed(),
+    holdSeed: (held) => {
+      heldSeed = held;
+    },
     state,
     write,
     amend,
@@ -659,12 +694,19 @@ const begin = (
       return Option.match(found.current, {
         onSome: (state) => Effect.andThen(landSeed(slot, state, hydrated), published),
         onNone: () => {
-          const commit = slot.outsideRead();
+          const read = slot.outsideRead();
+          // While the seed can still land here, a boundary may read it ahead.
+          slot.holdSeed(() => {
+            if (read.current()) {
+              return found.held;
+            }
+            return Option.none();
+          });
           return Effect.andThen(
             Scope.addFinalizer(slot.scope, published),
             Effect.forkIn(
               Effect.flatMap(Deferred.await(found.settled), (state) =>
-                commit(landSeed(slot, state, hydrated)),
+                read.commit(landSeed(slot, state, hydrated)),
               ).pipe(Effect.ensuring(published)),
               slot.scope,
             ),
@@ -743,8 +785,6 @@ interface Seed {
 interface Seeds {
   /** The seed for a key, if the document holds one no slot has consumed. */
   readonly take: (id: string) => Option.Option<Seed>;
-  /** The settle the document holds back for a key until hydration is done. */
-  readonly held: (id: string) => Option.Option<SeedState>;
   /**
    * Completes when hydration is done (`Resumed.hydrated`), or when the
    * principal changed. A read a seed calls for waits for it.
@@ -778,12 +818,14 @@ export interface DocumentAccess {
   readonly settle: (id: string, state: SeedState, late: boolean) => Effect.Effect<void>;
   /**
    * The document ended. Every id still open fails `StreamEnded`, late, and
-   * this returns once every slot that took a seed has published it or
-   * closed: after hydration, when a slot took a held settle.
+   * this returns once every slot that took a landed seed has published it
+   * or closed. A held settle publishes at `expire`: `end` never waits for
+   * hydration.
    */
   readonly end: Effect.Effect<void>;
   /**
-   * Hydration is done. Each held settle lands. A seed no slot took is
+   * Hydration is done. Each held settle lands, and this returns once every
+   * slot that took a landed seed has published it or closed. A seed no slot took is
    * dropped: a key declared from now on reads over the query path, never
    * from the document. A read a
    * landed seed called for (a stale value, a failure that is not final)
@@ -870,6 +912,16 @@ const makeDocument = (live: ReadonlySet<CacheSlot>): CacheDocument => {
       }
       return land(seed, state);
     });
+  // Each taken seed that landed has put its state in its slot, or its slot
+  // closed. A seed still open or held is not waited for: `end` and `expire`
+  // each return without the other (review round 1).
+  const publishedLanded = Effect.suspend(() =>
+    Effect.forEach(
+      Array.from(table.values()).filter((seed) => seed.taken && Option.isSome(seed.current)),
+      (seed) => Deferred.await(seed.published),
+      { discard: true },
+    ),
+  );
   const access: DocumentAccess = {
     entries: Effect.sync(() =>
       Array.from(live, (slot) => ({
@@ -885,8 +937,8 @@ const makeDocument = (live: ReadonlySet<CacheSlot>): CacheDocument => {
     ),
     placeholder: (id) => Effect.sync(() => void seedFor(id)),
     settle,
-    // Every open seed fails, then every taken seed is waited for: when `end`
-    // returns, each live slot shows its seed's final state.
+    // Every open seed fails, then every taken seed that landed is waited for.
+    // A held seed publishes at `expire`, so `end` never waits for hydration.
     end: Effect.andThen(
       Effect.suspend(() =>
         Effect.forEach(
@@ -897,18 +949,14 @@ const makeDocument = (live: ReadonlySet<CacheSlot>): CacheDocument => {
           { discard: true },
         ),
       ),
-      Effect.suspend(() =>
-        Effect.forEach(
-          Array.from(table.values()).filter((seed) => seed.taken),
-          (seed) => Deferred.await(seed.published),
-          { discard: true },
-        ),
-      ),
+      publishedLanded,
     ),
     expire: Effect.suspend(() => {
       expired = true;
       actorSeeds.clear();
-      // Each held settle lands now, as the late update it is.
+      // Each held settle lands now, as the late update it is, and each taken
+      // seed that landed is waited for: when `expire` returns, a slot that
+      // took a landed seed shows it.
       return Effect.andThen(
         Effect.forEach(
           Array.from(table.values()),
@@ -919,7 +967,7 @@ const makeDocument = (live: ReadonlySet<CacheSlot>): CacheDocument => {
             }),
           { discard: true },
         ),
-        Deferred.succeed(hydrated, void 0),
+        Effect.andThen(Deferred.succeed(hydrated, void 0), publishedLanded),
       );
     }),
     actors: Effect.suspend(() =>
@@ -957,7 +1005,6 @@ const makeDocument = (live: ReadonlySet<CacheSlot>): CacheDocument => {
         seed.taken = true;
         return true;
       }),
-    held: (id) => Option.flatMap(Option.fromNullishOr(table.get(id)), (seed) => seed.held),
     hydrated: Deferred.await(hydrated),
   };
   const document: CacheDocument = { access, seeds };
@@ -1002,14 +1049,12 @@ const stampedChanges = <Q extends AnyQuery>(
 const entryOf = <Q extends AnyQuery>(
   contract: Q,
   slot: CacheSlot,
-  seeds: Seeds,
 ): QueryEntry<ResultOf<Q>, QueryFailure> => {
   // A Ready value was decoded through this contract before, and the
   // caller's result is typed by it: a failure either way is a defect.
   const decode = Schema.decodeSync(contract.result);
   const encode = Schema.encodeSync(contract.result);
   const decodeState = decoderOf(contract);
-  const id = keyOf(slot.key);
   return {
     key: slot.key,
     // A readiness boundary may read a held settle ahead (`read-ahead.ts`).
@@ -1023,7 +1068,7 @@ const entryOf = <Q extends AnyQuery>(
         ),
       },
       Effect.suspend(() =>
-        Option.match(seeds.held(id), {
+        Option.match(slot.heldSeed(), {
           onNone: () => Effect.succeed(Option.none()),
           onSome: (state) => Effect.map(decodeState(state), Option.some),
         }),
@@ -1166,11 +1211,11 @@ const make = (): Effect.Effect<QueryCacheService, never, Scope.Scope> =>
       });
 
     const open = <Q extends AnyQuery>(contract: Q, args: ArgsOf<Q>) =>
-      Effect.map(openSlot(contract, args), (slot) => entryOf(contract, slot, document.seeds));
+      Effect.map(openSlot(contract, args), (slot) => entryOf(contract, slot));
 
     const openStamped = <Q extends AnyQuery>(contract: Q, args: ArgsOf<Q>) =>
       Effect.map(openSlot(contract, args), (slot): StampedEntry<Q> => ({
-        entry: entryOf(contract, slot, document.seeds),
+        entry: entryOf(contract, slot),
         get: stampedState(contract, slot),
         changes: stampedChanges(contract, slot),
       }));

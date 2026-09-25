@@ -342,7 +342,9 @@ export interface Resumed {
   /**
    * Completes once the record channel is over: `Closed` arrived, or the
    * document ended without it. Every entry is settled by then, or failed
-   * `StreamEnded`. A consumer that must see one agreed tree, such as a
+   * `StreamEnded`. A settle held for hydration is on screen only after
+   * `hydrated`; `closed` never waits for it, so the two can be awaited in
+   * either order. A consumer that must see one agreed tree, such as a
    * server-driven op wire, starts after this and after hydration.
    */
   readonly closed: Effect.Effect<void>;
@@ -352,7 +354,8 @@ export interface Resumed {
    * the document held since the page loaded. The reads that seeds call for
    * start then too (a stale value, a failure that is not final,
    * `StreamEnded`): until hydration is done, an entry shows what the server
-   * drew. A client that never runs it never reads those keys again.
+   * drew. It returns once each view that took a held settle shows it.
+   * A client that never runs it never reads those keys again.
    */
   readonly hydrated: Effect.Effect<void>;
 }

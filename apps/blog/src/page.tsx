@@ -1,5 +1,5 @@
 import type { RemoteActorRef } from "effect-frame/actor/client";
-import { Source, select } from "effect-frame/actor/client";
+import { Source } from "effect-frame/actor/client";
 import { Router } from "effect-frame/router";
 import type { Route } from "effect-frame/router";
 import { View, orErrored, ready } from "effect-frame/view";
@@ -90,7 +90,7 @@ export const PostView = (props: PostProps) =>
         { slug: params.slug, reactions },
       ]);
     const blocks = yield* View.list({
-      each: select(body, placed),
+      each: Source.select(body, placed),
       keyBy: (one: Placed) => one.key,
       row: BlockView,
     });

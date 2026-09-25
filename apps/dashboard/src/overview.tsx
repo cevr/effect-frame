@@ -1,4 +1,4 @@
-import { Behavior, Source, Value, select, spawn } from "effect-frame/actor/client";
+import { Behavior, Source, Value, spawn } from "effect-frame/actor/client";
 import { Link, link } from "effect-frame/router";
 import type { Route } from "effect-frame/router";
 import { For, Loading, View, orErrored, ready, readyWithStale } from "effect-frame/view";
@@ -51,7 +51,7 @@ const RevenueCard = (props: OverviewProps) =>
 const OrdersCard = (props: OverviewProps, book: OrdersCommands) =>
   Effect.gen(function* () {
     const shown = yield* ready(yield* orErrored(props.data.orders.state), { rows: [] });
-    const rows = select(shown, (result) => result.rows);
+    const rows = Source.select(shown, (result) => result.rows);
     return (
       <section id="orders-card" class="card">
         <h2>orders</h2>
@@ -88,7 +88,7 @@ const FunnelCard = (props: OverviewProps) =>
       <section id="funnel-card" class="card">
         <h2>funnel</h2>
         <ul id="funnel">
-          <For each={select(shown, (result) => result.stages)} keyBy={(stage) => stage.name}>
+          <For each={Source.select(shown, (result) => result.stages)} keyBy={(stage) => stage.name}>
             {(stage) => <li>{View.bind(stage, (value) => `${value.name} ${value.count}`)}</li>}
           </For>
         </ul>
@@ -106,7 +106,7 @@ const SlowestCard = (props: OverviewProps) =>
         <section id="slowest-card" class="card">
           <h2>slowest</h2>
           <ul id="slowest">
-            <For each={select(shown, (result) => result.rows)} keyBy={(row) => row.endpoint}>
+            <For each={Source.select(shown, (result) => result.rows)} keyBy={(row) => row.endpoint}>
               {(row) => <li>{View.bind(row, (value) => `${value.endpoint} ${value.ms}ms`)}</li>}
             </For>
           </ul>
@@ -118,7 +118,7 @@ const SlowestCard = (props: OverviewProps) =>
 /** The live alerts: the route's `Alerts` actor, followed as it changes. */
 const AlertsCard = (props: OverviewProps) =>
   Effect.sync(() => {
-    const items = select(
+    const items = Source.select(
       Source.switchMap(props.data.alerts, (current) => current.state),
       (snapshot) => snapshot.items,
     );
@@ -156,13 +156,15 @@ export const OverviewView = (props: OverviewProps) =>
     const week = yield* link(overview, params, { range: "7d" });
     const month = yield* link(overview, params, {});
     const ever = yield* link(overview, params, { range: "all" });
-    const range = select(props.search, (search) => rangeLabel(Option.fromNullishOr(search.range)));
+    const range = Source.select(props.search, (search) =>
+      rangeLabel(Option.fromNullishOr(search.range)),
+    );
 
     // The funnel tab. Its card is a row that exists only once revealed, so
     // its `ready` registers with the shell's scope after first paint.
     const revealed = yield* spawn(Behavior.value(false));
     const funnel = yield* View.list({
-      each: select(revealed.state, (open): ReadonlyArray<string> => {
+      each: Source.select(revealed.state, (open): ReadonlyArray<string> => {
         if (open) {
           return ["funnel"];
         }

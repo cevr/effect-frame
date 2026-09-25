@@ -3,14 +3,8 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import { Streaming, followQuery, useQuery } from "effect-frame/actor";
-import type {
-  ActorTransport,
-  QueryCache,
-  QueryFailure,
-  QueryState,
-  Source,
-} from "effect-frame/actor";
-import { zip } from "effect-frame/actor/client";
+import type { ActorTransport, QueryCache, QueryFailure, QueryState } from "effect-frame/actor";
+import { Source } from "effect-frame/actor/client";
 import type { Node } from "effect-frame/view";
 import { Html, Loading, View, mount, ready, readyWithStale } from "effect-frame/view";
 import type { Scope } from "effect";
@@ -63,7 +57,7 @@ const constant = <A,>(value: A): Source<A> => ({
 /** The source zipped with a constant `hops` times: each zip is one more step on a fiber. */
 const through = <A,>(source: Source<A>, hops: number): Source<A> =>
   Array.from({ length: hops }).reduce<Source<A>>(
-    (chained) => zip(chained, constant(0), (value) => value),
+    (chained) => Source.zip(chained, constant(0), (value) => value),
     source,
   );
 

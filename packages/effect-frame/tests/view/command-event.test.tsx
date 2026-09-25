@@ -9,7 +9,7 @@ import {
   Policies,
   Policy,
 } from "effect-frame/actor";
-import { ActorTransport, contract, ref, select } from "effect-frame/actor/client";
+import { ActorTransport, contract, ref, Source } from "effect-frame/actor/client";
 import type { TransportService } from "effect-frame/actor/client";
 import { Dom, View, ViewTest, mount } from "effect-frame/view";
 import { Effect, Layer, Option, Ref, Schema, Stream } from "effect";
@@ -82,7 +82,7 @@ const Clicker = (_props: NoProps) =>
     const counter = yield* ref(Counter, "one");
     return (
       <div>
-        <span id="count">{View.bind(select(counter.state, (n) => String(n)))}</span>
+        <span id="count">{View.bind(Source.select(counter.state, (n) => String(n)))}</span>
         <button id="add" onClick={View.event(() => Effect.asVoid(counter.send(1)))}>
           add
         </button>

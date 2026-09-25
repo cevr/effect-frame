@@ -1,5 +1,4 @@
-import { Behavior, select, spawn } from "effect-frame/actor/client";
-import type { Source } from "effect-frame/actor/client";
+import { Behavior, spawn, Source } from "effect-frame/actor/client";
 import { Link, link } from "effect-frame/router";
 import type { NotFoundProps, Route } from "effect-frame/router";
 import { Errored, For, Loading, View, ready } from "effect-frame/view";
@@ -103,7 +102,7 @@ export const ListsView = <ChildR,>(props: Route.LayoutPropsOf<typeof lists, Chil
 export const IndexView = (props: Route.PropsOf<typeof index>) =>
   Effect.gen(function* () {
     const found = yield* ready(props.data.found.state, []);
-    const q = select(props.search, (search) =>
+    const q = Source.select(props.search, (search) =>
       Option.getOrElse(Option.fromNullishOr(search.q), () => ""),
     );
     const search = (text: string) =>

@@ -11,7 +11,7 @@ import {
   Policy,
 } from "effect-frame/actor";
 import type { KeyOf, TransportService } from "effect-frame/actor/client";
-import { ActorTransport, contract, ref, select } from "effect-frame/actor/client";
+import { ActorTransport, contract, ref, Source } from "effect-frame/actor/client";
 import type { Host } from "effect-frame/view";
 import { Dom, For, Html, Remote, View, ViewTest, mount } from "effect-frame/view";
 import * as Driven from "effect-frame/view/driven";
@@ -108,7 +108,10 @@ const NotesPage = (props: PageProps) =>
           add
         </button>
         <ul id="list">
-          <For each={select(notes.state, (snapshot) => snapshot.notes)} keyBy={(note) => note.id}>
+          <For
+            each={Source.select(notes.state, (snapshot) => snapshot.notes)}
+            keyBy={(note) => note.id}
+          >
             {(note) => (
               <li>
                 <input type="checkbox" checked={View.bind(note, (value) => value.done)} />
@@ -127,7 +130,7 @@ const LateRows = (props: PageProps) =>
   Effect.gen(function* () {
     const notes = yield* ref(Notes, props.key);
     const rows = yield* View.list({
-      each: select(notes.state, (snapshot) => snapshot.notes),
+      each: Source.select(notes.state, (snapshot) => snapshot.notes),
       keyBy: (note: Note) => note.id,
       row: (note) =>
         Effect.gen(function* () {
@@ -148,7 +151,7 @@ const GatedRows = (props: GatedProps) =>
   Effect.gen(function* () {
     const notes = yield* ref(Notes, props.key);
     const rows = yield* View.list({
-      each: select(notes.state, (snapshot) => snapshot.notes),
+      each: Source.select(notes.state, (snapshot) => snapshot.notes),
       keyBy: (note: Note) => note.id,
       row: (note) =>
         Effect.gen(function* () {
@@ -178,7 +181,10 @@ const RowButtons = (props: PageProps) =>
     const notes = yield* ref(Notes, props.key);
     return (
       <ul id="buttons">
-        <For each={select(notes.state, (snapshot) => snapshot.notes)} keyBy={(note) => note.id}>
+        <For
+          each={Source.select(notes.state, (snapshot) => snapshot.notes)}
+          keyBy={(note) => note.id}
+        >
           {(note) => (
             <li>
               <button

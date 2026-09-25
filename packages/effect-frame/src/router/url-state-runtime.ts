@@ -1,5 +1,4 @@
-import type { Source } from "effect-frame/actor";
-import { select } from "effect-frame/actor/client";
+import { Source } from "effect-frame/actor/client";
 import type {
   RouteInstance,
   RouteNavigation,
@@ -133,7 +132,9 @@ export const makeRuntime = (
           }),
       );
 
-      const state = select(router.current, (match) => decodeUrl(codec, keys, fallback, match.url));
+      const state = Source.select(router.current, (match) =>
+        decodeUrl(codec, keys, fallback, match.url),
+      );
 
       const registry = yield* Effect.serviceOption(Inspection.Registry);
       const frameOwner = yield* Effect.serviceOption(Inspection.Owner);

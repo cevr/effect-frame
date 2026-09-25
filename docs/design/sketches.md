@@ -93,7 +93,7 @@ Behaviors:
 Rules:
 
 - The actor owns execution and lifetime. The behavior defines what messages mean.
-- Selectors do not become new actors. `select(count.state, n => n * 2)` is a read-only projection with no mailbox.
+- Selectors do not become new actors. `Source.select(count.state, n => n * 2)` is a read-only projection with no mailbox.
 - Machines do not expose unrestricted setters.
 - `Behavior.value` accepts a `Set` message only. A `modify(fn)` helper exists on a local ref. It is absent from a durable ref type because an updater function cannot cross the durable boundary.
 - `send` returns a receipt. It means accepted for processing.
@@ -110,7 +110,7 @@ export const Counter = ((props) =>
   Effect.gen(function* () {
     const counter = yield* Actor.spawn(Behavior.machine(CounterMachine));
 
-    const count = View.select(counter.state, (state) => state.count);
+    const count = Source.select(counter.state, (state) => state.count);
 
     return (
       <button onClick={View.event(() => counter.send(CounterEvent.Increment))}>
@@ -288,11 +288,11 @@ export const BoardPage = ((props: BoardInput) =>
   Effect.gen(function* () {
     const { board, composer } = yield* BoardScreen.make(props);
 
-    const tasks = View.select(board.state, (snapshot) => snapshot.tasks);
-    const draft = View.select(composer.state, ComposerSelectors.draft);
-    const submitting = View.select(composer.state, ComposerSelectors.submitting);
-    const message = View.select(composer.state, ComposerSelectors.message);
-    const canRetry = View.select(composer.state, ComposerSelectors.canRetry);
+    const tasks = Source.select(board.state, (snapshot) => snapshot.tasks);
+    const draft = Source.select(composer.state, ComposerSelectors.draft);
+    const submitting = Source.select(composer.state, ComposerSelectors.submitting);
+    const message = Source.select(composer.state, ComposerSelectors.message);
+    const canRetry = Source.select(composer.state, ComposerSelectors.canRetry);
 
     return (
       <main>
@@ -339,8 +339,8 @@ The terminal uses the same screen setup, contract, and composer machine. It uses
 export const BoardTerminal = ((props: BoardInput) =>
   Effect.gen(function* () {
     const { board, composer } = yield* BoardScreen.make(props);
-    const tasks = View.select(board.state, (snapshot) => snapshot.tasks);
-    const draft = View.select(composer.state, ComposerSelectors.draft);
+    const tasks = Source.select(board.state, (snapshot) => snapshot.tasks);
+    const draft = Source.select(composer.state, ComposerSelectors.draft);
 
     return (
       <box flexDirection="column">

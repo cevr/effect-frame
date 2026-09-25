@@ -1,5 +1,4 @@
-import type { Source } from "effect-frame/actor";
-import { select } from "effect-frame/actor/client";
+import { Source } from "effect-frame/actor/client";
 import type { Child, Node } from "effect-frame/view";
 import { Dom, View } from "effect-frame/view";
 import { Effect, Option, Predicate } from "effect";
@@ -41,12 +40,12 @@ export const link = <Params, Search>(
   Effect.gen(function* () {
     const router = yield* Router;
     const hrefAt = (url: URL): string => to.hrefAt(url, params, searchAt(to, url, search));
-    const href = select(router.current, (match) => hrefAt(match.url));
-    const current = select(router.current, (match) => to.currentAt(match));
+    const href = Source.select(router.current, (match) => hrefAt(match.url));
+    const current = Source.select(router.current, (match) => to.currentAt(match));
     return {
       href,
       current,
-      active: select(current, (where) => where !== "none"),
+      active: Source.select(current, (where) => where !== "none"),
       go: router.navigate(hrefAt),
       replace: router.replace(hrefAt),
     };
@@ -69,7 +68,7 @@ function isUpdater<Search>(search: LinkSearch<Search>): search is SearchUpdater<
 
 /** `true` while the document is on `route`, whatever its values. */
 export function isActive<R>(router: RouterService, route: AnyRoute<R>): Source<boolean> {
-  return select(router.current, (match) => match.name === route.name);
+  return Source.select(router.current, (match) => match.name === route.name);
 }
 
 export interface LinkProps {

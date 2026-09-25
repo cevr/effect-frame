@@ -1,13 +1,8 @@
-import type {
-  ActorTransport,
-  QueryCache,
-  Source,
-  TransportReadError,
-} from "effect-frame/actor/client";
+import type { ActorTransport, QueryCache, TransportReadError } from "effect-frame/actor/client";
+import { Source } from "effect-frame/actor/client";
 import type { AnyRoute, Location, NotFoundProps } from "effect-frame/router";
 import { hydrate } from "effect-frame/router";
-import type { Dom } from "effect-frame/view";
-import { View } from "effect-frame/view";
+import type { Dom, View } from "effect-frame/view";
 import { session } from "effect-frame/view/driven";
 import type { Effect, Scope } from "effect";
 
@@ -62,5 +57,5 @@ export const sessionRequirements: Equals<
 
 // An `any` select would make the result `any`, which `Equals` tells apart.
 declare const titles: Source<string>;
-const lengths = View.select(titles, (title) => title.length);
+const lengths = Source.select(titles, (title) => title.length);
 export const selectProjects: Equals<typeof lengths, Source<number>> = true;

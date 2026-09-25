@@ -20,9 +20,7 @@ import {
   Value,
   committedRevision,
   modify,
-  select,
   spawn,
-  zip,
 } from "effect-frame/actor";
 import type { CommandSettled } from "effect-frame/actor";
 
@@ -140,7 +138,7 @@ describe("local actor", () => {
   it.scoped("a selector projects state without a second actor", () =>
     Effect.gen(function* () {
       const count = yield* spawn(Behavior.value(2));
-      const doubled = select(count.state, (n) => n * 2);
+      const doubled = Source.select(count.state, (n) => n * 2);
       expect(yield* doubled.get).toBe(4);
       yield* count.call(Value.Set(5));
       expect(yield* doubled.get).toBe(10);
@@ -339,7 +337,7 @@ describe("source combinators", () => {
         get: SubscriptionRef.get(letter),
         changes: SubscriptionRef.changes(letter),
       };
-      const pair = zip(left, right, (n, s) => `${s}${String(n)}`);
+      const pair = Source.zip(left, right, (n, s) => `${s}${String(n)}`);
       const reached = yield* Stream.runHead(
         Stream.filter(pair.changes, (value) => value === "a1"),
       ).pipe(Effect.timeoutOption("200 millis"));
@@ -351,7 +349,7 @@ describe("source combinators", () => {
     Effect.gen(function* () {
       const left = yield* spawn(Behavior.value(1));
       const right = yield* spawn(Behavior.value("a"));
-      const pair = zip(left.state, right.state, (n, s) => `${s}${String(n)}`);
+      const pair = Source.zip(left.state, right.state, (n, s) => `${s}${String(n)}`);
       expect(yield* pair.get).toBe("a1");
 
       const seen = yield* Stream.take(pair.changes, 3).pipe(Stream.runCollect, Effect.forkScoped);

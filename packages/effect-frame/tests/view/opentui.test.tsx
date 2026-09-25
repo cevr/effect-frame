@@ -1,4 +1,4 @@
-import { Behavior, Value, modify, select, spawn } from "effect-frame/actor";
+import { Behavior, Value, modify, spawn, Source } from "effect-frame/actor";
 import type { LocalActorRef, SetValue } from "effect-frame/actor";
 import { View, ViewTest, mount, render } from "effect-frame/view";
 import { make as makeHost } from "effect-frame/view/opentui";
@@ -50,7 +50,7 @@ interface CounterProps {
 const Counter = (props: CounterProps) =>
   Effect.succeed(
     <box flexDirection="column" width={30} height={3}>
-      <text>{View.bind(select(props.count.state, (n) => `count ${n}`))}</text>
+      <text>{View.bind(Source.select(props.count.state, (n) => `count ${n}`))}</text>
     </box>,
   );
 

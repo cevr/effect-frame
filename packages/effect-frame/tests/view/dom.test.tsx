@@ -2,8 +2,8 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Behavior, Cell, Value, modify, select, spawn } from "effect-frame/actor";
-import type { LocalActorRef, SetValue, Source } from "effect-frame/actor";
+import { Behavior, Cell, Value, modify, spawn, Source } from "effect-frame/actor";
+import type { LocalActorRef, SetValue } from "effect-frame/actor";
 import { Dom, For, Match, Portal, Show, View, ViewTest, mount } from "effect-frame/view";
 import type { Host } from "effect-frame/view";
 import { Deferred, Effect, Exit, Option, Ref, Scope, Stream } from "effect";
@@ -31,7 +31,7 @@ const Counter = (_props: NoProps) =>
     const count = yield* spawn(Behavior.value(0));
     return (
       <div>
-        <span id="count">{View.bind(select(count.state, (n) => String(n)))}</span>
+        <span id="count">{View.bind(Source.select(count.state, (n) => String(n)))}</span>
         <button
           id="up"
           onClick={View.event(() =>
@@ -138,7 +138,7 @@ const Hits = (props: HitsProps) =>
   Effect.succeed(
     <section>
       <Show when={props.hits} is={(xs) => xs.length > 0} fallback={<p id="none">no hits</p>}>
-        {(xs) => <p id="first">{View.bind(select(xs, (found) => found[0] ?? ""))}</p>}
+        {(xs) => <p id="first">{View.bind(Source.select(xs, (found) => found[0] ?? ""))}</p>}
       </Show>
     </section>,
   );
@@ -152,7 +152,7 @@ const Optional = (props: OptionalProps) =>
   Effect.succeed(
     <section>
       <Show when={props.name} is={Option.isSome<string>}>
-        {(some) => <b id="name">{View.bind(select(some, (found) => found.value))}</b>}
+        {(some) => <b id="name">{View.bind(Source.select(some, (found) => found.value))}</b>}
       </Show>
     </section>,
   );
@@ -179,9 +179,9 @@ const JobView = (props: JobProps) =>
         cases={{
           Idle: () => <p id="idle">idle</p>,
           Running: (running) => (
-            <p id="running">{View.bind(select(running, (r) => `${r.percent}%`))}</p>
+            <p id="running">{View.bind(Source.select(running, (r) => `${r.percent}%`))}</p>
           ),
-          Done: (done) => <p id="done">{View.bind(select(done, (d) => d.output))}</p>,
+          Done: (done) => <p id="done">{View.bind(Source.select(done, (d) => d.output))}</p>,
         }}
       />
     </section>,
@@ -524,7 +524,7 @@ describe("browser view", () => {
       // A plain counter: the projection is a pure function the stream runs,
       // and counting its runs is what this test observes.
       let reads = 0;
-      const counted = select(count.state, (n) => {
+      const counted = Source.select(count.state, (n) => {
         reads += 1;
         return String(n);
       });

@@ -11,8 +11,8 @@ import {
   Policies,
   Policy,
 } from "effect-frame/actor";
-import type { QueryEntry, Source } from "effect-frame/actor";
-import { Behavior, Value, select as selectSource, spawn } from "effect-frame/actor/client";
+import type { QueryEntry } from "effect-frame/actor";
+import { Behavior, Value, spawn, Source } from "effect-frame/actor/client";
 import { QueryTest } from "effect-frame/actor/testing";
 import {
   Await,
@@ -85,7 +85,7 @@ const hasAt = (root: Node, selector: string): boolean => {
  */
 const bound = <A, B>(source: Source<A>, project: (value: A) => B): Bound<B> => ({
   _tag: "Bound",
-  source: selectSource(source, project),
+  source: Source.select(source, project),
 });
 
 const staleClass = (stale: boolean): string => {
@@ -792,7 +792,7 @@ describe("readiness through context", () => {
               const revealed = yield* spawn(Behavior.value(false));
               yield* Deferred.succeed(reveal, Effect.asVoid(revealed.send(Value.Set(true))));
               const late = yield* View.list({
-                each: selectSource(revealed.state, (open): ReadonlyArray<string> =>
+                each: Source.select(revealed.state, (open): ReadonlyArray<string> =>
                   Option.match(Option.liftPredicate(open, Boolean), {
                     onNone: () => [],
                     onSome: () => ["late"],

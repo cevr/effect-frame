@@ -1,5 +1,5 @@
 import type { Applied, SnapshotOf } from "effect-frame/actor/client";
-import { Behavior, ref, select, spawn } from "effect-frame/actor/client";
+import { Behavior, ref, spawn, Source } from "effect-frame/actor/client";
 import { For, View } from "effect-frame/view";
 import type { Option } from "effect";
 import { Effect } from "effect";
@@ -36,7 +36,10 @@ export const NotesTerminal = (props: NotesTerminalProps) =>
       <box flexDirection="column" width={48}>
         <text>{View.bind(notes.state, (snapshot) => `notes: ${snapshot.notes.length}`)}</text>
         <box flexDirection="column">
-          <For each={select(notes.state, (snapshot) => snapshot.notes)} keyBy={(note) => note.id}>
+          <For
+            each={Source.select(notes.state, (snapshot) => snapshot.notes)}
+            keyBy={(note) => note.id}
+          >
             {(note) => <text>{View.bind(note, line)}</text>}
           </For>
         </box>

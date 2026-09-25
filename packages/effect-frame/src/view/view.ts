@@ -1,5 +1,5 @@
-import type { Form, Source } from "effect-frame/actor";
-import { select as selectSource } from "effect-frame/actor/client";
+import type { Form } from "effect-frame/actor";
+import { Source } from "effect-frame/actor/client";
 import type { Effect, Scope } from "effect";
 import { Option } from "effect";
 import type { HostEvent } from "./host.js";
@@ -94,11 +94,8 @@ export interface Bind {
 export const bind: Bind = <A, B>(source: Source<A>, project?: (value: A) => B): Bound<A | B> =>
   Option.match(Option.fromNullishOr(project), {
     onNone: (): Bound<A | B> => ({ _tag: "Bound", source }),
-    onSome: (f): Bound<A | B> => ({ _tag: "Bound", source: selectSource(source, f) }),
+    onSome: (f): Bound<A | B> => ({ _tag: "Bound", source: Source.select(source, f) }),
   });
-
-/** Project a source into another source. Both stay explicit inputs. */
-export const select = selectSource;
 
 /**
  * Run the handler's Effect when the host fires. The runtime forks it into

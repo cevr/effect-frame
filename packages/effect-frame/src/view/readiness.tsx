@@ -1,4 +1,4 @@
-import { Source, isFailed, isReady, select } from "effect-frame/actor/client";
+import { Source, isFailed, isReady } from "effect-frame/actor/client";
 import {
   Context as ServiceMap,
   Effect,
@@ -177,7 +177,7 @@ export const ready: <Value, Error>(
 ) => Effect.Effect<Source<Value>, never, LoadingScope | Scope.Scope> = Effect.fn("Readiness.ready")(
   function* <Value, Error>(state: Source<QueryState<Value, Error>>, fallback: Value) {
     const shared = yield* registerLoading(state);
-    return yield* holdSome(fallback, select(shared, valueOf));
+    return yield* holdSome(fallback, Source.select(shared, valueOf));
   },
 );
 
@@ -200,8 +200,8 @@ export const orErrored: <Value, Error>(
   const erroredScope = yield* ErroredScope;
   const read = readAhead(state, yield* ReadAhead);
   yield* erroredScope.register({
-    settled: select(read, isNotFailed),
-    failure: select(read, errorOf),
+    settled: Source.select(read, isNotFailed),
+    failure: Source.select(read, errorOf),
   });
   return read;
 });
@@ -223,7 +223,7 @@ const registerLoading = Effect.fn("Readiness.registerLoading")(function* <Value,
   const loadingScope = yield* LoadingScope;
   const read = readAhead(state, yield* ReadAhead);
   yield* loadingScope.register({
-    settled: select(read, hasSettled),
+    settled: Source.select(read, hasSettled),
     failure: noFailure,
   });
   return read;
@@ -243,7 +243,7 @@ export const readyWithStale: <Value, Error>(
   const shared = yield* registerLoading(state);
   return yield* holdSome<ReadyValue<Value>>(
     { value: fallback, stale: false },
-    select(shared, readyValueOf),
+    Source.select(shared, readyValueOf),
   );
 });
 
@@ -417,7 +417,7 @@ export const Loading = <E, R>(
     const pending = yield* pendingOf(registry);
     return retained(
       "Loading",
-      select(pending, (value) => !value),
+      Source.select(pending, (value) => !value),
       props.fallback,
       content,
       Option.some(registry.onPending),
@@ -459,10 +459,10 @@ export const Errored = <E, R>(
     // Failed registration contributes at once. Deferred producers register
     // through the retained runtime node and still drive this source later.
     const failure = yield* derive(registry, firstFailure);
-    const failed = select(failure, Option.isSome);
+    const failed = Source.select(failure, Option.isSome);
     return retained(
       "Errored",
-      select(failed, (value) => !value),
+      Source.select(failed, (value) => !value),
       props.fallback(failure),
       content,
       Option.none(),
@@ -497,10 +497,10 @@ export const Query = <Value, Error>(props: QueryProps<Value, Error>): Node => (
       Loading: () => props.loading,
       Ready: (found) =>
         props.ready(
-          select(found, (state) => state.value),
-          select(found, (state) => state.stale),
+          Source.select(found, (state) => state.value),
+          Source.select(found, (state) => state.stale),
         ),
-      Failed: (found) => props.failed(select(found, (state) => state.error)),
+      Failed: (found) => props.failed(Source.select(found, (state) => state.error)),
     }}
   />
 );
@@ -526,7 +526,7 @@ export const Await = <Value, Error>(
       failed={props.failed}
       ready={(value, stale) =>
         props.ready(
-          select(Source.all({ value, stale }), (both) => ({
+          Source.select(Source.all({ value, stale }), (both) => ({
             value: both.value,
             stale: both.stale,
           })),

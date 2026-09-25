@@ -1,5 +1,5 @@
 import type { RemoteActorRef } from "effect-frame/actor/client";
-import { Behavior, Source, Value, select, spawn } from "effect-frame/actor/client";
+import { Behavior, Source, Value, spawn } from "effect-frame/actor/client";
 import { Link, Router, link } from "effect-frame/router";
 import type { Route } from "effect-frame/router";
 import { For, View, orErrored, ready } from "effect-frame/view";
@@ -78,7 +78,7 @@ const ListBody = (props: BodyProps) =>
     const every = yield* link(list, { list: props.name }, {});
     const open = yield* link(list, { list: props.name }, { filter: "open" });
     const done = yield* link(list, { list: props.name }, { filter: "done" });
-    const all = select(notes.state, (snapshot) => snapshot.notes);
+    const all = Source.select(notes.state, (snapshot) => snapshot.notes);
 
     return (
       <section id="notes-page" data-list={props.name}>
@@ -139,7 +139,7 @@ export const ListView = (props: ListProps) =>
   Effect.gen(function* () {
     // A failed read goes to the nearest `Errored`, and only that read does.
     const counts = yield* ready(yield* orErrored(props.data.counts.state), { total: 0, done: 0 });
-    const filter = select(props.search, (search) => Option.fromNullishOr(search.filter));
+    const filter = Source.select(props.search, (search) => Option.fromNullishOr(search.filter));
     // The route publishes its params and its reference together, so the pair
     // read here always names one list.
     const opened = (notes: RemoteActorRef<typeof Notes>) =>

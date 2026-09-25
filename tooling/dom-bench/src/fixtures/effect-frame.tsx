@@ -1,7 +1,6 @@
 /* oxlint-disable effect/noGlobals, effect/noNullish, effect/noRuntimeTypeof, effect/noTernary -- this browser fixture is the benchmark boundary: it must use DOM globals, nullable DOM state, and the canonical imperative callback shape. */
 
-import { Behavior, Value, select, spawn } from "effect-frame/actor/client";
-import type { Source } from "effect-frame/actor/client";
+import { Behavior, Value, spawn, Source } from "effect-frame/actor/client";
 import { Dom, View, mount, render } from "effect-frame/view";
 import { Effect } from "effect";
 import {
@@ -84,7 +83,7 @@ const Benchmark = (props: BenchmarkProps) =>
               data-row-id={String(row.id)}
               data-bench-node={token}
               class={View.bind(
-                select(selected.state, (value) => (value === row.id ? "danger" : "")),
+                Source.select(selected.state, (value) => (value === row.id ? "danger" : "")),
               )}
             >
               <td class="col-md-1">{row.id}</td>

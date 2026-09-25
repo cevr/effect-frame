@@ -9,12 +9,12 @@ import {
   Policy,
   QueryCache,
   contract,
-  select,
   implementQuery,
   implementTransparent,
   queryCacheLayer,
   ref,
   useQuery,
+  Source,
 } from "effect-frame/actor";
 import type { TransportService } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
@@ -118,7 +118,7 @@ const LineupView = (params: { readonly room: string }) =>
     const lineup = yield* Effect.orDie(ref(Lineup, params.room));
     return (
       <ul id="lineup">
-        <For each={select(lineup.state, (items) => items)} keyBy={(item) => item}>
+        <For each={Source.select(lineup.state, (items) => items)} keyBy={(item) => item}>
           {(item) => <li>{View.bind(item, (value) => value)}</li>}
         </For>
       </ul>

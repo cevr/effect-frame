@@ -2,8 +2,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import type { Source } from "effect-frame/actor/client";
-import { select } from "effect-frame/actor/client";
+import { Source } from "effect-frame/actor/client";
 import { getOwner } from "@solidjs/signals";
 import { Route, renderDocument } from "effect-frame/router";
 import { Errored, Loading, View, orErrored, ready } from "effect-frame/view";
@@ -53,7 +52,9 @@ const tree = Route.prerender(
         Effect.gen(function* () {
           const value = yield* ready(yield* orErrored(props.data.post.state), { label: "" });
           const parts = yield* View.list({
-            each: select(value, (found) => found.label.split(",").filter((part) => part !== "")),
+            each: Source.select(value, (found) =>
+              found.label.split(",").filter((part) => part !== ""),
+            ),
             keyBy: (part: string) => part,
             // A setup with no suspension: it ends while the list builds the row.
             row: (part) => Effect.map(part.get, (text) => <li>{text}</li>),

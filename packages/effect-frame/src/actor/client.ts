@@ -90,18 +90,8 @@ export {
 } from "./transport.js";
 export * as HttpTransport from "./http/client.js";
 export * as Wire from "./http/wire.js";
-export {
-  Source,
-  all,
-  debounce,
-  mapEffect,
-  on,
-  select,
-  throttle,
-  zip,
-  type AllValues,
-  type ValueOf,
-} from "./source.js";
+// One path per combinator: `Source.select`, `Source.zip`, and the rest.
+export { Source, type AllValues, type ValueOf } from "./source.js";
 export * as Cell from "./cell.js";
 // Plain-form posts (#21) and generated fields (#32).
 export * as Form from "./form.js";

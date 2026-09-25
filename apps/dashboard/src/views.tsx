@@ -1,5 +1,4 @@
-import { Behavior, Form, Value, select, spawn } from "effect-frame/actor/client";
-import type { Source } from "effect-frame/actor/client";
+import { Behavior, Form, Value, spawn, Source } from "effect-frame/actor/client";
 import { Link, link } from "effect-frame/router";
 import type { NotFoundProps, Route } from "effect-frame/router";
 import { Errored, Loading, View, orErrored, readyWithStale } from "effect-frame/view";
@@ -94,7 +93,7 @@ export const DashShell = <ChildR,>(props: Route.LayoutPropsOf<typeof dash, Child
           plan: "",
           alerts: 0,
         });
-        const tenant = select(header, (shown) => shown.value);
+        const tenant = Source.select(header, (shown) => shown.value);
         const params = yield* props.params.get;
         const home = yield* link(overview, params, {});
         const book = yield* link(ordersIndex, params, {});

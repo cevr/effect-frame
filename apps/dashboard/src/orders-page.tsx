@@ -1,4 +1,4 @@
-import { select, zip } from "effect-frame/actor/client";
+import { Source } from "effect-frame/actor/client";
 import type { QueryState } from "effect-frame/actor/client";
 import type { Route } from "effect-frame/router";
 import { For, View, orErrored, ready } from "effect-frame/view";
@@ -41,7 +41,7 @@ export const OrdersLayout = <ChildR,>(props: Route.LayoutPropsOf<typeof orders, 
       <article id="orders-page">
         <h2 id="orders-of">{View.bind(props.data.tenant.state, nameOf)}</h2>
         <ul id="rows">
-          <For each={select(all, (result) => result.rows)} keyBy={(row) => row.id}>
+          <For each={Source.select(all, (result) => result.rows)} keyBy={(row) => row.id}>
             {(row) => (
               <li data-order={View.bind(row, (value) => value.id)}>
                 <span>{View.bind(row, (value) => `${value.id} ${value.status}`)}</span>
@@ -78,7 +78,7 @@ export const OrdersIndex = (props: Route.PropsOf<typeof ordersIndex>) =>
     const detail = yield* ready(yield* orErrored(props.data.detail.state), { rows: [] });
     return (
       <ul id="detail">
-        <For each={select(detail, (result) => result.rows)} keyBy={(row) => row.id}>
+        <For each={Source.select(detail, (result) => result.rows)} keyBy={(row) => row.id}>
           {(row) => <li>{View.bind(row, (value) => `${value.id} ${value.amount}`)}</li>}
         </For>
       </ul>
@@ -97,11 +97,13 @@ export const OrderView = (props: Route.PropsOf<typeof order>) =>
       alerts: 0,
     });
     const all = yield* ready(yield* orErrored(props.data.orders.state), { rows: [] });
-    const status = zip(props.params, all, (now, result) => statusOf(now.order, result.rows));
+    const status = Source.zip(props.params, all, (now, result) => statusOf(now.order, result.rows));
     return (
       <section id="order">
         <h3 id="order-of">
-          {View.bind(zip(info, props.params, (value, now) => `${value.name} / ${now.order}`))}
+          {View.bind(
+            Source.zip(info, props.params, (value, now) => `${value.name} / ${now.order}`),
+          )}
         </h3>
         <p id="order-status">{View.bind(status)}</p>
       </section>

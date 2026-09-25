@@ -1,7 +1,6 @@
-import type { Source } from "effect-frame/actor";
 import type { ErroredScope, Host, LoadingScope, MatchNode, QueryState } from "effect-frame/view";
 import { For, Loading, Match, View, mount, orErrored, ready } from "effect-frame/view";
-import { select } from "effect-frame/actor";
+import { Source } from "effect-frame/actor";
 import type { Scope } from "effect";
 import { Context, Effect, Schema } from "effect";
 import { describe, expect, test } from "bun:test";
@@ -175,7 +174,7 @@ const complete = () =>
     on: light,
     cases: {
       Red: () => <p>stop</p>,
-      Green: (green) => <p>{View.bind(select(green, (g) => String(g.seconds)))}</p>,
+      Green: (green) => <p>{View.bind(Source.select(green, (g) => String(g.seconds)))}</p>,
     },
   });
 
@@ -213,8 +212,8 @@ declare const rows: Source<{ readonly items: ReadonlyArray<Row> }>;
  * its item type: `keyBy` and the row read `Row` with no annotation.
  */
 const inlineSelect = () => (
-  <For each={select(rows, (state) => state.items)} keyBy={(row) => row.id}>
-    {(row) => <li>{View.bind(select(row, (one) => one.label))}</li>}
+  <For each={Source.select(rows, (state) => state.items)} keyBy={(row) => row.id}>
+    {(row) => <li>{View.bind(Source.select(row, (one) => one.label))}</li>}
   </For>
 );
 void inlineSelect;

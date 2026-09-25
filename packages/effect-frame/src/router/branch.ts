@@ -30,9 +30,8 @@ import {
   ref,
 } from "effect-frame/actor/client";
 import type { Node, Remote } from "effect-frame/view";
-import { LoadingScope, View, ready } from "effect-frame/view";
+import { View } from "effect-frame/view";
 import {
-  Cause,
   Clock,
   Context,
   Deferred,
@@ -1737,33 +1736,6 @@ const constant = <A>(value: A): Source<A> => ({
   changes: Stream.make(value),
 });
 
-/**
- * A failed segment has settled: nothing it would read will ever register.
- * So it registers one settled read with the nearest `Loading`, if any, for
- * as long as its errored node lives; otherwise that Loading would keep its
- * fallback over the failure forever (a Loading with no registration is
- * pending by the readiness rule).
- */
-const presentFailure = (node: Node): Effect.Effect<Node, never, Scope.Scope> =>
-  Effect.as(settleLoading, node);
-
-/**
- * Register one settled read with the nearest `Loading`, if any, for as long
- * as the caller's Scope lives. It never makes the Loading wait: it says only
- * that this region has nothing for it to wait on.
- */
-const settleLoading: Effect.Effect<void, never, Scope.Scope> = Effect.flatMap(
-  Effect.serviceOption(LoadingScope),
-  (loading) =>
-    Option.match(loading, {
-      onNone: () => Effect.void,
-      onSome: (scope) =>
-        Effect.asVoid(
-          Effect.provideService(ready(constant(Ready(true, false)), false), LoadingScope, scope),
-        ),
-    }),
-);
-
 /** What a pending presentation draws: nothing yet, the fallback, or the view. */
 interface Shown {
   readonly key: "fallback" | "view";
@@ -1796,20 +1768,6 @@ const sleepUntil = (deadline: number): Effect.Effect<void> =>
   });
 
 /**
- * A setup defect leaves nothing that will ever register with the nearest
- * `Loading`, so the region settles it for as long as the view Scope lives.
- * Otherwise that Loading would show its fallback forever. The defect itself
- * still propagates. Interruption and typed failures are not defects.
- */
-const settleOnDefect = <A, E, R>(work: Effect.Effect<A, E, R>) =>
-  Effect.onError(work, (cause) => {
-    if (Cause.hasDies(cause) && !Cause.hasInterrupts(cause)) {
-      return settleLoading;
-    }
-    return Effect.void;
-  });
-
-/**
  * Present one instance's preparation. With no `pending` the setup runs in
  * place, as before. With one, the setup runs on a fiber owned by the view
  * Scope and this returns at once:
@@ -1826,9 +1784,9 @@ const settleOnDefect = <A, E, R>(work: Effect.Effect<A, E, R>) =>
  * - Closing the view Scope interrupts both fibers: nothing waits for
  *   `atLeast`, and nothing late is drawn.
  *
- * While it prepares, the region settles the nearest `Loading`, so that
- * Loading presents this fallback rather than its own, unless a read the
- * setup made before it suspended is still unsettled.
+ * While it prepares, the region registers nothing with the nearest
+ * `Loading`, so that Loading presents this fallback rather than its own,
+ * unless a read the setup made before it suspended is still unsettled.
  */
 const presentWith = <R>(
   pending: Option.Option<Timed>,
@@ -1844,22 +1802,17 @@ const presentWith = <R>(
       Effect.gen(function* () {
         const owner = yield* Effect.scope;
         const shown = yield* SubscriptionRef.make<ReadonlyArray<Shown>>([]);
-        const preparing = yield* Scope.fork(owner);
-        yield* Scope.provide(settleLoading, preparing);
         const fiber = yield* Effect.forkIn(work, owner);
         const finish = (exit: Exit.Exit<Node>) =>
-          Effect.andThen(
-            Scope.close(preparing, Exit.void),
-            Exit.match(exit, {
-              onSuccess: (node) =>
-                Effect.andThen(
-                  SubscriptionRef.set(shown, [{ key: "view", node }]),
-                  Deferred.succeed(drawn, !failed()),
-                ),
-              onFailure: (cause) =>
-                Effect.andThen(SubscriptionRef.set(shown, []), Effect.failCause(cause)),
-            }),
-          );
+          Exit.match(exit, {
+            onSuccess: (node) =>
+              Effect.andThen(
+                SubscriptionRef.set(shown, [{ key: "view", node }]),
+                Deferred.succeed(drawn, !failed()),
+              ),
+            onFailure: (cause) =>
+              Effect.andThen(SubscriptionRef.set(shown, []), Effect.failCause(cause)),
+          });
         // Read here, in setup, so the deadline does not wait for the fiber.
         const begin = Math.max(startedAt, yield* Clock.currentTimeMillis);
         const showAt = begin + Duration.toMillis(options.after);
@@ -1910,10 +1863,7 @@ const failedEntering = <R>(
       key: tree.nextKey(name),
       branch: identity,
       setup: Scope.provide(
-        attempt(
-          Effect.suspend(() => presentFailure(node())),
-          (error: never): Effect.Effect<Node> => Function.absurd(error),
-        ),
+        attempt(Effect.sync(node), (error: never): Effect.Effect<Node> => Function.absurd(error)),
         scope,
       ),
       presents: false,
@@ -2052,10 +2002,8 @@ const makeBranch = <
               );
             }),
           ),
-          Effect.suspend(() =>
-            presentFailure(
-              boundary.setupShell(errored(constant<RouteFailure<E>>({ _tag: "Setup", error }))),
-            ),
+          Effect.sync(() =>
+            boundary.setupShell(errored(constant<RouteFailure<E>>({ _tag: "Setup", error }))),
           ),
         ),
     });
@@ -2270,23 +2218,21 @@ const makeBranch = <
       setup: Scope.provide(
         presentWith(
           Option.filter(boundary.pending, () => presentable),
-          settleOnDefect(
-            attempt(
-              Effect.suspend(() =>
-                withTicket(
-                  ticket,
-                  Effect.map(
-                    Effect.provideService(
-                      view(props, slotSetup(internals)),
-                      MountedRoute,
-                      mountedRoute,
-                    ),
-                    drawn,
+          attempt(
+            Effect.suspend(() =>
+              withTicket(
+                ticket,
+                Effect.map(
+                  Effect.provideService(
+                    view(props, slotSetup(internals)),
+                    MountedRoute,
+                    mountedRoute,
                   ),
+                  drawn,
                 ),
               ),
-              (error: E) => setupFailed(tree, internals, error),
             ),
+            (error: E) => setupFailed(tree, internals, error),
           ),
           startedAt,
           () => internals.failed,

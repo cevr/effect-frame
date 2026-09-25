@@ -316,18 +316,16 @@ const firstFailure = (contributions: ReadonlyArray<Contribution>): Option.Option
 // ---------------------------------------------------------------------------
 
 /**
- * `true` while any registration is unsettled, and `true` as well when there
- * is no registration yet.
+ * `true` while any registration is unsettled. A scope with no registration
+ * has nothing to wait for, so it shows its content.
  *
- * The empty case is what makes this work under setup-once semantics. A view's
- * setup runs once, and a child's `ready` registers during that run, so the
- * scope cannot know when registration is "complete". It never asks. It starts
- * pending, and it leaves pending only once it holds at least one settled
- * registration and no unsettled one. A query that registers later simply
- * flips it back.
+ * A view's setup runs once, and a child's `ready` registers during that run,
+ * so the scope never asks whether registration is "complete". A query that
+ * registers later, unsettled, flips it back to pending: the retained node
+ * hears that registration before the registering view writes (`onPending`).
  */
 const pendingOf = (registry: Registry): Effect.Effect<Source<boolean>> =>
-  derive(registry, (all) => all.length === 0 || all.some((one) => !one.settled));
+  derive(registry, (all) => all.some((one) => !one.settled));
 
 /**
  * Derive one source from every registration under a scope.

@@ -157,22 +157,22 @@ Each mutation was applied to the source and the proof file was run. The
 original was restored after each run. The runs were scripted in the session
 scratchpad; this table is the record.
 
-| Mutation                                                          | Killed by         | First failure                                                                 |
-| ----------------------------------------------------------------- | ----------------- | ----------------------------------------------------------------------------- |
-| M1: push the requested URL, then the redirect                     | 2, 3              | history received an extra `push /app/t2/posts/9`                              |
-| M2: ask the child even after a parent redirect                    | 2, 2b, 3, 4       | questions received `post:/app/t2/posts/9:push`                                |
-| M3: skip checks when the route is already mounted (stayed layout) | 1, 2, 3, 4, 8     | questions missed `tenant:/app/t1/posts/2:push`                                |
-| M4: no repeated-destination detection                             | 4                 | `RedirectCycle` was `limit`, not `repeated`                                   |
-| M5: a setup failure keeps its descendants and own interests       | 5, 5b             | the `bad` post query record was still present                                 |
-| M6: recover in the view Scope, without the owned attempt          | 5                 | order lacked `setup-closed` before `errored-built`                            |
-| M7: errored registers nothing with the enclosing Loading          | 5                 | `ConditionNotObserved`: "the post's errored node"                             |
-| M8: an own declaration failure ignores `errored`                  | 6                 | the navigation died with `ActorStopped`                                       |
-| M9: a failed instance is stayed, not entered again                | 5, 6              | "post t1/1 content" not observed; "segment post did not create this instance" |
-| M10: the router ignores an update that cannot stay                | 5b                | "the t1 layout" not observed                                                  |
-| M11: a request ended by close reports `Unchanged`                 | 8                 | the receipt was not interrupted                                               |
-| M12: fragment-only moves are checked                              | 1                 | 8 questions, expected 6                                                       |
-| M13: every check sees kind `push`                                 | 1, 2b             | `kind: "push"` where `initial` was expected                                   |
-| M14: start the target's setup before its checks                   | 1, 2, 3, 5, 5b, 6 | an extra layout setup `t1`; `tenant:t2` was called                            |
+| Mutation                                                          | Killed by         | First failure                                                                                                                |
+| ----------------------------------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| M1: push the requested URL, then the redirect                     | 2, 3              | history received an extra `push /app/t2/posts/9`                                                                             |
+| M2: ask the child even after a parent redirect                    | 2, 2b, 3, 4       | questions received `post:/app/t2/posts/9:push`                                                                               |
+| M3: skip checks when the route is already mounted (stayed layout) | 1, 2, 3, 4, 8     | questions missed `tenant:/app/t1/posts/2:push`                                                                               |
+| M4: no repeated-destination detection                             | 4                 | `RedirectCycle` was `limit`, not `repeated`                                                                                  |
+| M5: a setup failure keeps its descendants and own interests       | 5, 5b             | the `bad` post query record was still present                                                                                |
+| M6: recover in the view Scope, without the owned attempt          | 5                 | order lacked `setup-closed` before `errored-built`                                                                           |
+| M7: errored registers nothing with the enclosing Loading          | —                 | no longer a mutant: a `Loading` with no registration shows its content, so the router registers nothing for a failed segment |
+| M8: an own declaration failure ignores `errored`                  | 6                 | the navigation died with `ActorStopped`                                                                                      |
+| M9: a failed instance is stayed, not entered again                | 5, 6              | "post t1/1 content" not observed; "segment post did not create this instance"                                                |
+| M10: the router ignores an update that cannot stay                | 5b                | "the t1 layout" not observed                                                                                                 |
+| M11: a request ended by close reports `Unchanged`                 | 8                 | the receipt was not interrupted                                                                                              |
+| M12: fragment-only moves are checked                              | 1                 | 8 questions, expected 6                                                                                                      |
+| M13: every check sees kind `push`                                 | 1, 2b             | `kind: "push"` where `initial` was expected                                                                                  |
+| M14: start the target's setup before its checks                   | 1, 2, 3, 5, 5b, 6 | an extra layout setup `t1`; `tenant:t2` was called                                                                           |
 
 ## Limits
 

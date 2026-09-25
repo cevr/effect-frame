@@ -232,9 +232,14 @@ describe("readiness ownership", () => {
           () => rowPage(items.state, setups, closed, rowSetupStarted),
           root,
         );
-        expect(root.querySelector("#fallback")?.textContent).toBe("loading");
+        // The row sets up after mount; its unsettled read puts the boundary
+        // in fallback before the row writes.
         yield* Deferred.await(rowSetupStarted);
         yield* Deferred.await(queryStarted);
+        yield* page.waitFor({
+          label: "the row's pending read shows the fallback",
+          until: (actualRoot) => textAt(actualRoot, "#fallback") === "loading",
+        });
         expect(root.querySelector("#row-a")).toBeNull();
 
         yield* setResponse(fixtures, "a", readyResponse("alpha"));
@@ -352,8 +357,10 @@ describe("readiness ownership", () => {
         });
       const lifetime = yield* Scope.make();
       yield* mount(Page, {}, Dom.host, root).pipe(Scope.provide(lifetime));
-      expect(root.querySelector("#fallback")?.textContent).toBe("loading");
       yield* Deferred.await(started);
+      // Nothing registered: the boundary shows its content, and the row is not drawn yet.
+      expect(root.querySelector("#fallback")).toBeNull();
+      expect(root.querySelector("#never")).toBeNull();
       yield* Scope.close(lifetime, Exit.void);
       expect(root.childNodes.length).toBe(0);
       expect(yield* Ref.get(closed)).toBe(1);
@@ -485,7 +492,7 @@ describe("readiness ownership", () => {
       }),
   );
 
-  it.scoped("starts an already-Ready list producer while HTML withholds its first frame", () =>
+  it.scoped("starts an already-Ready list producer and draws it in the first HTML frame", () =>
     Effect.gen(function* () {
       let setups = 0;
       const items: Source<ReadonlyArray<string>> = {
@@ -516,7 +523,7 @@ describe("readiness ownership", () => {
       const html = yield* Html.renderToString(Page, {});
       // The marks name the boundary and the branch it drew, for hydration (#22).
       expect(html).toBe(
-        '<!--frame-boundary:fallback--><p id="fallback">loading</p><!--/frame-boundary-->',
+        '<!--frame-boundary:content--><ul><li id="html-row">ready</li></ul><!--/frame-boundary-->',
       );
       expect(setups).toBe(1);
     }),

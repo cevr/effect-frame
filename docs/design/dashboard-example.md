@@ -92,14 +92,14 @@ Notes on the survivors:
 - **`refreshFor` without its early return** is an equivalent mutant.
   `query.batch([])` answers `[]`, so the reply and the handler counts do
   not change. The early return saves a call, and nothing more.
-- **`pendingOf` with an empty registry settled** is not equivalent in
+- **`pendingOf` with an empty registry pending** is not equivalent in
   general. It survives here because the shell always registers `TenantInfo`
   during its own setup, so the Dashboard's scope is never empty. The
-  package kills it: `tests/view/owned-attempt.test.tsx` "adds no readiness
-  registration: an empty Loading keeps its fallback", and
+  package kills it: `tests/view/readiness.test.tsx` "a Loading with no
+  registration shows its content", `tests/view/owned-attempt.test.tsx`
+  "adds no readiness registration: an empty Loading shows its content", and
   `tests/router/nested-transition.test.tsx` "4. closes one child, then the
-  root, with records removed in order" (its empty outlet keeps the
-  fallback).
+  root, with records removed in order" (its empty outlet shows the layout).
 - **Releasing interests without closing the exited view** is not
   equivalent. It breaks a different lifetime invariant: the exited view's
   Scope, not the keys in `active`. The Dashboard tests check keys, so it

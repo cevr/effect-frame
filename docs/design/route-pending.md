@@ -8,7 +8,7 @@ and stay private. Streaming records (#22) are not part
 of this slice.
 
 Source: `packages/effect-frame/src/router/branch.ts` (`Pending`,
-`Presentation`, `presentWith`, `settleLoading`, `settleOnDefect`, the ticket and timer in
+`Presentation`, `presentWith`, the ticket and timer in
 `enterWith`, and `Tree.present`) and `packages/effect-frame/src/view/lazy.ts`.
 Proofs: `packages/effect-frame/tests/router/route-pending.test.tsx`.
 

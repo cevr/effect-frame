@@ -963,7 +963,7 @@ describe("private nested transition", () => {
         yield* page.act(router.navigate("/app/t1"), {
           label: "the layout alone",
           until: (actual) =>
-            !hasAt(actual, "#post") && hasAt(actual, "#layout") && hasAt(actual, "#child-loading"),
+            !hasAt(actual, "#post") && hasAt(actual, "#layout") && !hasAt(actual, "#child-loading"),
         });
         const childClosed = yield* Frame.inspect;
         expect(root.querySelector("#layout")).toBe(layoutElement);
@@ -976,8 +976,8 @@ describe("private nested transition", () => {
         expect(yield* subscriptionsOf("t1", "1")).toBe(0);
         expect(childClosed.mounts).toHaveLength(1);
         expect(childClosed.routes).toHaveLength(1);
-        // An empty outlet leaves no registration: the accepted rule shows the fallback.
-        expect(hasAt(root, "#child-loading")).toBe(true);
+        // An empty outlet leaves no registration, so the layout's Loading shows its content.
+        expect(hasAt(root, "#child-loading")).toBe(false);
 
         yield* page.close;
         // The layout view closed before the root released its tenant interest.

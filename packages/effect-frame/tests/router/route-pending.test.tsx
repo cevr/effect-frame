@@ -1187,9 +1187,11 @@ describe("private route pending and lazy views", () => {
           "/app/t1",
         );
         yield* receipts.navigate("/app/t1/posts/slow-boom");
+        // The waiting setup has registered no read, so the layout's Loading
+        // has nothing to wait for: it shows the outlet, not its fallback.
         yield* page.waitFor({
-          label: "the layout's Loading fallback while the setup waits",
-          until: (actual) => hasAt(actual, "#child-loading"),
+          label: "the layout's outlet while the setup waits",
+          until: (actual) => hasAt(actual, "#outlet") && !hasAt(actual, "#child-loading"),
         });
         yield* Deferred.succeed(probes.slow, void 0);
         yield* page.waitFor({

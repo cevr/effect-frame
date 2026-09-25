@@ -1138,16 +1138,16 @@ describe("private owned attempt", () => {
           }
 
           // A typed child failure runs its fallback inside the outlet row.
-          // No registration remains under the layout Loading, so the
-          // accepted empty-registration rule keeps the Loading fallback up.
+          // No registration remains under the layout Loading, so it has
+          // nothing to wait for and shows the failure.
           yield* transition.go({ id: "c", tenant: "t1", post: "missing", revision: 13 });
           yield* Deferred.await(childFailed);
           yield* page.waitFor({
-            label: "failed child fallback stays behind an empty Loading",
+            label: "failed child fallback shows under an empty Loading",
             until: (actual) =>
-              hasAt(actual, "#child-loading") &&
+              !hasAt(actual, "#child-loading") &&
               !hasAt(actual, "#child-b") &&
-              !hasAt(actual, "#child-failed"),
+              hasAt(actual, "#child-failed"),
           });
           expect(root.querySelector("#layout")).toBe(layoutElement);
           expect(yield* Ref.get(layoutSetups)).toBe(1);
@@ -1340,7 +1340,7 @@ describe("private owned attempt", () => {
       }),
     );
 
-    it.scoped("adds no readiness registration: an empty Loading keeps its fallback", () =>
+    it.scoped("adds no readiness registration: an empty Loading shows its content", () =>
       Effect.gen(function* () {
         const root = yield* makeRoot;
         const settled: Source<{
@@ -1362,8 +1362,8 @@ describe("private owned attempt", () => {
         const Empty = () => Loading({ fallback: <p id="fallback">loading</p>, children: owned });
         const page = yield* mountPage(Empty, root);
         yield* render;
-        expect(hasAt(root, "#fallback")).toBe(true);
-        expect(hasAt(root, "#content")).toBe(false);
+        expect(hasAt(root, "#fallback")).toBe(false);
+        expect(hasAt(root, "#content")).toBe(true);
         expect(yield* Ref.get(setups)).toBe(1);
         yield* page.close;
 

@@ -972,6 +972,26 @@ describe("readiness through context", () => {
 // SSR tests use prebuilt source states because there is no live client cache
 // in a string render. The live query boundary is covered above.
 describe("readiness on the server", () => {
+  it.scoped("a Loading with no registration shows its content", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const Page = (_props: Record<string, never>) =>
+        Loading({
+          fallback: <p id="pending">loading</p>,
+          children: Effect.succeed(<p id="static">nothing to wait for</p>),
+        });
+
+      const page = yield* mountScoped(Page, root);
+      yield* page.waitFor({
+        label: "the content, with nothing registered",
+        until: (actual) => hasAt(actual, "#static") && !hasAt(actual, "#pending"),
+      });
+      const html = yield* Html.renderToString(Page, {});
+      expect(html).toContain('<p id="static">nothing to wait for</p>');
+      expect(html).not.toContain('id="pending"');
+    }),
+  );
+
   it.scoped("a server render draws the fallback for a query with no value yet", () =>
     Effect.gen(function* () {
       const controlled = yield* QueryState.fakeQuery<string, string>();

@@ -304,8 +304,7 @@ ends, outside any boundary" holds this.
 The render wakes after each branch switch, each removal in its tree, each
 setup that ends, and each wait for the declared entries. An `Errored` fallback is a final
 drawing and does not hold the render. A `Loading` boundary that registers
-no query shows its fallback for ever, so such a page waits for the time
-limit. The document holds no `#frame-records`. The
+no query shows its content, so it holds nothing. The document holds no `#frame-records`. The
 settled values go in one `<script type="application/json"
 id="frame-query-seed">`, a JSON array of `Patch`. `Dom.readRecords` returns
 the seed as `present`, so the client entry is the same for both modes.

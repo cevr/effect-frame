@@ -123,8 +123,9 @@ that the router's close ends is interrupted; it never reports a result.
    enters it again. A failed root makes `update` answer false; the router then
    enters the whole tree again before it closes the old one (a new internal
    use of the existing `update` boolean, which the router now honors).
-5. A failed segment has settled. Its errored node registers one settled read
-   with the nearest `Loading`, so the Loading presents it instead of its
+5. A failed segment has settled. Its errored node registers nothing with
+   the nearest `Loading`, and a `Loading` with no registration shows its
+   content, so the Loading presents the errored node instead of its
    fallback.
 6. Query failures after setup, event failures, and child fibers are not route
    failures. `View.event` handlers cannot carry a typed `E` (type fixture).

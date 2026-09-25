@@ -133,9 +133,9 @@ The two framework fixes this ticket made carry their own mutations:
 7. **`returnTo` is the page's pathname.** The compose form reads it from the
    router's current location, so a plain post from `/lists/errands` or
    `/lists/errands/print` returns to that page.
-8. **`/scratch` uses `BareShell`.** A `Loading` with nothing registered
-   waits for ever (#16). The scratch page reads nothing, so its shell has no
-   `Loading`.
+8. **`/scratch` uses `BareShell`.** The scratch page reads nothing, so its
+   shell has no `Loading`. (A `Loading` with nothing registered shows its
+   content, so `Shell` would draw it too.)
 9. **The client marks the document hydrated.** `client.tsx` sets
    `data-hydrated="true"` on `<html>` when hydration finishes. The browser
    tests wait on it.

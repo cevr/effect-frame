@@ -571,8 +571,8 @@ export const streamPrepared = <E, R>(
  * still move in the final pass: then it fails with `RecordsUnsettled` and
  * writes nothing. A query still open
  * has no seed, its boundary shows the fallback, and the client reads it. A
- * `Loading` boundary that registers no query shows its fallback for ever,
- * so such a page always waits for the limit.
+ * `View.loading` boundary that registers no query shows its content, so it
+ * holds nothing.
  */
 export const renderAwaitAll = <Props, E, R>(
   view: View<Props, E, R> & ScopesClosed<R>,

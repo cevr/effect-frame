@@ -64,8 +64,8 @@ export const Shell = <ChildR,>(props: Route.LayoutPropsOf<typeof shell, ChildR>)
   );
 
 /**
- * The shell of a page that reads nothing. A `Loading` that nothing
- * registers with waits for ever (#16), so this one has none.
+ * The shell of a page that reads nothing. It has nothing to wait for, so it
+ * draws its outlet with no `View.loading` around it.
  */
 export const BareShell = <ChildR,>(props: Route.LayoutPropsOf<typeof shell, ChildR>) =>
   Effect.flatMap(props.outlet, chrome);

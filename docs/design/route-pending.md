@@ -73,22 +73,20 @@ const tree = Branch.layout(tenant, [
 6. A typed setup failure, `LazyImportFailed` included, draws `errored` at
    once. The minimum never holds a failed owner. A defect removes the
    fallback at once and fails the presenting fiber.
-   A setup defect, with or without `pending`, also registers one settled
-   read with the nearest `Loading` before it propagates. Without it, that
-   `Loading` would show its own fallback forever, as it did before this
-   slice. Interruption and typed failures do not take this path.
+   A setup defect registers nothing with the nearest `Loading`: a
+   `Loading` with no registration shows its content, so it never holds a
+   defect's region.
 7. Route exit, a redirect away, and root close close the view Scope. That
    interrupts the setup fiber and the timer fiber. Nothing waits for
    `atLeast`, and nothing is drawn late. The owned attempt also refuses a
    result that completes after its owner closed.
 8. A stayed segment never presents pending. Its successful setup and local
    state stay. A param move of a stayed post is not a new preparation.
-9. While the instance prepares, its region registers one settled read with
-   the nearest `Loading`, like a failed segment's `errored` node does. So a
-   layout that yields its outlet inside `Loading` presents the route's
-   fallback, not its own, when the setup makes no read before it suspends.
-   The registration ends when the view's node is drawn; the view's own
-   reads then decide that `Loading`. This is not a full guarantee: the
+9. While the instance prepares, its region registers nothing with the
+   nearest `Loading`. So a layout that yields its outlet inside `Loading`
+   presents the route's fallback, not its own, when the setup makes no read
+   before it suspends. Once the view's node is drawn, the view's own reads
+   decide that `Loading`. This is not a full guarantee: the
    setup's reads register with that same `Loading` while it prepares. A
    read that is not ready, made before a later suspension, keeps that
    `Loading` pending, so its fallback covers the route's fallback until the

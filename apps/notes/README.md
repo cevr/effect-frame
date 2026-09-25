@@ -27,33 +27,33 @@ Type a note in either client and press Enter. Both update. Tick a box in the bro
 
 ## What each file does
 
-| File                       | Role                                                                                                                            |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `src/contract.ts`          | The contract. Browser safe: it imports only `effect` and the actor client entry.                                                |
-| `src/queries.ts`           | `ListIndex` and `ListCounts` (both depend on `Notes`), and `ListNotes`, the notes a list page resumes from.                     |
-| `src/behavior.ts`          | The reducer. The server hosts it, and the list page's reference predicts an add with it.                                        |
-| `src/segments.ts`          | The route segments: paths, the `list` and `filter` codecs, and the data each page declares.                                     |
-| `src/routes.tsx`           | The route tree. Each page names its rendering mode here, and only here.                                                         |
-| `src/page.tsx`             | The list page. The same view for `/lists/:list` and `/lists/:list/print`.                                                       |
-| `src/views.tsx`            | The shell, the index, the scratch page, and the fallbacks.                                                                      |
-| `src/notes.server.ts`      | The host, and the two transports the server can run over. A server module: `bun run boundary` fails if `client.tsx` reaches it. |
-| `src/queries.server.ts`    | The query handlers. A server module.                                                                                            |
-| `src/policies.server.ts`   | The policy table: `public` for the queries, `notes` for the actor (a send to `archive` is refused). A server module.            |
-| `src/commands.ts`          | Command ids and the send helpers both views share.                                                                              |
-| `src/terminal-view.tsx`    | The terminal view. Same setup, different tags.                                                                                  |
-| `src/server.ts`            | The platform boundary: `Bun.serve`, `Bun.build`, and the environment.                                                           |
-| `src/client.tsx`           | The browser entry: `hydrate` the routes, then follow links.                                                                     |
-| `src/terminal.tsx`         | The terminal entry.                                                                                                             |
-| `tests/e2e.test.tsx`       | A real server on a free port, a real socket, both clients.                                                                      |
-| `tests/modes.test.tsx`     | One list view under SSR, streaming, `AwaitAll` and client-only, each hydrated clean.                                            |
-| `tests/routes.test.tsx`    | Every route prints what it parses; a filter change is a stayed transition; bad templates are refused.                           |
-| `tests/streaming.test.tsx` | The shell before a held query, `resolvedAhead`, no records on `AwaitAll`, and a cut stream.                                     |
-| `tests/query.test.tsx`     | One add refreshes both dependent queries, or none; an exited page releases its keys.                                            |
-| `tests/readiness.test.tsx` | One fallback in each nesting order; a refetch keeps the counts on screen.                                                       |
-| `tests/command.test.tsx`   | `Sent` before the reply, the predicted row, the rollback, and stale counts over HTTP.                                           |
-| `tests/navigation.test.ts` | Scroll and focus in real WebKit and Chrome.                                                                                     |
-| `tests/boundary.test.ts`   | An injected server import is the one refusal, named with its import chain; `bun run boundary` checks the entry.                 |
-| `tests/plain-form.test.ts` | The compose form with no script: a real post, a 303, and a double post that adds one note.                                      |
+| File                       | Role                                                                                                                             |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `src/contract.ts`          | The contract. Browser safe: it imports only `effect` and the actor client entry.                                                 |
+| `src/queries.ts`           | `ListIndex` and `ListCounts`, both depending on `Notes`. A list's notes are no query: the list route declares the `Notes` actor. |
+| `src/behavior.ts`          | The reducer. The server hosts it, and the list page's reference predicts an add with it.                                         |
+| `src/segments.ts`          | The route segments: paths, the `list` and `filter` codecs, and the data each page declares.                                      |
+| `src/routes.tsx`           | The route tree. Each page names its rendering mode here, and only here.                                                          |
+| `src/page.tsx`             | The list page. The same view for `/lists/:list` and `/lists/:list/print`.                                                        |
+| `src/views.tsx`            | The shell, the index, the scratch page, and the fallbacks.                                                                       |
+| `src/notes.server.ts`      | The host, and the two transports the server can run over. A server module: `bun run boundary` fails if `client.tsx` reaches it.  |
+| `src/queries.server.ts`    | The query handlers. A server module.                                                                                             |
+| `src/policies.server.ts`   | The policy table: `public` for the queries, `notes` for the actor (a send to `archive` is refused). A server module.             |
+| `src/commands.ts`          | Command ids and the send helpers both views share.                                                                               |
+| `src/terminal-view.tsx`    | The terminal view. Same setup, different tags.                                                                                   |
+| `src/server.ts`            | The platform boundary: `Bun.serve`, `Bun.build`, and the environment.                                                            |
+| `src/client.tsx`           | The browser entry: `hydrate` the routes, then follow links.                                                                      |
+| `src/terminal.tsx`         | The terminal entry.                                                                                                              |
+| `tests/e2e.test.tsx`       | A real server on a free port, a real socket, both clients.                                                                       |
+| `tests/modes.test.tsx`     | One list view under SSR, streaming, `AwaitAll` and client-only, each hydrated clean.                                             |
+| `tests/routes.test.tsx`    | Every route prints what it parses; a filter change is a stayed transition; bad templates are refused.                            |
+| `tests/streaming.test.tsx` | The shell before a held query, `resolvedAhead`, no records on `AwaitAll`, and a cut stream.                                      |
+| `tests/query.test.tsx`     | One add refreshes both dependent queries, or none; an exited page releases its keys.                                             |
+| `tests/readiness.test.tsx` | One fallback in each nesting order; a refetch keeps the counts on screen.                                                        |
+| `tests/command.test.tsx`   | `Sent` before the reply, the predicted row, the rollback, and stale counts over HTTP.                                            |
+| `tests/navigation.test.ts` | Scroll and focus in real WebKit and Chrome.                                                                                      |
+| `tests/boundary.test.ts`   | An injected server import is the one refusal, named with its import chain; `bun run boundary` checks the entry.                  |
+| `tests/plain-form.test.ts` | The compose form with no script: a real post, a 303, and a double post that adds one note.                                       |
 
 ## Routes
 

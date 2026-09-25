@@ -14,6 +14,12 @@ import { Option, Predicate } from "effect";
  * - `frame/span-name`: an `Effect.fn` span is named `Area.operation`
  *   (`Notes.renderPage`, `Actor.durable.process`), so a trace reads as one
  *   vocabulary.
+ * - `frame/no-module-state`: a module holds no mutable state: no top-level
+ *   `let`, and no top-level `new Map`, `Set`, `WeakMap`, or `WeakSet`
+ *   unless an array literal fills it (a constant lookup table). State kept
+ *   beside a value, keyed by it, is found by no reader of the value: carry
+ *   it on the value, or in an actor or a Scope. `.oxlintrc.json` turns it on
+ *   for `packages/*\/src`.
  */
 
 /** The part of a node the rules read. */
@@ -38,6 +44,24 @@ interface CallExpression extends LintNode {
     readonly property?: LintNode & { readonly name?: string };
   };
   readonly arguments: ReadonlyArray<LintNode & { readonly value?: unknown }>;
+}
+
+interface Declarator extends LintNode {
+  readonly init?: LintNode & {
+    readonly callee?: LintNode & { readonly name?: string };
+    readonly arguments?: ReadonlyArray<LintNode>;
+  };
+}
+
+interface Declaration extends LintNode {
+  readonly kind?: string;
+  readonly declarations?: ReadonlyArray<Declarator>;
+  /** The declaration an `export` statement wraps. */
+  readonly declaration?: Declaration;
+}
+
+interface Program extends LintNode {
+  readonly body: ReadonlyArray<Declaration>;
 }
 
 type Report =
@@ -118,12 +142,80 @@ const spanNameRule: Rule = {
   }),
 };
 
+/** The collections whose top-level instance is mutable state. */
+const collections: ReadonlySet<string> = new Set(["Map", "Set", "WeakMap", "WeakSet"]);
+
+/** The variable declaration a top-level statement is, exported or not. */
+const variablesOf = (statement: Declaration): Option.Option<Declaration> => {
+  if (statement.type === "VariableDeclaration") {
+    return Option.some(statement);
+  }
+  return Option.filter(
+    Option.fromNullishOr(statement.declaration),
+    (inner) => statement.type === "ExportNamedDeclaration" && inner.type === "VariableDeclaration",
+  );
+};
+
+/** `new Map(...)`, `new Set(...)`, and the weak ones, not filled by an array literal. */
+const isMutableCollection = (declarator: Declarator): boolean =>
+  Option.exists(
+    Option.filter(
+      Option.fromNullishOr(declarator.init),
+      (init) =>
+        init.type === "NewExpression" &&
+        Option.exists(
+          Option.flatMap(Option.fromNullishOr(init.callee), (callee) =>
+            Option.fromNullishOr(callee.name),
+          ),
+          (name) => collections.has(name),
+        ),
+    ),
+    (init) => {
+      const first = Option.flatMap(Option.fromNullishOr(init.arguments), (given) =>
+        Option.fromNullishOr(given[0]),
+      );
+      return !Option.exists(first, (argument) => argument.type === "ArrayExpression");
+    },
+  );
+
+const noModuleState: Rule = {
+  create: (context) => ({
+    Program: (program: Program) => {
+      for (const declaration of program.body.flatMap((statement) =>
+        Option.toArray(variablesOf(statement)),
+      )) {
+        if (declaration.kind !== "const") {
+          context.report({
+            node: declaration,
+            message:
+              "A module holds no mutable binding: make it a const, or keep the state in an actor, a Scope, or on the value it describes.",
+          });
+        }
+        const declarators = Option.getOrElse(
+          Option.fromNullishOr(declaration.declarations),
+          (): ReadonlyArray<Declarator> => [],
+        );
+        for (const declarator of declarators) {
+          if (isMutableCollection(declarator)) {
+            context.report({
+              node: declarator,
+              message:
+                "A module-level Map, Set, WeakMap, or WeakSet is state no reader of its key can find: carry the data on the value, or in an actor or a Scope. A constant lookup table is filled by an array literal.",
+            });
+          }
+        }
+      }
+    },
+  }),
+};
+
 const plugin = {
   meta: { name: "frame" },
   rules: {
     "no-switch": noSwitch,
     "disable-reason": disableReason,
     "span-name": spanNameRule,
+    "no-module-state": noModuleState,
   },
 };
 

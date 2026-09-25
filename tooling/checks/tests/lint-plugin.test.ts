@@ -59,6 +59,31 @@ describe("frame lint plugin", () => {
     }),
   );
 
+  it.effect("refuses module-level mutable state, and not a constant table or a local", () =>
+    Effect.sync(() => {
+      const found = lint(
+        "no-module-state",
+        [
+          "const m = new WeakMap<object, string>();",
+          "export const s = new Set<string>();",
+          "let counter = 0;",
+          'const keys = new Set(["a", "b"]);',
+          'export const table: ReadonlyMap<string, number> = new Map([["a", 1]]);',
+          "export const f = (): number => {",
+          "  const local = new WeakMap<object, number>();",
+          "  let n = 0;",
+          "  n += local.has(f) ? 1 : 0;",
+          "  return n + keys.size + table.size + counter + s.size + (m.has(f) ? 1 : 0);",
+          "};",
+        ].join("\n"),
+      );
+      expect(found).toHaveLength(3);
+      expect(found[0]).toContain("sample.ts:1:");
+      expect(found[1]).toContain("sample.ts:2:");
+      expect(found[2]).toContain("sample.ts:3:");
+    }),
+  );
+
   it.effect("refuses an Effect.fn span not named Area.operation", () =>
     Effect.sync(() => {
       const found = lint(

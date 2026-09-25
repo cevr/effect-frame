@@ -32,6 +32,7 @@ export const freshCommandId: Effect.Effect<CommandId> = Effect.sync(() =>
  * an ID an application supplies stays supplied, whatever its origin. The
  * record is for one send: the first check consumes it.
  */
+// oxlint-disable-next-line frame/no-module-state -- A18: provenance is identity; a module-private set is the one place no caller can forge a minted ID.
 const minted = new WeakSet<object>();
 
 /** Send options for an ID the framework minted for this send alone. Internal. */

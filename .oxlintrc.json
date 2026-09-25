@@ -115,6 +115,12 @@
   },
   "overrides": [
     {
+      "files": ["packages/*/src/**/*.ts", "packages/*/src/**/*.tsx"],
+      "rules": {
+        "frame/no-module-state": "error"
+      }
+    },
+    {
       "files": ["packages/host-durable-object/tests/sqlite-storage.ts"],
       "rules": {
         "effect/noAsyncFunction": "off",

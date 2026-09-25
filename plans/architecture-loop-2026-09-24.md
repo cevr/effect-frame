@@ -199,7 +199,7 @@ Counsel defects:
 | V4 | `onKeyDown` listened for `keyDown` and never fired | `packages/effect-frame/tests/view/dom.test.tsx` | done 5bd87f9 |
 | V3-select | a `select`'s change event carried an empty value | `packages/effect-frame/tests/view/dom.test.tsx` | done fa52a41 |
 | E6a | a Durable Object served a request naming another address | `packages/host-durable-object/tests/frame-host.test.ts` | done eb22ef4 |
-| D13-link | `link` computes `aria-current` per segment and ignores params: on `/counters/home`, the `/counters/work` link also carries `aria-current="page"` (`router/link.tsx` `to.currentAt(match)`; the notes lists nav too) | none yet | open: pass 2 |
+| D13-link | `link` computes `aria-current` per segment and ignores params: on `/counters/home`, the `/counters/work` link also carries `aria-current="page"` (`router/link.tsx` `to.currentAt(match)`; the notes lists nav too) | `packages/effect-frame/tests/router/route-public.test.tsx` "4. a link is the page only when its own params print the current path; search does not count"; `packages/effect-frame/tests/examples/counter.test.tsx` "draws a counter page on the server, with the names beside it" | done e8da6b0 |
 
 Live check: `<pending>`
 

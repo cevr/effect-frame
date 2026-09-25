@@ -9,7 +9,7 @@ import type { HttpServerRequest } from "effect/unstable/http";
 import { HttpEffect, HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { Notes } from "./contract.js";
 import { inProcess, upstream } from "./notes.server.js";
-import { rootId } from "./document.js";
+import { actorPrefix, rootId } from "./document.js";
 import { routes } from "./routes.js";
 import { NotFound } from "./views.js";
 
@@ -25,8 +25,6 @@ import { NotFound } from "./views.js";
  *                      no script (#21)
  *   *    anything else the route tree's document, in the mode its tree names
  */
-
-const actorPrefix = "/actors";
 
 /** Build the browser bundle once, at start, and keep it in memory. */
 const buildClient = Effect.fn("Notes.buildClient")(function* () {

@@ -6,6 +6,7 @@ import { InputRenderable, createCliRenderer } from "@opentui/core";
 import { Effect, Layer, Option } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { demoKey } from "./contract.js";
+import { actorPrefix } from "./document.js";
 import { NotesTerminal } from "./terminal-view.js";
 
 /**
@@ -51,7 +52,7 @@ const start = Effect.gen(function* () {
 const baseUrl = process.env["NOTES_URL"] ?? "http://127.0.0.1:3000";
 
 const transport = HttpTransport.layer({
-  baseUrl: `${baseUrl}/actors`,
+  baseUrl: `${baseUrl}${actorPrefix}`,
   reconnect: HttpTransport.defaultReconnect,
 }).pipe(Layer.provide(FetchHttpClient.layer));
 

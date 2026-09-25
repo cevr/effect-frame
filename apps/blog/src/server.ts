@@ -12,7 +12,7 @@ import {
   HttpServerResponse,
 } from "effect/unstable/http";
 import { Reactions } from "./contract.js";
-import { blogDocument } from "./document.js";
+import { actorPrefix, blogDocument } from "./document.js";
 import { bundleClient, defaultOut, defaultPosts } from "./prerender.server.js";
 import { site } from "./reactions.server.js";
 import { routes } from "./routes.js";
@@ -30,8 +30,6 @@ import { NotFound } from "./views.js";
  *                      prerender route with no file renders in AwaitAll,
  *                      the same document without `builtAt`
  */
-
-const actorPrefix = "/actors";
 
 /** How long a page may take to render on request. */
 const pageLimit: Effect.Effect<void> = Effect.sleep("10 seconds");

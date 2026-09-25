@@ -1,8 +1,8 @@
 import { Route } from "effect-frame/router";
 import { Schema } from "effect";
 import { notesBehavior } from "./behavior.js";
-import { Notes } from "./contract.js";
-import { Filter, ListCounts, ListIndex, ListName, keyOf } from "./queries.js";
+import { ListName, Notes } from "./contract.js";
+import { Filter, ListCounts, ListIndex, keyOf } from "./queries.js";
 
 /**
  * The addresses of the Notes route tree (#18, #25 §1): each segment's path,

@@ -28,7 +28,7 @@ export const inProcess: Layer.Layer<ActorTransport> = ActorHost.layer({
 );
 
 /**
- * The actors run somewhere else, for example a celld node. This process
+ * The actors run somewhere else, for example a Durable Object host. This process
  * only proxies. `server.ts` picks between the two at the boundary.
  */
 export const upstream = (baseUrl: string): Layer.Layer<ActorTransport> =>

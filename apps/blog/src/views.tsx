@@ -4,7 +4,6 @@ import type { NotFoundProps, Route } from "effect-frame/router";
 import { View } from "effect-frame/view";
 import type { Node } from "effect-frame/view";
 import { Effect, Option } from "effect";
-import type { PostSummary } from "./queries.js";
 import type { chrome } from "./segments.js";
 import { index, post } from "./segments.js";
 
@@ -50,7 +49,7 @@ export const IndexView = (props: Route.PropsOf<typeof index>) =>
     const posts = yield* View.ready(props.data.posts.state, []);
     const rows = yield* View.list({
       each: posts,
-      keyBy: (summary: PostSummary) => summary.slug,
+      keyBy: (summary) => summary.slug,
       row: (summary) =>
         Effect.gen(function* () {
           const current = yield* summary.get;

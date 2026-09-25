@@ -6,7 +6,6 @@ import { For, View } from "effect-frame/view";
 import type { Node } from "effect-frame/view";
 import { Effect, Option } from "effect";
 import { writeDraft } from "./commands.js";
-import type { ListEntry } from "./queries.js";
 import type { lists, shell } from "./segments.js";
 import { index, list, scratch } from "./segments.js";
 
@@ -73,7 +72,7 @@ export const ListsView = <ChildR,>(props: Route.LayoutPropsOf<typeof lists, Chil
     const outlet = yield* props.outlet;
     const rows = yield* View.list({
       each: names,
-      keyBy: (entry: ListEntry) => entry.name,
+      keyBy: (entry) => entry.name,
       row: (entry) =>
         Effect.gen(function* () {
           const current = yield* entry.get;

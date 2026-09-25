@@ -14,6 +14,7 @@ import { Location, hydrate, mount, NavigationBehavior, memoryLocation } from "ef
 import { Dom, View } from "effect-frame/view";
 import { Context, Deferred, Effect, Layer, Option, Predicate, Schema } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
+import { actorPrefix } from "../src/document.js";
 import { routes } from "../src/routes.js";
 import { NotFound } from "../src/views.js";
 import { inProcess } from "../src/notes.server.js";
@@ -28,7 +29,7 @@ import { notesDocument, serve as serveNotes } from "../src/server.js";
 
 export const transportTo = (url: string): Layer.Layer<ActorTransport> =>
   HttpTransport.layer({
-    baseUrl: `${url}/actors`,
+    baseUrl: `${url}${actorPrefix}`,
     reconnect: HttpTransport.defaultReconnect,
     // happy-dom replaces `fetch`; the actor transport needs the real one.
   }).pipe(

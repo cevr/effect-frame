@@ -1,7 +1,7 @@
 import { Actor, implementQuery } from "effect-frame/actor";
 import { Effect, Option } from "effect";
 import { Notes } from "./contract.js";
-import type { ListName } from "./queries.js";
+import type { ListName } from "./contract.js";
 import { ListCounts, ListIndex, catalog, keyOf, shows } from "./queries.js";
 
 /**

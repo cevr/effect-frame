@@ -14,9 +14,9 @@ import type { QueryState } from "effect-frame/actor/client";
 import { Context, Effect, Option, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { notesBehavior, refusedText } from "../src/behavior.js";
-import { Notes, readOnlyList } from "../src/contract.js";
+import { ListName, Notes, readOnlyList } from "../src/contract.js";
 import type { Counts } from "../src/queries.js";
-import { ListCounts, ListName, keyOf } from "../src/queries.js";
+import { ListCounts, keyOf } from "../src/queries.js";
 import { routes } from "../src/routes.js";
 import { clientOf, elementOf, mountApp, serve, settle, tappedHost, textOf } from "./fixture.js";
 

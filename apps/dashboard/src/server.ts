@@ -14,7 +14,7 @@ import {
 } from "effect/unstable/http";
 import { demoTenant } from "./contract.js";
 import { inProcess } from "./host.server.js";
-import { rootId } from "./document.js";
+import { actorPrefix, rootId } from "./document.js";
 import { routes } from "./routes.js";
 import { NotFound } from "./views.js";
 
@@ -32,8 +32,6 @@ import { NotFound } from "./views.js";
  * here, for the page and for the actors alike (#25 §4). No header is
  * `Anonymous`, and `tenantMember` refuses it.
  */
-
-const actorPrefix = "/actors";
 
 /** The fixture header that names a member's tenants. */
 export const memberHeader = "x-dashboard-member";

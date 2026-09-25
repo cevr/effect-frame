@@ -9,7 +9,7 @@ import { View } from "effect-frame/view";
 import { Effect, Option, Predicate, Schema } from "effect";
 import { Arbitrary } from "effect/unstable/arbitrary";
 import { describe, expect, it } from "effect-bun-test";
-import { ListName } from "../src/queries.js";
+import { ListName } from "../src/contract.js";
 import { routes } from "../src/routes.js";
 import {
   IndexSearch,

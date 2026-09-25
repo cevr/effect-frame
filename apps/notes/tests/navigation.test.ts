@@ -11,8 +11,8 @@
 import { afterAll, describe, expect, it } from "bun:test";
 import { Actor, ActorTransport, CommandId } from "effect-frame/actor/client";
 import { Context, Effect, Exit, Schema, Scope } from "effect";
-import { Notes } from "../src/contract.js";
-import { ListName, keyOf } from "../src/queries.js";
+import { ListName, Notes } from "../src/contract.js";
+import { keyOf } from "../src/queries.js";
 import { serve } from "../src/server.js";
 import type { Engine } from "./browser.js";
 import { hasNavigation, open, waitFor } from "./browser.js";

@@ -5,9 +5,10 @@ import type { Route } from "effect-frame/router";
 import { For, View } from "effect-frame/view";
 import { Effect, Option, Scope } from "effect";
 import { dispatch, writeDraft } from "./commands.js";
-import type { Note, Notes } from "./contract.js";
+import type { ListName, Note, Notes } from "./contract.js";
 import { Add } from "./contract.js";
-import type { Filter, ListName } from "./queries.js";
+import { actorPrefix } from "./document.js";
+import type { Filter } from "./queries.js";
 import { shows } from "./queries.js";
 import { list } from "./segments.js";
 
@@ -31,12 +32,6 @@ interface BodyProps {
   readonly name: ListName;
   readonly notes: RemoteActorRef<typeof Notes>;
   readonly filter: Source<Option.Option<Filter>>;
-}
-
-/** The list the route shows and the reference it opened for it, published together. */
-interface Opened {
-  readonly name: ListName;
-  readonly notes: RemoteActorRef<typeof Notes>;
 }
 
 /** The notes `filter` shows, as `filter` and the list change. */
@@ -65,7 +60,7 @@ const ListBody = (props: BodyProps) =>
       ref: notes,
       message: Add,
       typed: ["text"],
-      endpoint: "/actors",
+      endpoint: actorPrefix,
       // A post with no script returns to the page it came from: the print
       // page draws the form whole, and a streamed page draws it only once
       // its script runs.
@@ -145,17 +140,14 @@ export const ListView = (props: ListProps) =>
       done: 0,
     });
     const filter = Source.select(props.search, (search) => Option.fromNullishOr(search.filter));
-    // The route publishes its params and its reference together, so the pair
-    // read here always names one list.
-    const opened = (notes: RemoteActorRef<typeof Notes>) =>
-      Effect.map(props.params.get, (params): Opened => ({ name: params.list, notes }));
-    // One body per list: a new list is a new body over the route's new reference.
+    // One body per list: a new list is a new body over the route's new
+    // reference, and the reference's key names the list.
     const body = yield* View.keyed(
-      Source.mapEffect(props.data.notes.ref, opened),
-      (one) => one.name,
-      (one) =>
-        Effect.flatMap(one.get, (current) =>
-          ListBody({ name: current.name, notes: current.notes, filter }),
+      props.data.notes.ref,
+      (ref) => ref.key.list,
+      (ref) =>
+        Effect.flatMap(ref.get, (current) =>
+          ListBody({ name: current.key.list, notes: current, filter }),
         ),
     );
     return (

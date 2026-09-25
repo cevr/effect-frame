@@ -14,7 +14,11 @@ export const Note = Schema.Struct({
 });
 export type Note = Schema.Schema.Type<typeof Note>;
 
-export const NotesKey = Schema.Struct({ tenant: Schema.String, list: Schema.String });
+/** A list's name. The route's param, the actor's key and the queries share it. */
+export const ListName = Schema.String.pipe(Schema.brand("ListName"));
+export type ListName = Schema.Schema.Type<typeof ListName>;
+
+export const NotesKey = Schema.Struct({ tenant: Schema.String, list: ListName });
 export type NotesKey = Schema.Schema.Type<typeof NotesKey>;
 
 export const NotesSnapshot = Schema.Struct({ notes: Schema.Array(Note) });
@@ -49,4 +53,4 @@ export const Notes = contract("Notes", {
 export const readOnlyList = "archive";
 
 /** The inbox. The terminal client shows this list. */
-export const demoKey: NotesKey = { tenant: "demo", list: "inbox" };
+export const demoKey: NotesKey = { tenant: "demo", list: Schema.decodeSync(ListName)("inbox") };

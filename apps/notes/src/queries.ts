@@ -1,7 +1,7 @@
 import { query } from "effect-frame/actor/client";
 import { Option, Schema } from "effect";
 import type { Note } from "./contract.js";
-import { Notes } from "./contract.js";
+import { ListName, Notes } from "./contract.js";
 
 /**
  * The two queries Notes reads (#17, #25 §1). Browser safe: contracts
@@ -11,10 +11,6 @@ import { Notes } from "./contract.js";
  * `Notes` actor itself (`segments.ts`), and the document carries its
  * snapshot for the first frame.
  */
-
-/** A list's name as a route param. It prints as itself. */
-export const ListName = Schema.String.pipe(Schema.brand("ListName"));
-export type ListName = Schema.Schema.Type<typeof ListName>;
 
 /** Which notes a list shows. Absent: every note. */
 export const Filter = Schema.Literals(["open", "done"]);

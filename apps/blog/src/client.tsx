@@ -9,7 +9,7 @@ import {
 import { Effect, Layer } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { Dom } from "effect-frame/view";
-import { rootId } from "./document.js";
+import { actorPrefix, rootId } from "./document.js";
 import { routes } from "./routes.js";
 import { NotFound } from "./views.js";
 
@@ -40,7 +40,7 @@ const start = Effect.gen(function* () {
 });
 
 const transport = HttpTransport.layer({
-  baseUrl: `${location.origin}/actors`,
+  baseUrl: `${location.origin}${actorPrefix}`,
   reconnect: HttpTransport.defaultReconnect,
 }).pipe(Layer.provide(FetchHttpClient.layer));
 

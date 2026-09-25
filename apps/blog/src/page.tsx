@@ -8,6 +8,7 @@ import type { Slug, Reactions } from "./contract.js";
 import { Heart } from "./contract.js";
 import type { Block, PostBodyValue } from "./queries.js";
 import type { post } from "./segments.js";
+import { actorPrefix } from "./document.js";
 
 /**
  * One post, and its one island: the reactions to it. The body is a baked
@@ -59,7 +60,7 @@ const Island = (props: IslandProps) =>
       ref: props.reactions,
       message: Heart,
       typed: [],
-      endpoint: "/actors",
+      endpoint: actorPrefix,
       returnTo: here.url.pathname,
     });
     return (
@@ -74,29 +75,22 @@ const Island = (props: IslandProps) =>
     );
   });
 
-interface Opened {
-  readonly slug: Slug;
-  readonly reactions: RemoteActorRef<typeof Reactions>;
-}
-
 export const PostView = (props: PostProps) =>
   Effect.gen(function* () {
     // A failed read goes to the nearest `Errored`; a built page has none.
     const body = yield* View.ready(yield* View.orErrored(props.data.body.state), empty);
-    const opened = (reactions: RemoteActorRef<typeof Reactions>) =>
-      Effect.map(props.params.get, (params): Opened => ({ slug: params.slug, reactions }));
     const blocks = yield* View.list({
       each: Source.select(body, placed),
-      keyBy: (one: Placed) => one.key,
+      keyBy: (one) => one.key,
       row: BlockView,
     });
     // One island per post: a move to another post opens a new one.
     const island = yield* View.keyed(
-      Source.mapEffect(props.data.reactions.ref, opened),
-      (one) => one.slug,
-      (one) =>
-        Effect.flatMap(one.get, (current) =>
-          Island({ slug: current.slug, reactions: current.reactions }),
+      props.data.reactions.ref,
+      (ref) => ref.key.slug,
+      (ref) =>
+        Effect.flatMap(ref.get, (current) =>
+          Island({ slug: current.key.slug, reactions: current }),
         ),
     );
     return (

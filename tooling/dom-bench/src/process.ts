@@ -1,4 +1,4 @@
-/* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNewError, effect/noNewPromise, effect/noNodeBuiltinImport, effect/noNullish, effect/noTernary, effect/noTryCatch, no-await-in-loop, node/no-process-env -- this private CLI owns bounded child-process groups and signal cleanup. */
+/* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNewError, effect/noNewPromise, effect/noNodeBuiltinImport, effect/noNullish, effect/noTernary, effect/noTryCatch, no-await-in-loop -- this private CLI owns bounded child-process groups and signal cleanup. */
 
 import { spawn } from "node:child_process";
 

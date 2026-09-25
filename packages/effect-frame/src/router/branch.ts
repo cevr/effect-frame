@@ -410,7 +410,7 @@ const segmentRuntimeOf = <Params, Search, Own extends Declarations>(
   Option.getOrThrowWith(
     Option.map(
       Option.fromNullishOr(segmentRuntimes.get(seg)),
-      // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- makeSegment stored this runtime under this segment with these types.
+      // oxlint-disable-next-line effect/noAs -- makeSegment stored this runtime under this segment with these types.
       (runtime) => runtime as SegmentRuntime<Params, Search, Own>,
     ),
     () =>
@@ -443,7 +443,7 @@ type Check = Effect.Effect<Verdict, never>;
 /** Move a check's services to the phantom. See `Check`. */
 // @effect-diagnostics unsafeEffectTypeAssertion:off
 const erase = <CheckR>(check: Effect.Effect<Verdict, never, CheckR>): Check =>
-  // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- CheckR is carried by the segment's phantom and reaches the route's DataR.
+  // oxlint-disable-next-line effect/noAs -- CheckR is carried by the segment's phantom and reaches the route's DataR.
   check as Check;
 // @effect-diagnostics unsafeEffectTypeAssertion:error
 
@@ -671,7 +671,7 @@ const ancestorWithParam = (
  */
 const ownEmpty = <Own>(): Own => {
   const empty: unknown = noDeclarations();
-  // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- Own defaults to NoDeclarations when data is absent.
+  // oxlint-disable-next-line effect/noAs -- Own defaults to NoDeclarations when data is absent.
   return empty as Own;
 };
 
@@ -974,7 +974,7 @@ const runtimeOf = <R>(branch: AnyBranch<R>): BranchRuntime<R> =>
   Option.getOrThrowWith(
     Option.map(
       Option.fromNullishOr(runtimes.get(branch)),
-      // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- makeBranch stored this runtime under this branch; its constructor chose R.
+      // oxlint-disable-next-line effect/noAs -- makeBranch stored this runtime under this branch; its constructor chose R.
       (runtime) => runtime as BranchRuntime<R>,
     ),
     () =>
@@ -1131,7 +1131,7 @@ export const buildLayout = <
       BranchRejected.make({ segment: seg.name, reason: "a layout cannot end in a tail" }),
     );
   }
-  // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- the children tuple is exactly ViewROf<Children[number]>'s branches.
+  // oxlint-disable-next-line effect/noAs -- the children tuple is exactly ViewROf<Children[number]>'s branches.
   const typed = children as ReadonlyArray<AnyBranch<ViewROf<Children[number]>>>;
   return makeBranch<
     Name,
@@ -1234,7 +1234,7 @@ const boundaryOf = <E>(recovery: ReadonlyArray<Recovery<E> | Presentation>): Bou
       Option.map(
         Option.fromNullishOr(one.errored),
         // A Presentation handles only declaration failures; it never sees Setup.
-        // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- errored only reads RouteFailure<E>, and E is never whenever a Presentation was accepted.
+        // oxlint-disable-next-line effect/noAs -- errored only reads RouteFailure<E>, and E is never whenever a Presentation was accepted.
         (errored) => errored as (failure: Source<RouteFailure<E>>) => Node,
       ),
     ),
@@ -1967,7 +1967,7 @@ const assemble = (inherited: DataRecord, own: ReadonlyMap<string, Binding>): Dat
 /** The record a view receives. One field per binding name. */
 const routeData = <Data extends Declarations>(data: DataRecord): RouteData<Data> => {
   const fields: unknown = Object.fromEntries(data);
-  // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- assemble builds exactly one binding per declared name, inherited first.
+  // oxlint-disable-next-line effect/noAs -- assemble builds exactly one binding per declared name, inherited first.
   return fields as RouteData<Data>;
 };
 
@@ -3076,7 +3076,7 @@ const drivenTree = <R>(
   return (url) =>
     Option.flatMap(matchUrl(runtime, url), (matched) => {
       const leafOutline = deepestOutline(matched.outline);
-      // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- the leaf's own segment decoded these params, so they are its driven view's Params.
+      // oxlint-disable-next-line effect/noAs -- the leaf's own segment decoded these params, so they are its driven view's Params.
       const params = leafOutline.values.params as never;
       return Option.map(
         Option.fromNullishOr(options.get(leafOutline.branch)),

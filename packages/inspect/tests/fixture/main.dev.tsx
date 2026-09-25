@@ -1,4 +1,3 @@
-/* oxlint-disable effect/noGlobals -- the development entry reports attachment status to the page. */
 /**
  * The development entry. Inspection is enabled only when the page config
  * names a gateway; otherwise this entry creates no connection either.

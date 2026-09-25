@@ -144,7 +144,6 @@ const runCounter = <A>(
   use: (counter: CounterRef) => Effect.Effect<A, never, Scope.Scope>,
 ): Promise<A> =>
   // The address is a run-time value; the client layer is built per call.
-  // oxlint-disable-next-line effect/noInlineProvide
   Effect.runPromise(
     Effect.scoped(
       // Each proof step is its own entry point: one process, one transport, one scope.
@@ -277,7 +276,6 @@ const runUpload = <A>(
   key: string,
   use: (upload: UploadRef) => Effect.Effect<A, never, Scope.Scope>,
 ): Promise<A> =>
-  // oxlint-disable-next-line effect/noInlineProvide
   Effect.runPromise(
     Effect.scoped(
       // Each proof step is its own entry point: one process, one transport, one scope.
@@ -327,7 +325,6 @@ const runRef = <C extends AnyContract, A>(
   key: KeyOf<C>,
   use: (handle: RemoteActorRef<C>) => Effect.Effect<A, never, Scope.Scope>,
 ): Promise<A> =>
-  // oxlint-disable-next-line effect/noInlineProvide
   Effect.runPromise(
     Effect.scoped(
       // Each proof step is its own entry point: one process, one transport, one scope.

@@ -119,14 +119,6 @@
       }
     },
     {
-      "files": ["packages/host-durable-object/fixture-contract/index.ts"],
-      "rules": {
-        "effect/noAsyncFunction": "off",
-        "effect/noNullish": "off",
-        "effect/noUnknownParameters": "off"
-      }
-    },
-    {
       "files": ["packages/host-durable-object/fixture-conformance/index.ts"],
       "rules": {
         "effect/noAsyncFunction": "off",
@@ -163,7 +155,6 @@
       "files": ["packages/host-durable-object/src/frame-host.ts"],
       "rules": {
         "effect/noAsyncFunction": "off",
-        "effect/noGlobals": "off",
         "effect/noUnknownParameters": "off"
       }
     },
@@ -177,7 +168,6 @@
       "files": ["packages/host-durable-object/src/interop.ts"],
       "rules": {
         "effect/noAsyncFunction": "off",
-        "effect/noNewPromise": "off",
         "effect/noRuntimeTypeof": "off"
       }
     },
@@ -217,26 +207,33 @@
         "effect/noAs": "off",
         "effect/noAsyncFunction": "off",
         "effect/noGlobals": "off",
-        "effect/noNewError": "off",
         "effect/noNewPromise": "off",
         "effect/noNodeBuiltinImport": "off",
         "effect/noNullish": "off",
         "effect/noRuntimeTypeof": "off",
         "effect/noTernary": "off",
-        "effect/noThrowStatement": "off",
         "effect/noTryCatch": "off",
         "effect/noUnknownParameters": "off",
+        "no-await-in-loop": "off"
+      }
+    },
+    {
+      "files": ["packages/host-durable-object/scripts/celld-process.ts"],
+      "rules": {
+        "effect/noAsyncFunction": "off",
+        "effect/noGlobals": "off",
+        "effect/noNewError": "off",
+        "effect/noNewPromise": "off",
+        "effect/noNodeBuiltinImport": "off",
+        "effect/noNullish": "off",
+        "effect/noThrowStatement": "off",
+        "effect/noTryCatch": "off",
         "no-await-in-loop": "off",
         "node/no-process-env": "off"
       }
     },
     {
-      "files": [
-        "packages/host-durable-object/scripts/celld-process.ts",
-        "packages/host-durable-object/scripts/proof.ts",
-        "packages/host-durable-object/scripts/runtimes.ts",
-        "packages/host-durable-object/scripts/workerd-process.ts"
-      ],
+      "files": ["packages/host-durable-object/scripts/proof.ts"],
       "rules": {
         "effect/noAsyncFunction": "off",
         "effect/noGlobals": "off",
@@ -245,11 +242,29 @@
         "effect/noNodeBuiltinImport": "off",
         "effect/noNullish": "off",
         "effect/noRuntimeTypeof": "off",
+        "effect/noTernary": "off"
+      }
+    },
+    {
+      "files": ["packages/host-durable-object/scripts/runtimes.ts"],
+      "rules": {
+        "effect/noNewError": "off",
+        "effect/noNullish": "off",
+        "effect/noTernary": "off",
+        "effect/noThrowStatement": "off"
+      }
+    },
+    {
+      "files": ["packages/host-durable-object/scripts/workerd-process.ts"],
+      "rules": {
+        "effect/noAsyncFunction": "off",
+        "effect/noGlobals": "off",
+        "effect/noNewError": "off",
+        "effect/noNewPromise": "off",
+        "effect/noNodeBuiltinImport": "off",
         "effect/noTernary": "off",
         "effect/noThrowStatement": "off",
-        "effect/noTryCatch": "off",
-        "no-await-in-loop": "off",
-        "node/no-process-env": "off"
+        "effect/noTryCatch": "off"
       }
     },
     {
@@ -257,8 +272,7 @@
       "rules": {
         "effect/noGlobals": "off",
         "effect/noNullish": "off",
-        "effect/noRuntimeTypeof": "off",
-        "effect/noThrowStatement": "off"
+        "effect/noRuntimeTypeof": "off"
       }
     },
     {

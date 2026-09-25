@@ -1,4 +1,3 @@
-/* oxlint-disable effect/noGlobals -- the client half reads happy-dom's document, the boundary under test. */
 import { registerDom } from "./dom-setup.js";
 
 registerDom();

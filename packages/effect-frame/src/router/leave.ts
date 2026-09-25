@@ -108,5 +108,5 @@ export const onLeave: <Params, Search, R>(
  * owner, and that instance decoded these values with the owner's codecs.
  */
 const narrow = <Params, Search>(input: LeaveInput<unknown, unknown>): LeaveInput<Params, Search> =>
-  // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- the registrar accepted only this owner's instance; see above.
+  // oxlint-disable-next-line effect/noAs -- the registrar accepted only this owner's instance; see above.
   input as LeaveInput<Params, Search>;

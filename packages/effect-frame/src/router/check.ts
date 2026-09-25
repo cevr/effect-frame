@@ -104,7 +104,7 @@ export const register = <R>(route: AnyRoute<R>, checker: Checker<R>): void => {
 export const read = <R>(route: AnyRoute<R>): Option.Option<Checker<MountServices<R>>> =>
   Option.map(
     Option.fromNullishOr(checkers.get(route)),
-    // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- register stored a Checker<R> under this same route value; see above for what is removed.
+    // oxlint-disable-next-line effect/noAs -- register stored a Checker<R> under this same route value; see above for what is removed.
     (checker) => checker as Checker<MountServices<R>>,
   );
 

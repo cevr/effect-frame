@@ -319,7 +319,7 @@ describe("scoped view test harness", () => {
       Set.prototype.add = function <T>(this: Set<T>, value: T): Set<T> {
         if (
           !injected &&
-          // oxlint-disable-next-line effect/noRuntimeTypeof, effect/noNullish
+          // oxlint-disable-next-line effect/noRuntimeTypeof
           typeof value === "object" &&
           // oxlint-disable-next-line effect/noNullish
           value !== null &&

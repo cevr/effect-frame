@@ -1,4 +1,4 @@
-/* oxlint-disable effect/noGlobals, effect/noNullish -- the server-render proof puts a recording `navigation` on globalThis, and the bundle proof reads Bun.build output. */
+/* oxlint-disable effect/noGlobals -- the server-render proof puts a recording `navigation` on globalThis, and the bundle proof reads Bun.build output. */
 import { registerDom } from "./dom-setup.js";
 
 registerDom();

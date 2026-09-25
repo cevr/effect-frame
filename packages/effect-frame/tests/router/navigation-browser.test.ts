@@ -1,4 +1,4 @@
-/* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNullish, effect/noThrowStatement, effect/noNewError, effect/noTryCatch, no-await-in-loop -- this proof drives real WebKit and Chrome pages through Bun.WebView. */
+/* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNullish, effect/noTryCatch, no-await-in-loop -- this proof drives real WebKit and Chrome pages through Bun.WebView. */
 /**
  * #31 navigation behavior, real-browser proofs. The fixture page mounts the
  * real router on the public `browserNavigation` Location with the public

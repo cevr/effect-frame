@@ -1,4 +1,4 @@
-/* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNullish, effect/noThrowStatement, effect/noNewError, effect/noTryCatch -- this proof drives real WebKit and Chrome pages through Bun.WebView against a real Bun server that serves a real prerender build. */
+/* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNullish, effect/noTryCatch -- this proof drives real WebKit and Chrome pages through Bun.WebView against a real Bun server that serves a real prerender build. */
 /**
  * A prerendered page in a real browser (#86). The build writes a page with
  * one actor island, and writes the real bundle of `browser/prerender-app.tsx`

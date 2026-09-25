@@ -306,7 +306,6 @@ export const requestPrincipal: MakePrincipal = (_follows) =>
     (context): HttpServer.DerivePrincipal =>
       (request) =>
         // The server is the boundary: each request reads through the host it is served by.
-        // oxlint-disable-next-line effect/noInlineProvide
         Effect.provideContext(snapshotPrincipal(request), context),
   );
 

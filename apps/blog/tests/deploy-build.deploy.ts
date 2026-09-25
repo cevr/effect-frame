@@ -39,7 +39,6 @@ describe("the Blog deploy build", () => {
         const [code, stderr] = yield* Effect.all(
           [
             Effect.promise(() => child.exited),
-            // oxlint-disable-next-line effect/noGlobals -- reads the process's own pipe.
             Effect.promise(() => Bun.readableStreamToText(child.stderr)),
           ],
           { concurrency: "unbounded" },

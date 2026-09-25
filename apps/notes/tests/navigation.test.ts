@@ -1,4 +1,4 @@
-/* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNullish, effect/noThrowStatement, effect/noNewError, effect/noTryCatch, no-await-in-loop, effect/noTestLifecycleHooks -- this proof drives real WebKit and Chrome pages through Bun.WebView, over one Notes server the file shares. */
+/* oxlint-disable effect/noAsyncFunction, effect/noTryCatch, no-await-in-loop, effect/noTestLifecycleHooks -- this proof drives real WebKit and Chrome pages through Bun.WebView, over one Notes server the file shares. */
 /**
  * #31 in the app, in real browsers: the real Notes server and its real
  * client bundle. A push scrolls to the top when the new shell commits, while

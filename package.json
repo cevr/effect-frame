@@ -9,7 +9,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "turbo run typecheck",
-    "lint": "oxlint",
+    "lint": "oxlint --report-unused-disable-directives-severity=error",
     "lint:fix": "oxlint --fix",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",

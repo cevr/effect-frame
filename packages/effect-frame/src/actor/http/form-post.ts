@@ -422,7 +422,6 @@ export const form = <E, R, P = never>(
         return Effect.succeed(new Response("method not allowed", { status: 405 }));
       }
       // The route is the boundary: the derivation runs with the context `form` was built in.
-      // oxlint-disable-next-line effect/noInlineProvide
       const derived = Effect.provideContext(options.principal(request), derivation);
       const answer = post(request, contracts, options.login, commitWithin).pipe(
         Effect.provideContext(context),

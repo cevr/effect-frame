@@ -1,4 +1,3 @@
-/* oxlint-disable effect/noGlobals, effect/noNullish -- this module is the fixture's browser boundary: it reads the document and exposes what it saw on window. */
 /**
  * The real-browser client of the prerender proof (#86). The build writes
  * this bundle as the site's `client.js`. It does what an application's

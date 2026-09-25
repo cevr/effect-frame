@@ -13,7 +13,6 @@ describe("the toolchain", () => {
   it.effect("runs the Bun that package.json pins", () =>
     Effect.sync(() => {
       const pinned = manifest.packageManager.replace(/^bun@/, "");
-      // oxlint-disable-next-line effect/noGlobals -- the running Bun is the fact under test.
       const running = Bun.version;
       expect(
         running,

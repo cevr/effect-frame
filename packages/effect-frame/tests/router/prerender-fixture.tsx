@@ -1,4 +1,3 @@
-/* oxlint-disable effect/noGlobals -- the serving proofs build web-standard Requests and read Responses, the boundary under test. */
 import { Streaming, runQuery, useQuery } from "effect-frame/actor";
 import type { ActorTransport, QueryCache, QueryFailure, QueryState } from "effect-frame/actor";
 import { Route, renderDocument } from "effect-frame/router";

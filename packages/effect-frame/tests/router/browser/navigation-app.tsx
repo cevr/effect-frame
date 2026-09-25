@@ -1,4 +1,4 @@
-/* oxlint-disable effect/noGlobals, effect/noNullish, effect/noNewPromise, effect/noNewError -- this module is the fixture's browser boundary: it reads page config and exposes test controls on window. */
+/* oxlint-disable effect/noNullish, effect/noNewPromise, effect/noNewError -- this module is the fixture's browser boundary: it reads page config and exposes test controls on window. */
 /**
  * The real-browser fixture for #31 navigation behavior. One `site` layout
  * with a search field, and leaves that each prove one row: a tall page with

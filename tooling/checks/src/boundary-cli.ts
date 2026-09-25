@@ -1,4 +1,3 @@
-// oxlint-disable effect/noGlobals -- the command reports through the process exit code, as the gate reads it.
 import { Effect, Exit } from "effect";
 import { checkEntry, formatViolation } from "./boundary.js";
 import { browserEntries, repositoryRoot } from "./browser-entries.js";

@@ -1,4 +1,3 @@
-/* oxlint-disable effect/noGlobals -- AbortSignal is how the process boundary hands a signal to a command. */
 /**
  * Process signals that end a command, and the exit codes they map to.
  * `bin.ts` aborts one AbortController with the signal name as its reason.

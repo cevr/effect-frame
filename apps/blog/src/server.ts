@@ -170,7 +170,6 @@ export const makeServer = async (options: ServerOptions): Promise<RunningServer>
       const loaded = yield* Scope.provide(Effect.orDie(Prerender.load(options.out)), held);
       const pages = yield* Prerender.serve(loaded, router);
       return yield* Effect.try({
-        // oxlint-disable-next-line effect/noGlobals -- Bun.serve is the platform boundary.
         try: () => Bun.serve({ port: options.port, fetch: fetch(pages) }),
         catch: (cause) => ServerNotStarted.make({ port: options.port, reason: String(cause) }),
       });

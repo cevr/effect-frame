@@ -19,7 +19,7 @@ The editor-only native-preview package was not the typecheck target.
 
 Oxlint uses the complete recommended rule map from the installed `oxlint-plugin-effect` 0.12.1 package.
 The skill's older twelve-rule example is not the current preset.
-No host or application path has a lint escape hatch.
+Host, script, and application paths do have lint escape hatches: per-file `overrides` in `.oxlintrc.json` and `oxlint-disable` comments with a reason. `bun run lint` passes `--report-unused-disable-directives-severity=error`, so a disable comment that no longer suppresses anything fails the gate.
 
 ## Checks
 

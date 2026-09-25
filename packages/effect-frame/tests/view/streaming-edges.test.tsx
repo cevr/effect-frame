@@ -1,4 +1,3 @@
-/* oxlint-disable effect/noGlobals -- this proof reads happy-dom's document, the boundary under test. */
 import { registerDom } from "./dom-setup.js";
 
 registerDom();

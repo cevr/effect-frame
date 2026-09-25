@@ -230,7 +230,6 @@ describe("http transport over a real socket", () => {
       yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
       // Bun.serve is the platform boundary of this test; the handler under
       // test is web-standard and does not know about it.
-      // oxlint-disable-next-line effect/noGlobals
       const serve = (port: number) =>
         Effect.acquireRelease(
           // oxlint-disable-next-line effect/noGlobals

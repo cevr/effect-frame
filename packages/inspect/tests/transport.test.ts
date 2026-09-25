@@ -1,4 +1,4 @@
-/* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNullish, effect/noTernary, effect/noUnknownParameters, effect/noNodeBuiltinImport, effect/noConditionalEmptyObjectSpread, effect/noThrowStatement, effect/noNewError, effect/noTryCatch, no-await-in-loop -- this proof drives a real WebKit page, a real loopback gateway, and CLI processes. */
+/* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNullish, effect/noTernary, effect/noNodeBuiltinImport, effect/noConditionalEmptyObjectSpread, effect/noThrowStatement, effect/noNewError, effect/noTryCatch, no-await-in-loop -- this proof drives a real WebKit page, a real loopback gateway, and CLI processes. */
 /**
  * Live inspection transport proof, items 1-5 of the scope draft. Every test
  * uses a real headless WebKit page running the production-shaped fixture

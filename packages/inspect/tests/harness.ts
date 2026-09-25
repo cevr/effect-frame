@@ -1,4 +1,4 @@
-/* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNewError, effect/noNewPromise, effect/noNullish, effect/noThrowStatement, effect/noTryCatch, effect/noTernary, effect/noNodeBuiltinImport, no-await-in-loop -- this harness owns the real browser, the page server, and bundling for the transport proof. */
+/* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNewError, effect/noNullish, effect/noThrowStatement, effect/noTernary, effect/noNodeBuiltinImport, no-await-in-loop -- this harness owns the real browser, the page server, and bundling for the transport proof. */
 import { Effect, Exit, Scope } from "effect";
 import { resolve } from "node:path";
 import * as Gateway from "../src/gateway.js";

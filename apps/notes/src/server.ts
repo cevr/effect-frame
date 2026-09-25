@@ -28,7 +28,6 @@ const actorPrefix = "/actors";
 /** Build the browser bundle once, at start, and keep it in memory. */
 const buildClient = Effect.fn("Notes.buildClient")(function* () {
   const result = yield* Effect.promise(() =>
-    // oxlint-disable-next-line effect/noGlobals -- Bun.build is the platform boundary.
     Bun.build({
       entrypoints: [new URL("./client.tsx", import.meta.url).pathname],
       target: "browser",
@@ -173,7 +172,6 @@ export const makeServer = async (options: ServerOptions): Promise<RunningServer>
   );
   const client = await runtime.runPromise(buildClient());
 
-  // oxlint-disable-next-line effect/noGlobals -- Bun.serve is the platform boundary.
   const server = Bun.serve({
     port: options.port,
     fetch: (request: Request): Response | Promise<Response> => {

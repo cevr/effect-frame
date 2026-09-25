@@ -1,4 +1,4 @@
-/* oxlint-disable effect/noGlobals, effect/noNewError, effect/noThrowStatement, effect/noNullish, effect/noUnknownParameters, effect/noNewPromise -- this proof installs a fake `window.navigation`, replaces `history.pushState` with the platform signature, and hands the adapter fake navigate events whose handlers return promises. */
+/* oxlint-disable effect/noGlobals, effect/noThrowStatement, effect/noNullish, effect/noUnknownParameters, effect/noNewPromise -- this proof installs a fake `window.navigation`, replaces `history.pushState` with the platform signature, and hands the adapter fake navigate events whose handlers return promises. */
 import { registerDom } from "./dom-setup.js";
 
 registerDom();
@@ -84,7 +84,7 @@ const traverseEvent = (
       sent.prevented += 1;
     },
   };
-  // oxlint-disable-next-line effect/noAs, effect/noChainedTypeAssertions, typescript/no-unsafe-type-assertion -- a fake event with the fields the adapter reads.
+  // oxlint-disable-next-line effect/noAs, effect/noChainedTypeAssertions -- a fake event with the fields the adapter reads.
   return event as unknown as NavigateEvent;
 };
 
@@ -178,7 +178,7 @@ const platformPush = (dispatch: (event: NavigateEvent) => Effect.Effect<void>) =
             },
             preventDefault: () => {},
           };
-          // oxlint-disable-next-line effect/noAs, effect/noChainedTypeAssertions, typescript/no-unsafe-type-assertion -- a fake event with the fields the adapter reads.
+          // oxlint-disable-next-line effect/noAs, effect/noChainedTypeAssertions -- a fake event with the fields the adapter reads.
           Effect.runSyncWith(context)(dispatch(event as unknown as NavigateEvent));
         };
       }),

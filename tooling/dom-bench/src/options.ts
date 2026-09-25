@@ -70,7 +70,6 @@ export const isInvalidOptionsError = (error: unknown): boolean =>
   error instanceof Error && error.message.startsWith("invalid benchmark options:");
 
 const requireValue = (argv: ReadonlyArray<string>, index: number, option: string): string => {
-  // oxlint-disable-next-line effect/noNullish -- argv is an external CLI boundary.
   const value = argv[index + 1];
   // oxlint-disable-next-line effect/noNullish -- missing option values are a CLI parse failure.
   if (value === undefined) return invalid(`${option} requires a value`);
@@ -113,7 +112,6 @@ export const parseOptions = (argv: ReadonlyArray<string>): BenchOptions => {
   let only: OperationName | undefined;
   let help = false;
   for (let index = 0; index < argv.length; index += 1) {
-    // oxlint-disable-next-line effect/noNullish -- indexed argv access is a CLI boundary.
     const argument = argv[index];
     // oxlint-disable-next-line effect/noNullish -- a missing argv entry ends iteration safely.
     if (argument === undefined) continue;

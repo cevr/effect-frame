@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-/* oxlint-disable effect/noGlobals, node/no-process-env, effect/noNullish -- this file is the process boundary: argv, environment, signals, streams, and the exit code. */
+/* oxlint-disable effect/noGlobals, node/no-process-env -- this file is the process boundary: argv, environment, signals, streams, and the exit code. */
 /**
  * The `effect-frame` executable. It only wires the process to `Cli.main`.
  * SIGINT, SIGTERM, and SIGHUP abort the command with the signal name as the

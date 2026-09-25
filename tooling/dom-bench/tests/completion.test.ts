@@ -1,4 +1,4 @@
-/* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noAs, effect/noNewError, effect/noNewPromise, effect/noNodeBuiltinImport, effect/noNullish, effect/noTernary, effect/noTestLifecycleHooks, effect/noThrowStatement, effect/noTryCatch, no-await-in-loop, node/no-process-env -- these tests drive a real Bun.WebView page with the real 10,000-row fixture. */
+/* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNewError, effect/noNewPromise, effect/noNodeBuiltinImport, effect/noNullish, effect/noTernary, effect/noTestLifecycleHooks, effect/noThrowStatement, effect/noTryCatch -- these tests drive a real Bun.WebView page with the real 10,000-row fixture. */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";

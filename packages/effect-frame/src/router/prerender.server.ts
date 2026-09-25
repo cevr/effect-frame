@@ -255,7 +255,7 @@ type RouteServices<Route> = Route extends AnyRoute<infer R> ? R : never;
 const servicesOf = <Routes extends AnyRoute<unknown>>(
   routes: ReadonlyArray<Routes>,
 ): ReadonlyArray<AnyRoute<RouteServices<Routes>>> =>
-  // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- AnyRoute is covariant in R, so each route is an AnyRoute of the union of every route's services.
+  // oxlint-disable-next-line effect/noAs -- AnyRoute is covariant in R, so each route is an AnyRoute of the union of every route's services.
   routes as ReadonlyArray<AnyRoute<RouteServices<Routes>>>;
 
 /** What a build needs: the routes' and inputs' services, a transport, and the platform. */

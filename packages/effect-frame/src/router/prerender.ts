@@ -24,7 +24,7 @@ export interface ParamsRecord {
 }
 
 /** The params of the tree's root level: none inherited. */
-// oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- the empty record is the params nothing contributes.
+// oxlint-disable-next-line effect/noAs -- the empty record is the params nothing contributes.
 const noParams = {} as ParamsRecord;
 
 /** A level's params: its parent's, with its own added. */
@@ -78,7 +78,7 @@ type Erased = (
 
 /** One own params value as the record the next level inherits. */
 const asRecord = <Own>(own: Own): ParamsRecord =>
-  // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- Route.inputs typed Own as this segment's own params, a record.
+  // oxlint-disable-next-line effect/noAs -- Route.inputs typed Own as this segment's own params, a record.
   own as ParamsRecord;
 
 const erase = <Own, E, R>(
@@ -90,7 +90,7 @@ const erase = <Own, E, R>(
 const restore = <E, R>(
   effect: Effect.Effect<ReadonlyArray<ParamsRecord>, unknown, unknown>,
 ): Effect.Effect<ReadonlyArray<ParamsRecord>, E, R> =>
-  // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- the caller names the E and R of the tree's Prerendered phantom, which lists every inputs value's.
+  // oxlint-disable-next-line effect/noAs -- the caller names the E and R of the tree's Prerendered phantom, which lists every inputs value's.
   effect as Effect.Effect<ReadonlyArray<ParamsRecord>, E, R>;
 // @effect-diagnostics unsafeEffectTypeAssertion:error
 
@@ -101,7 +101,7 @@ const eraseEnumerate =
     if (Effect.isEffect(enumerate)) {
       return erase(enumerate);
     }
-    // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- the build passes exactly the params this segment's ancestors enumerated, which is Inherited.
+    // oxlint-disable-next-line effect/noAs -- the build passes exactly the params this segment's ancestors enumerated, which is Inherited.
     return erase(enumerate(inherited as Inherited));
   };
 

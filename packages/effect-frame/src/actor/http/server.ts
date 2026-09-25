@@ -190,7 +190,6 @@ export const shareSessions = <K, R>(
     });
     return (key: K): PrincipalSource => ({
       // The server is the boundary: a request's read runs in the server's context.
-      // oxlint-disable-next-line effect/noInlineProvide
       get: Effect.provideContext(sessions.read(key), context),
       changes: Stream.unwrap(RcMap.get(followed, key)),
     });
@@ -205,7 +204,6 @@ export const make = <R = never>(
     const derivation: Context.Context<R> = yield* Effect.context<R>();
     const derive = (request: Request): Effect.Effect<PrincipalSource> =>
       // The host is the boundary: the derivation runs with the context `make` was built in.
-      // oxlint-disable-next-line effect/noInlineProvide
       Effect.provideContext(options.principal(request), derivation);
 
     const changes = (request: Request, who: PrincipalSource): Effect.Effect<Response> =>

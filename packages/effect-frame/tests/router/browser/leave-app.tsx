@@ -1,4 +1,4 @@
-/* oxlint-disable effect/noGlobals, effect/noNullish, effect/noNewPromise, effect/noNewError -- this module is the fixture's browser boundary: it reads page config and exposes test controls on window. */
+/* oxlint-disable effect/noNewPromise, effect/noNewError -- this module is the fixture's browser boundary: it reads page config and exposes test controls on window. */
 /**
  * The real-browser fixture for route slice 5. One tenant layout and one post
  * leaf, mounted by the real router on the private `browserCommit` Location.

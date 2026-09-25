@@ -1,4 +1,3 @@
-// oxlint-disable effect/noGlobals -- Bun.build and the working directory are the rule's whole mechanism: the bundler computes the graph a page downloads.
 import { Effect, Option, Schema } from "effect";
 
 /**

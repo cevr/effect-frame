@@ -23,7 +23,6 @@ export const defaultOut = new URL("../dist/prerender", import.meta.url).pathname
 /** The one browser bundle every page loads, built from `client.tsx`. */
 export const bundleClient = Effect.gen(function* () {
   const result = yield* Effect.promise(() =>
-    // oxlint-disable-next-line effect/noGlobals -- Bun.build is the platform boundary.
     Bun.build({
       entrypoints: [new URL("./client.tsx", import.meta.url).pathname],
       target: "browser",

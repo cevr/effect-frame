@@ -1,4 +1,4 @@
-/* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noTestLifecycleHooks, effect/noTryCatch, no-await-in-loop -- this proof drives real WebKit and Chrome pages through Bun.WebView, over one Blog server the file shares. */
+/* oxlint-disable effect/noAsyncFunction, effect/noTestLifecycleHooks, effect/noTryCatch, no-await-in-loop -- this proof drives real WebKit and Chrome pages through Bun.WebView, over one Blog server the file shares. */
 /**
  * The island's first scripted heart, in real browsers: the real Blog
  * server, a build with the real client bundle, and a built post. The form's

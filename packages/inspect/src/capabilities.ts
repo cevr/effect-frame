@@ -1,4 +1,4 @@
-/* oxlint-disable effect/noNodeBuiltinImport, effect/noGlobals -- the state directory needs POSIX modes, owner checks, exclusive creation, and a PID liveness probe; node:fs and process are the platform APIs for them. */
+/* oxlint-disable effect/noNodeBuiltinImport -- the state directory needs POSIX modes, owner checks, exclusive creation, and a PID liveness probe; node:fs and process are the platform APIs for them. */
 /**
  * The gateway's state directory and capability files.
  *

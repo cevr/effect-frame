@@ -299,7 +299,7 @@ const samePost = (
 const postCheck = (label: string) =>
   check(label, (input) =>
     samePost(
-      // oxlint-disable-next-line effect/noAs, typescript/no-unsafe-type-assertion -- the test's shared recorder takes erased input; onLeave typed the real one.
+      // oxlint-disable-next-line effect/noAs -- the test's shared recorder takes erased input; onLeave typed the real one.
       input as Leave.LeaveInput<
         { readonly tenant: string; readonly postId: string },
         { readonly tab: string }

@@ -96,7 +96,7 @@ Apply groups (run one after the other in the worktree):
 | 7 docs + agent entry | D1, D2, D3, D4, D5, D7, D11, D12, D13, D15, G5, G9, G10 |
 | 8 EGW | adopt every renamed/added API in `bible-tools/apps/egw-search` |
 
-Pass 2 candidates already known: compile or export-check JSDoc `@example` blocks and `.changeset/*.md` code (counsel C1); A12, P5/P6 (a conditional that hosts a view, remount on key), P15 (debounced input marks results stale), Foldkit `Stale` on failed refresh, per-field form issues.
+Pass 2 candidates already known: one subscription per Source within a mount, so a list and a sibling binding of the same Source paint in one flush (today `tracker.track` runs one fiber per binding; CI caught `#open` ahead of its `For` row — f476010 made the tests settle on the whole state; owner decision, the design makes no such promise); compile or export-check JSDoc `@example` blocks and `.changeset/*.md` code (counsel C1); A12, P5/P6 (a conditional that hosts a view, remount on key), P15 (debounced input marks results stale), Foldkit `Stale` on failed refresh, per-field form issues.
 
 More pass 2 candidates, found while applying pass 1:
 

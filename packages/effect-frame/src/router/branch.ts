@@ -584,6 +584,11 @@ export interface SegmentOptions<
    * declares none.
    */
   readonly params?: P;
+  /**
+   * Decodes this segment's search. `Route.search(struct)` names its keys,
+   * and so does a codec whose encoded side is a fixed-key struct. Any other
+   * codec over `SearchRecord` is opaque and declares `searchKeys`.
+   */
   readonly search?: S;
   /** Encoded search keys for an opaque codec such as a custom SearchRecord. */
   readonly searchKeys?: ReadonlyArray<string>;

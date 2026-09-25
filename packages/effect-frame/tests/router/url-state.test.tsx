@@ -408,6 +408,26 @@ const missingOpaqueKeys = Route.client(
   Route.leaf(missingOpaqueKeysSegment, MissingOpaqueKeys),
 );
 
+/** `Route.search` then `.annotate`: a new Schema value, with the same keys. */
+const TitledCountSearch = Route.search(
+  Schema.Struct({ count: Schema.FiniteFromString.pipe(Route.withDefault(0)) }).pipe(
+    Schema.encodeKeys({ count: "c" }),
+  ),
+).annotate({ title: "Count" });
+let titledState: Option.Option<UrlState.State<(typeof TitledCountSearch)["Type"]>> = Option.none();
+const TitledCounter = (_props: Route.RouteProps<{}, {}>) =>
+  Effect.gen(function* () {
+    const state = yield* UrlState.make(TitledCountSearch);
+    titledState = Option.some(state);
+    return <p id="titled">{View.bind(state.state, (value) => String(value.count))}</p>;
+  });
+const titledSegment = Route.segment("titled", {
+  path: "/titled",
+  params: Nothing,
+  search: Nothing,
+});
+const titled = Route.client("titled", Route.leaf(titledSegment, TitledCounter));
+
 const NotFound = (props: { readonly url: Source<URL> }) =>
   Effect.succeed(<p id="missing">{View.bind(props.url, (url) => url.pathname)}</p>);
 
@@ -675,6 +695,27 @@ describe("UrlState", () => {
       );
       expect(Exit.isFailure(routeCollisionResult)).toBe(true);
       expect(Exit.isFailure(viewCollisionResult)).toBe(true);
+    }),
+  );
+
+  it.scoped("an annotated Route.search keeps its keys, on a segment and in UrlState", () =>
+    Effect.gen(function* () {
+      const annotatedSegment = Route.segment("annotated", {
+        path: "/annotated",
+        params: Nothing,
+        search: TitledCountSearch,
+      });
+      expect(annotatedSegment.searchKeys).toEqual({ known: true, keys: ["c"] });
+      expect(annotatedSegment.href({}, { count: 3 })).toBe("/annotated?c=3");
+
+      const { root, location, page } = yield* startWith("http://app.test/titled?c=1", [titled]);
+      expect(root.querySelector("#titled")?.textContent).toBe("1");
+      const state = Option.getOrThrow(titledState);
+      yield* page.act(state.replace({ count: 2 }), {
+        label: "annotated state update",
+        until: (actualRoot) => textAt(actualRoot, "#titled") === "2",
+      });
+      expect(location.history).toEqual(["replace /titled?c=2"]);
     }),
   );
 

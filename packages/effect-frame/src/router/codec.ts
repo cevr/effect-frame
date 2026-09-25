@@ -246,21 +246,43 @@ export const withDefault =
     );
   };
 
-interface SearchField {
-  readonly decodedName: string;
-  readonly name: string;
-  readonly array: boolean;
-}
+const SearchField = Schema.Struct({
+  decodedName: Schema.String,
+  name: Schema.String,
+  array: Schema.Boolean,
+});
+type SearchField = typeof SearchField.Type;
 
-const searchKeyOrders = new WeakMap<object, ReadonlyArray<string>>();
-const searchFieldDefinitions = new WeakMap<object, ReadonlyArray<SearchField>>();
+/**
+ * The fields `Route.search` read from its struct, as an annotation on the
+ * codec it returns. An annotation is Schema metadata: `.annotate()` makes a
+ * new Schema value and keeps it. The keys and their print order derive
+ * from it.
+ */
+const SearchFields = Schema.TaggedStruct("SearchFields", { fields: Schema.Array(SearchField) });
+type SearchFields = typeof SearchFields.Type;
+
+const searchFieldsKey = "effect-frame/router/searchFields";
+
+const isSearchFields = Schema.is(SearchFields);
+
+/** The fields of a `Route.search` codec. None: an opaque codec. */
+const searchFieldsOf = (schema: SearchCodec): Option.Option<ReadonlyArray<SearchField>> =>
+  Option.map(
+    Option.filter(
+      Option.flatMap(Option.fromNullishOr(schema.ast.annotations), (annotations) =>
+        Option.fromNullishOr(annotations[searchFieldsKey]),
+      ),
+      isSearchFields,
+    ),
+    (found) => found.fields,
+  );
+
 /** Encoded search keys owned by one route or URL-state codec. */
 export interface SearchKeyInfo {
   readonly known: boolean;
   readonly keys: ReadonlyArray<string>;
 }
-
-const searchKeyDefinitions = new WeakMap<object, SearchKeyInfo>();
 type SearchEncodedValue = string | ReadonlyArray<string> | number | boolean;
 type SearchEncodedObject = Partial<Record<string, SearchEncodedValue>>;
 
@@ -296,22 +318,13 @@ export const search = <S extends Schema.ConstraintCodec<object, SearchEncodedObj
   schema: S,
 ): Schema.Codec<S["Type"], SearchRecord> => {
   const fields = searchFields(schema);
-  const result = SearchRecord.pipe(
+  const annotation: SearchFields = { _tag: "SearchFields", fields };
+  return SearchRecord.pipe(
     Schema.decodeTo(schema, {
       decode: SchemaGetter.transform((record) => decodeFields(fields, record)),
       encode: SchemaGetter.transform((value) => encodeFields(fields, value)),
     }),
-  );
-  searchKeyOrders.set(
-    result,
-    fields.map((field) => field.name),
-  );
-  searchFieldDefinitions.set(result, fields);
-  searchKeyDefinitions.set(result, {
-    known: true,
-    keys: fields.map((field) => field.name),
-  });
-  return result;
+  ).annotate({ [searchFieldsKey]: annotation });
 };
 
 const isStringEncodedAst = (ast: SchemaAST.AST): boolean => {
@@ -714,7 +727,7 @@ export const address = <Params, Search extends SearchCodec>(
         const retainedRecord = retainedSearchRecord(
           currentRecord,
           callerRecord,
-          Option.fromNullishOr(searchFieldDefinitions.get(spec.search)),
+          searchFieldsOf(spec.search),
           callerKeys(searchValue),
           keys,
         );
@@ -763,29 +776,30 @@ const declaredSearchKeys = (
   return { known: false, keys: [] };
 };
 
-const inferredSearchKeys = (schema: SearchCodec): Option.Option<ReadonlyArray<string>> => {
-  const registered = Option.fromNullishOr(searchKeyDefinitions.get(schema));
-  if (Option.isSome(registered)) {
-    return Option.some(registered.value.keys);
-  }
-  const ast = Schema.toEncoded(schema).ast;
+/**
+ * The encoded keys a codec names itself, in print order, by one of two
+ * rules. A `Route.search` codec names them in its fields annotation. A
+ * codec whose encoded side is a struct with fixed keys (`Schema.Struct({})`)
+ * names them as that struct's properties. Any other codec is opaque (None):
+ * it declares `searchKeys`.
+ */
+const inferredSearchKeys = (schema: SearchCodec): Option.Option<ReadonlyArray<string>> =>
+  Option.orElse(
+    Option.map(searchFieldsOf(schema), (fields) => fields.map((field) => field.name)),
+    () => structKeys(Schema.toEncoded(schema).ast),
+  );
+
+/** The property names of a fixed-key struct. None: any other shape. */
+const structKeys = (ast: SchemaAST.AST): Option.Option<ReadonlyArray<string>> => {
   if (ast._tag !== "Objects" || ast.indexSignatures.length > 0) {
     return Option.none();
   }
   return Option.some(ast.propertySignatures.map((property) => String(property.name)));
 };
 
-const encodedKeys = (schema: SearchCodec): ReadonlyArray<string> => {
-  const registered = Option.fromNullishOr(searchKeyOrders.get(schema));
-  if (Option.isSome(registered)) {
-    return registered.value;
-  }
-  const ast = Schema.toEncoded(schema).ast;
-  if (ast._tag !== "Objects" || ast.indexSignatures.length > 0) {
-    return [];
-  }
-  return ast.propertySignatures.map((property) => String(property.name));
-};
+/** The print order of a codec's keys. An opaque codec prints in its own order. */
+const encodedKeys = (schema: SearchCodec): ReadonlyArray<string> =>
+  Option.getOrElse(inferredSearchKeys(schema), () => []);
 
 const sameKeySet = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean => {
   if (left.length !== right.length) {

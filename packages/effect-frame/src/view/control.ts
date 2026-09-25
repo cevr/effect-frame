@@ -70,12 +70,13 @@ export const list = <Item, R>(
  * form that prints its actor's address, while the view around it stays.
  *
  * ```ts
- * const body = yield* View.keyed(
- *   props.data.notes,
- *   (notes) => notes.key,
- *   (notes) => Effect.flatMap(notes.get, (current) => ListBody({ notes: current })),
+ * // `props.data.counter.ref` is the Source of the actor the route holds now.
+ * const controls = yield* View.keyed(
+ *   props.data.counter.ref,
+ *   (ref) => ref.key.name,
+ *   (ref) => Effect.flatMap(ref.get, (current) => Controls({ counter: current })),
  * );
- * return <article>{body}</article>;
+ * return <section>{controls}</section>;
  * ```
  */
 export const keyed = <Item, R>(

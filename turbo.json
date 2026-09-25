@@ -10,6 +10,8 @@
         "src/**/*.tsx",
         "tests/**/*.ts",
         "tests/**/*.tsx",
+        "examples/**/*.ts",
+        "examples/**/*.tsx",
         "tsconfig.json",
         "../../tsconfig.json",
         "package.json"
@@ -41,7 +43,15 @@
       "outputs": ["dist/**"]
     },
     "test": {
-      "inputs": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "tests/**/*.tsx", "package.json"],
+      "inputs": [
+        "src/**/*.ts",
+        "src/**/*.tsx",
+        "tests/**/*.ts",
+        "tests/**/*.tsx",
+        "examples/**/*.ts",
+        "examples/**/*.tsx",
+        "package.json"
+      ],
       "outputs": [],
       "cache": false
     },

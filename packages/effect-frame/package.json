@@ -96,11 +96,12 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "bun --bun tsdown",
-    "test": "bun run test:actor && bun run test:view && bun run test:router && bun run test:inspection",
+    "test": "bun run test:actor && bun run test:view && bun run test:router && bun run test:inspection && bun run test:examples",
     "test:actor": "bun test --conditions=source tests/actor",
     "test:view": "bun test --conditions=source tests/view",
     "test:router": "bun test --conditions=source tests/router",
-    "test:inspection": "bun test --conditions=source tests/inspection"
+    "test:inspection": "bun test --conditions=source tests/inspection",
+    "test:examples": "bun test --conditions=source tests/examples"
   },
   "dependencies": {
     "@solidjs/signals": "2.0.0-rc.8",

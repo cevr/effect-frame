@@ -1,13 +1,12 @@
-import { Effect, Option, Queue, Schema, Stream } from "effect";
+import { Effect, Queue, Schema, Stream } from "effect";
 import type { Scope } from "effect";
-import type { LocationService } from "./router.js";
 import type { Landing } from "./landing.js";
 
 /**
  * PRIVATE. A platform traversal (Back or Forward) that the
  * router sees before the platform commits it. A `Location` may carry a
- * source of them beside its `pops`, through this registry, without a change
- * to the public `LocationService`. See `docs/design/route-leave.md`.
+ * source of them beside its `pops`, in its capabilities (`landing.ts`),
+ * whose key is not public. See `docs/design/route-leave.md`.
  *
  * `pops` stays the committed path: a URL the platform already moved to. A
  * traversal is the earlier path. Its `protection` says what the platform
@@ -123,14 +122,3 @@ export const makeSource: Effect.Effect<TraversalSource> = Effect.gen(function* (
   const source: TraversalSource = { active: () => consuming, offer, consume };
   return source;
 });
-
-const sources = new WeakMap<LocationService, TraversalSource>();
-
-/** Attach a traversal source to a location service. */
-export const register = (location: LocationService, source: TraversalSource): void => {
-  sources.set(location, source);
-};
-
-/** The traversals a location reports before commit, if it can. */
-export const read = (location: LocationService): Option.Option<TraversalSource> =>
-  Option.fromNullishOr(sources.get(location));

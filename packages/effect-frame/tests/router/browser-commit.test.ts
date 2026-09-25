@@ -13,8 +13,8 @@ import { Effect, Option, Queue, Stream } from "effect";
 import type { Scope } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { browserCommit } from "../../src/router/browser-commit.js";
-import * as Traversal from "../../src/router/traversal.js";
-import { readSurface } from "../../src/router/landing.js";
+import type * as Traversal from "../../src/router/traversal.js";
+import { surfaceOf, traversalsOf } from "../../src/router/landing.js";
 import type { Landing } from "../../src/router/landing.js";
 import { Restore } from "../../src/router/navigation-behavior.js";
 
@@ -95,7 +95,7 @@ const adapter = (precommit: boolean, consume: boolean) =>
     const location = yield* browserCommit("detect");
     const traversals = yield* Queue.unbounded<Traversal.Traversal>();
     const pops = yield* Queue.unbounded<URL>();
-    const source = yield* Option.match(Traversal.read(location), {
+    const source = yield* Option.match(traversalsOf(location), {
       onNone: () => Effect.die("no traversal source"),
       onSome: Effect.succeed,
     });
@@ -234,7 +234,7 @@ describe("private browser commit adapter", () => {
     Effect.gen(function* () {
       const { location, dispatch } = yield* adapter(true, false);
       const events = yield* platformPush(dispatch);
-      const surface = yield* Option.match(readSurface(location), {
+      const surface = yield* Option.match(surfaceOf(location), {
         onNone: () => Effect.die("no surface"),
         onSome: Effect.succeed,
       });
@@ -284,7 +284,7 @@ describe("private browser commit adapter", () => {
         } else {
           fake.listeners.unshift(other);
         }
-        const surface = yield* Option.match(readSurface(location), {
+        const surface = yield* Option.match(surfaceOf(location), {
           onNone: () => Effect.die("no surface"),
           onSome: Effect.succeed,
         });

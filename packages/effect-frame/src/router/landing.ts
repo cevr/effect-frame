@@ -2,6 +2,7 @@ import type { Effect } from "effect";
 import { Option } from "effect";
 import type { LocationService } from "./router.js";
 import type { NavigationBehavior } from "./navigation-behavior.js";
+import type { TraversalSource } from "./traversal.js";
 
 /**
  * PRIVATE (#31). What passes between a mounted route, the router, and the
@@ -74,14 +75,36 @@ export interface Surface {
   readonly pop: (landing: Option.Option<Landing>) => Effect.Effect<void>;
 }
 
-const surfaces = new WeakMap<LocationService, Surface>();
+/**
+ * Holds what a `Location` offers the router beyond the public seam. The
+ * symbol is not public: the surface and the traversal protocol stay
+ * PRIVATE. A field on the value, so a spread of a Location keeps it.
+ */
+export const LocationCapabilities: unique symbol = Symbol.for(
+  "effect-frame/router/LocationCapabilities",
+);
 
-/** Attach a surface to a location service, and return the service. */
-export const registerSurface = (location: LocationService, surface: Surface): LocationService => {
-  surfaces.set(location, surface);
-  return location;
-};
+/** What a `Location` can do beyond `current`, `push`, `replace`, and `pops`. */
+export interface Capabilities {
+  /** Places the viewport and focus. None: a Location with nothing to place. */
+  readonly surface: Option.Option<Surface>;
+  /** Back and Forward, before the platform commits them. None: pops only. */
+  readonly traversals: Option.Option<TraversalSource>;
+}
+
+/** `location` with `capabilities` in place of any it had. */
+export const withCapabilities = (
+  location: LocationService,
+  capabilities: Capabilities,
+): LocationService => ({ ...location, [LocationCapabilities]: capabilities });
+
+const capabilitiesOf = (location: LocationService): Option.Option<Capabilities> =>
+  Option.fromNullishOr(location[LocationCapabilities]);
 
 /** The surface of a location, when it has one. */
-export const readSurface = (location: LocationService): Option.Option<Surface> =>
-  Option.fromNullishOr(surfaces.get(location));
+export const surfaceOf = (location: LocationService): Option.Option<Surface> =>
+  Option.flatMap(capabilitiesOf(location), (capabilities) => capabilities.surface);
+
+/** The traversals a location reports before commit, if it can. */
+export const traversalsOf = (location: LocationService): Option.Option<TraversalSource> =>
+  Option.flatMap(capabilitiesOf(location), (capabilities) => capabilities.traversals);

@@ -33,9 +33,15 @@ import { Committed, Stayed, Unchanged, register as registerReceipts } from "./re
 import type { LeaveKind, LeaveVerdict, Question } from "./leave-registry.js";
 import { Leave } from "./leave-registry.js";
 import type { Traversal } from "./traversal.js";
-import { read as readTraversals } from "./traversal.js";
-import type { Landing, Shell, WriteKind, Written } from "./landing.js";
-import { readSurface } from "./landing.js";
+import type {
+  Capabilities,
+  Landing,
+  Shell,
+  WriteKind,
+  Written,
+  LocationCapabilities,
+} from "./landing.js";
+import { surfaceOf, traversalsOf } from "./landing.js";
 import * as LeafRoot from "./leaf-root.js";
 import type { NavigationBehavior } from "./navigation-behavior.js";
 
@@ -102,6 +108,12 @@ export interface LocationService {
   readonly replace: (url: URL) => Effect.Effect<void>;
   /** URLs the platform moves to on its own: back and forward. */
   readonly pops: Stream.Stream<URL>;
+  /**
+   * What the browser Locations add: a surface that places the viewport and
+   * focus, and Back and Forward before they commit. Absent on a memory
+   * Location and a server render. Its key is not public.
+   */
+  readonly [LocationCapabilities]?: Capabilities;
 }
 
 export class Location extends Context.Service<Location, LocationService>()(
@@ -337,7 +349,7 @@ export const mount: <R, HostNode, N = R>(
     routeName: fallback.name,
   });
   const requests = yield* Queue.unbounded<Request>();
-  const surface = readSurface(location);
+  const surface = surfaceOf(location);
   const defaultBehavior = options.landing;
   const traversalReadLimit = options.traversalReadLimit;
   const drawing = drawingOf(options.host);
@@ -1079,7 +1091,7 @@ export const mount: <R, HostNode, N = R>(
   yield* Effect.forkScoped(Stream.runForEach(location.pops, () => enqueuePop()));
   // The one consumer of this Location's traversals, for this router's
   // lifetime. Its close lets through every traversal still held.
-  yield* Option.match(readTraversals(location), {
+  yield* Option.match(traversalsOf(location), {
     onNone: () => Effect.void,
     onSome: (source) =>
       Effect.flatMap(source.consume, (traversals) =>

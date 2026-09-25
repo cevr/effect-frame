@@ -1,6 +1,6 @@
 import { Effect, Option, Queue, Result, Stream } from "effect";
 import type { Landing, Surface, WriteKind, Written } from "./landing.js";
-import { registerSurface } from "./landing.js";
+import { withCapabilities } from "./landing.js";
 import type { LocationService, RouterService } from "./router.js";
 
 /**
@@ -174,7 +174,7 @@ export const historySurface: Surface = {
  * Navigation API, and for leave checks on Back and Forward, use
  * `browserNavigation`, which falls back to this where the API is absent.
  */
-export const browserLocation: LocationService = /* @__PURE__ */ registerSurface(
+export const browserLocation: LocationService = /* @__PURE__ */ withCapabilities(
   {
     current: /* @__PURE__ */ Effect.sync(() => new URL(window.location.href)),
     push: (url) =>
@@ -190,7 +190,10 @@ export const browserLocation: LocationService = /* @__PURE__ */ registerSurface(
       Stream.map(Stream.fromEventListener(window, "popstate"), () => new URL(window.location.href)),
     ),
   },
-  historySurface,
+  {
+    surface: /* @__PURE__ */ Option.some(historySurface),
+    traversals: /* @__PURE__ */ Option.none(),
+  },
 );
 
 /**

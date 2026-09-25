@@ -9,7 +9,7 @@ import { ViewTest } from "effect-frame/view/testing";
 import { Effect, Option, Ref, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import type { Landing, Surface, WriteKind } from "../../src/router/landing.js";
-import { registerSurface } from "../../src/router/landing.js";
+import { withCapabilities } from "../../src/router/landing.js";
 
 /**
  * #31 landing order, without a browser. A Location with a surface records
@@ -89,7 +89,13 @@ const recordingLocation = (initial: string) =>
       write: (kind, url) => Effect.as(set(kind)(url), { land: placed(url) }),
       pop: () => Effect.void,
     };
-    return { service: registerSurface(service, surface), log };
+    return {
+      service: withCapabilities(service, {
+        surface: Option.some(surface),
+        traversals: Option.none(),
+      }),
+      log,
+    };
   });
 
 /** Poll a condition on the real clock. The test's own timeout bounds it. */

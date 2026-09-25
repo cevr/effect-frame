@@ -25,6 +25,7 @@ import * as LeaveBranch from "../../src/router/leave-branch.js";
 import * as Leave from "../../src/router/leave.js";
 import * as Receipt from "../../src/router/receipt.js";
 import * as Traversal from "../../src/router/traversal.js";
+import { withCapabilities } from "../../src/router/landing.js";
 import {
   Cause,
   Context,
@@ -424,13 +425,15 @@ const makeLocation = (initial: string): Effect.Effect<FakeLocation> =>
           history.push(`${kind} ${url.pathname}${url.search}`);
         }),
       );
-    const service: LocationService = {
-      current: Ref.get(current),
-      push: write("push"),
-      replace: write("replace"),
-      pops: Stream.fromQueue(pops),
-    };
-    Traversal.register(service, traversals);
+    const service = withCapabilities(
+      {
+        current: Ref.get(current),
+        push: write("push"),
+        replace: write("replace"),
+        pops: Stream.fromQueue(pops),
+      },
+      { surface: Option.none(), traversals: Option.some(traversals) },
+    );
     return { service, history, current, pops, traversals };
   });
 

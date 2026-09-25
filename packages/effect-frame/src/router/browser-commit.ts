@@ -1,7 +1,7 @@
 import { Deferred, Effect, Exit, Option, Result, Stream } from "effect";
 import type { Scope } from "effect";
 import type { Landing, WriteKind, Written } from "./landing.js";
-import { registerSurface } from "./landing.js";
+import { withCapabilities } from "./landing.js";
 import {
   browserLocation,
   historyWritten,
@@ -11,7 +11,7 @@ import {
 } from "./navigation.js";
 import type { LocationService } from "./router.js";
 import type { Traversal } from "./traversal.js";
-import { makeSource, register as registerTraversals } from "./traversal.js";
+import { makeSource } from "./traversal.js";
 
 /**
  * The browser `Location` with commit control over Back and Forward
@@ -475,8 +475,10 @@ export const browserCommit = /* @__PURE__ */ Effect.fn("Router.browserCommit")(f
       },
     ),
   };
-  registerTraversals(service, source);
-  return registerSurface(service, { write, pop });
+  return withCapabilities(service, {
+    surface: Option.some({ write, pop }),
+    traversals: Option.some(source),
+  });
 });
 
 /**

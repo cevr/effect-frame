@@ -3,6 +3,7 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import {
+  Actor,
   ActorTransport,
   Behavior,
   Policies,
@@ -11,7 +12,6 @@ import {
   contract,
   implementQuery,
   implementTransparent,
-  ref,
   Source,
 } from "effect-frame/actor";
 import type { TransportService } from "effect-frame/actor";
@@ -69,7 +69,7 @@ const RoomLive = implementTransparent(Room, {
 /** The driven view: a count, and a button whose handler runs on the server. */
 const RoomView = (params: { readonly room: string }) =>
   Effect.gen(function* () {
-    const room = yield* Effect.orDie(ref(Room, params.room));
+    const room = yield* Effect.orDie(Actor.remote(Room, params.room));
     return (
       <div>
         <p id="count">{View.bind(room.state, (count) => String(count))}</p>
@@ -114,7 +114,7 @@ const LineupLive = implementTransparent(Lineup, {
 
 const LineupView = (params: { readonly room: string }) =>
   Effect.gen(function* () {
-    const lineup = yield* Effect.orDie(ref(Lineup, params.room));
+    const lineup = yield* Effect.orDie(Actor.remote(Lineup, params.room));
     return (
       <ul id="lineup">
         <For each={Source.select(lineup.state, (items) => items)} keyBy={(item) => item}>
@@ -345,7 +345,7 @@ describe("a driven route (#36)", () => {
         const host = yield* sharedHost(title);
         const transport = Context.get(host, ActorTransport);
         const server = yield* sideOver(transport);
-        const writer = yield* ref(Room, "r1").pipe(Effect.provideContext(server));
+        const writer = yield* Actor.remote(Room, "r1").pipe(Effect.provideContext(server));
         yield* writer.call({ _tag: "Add", amount: 2 }, { timeout: "1 second" });
 
         // Only the shell has arrived: the layout's query is still held.
@@ -414,8 +414,8 @@ describe("a driven route (#36)", () => {
         const host = yield* sharedHost(yield* Deferred.make<void>());
         const transport = Context.get(host, ActorTransport);
         const server = yield* sideOver(transport);
-        const first = yield* ref(Room, "a").pipe(Effect.provideContext(server));
-        const second = yield* ref(Room, "b").pipe(Effect.provideContext(server));
+        const first = yield* Actor.remote(Room, "a").pipe(Effect.provideContext(server));
+        const second = yield* Actor.remote(Room, "b").pipe(Effect.provideContext(server));
         yield* first.call({ _tag: "Add", amount: 1 }, { timeout: "1 second" });
         yield* second.call({ _tag: "Add", amount: 20 }, { timeout: "1 second" });
 
@@ -476,7 +476,7 @@ describe("a driven route (#36)", () => {
       const host = yield* sharedHost(yield* Deferred.make<void>());
       const transport = Context.get(host, ActorTransport);
       const server = yield* sideOver(transport);
-      const writer = yield* ref(Room, "s").pipe(Effect.provideContext(server));
+      const writer = yield* Actor.remote(Room, "s").pipe(Effect.provideContext(server));
       yield* writer.call({ _tag: "Add", amount: 5 }, { timeout: "1 second" });
       const url = new URL(`${origin}/room/s`);
       const html = yield* wholeDocument([flat], url).pipe(Effect.provideContext(server));
@@ -512,7 +512,7 @@ describe("a driven route (#36)", () => {
       yield* eventually("the wire", () => log.connects.length === 1);
 
       // The server moves the first item to the end: the adopted node moves.
-      const writer = yield* ref(Lineup, "l1").pipe(Effect.provideContext(server));
+      const writer = yield* Actor.remote(Lineup, "l1").pipe(Effect.provideContext(server));
       yield* writer.call({ _tag: "Rotate" }, { timeout: "1 second" });
       yield* eventually("the move", () => items().join() === "b,c,a");
       expect(document.querySelectorAll("#lineup li")[2]).toBe(first);
@@ -545,8 +545,8 @@ describe("a driven route (#36)", () => {
         const host = yield* sharedHost(yield* Deferred.make<void>());
         const transport = Context.get(host, ActorTransport);
         const server = yield* sideOver(transport);
-        const first = yield* ref(Room, "h1").pipe(Effect.provideContext(server));
-        const second = yield* ref(Room, "h2").pipe(Effect.provideContext(server));
+        const first = yield* Actor.remote(Room, "h1").pipe(Effect.provideContext(server));
+        const second = yield* Actor.remote(Room, "h2").pipe(Effect.provideContext(server));
         yield* first.call({ _tag: "Add", amount: 1 }, { timeout: "1 second" });
         yield* second.call({ _tag: "Add", amount: 30 }, { timeout: "1 second" });
         const url = new URL(`${origin}/room/h1`);
@@ -659,7 +659,7 @@ describe("Route.driven forbids a client-only view (#18)", () => {
 
 /** A view whose read can fail: its leaf names an `errored` view, as any leaf. */
 const FailingRoom = (params: { readonly room: string }) =>
-  Effect.map(ref(Room, params.room), () => <p>room</p>);
+  Effect.map(Actor.remote(Room, params.room), () => <p>room</p>);
 
 export const recovered = Route.leaf(
   roomSegment,

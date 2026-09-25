@@ -1,5 +1,4 @@
-import { implementQuery } from "effect-frame/actor";
-import { ref } from "effect-frame/actor/client";
+import { Actor, implementQuery } from "effect-frame/actor";
 import { Context, Effect, Option } from "effect";
 import type { Duration } from "effect";
 import type { TenantId } from "./contract.js";
@@ -15,7 +14,7 @@ import { Funnel, OrderDetail, OrderList, Revenue, Slowest, TenantInfo, within } 
  */
 
 const ordersOf = (tenant: TenantId) =>
-  Effect.flatMap(ref(Orders, { tenant }), (book) =>
+  Effect.flatMap(Actor.remote(Orders, { tenant }), (book) =>
     Effect.map(book.state.get, (snapshot) => snapshot.orders),
   ).pipe(Effect.scoped);
 
@@ -31,7 +30,7 @@ export const TenantInfoLive = implementQuery(TenantInfo, {
       if (Option.isNone(found)) {
         return yield* Effect.fail(`no tenant ${tenant}`);
       }
-      const alerts = yield* ref(Alerts, { tenant });
+      const alerts = yield* Actor.remote(Alerts, { tenant });
       const snapshot = yield* alerts.state.get;
       return { ...found.value, alerts: snapshot.items.filter((item) => !item.acked).length };
     }).pipe(Effect.scoped),

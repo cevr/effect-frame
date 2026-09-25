@@ -3,6 +3,7 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import {
+  Actor,
   ActorHost,
   Behavior,
   CommandId,
@@ -10,7 +11,7 @@ import {
   Policies,
   Policy,
 } from "effect-frame/actor";
-import { contract, ref, resumeCodec } from "effect-frame/actor/client";
+import { contract, resumeCodec } from "effect-frame/actor/client";
 import type { Applied, KeyOf, SnapshotOf } from "effect-frame/actor/client";
 import { Dom, Html, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -69,7 +70,7 @@ interface PageProps {
 
 const NotePage = (props: PageProps) =>
   Effect.gen(function* () {
-    const note = yield* ref(Note, props.key, { resume: props.resume });
+    const note = yield* Actor.remote(Note, props.key, { resume: props.resume });
     yield* Effect.addFinalizer(() => props.onClose);
     return (
       <article>
@@ -81,7 +82,7 @@ const NotePage = (props: PageProps) =>
 
 const server = (key: string) =>
   Effect.gen(function* () {
-    const note = yield* ref(Note, key);
+    const note = yield* Actor.remote(Note, key);
     return { note, key };
   });
 
@@ -94,7 +95,7 @@ const renderPage = (key: string) =>
       resume: Option.none(),
       onClose: Deferred.succeed(closed, true).pipe(Effect.asVoid),
     });
-    const note = yield* ref(Note, key);
+    const note = yield* Actor.remote(Note, key);
     const snapshot = yield* note.applied.get;
     const payload = yield* Effect.orDie(Schema.encodeEffect(Resume)(snapshot));
     const script = Html.jsonScript("note", payload);

@@ -2,7 +2,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { CommandId, QueryCache, ref } from "effect-frame/actor/client";
+import { Actor, CommandId, QueryCache } from "effect-frame/actor/client";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { Notes } from "../src/contract.js";
@@ -65,7 +65,7 @@ describe("the queries a command refreshes", () => {
       yield* settle(Effect.sync(() => textOf(app.root, "#scratch-length") === "0"));
       expect(yield* app.run(activeKeys)).toEqual([]);
 
-      const notes = yield* app.run(ref(Notes, { tenant: "demo", list: "inbox" }));
+      const notes = yield* app.run(Actor.remote(Notes, { tenant: "demo", list: "inbox" }));
       yield* notes.call(
         { _tag: "Add", id: "n1", text: "from scratch" },
         { commandId: id("c1"), timeout: "2 seconds" },

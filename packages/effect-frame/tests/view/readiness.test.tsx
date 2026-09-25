@@ -3,6 +3,7 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import {
+  Actor,
   QueryCache,
   QueryFailure,
   implementQuery,
@@ -11,7 +12,7 @@ import {
   Policy,
 } from "effect-frame/actor";
 import type { QueryEntry } from "effect-frame/actor";
-import { Behavior, QueryState, Value, spawn, Source } from "effect-frame/actor/client";
+import { Behavior, QueryState, Value, Source } from "effect-frame/actor/client";
 import { QueryTest } from "effect-frame/actor/testing";
 import { Await, Dom, Html, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -809,7 +810,7 @@ describe("readiness through context", () => {
                 cache.open(ReadinessQuery, { id: "shown" }),
               );
               const value = yield* View.ready(entry.state, "");
-              const revealed = yield* spawn(Behavior.value(false));
+              const revealed = yield* Actor.local(Behavior.value(false));
               yield* Deferred.succeed(reveal, Effect.asVoid(revealed.send(Value.Set(true))));
               const late = yield* View.list({
                 each: Source.select(revealed.state, (open): ReadonlyArray<string> =>

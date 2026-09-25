@@ -1,4 +1,4 @@
-import { Behavior, Source, Value, spawn } from "effect-frame/actor/client";
+import { Actor, Behavior, Source, Value } from "effect-frame/actor/client";
 import { Link, link } from "effect-frame/router";
 import type { Route } from "effect-frame/router";
 import { For, View } from "effect-frame/view";
@@ -164,7 +164,7 @@ export const OverviewView = (props: OverviewProps) =>
 
     // The funnel tab. Its card is a row that exists only once revealed, so
     // its `ready` registers with the shell's scope after first paint.
-    const revealed = yield* spawn(Behavior.value(false));
+    const revealed = yield* Actor.local(Behavior.value(false));
     const funnel = yield* View.list({
       each: Source.select(revealed.state, (open): ReadonlyArray<string> => {
         if (open) {

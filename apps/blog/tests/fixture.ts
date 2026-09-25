@@ -1,7 +1,7 @@
 import { platformFetch } from "./dom-setup.js";
 
 import type { QueryKey, TransportService } from "effect-frame/actor/client";
-import { ActorTransport, CommandId, ref, QueryCache } from "effect-frame/actor/client";
+import { Actor, ActorTransport, CommandId, QueryCache } from "effect-frame/actor/client";
 import { Location } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
 import * as Prerender from "effect-frame/router/prerender";
@@ -390,7 +390,7 @@ const commandId = Schema.decodeSync(CommandId);
 /** One heart on `slug`, committed before this returns. */
 export const heart = (store: Context.Context<ActorTransport>, slug: Slug, id: string) =>
   Effect.gen(function* () {
-    const reactions = yield* ref(Reactions, { slug });
+    const reactions = yield* Actor.remote(Reactions, { slug });
     return yield* reactions.call(
       { _tag: "Heart", id },
       { commandId: commandId(`heart-${id}`), timeout: "2 seconds" },

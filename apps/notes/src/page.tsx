@@ -1,5 +1,5 @@
 import type { RemoteActorRef } from "effect-frame/actor/client";
-import { Behavior, Source, Value, spawn } from "effect-frame/actor/client";
+import { Actor, Behavior, Source, Value } from "effect-frame/actor/client";
 import { Link, Router, link } from "effect-frame/router";
 import type { Route } from "effect-frame/router";
 import { For, View } from "effect-frame/view";
@@ -50,10 +50,10 @@ const ListBody = (props: BodyProps) =>
     const key = keyOf(props.name);
     // The route's reference predicts with the behavior (#19): an add shows at once.
     const notes = props.notes;
-    const draft = yield* spawn(Behavior.value(""));
+    const draft = yield* Actor.local(Behavior.value(""));
     const setDraft = writeDraft(draft);
     // The last send's state, as its handle reports it: Sent, Admitted, Applied.
-    const status = yield* spawn(Behavior.value("idle"));
+    const status = yield* Actor.local(Behavior.value("idle"));
     const scope = yield* Effect.scope;
     const follow = (state: Source<{ readonly _tag: string }>) =>
       Source.on(state, (current) => status.send(Value.Set(current._tag))).pipe(

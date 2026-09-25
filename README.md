@@ -91,12 +91,12 @@ client can import the actor's behavior and that behavior has `predict`.
 ```ts
 import { Effect, Option } from "effect";
 import { Behavior } from "effect-frame/actor";
-import { ref } from "effect-frame/actor/client";
+import { Actor } from "effect-frame/actor/client";
 
 const notes = Behavior.reducer({ initial: [], reduce: addNote });
 
 const program = Effect.gen(function* () {
-  const list = yield* ref(Notes, key, { resume: Option.none(), behavior: notes });
+  const list = yield* Actor.remote(Notes, key, { resume: Option.none(), behavior: notes });
   const handle = yield* list.send({ _tag: "Add", text: "hello" });
   // { revision: { _tag: "Provisional", base: 0, depth: 1 }, state }
   const shown = yield* list.displayed.get;

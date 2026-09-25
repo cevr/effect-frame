@@ -3,6 +3,7 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import {
+  Actor,
   ActorTransport,
   Behavior,
   Policies,
@@ -10,7 +11,6 @@ import {
   Streaming,
   contract,
   implementTransparent,
-  ref,
   QueryCache,
 } from "effect-frame/actor";
 import type { TransportService } from "effect-frame/actor";
@@ -208,7 +208,9 @@ describe("a route actor is seeded into the document (#37)", () => {
           const host = yield* sharedHost;
           const transport = Context.get(host, ActorTransport);
           const server = yield* sideOver(transport);
-          const writer = yield* ref(Counter, { id: "a" }).pipe(Effect.provideContext(server));
+          const writer = yield* Actor.remote(Counter, { id: "a" }).pipe(
+            Effect.provideContext(server),
+          );
           yield* writer.call({ _tag: "Add", amount: 3 }, { timeout: "1 second" });
           yield* writer.call({ _tag: "Add", amount: 4 }, { timeout: "1 second" });
 
@@ -250,7 +252,9 @@ describe("a route actor is seeded into the document (#37)", () => {
           const host = yield* sharedHost;
           const transport = Context.get(host, ActorTransport);
           const server = yield* sideOver(transport);
-          const writer = yield* ref(Counter, { id: "m" }).pipe(Effect.provideContext(server));
+          const writer = yield* Actor.remote(Counter, { id: "m" }).pipe(
+            Effect.provideContext(server),
+          );
           // The actor commits without pause while the document is drawn.
           yield* Effect.forkScoped(
             Effect.forever(
@@ -285,7 +289,7 @@ describe("a route actor is seeded into the document (#37)", () => {
       const host = yield* sharedHost;
       const transport = Context.get(host, ActorTransport);
       const server = yield* sideOver(transport);
-      const writer = yield* ref(Counter, { id: "t" }).pipe(Effect.provideContext(server));
+      const writer = yield* Actor.remote(Counter, { id: "t" }).pipe(Effect.provideContext(server));
       yield* writer.call({ _tag: "Add", amount: 4 }, { timeout: "1 second" });
       const url = new URL(`${origin}/counter/t/detail`);
       const html = yield* render([app], url).pipe(Effect.provideContext(server));
@@ -314,7 +318,7 @@ describe("a route actor is seeded into the document (#37)", () => {
         const app = Route.ssr("between", twiceBranch);
         const host = yield* sharedHost;
         const transport = Context.get(host, ActorTransport);
-        const writer = yield* ref(Counter, { id: "w" }).pipe(
+        const writer = yield* Actor.remote(Counter, { id: "w" }).pipe(
           Effect.provideContext(yield* sideOver(transport)),
         );
         yield* writer.call({ _tag: "Add", amount: 4 }, { timeout: "1 second" });
@@ -406,7 +410,7 @@ describe("a route actor is seeded into the document (#37)", () => {
       const host = yield* sharedHost;
       const transport = Context.get(host, ActorTransport);
       const server = yield* sideOver(transport);
-      const writer = yield* ref(Counter, { id: "z" }).pipe(Effect.provideContext(server));
+      const writer = yield* Actor.remote(Counter, { id: "z" }).pipe(Effect.provideContext(server));
       yield* writer.call({ _tag: "Add", amount: 2 }, { timeout: "1 second" });
       const url = new URL(`${origin}/counter/z`);
       const html = yield* render([Route.ssr("seeded", counterBranch)], url).pipe(
@@ -465,7 +469,7 @@ describe("a route actor is seeded into the document (#37)", () => {
       expect(sends).toHaveLength(1);
       yield* Deferred.succeed(gate, void 0);
       // The host committed it: another reference reads the same count.
-      const reader = yield* ref(Counter, { id: "p" }).pipe(Effect.provideContext(client));
+      const reader = yield* Actor.remote(Counter, { id: "p" }).pipe(Effect.provideContext(client));
       const committed = yield* Stream.runHead(
         Stream.filter(reader.state.changes, (count) => count === 1),
       ).pipe(Effect.timeout("2 seconds"));

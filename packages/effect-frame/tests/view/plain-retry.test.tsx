@@ -3,8 +3,8 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { HttpServer } from "effect-frame/actor";
-import { ActorTransport, Form, HttpTransport, ref } from "effect-frame/actor/client";
+import { Actor, HttpServer } from "effect-frame/actor";
+import { ActorTransport, Form, HttpTransport } from "effect-frame/actor/client";
 import type { DurableReceipt, IdentifiedCommandHandle } from "effect-frame/actor/client";
 import { Dom, Html, View } from "effect-frame/view";
 import { Context, Deferred, Effect, Fiber, Layer, Option, Ref, Stream } from "effect";
@@ -43,7 +43,7 @@ interface PageProps {
 /** The add form alone, with its scripted handle handed to the test. */
 const AddPage = (props: PageProps) =>
   Effect.gen(function* () {
-    const tasks = yield* ref(Tasks, board);
+    const tasks = yield* Actor.remote(Tasks, board);
     const add = yield* View.form({
       ref: tasks,
       contract: Tasks,
@@ -167,7 +167,7 @@ const fill = (html: string, typed: ReadonlyArray<[string, string]>): string =>
 /** The host's committed state once it reaches `revision`. */
 const committed = (served: Served, revision: number) =>
   Effect.scoped(
-    Effect.flatMap(ref(Tasks, board), (tasks) =>
+    Effect.flatMap(Actor.remote(Tasks, board), (tasks) =>
       Stream.runHead(
         Stream.filter(tasks.applied.changes, (applied) => applied.revision.value >= revision),
       ),

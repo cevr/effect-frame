@@ -2,7 +2,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Behavior, Value, modify, spawn, Source } from "effect-frame/actor";
+import { Actor, Behavior, Value, modify, Source } from "effect-frame/actor";
 import type { LocalActorRef, SetValue } from "effect-frame/actor";
 import { Dom, For, Match, Portal, Show, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -29,7 +29,7 @@ const pageMount = <Props, E, R>(root: Node, view: View.View<Props, E, R>, props:
 
 const Counter = (_props: NoProps) =>
   Effect.gen(function* () {
-    const count = yield* spawn(Behavior.value(0));
+    const count = yield* Actor.local(Behavior.value(0));
     return (
       <div>
         <span id="count">{View.bind(Source.select(count.state, (n) => String(n)))}</span>
@@ -118,7 +118,7 @@ const hasAt = (root: Node, selector: string): boolean => {
 /** A child asks for the capabilities itself; nothing passes them down. */
 const Child = (_props: NoProps) =>
   Effect.gen(function* () {
-    const label = yield* spawn(Behavior.value("child"));
+    const label = yield* Actor.local(Behavior.value("child"));
     return <em id="child">{View.bind(label.state)}</em>;
   });
 
@@ -272,7 +272,7 @@ describe("browser view", () => {
   it.scoped("a keyed list adds, removes, and reorders its rows", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
-      const tasks = yield* spawn(
+      const tasks = yield* Actor.local(
         Behavior.value<ReadonlyArray<Task>>([
           { id: "a", title: "alpha" },
           { id: "b", title: "beta" },
@@ -305,7 +305,7 @@ describe("browser view", () => {
   it.scoped("a keyed region runs its row again when the key changes, and only then", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
-      const task = yield* spawn(Behavior.value<Task>({ id: "a", title: "alpha" }));
+      const task = yield* Actor.local(Behavior.value<Task>({ id: "a", title: "alpha" }));
       const setups = yield* Ref.make<ReadonlyArray<string>>([]);
       const Region = (props: { readonly task: Source<Task> }) =>
         Effect.gen(function* () {
@@ -343,7 +343,7 @@ describe("browser view", () => {
   it.scoped("replacing an item under one key updates that row in place", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
-      const tasks = yield* spawn(
+      const tasks = yield* Actor.local(
         Behavior.value<ReadonlyArray<Task>>([{ id: "a", title: "alpha" }]),
       );
       const page = yield* pageMount(root, TaskList, { tasks: tasks.state });
@@ -361,7 +361,7 @@ describe("browser view", () => {
   it.scoped("Show adds and removes its children", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
-      const open = yield* spawn(Behavior.value(false));
+      const open = yield* Actor.local(Behavior.value(false));
       const page = yield* pageMount(root, Toggle, { open: open.state });
       expect(root.querySelector("#body")).toBeNull();
 
@@ -390,7 +390,7 @@ describe("browser view", () => {
   it.scoped("Show narrows to the tested value and draws its fallback otherwise", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
-      const hits = yield* spawn(Behavior.value<ReadonlyArray<string>>([]));
+      const hits = yield* Actor.local(Behavior.value<ReadonlyArray<string>>([]));
       const page = yield* pageMount(root, Hits, { hits: hits.state });
       expect(textOf(root, "#none")).toBe("no hits");
       expect(root.querySelector("#first")).toBeNull();
@@ -421,7 +421,7 @@ describe("browser view", () => {
   it.scoped("Match draws one case per tag and updates a kept tag in place", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
-      const job = yield* spawn(Behavior.value<Job>({ _tag: "Idle" }));
+      const job = yield* Actor.local(Behavior.value<Job>({ _tag: "Idle" }));
       const page = yield* pageMount(root, JobView, { job: job.state });
       expect(textOf(root, "#idle")).toBe("idle");
       expect(root.querySelector("#running")).toBeNull();
@@ -456,7 +456,7 @@ describe("browser view", () => {
       const root = yield* makeRoot;
       document.body.appendChild(root);
       const log = yield* Ref.make<ReadonlyArray<string>>([]);
-      const open = yield* spawn(Behavior.value(false));
+      const open = yield* Actor.local(Behavior.value(false));
       const attached = yield* Deferred.make<void>();
       const gone = yield* Deferred.make<void>();
       const page = yield* pageMount(root, Attaching, { open: open.state, log, attached, gone });
@@ -482,7 +482,7 @@ describe("browser view", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const into = document.createElement("div");
-      const open = yield* spawn(Behavior.value(false));
+      const open = yield* Actor.local(Behavior.value(false));
       const page = yield* pageMount(root, WithPortal, { open: open.state, into });
       expect(into.querySelector("#modal")).toBeNull();
 
@@ -504,7 +504,7 @@ describe("browser view", () => {
   it.scoped("Show accepts a type predicate and hands the branch the narrowed source", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
-      const name = yield* spawn(Behavior.value<Option.Option<string>>(Option.none()));
+      const name = yield* Actor.local(Behavior.value<Option.Option<string>>(Option.none()));
       const page = yield* pageMount(root, Optional, { name: name.state });
       expect(root.querySelector("#name")).toBeNull();
 
@@ -525,8 +525,8 @@ describe("browser view", () => {
   it.scoped("Show removes what a nested Show revealed in the same update", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
-      const outer = yield* spawn(Behavior.value(true));
-      const inner = yield* spawn(Behavior.value(false));
+      const outer = yield* Actor.local(Behavior.value(true));
+      const inner = yield* Actor.local(Behavior.value(false));
       const page = yield* pageMount(root, NestedToggle, { outer: outer.state, inner: inner.state });
       expect(root.querySelector("#title")).toBeNull();
 
@@ -558,8 +558,8 @@ describe("browser view", () => {
   it.scoped("a hidden Show branch keeps no source subscribed", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
-      const open = yield* spawn(Behavior.value(true));
-      const count = yield* spawn(Behavior.value(0));
+      const open = yield* Actor.local(Behavior.value(true));
+      const count = yield* Actor.local(Behavior.value(0));
       // A plain counter: the projection is a pure function the stream runs,
       // and counting its runs is what this test observes.
       let reads = 0;
@@ -683,7 +683,7 @@ describe("browser view", () => {
 
       const Owned = (_props: NoProps) =>
         Effect.gen(function* () {
-          const count = yield* spawn(Behavior.value(0));
+          const count = yield* Actor.local(Behavior.value(0));
           yield* Ref.update(spawned, (all) => [...all, count]);
           yield* Effect.addFinalizer(() => Ref.set(finished, true));
           return <p id="owned">owned</p>;
@@ -793,7 +793,7 @@ describe("row sources", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const ended = yield* Ref.make(0);
-      const tasks = yield* spawn(
+      const tasks = yield* Actor.local(
         Behavior.value<ReadonlyArray<Task>>([
           { id: "a", title: "alpha" },
           { id: "b", title: "beta" },
@@ -844,7 +844,7 @@ const CountedRows = (props: CountedRowsProps) =>
       keyBy: (task: Task) => task.id,
       row: (task: Source<Task>) =>
         Effect.gen(function* () {
-          const clicks = yield* spawn(Behavior.value(0));
+          const clicks = yield* Actor.local(Behavior.value(0));
           yield* Effect.addFinalizer(() => Ref.update(props.closed, (n) => n + 1));
           return (
             <li>
@@ -903,7 +903,7 @@ describe("rows with a setup", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const closed = yield* Ref.make(0);
-      const tasks = yield* spawn(
+      const tasks = yield* Actor.local(
         Behavior.value<ReadonlyArray<Task>>([
           { id: "a", title: "alpha" },
           { id: "b", title: "beta" },
@@ -952,7 +952,7 @@ describe("rows with a setup", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const gate = yield* Deferred.make<void>();
-      const tasks = yield* spawn(
+      const tasks = yield* Actor.local(
         Behavior.value<ReadonlyArray<Task>>([
           { id: "a", title: "alpha" },
           { id: "b", title: "beta" },
@@ -985,7 +985,9 @@ describe("rows with a setup", () => {
       const gate = yield* Deferred.make<void>();
       const setupStarted = yield* Deferred.make<void>();
       const setupFinalized = yield* Deferred.make<void>();
-      const tasks = yield* spawn(Behavior.value<ReadonlyArray<Task>>([{ id: "b", title: "beta" }]));
+      const tasks = yield* Actor.local(
+        Behavior.value<ReadonlyArray<Task>>([{ id: "b", title: "beta" }]),
+      );
       const scope = yield* Scope.make();
       yield* Scope.provide(
         View.mount(

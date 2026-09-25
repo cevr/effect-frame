@@ -13,6 +13,7 @@ import {
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
 import {
+  Actor,
   ActorHost,
   MailboxStore,
   Policies,
@@ -21,8 +22,6 @@ import {
   CommandId,
   committedRevision,
   implementTransparent,
-  ref,
-  spawn,
 } from "effect-frame/actor";
 import type { LocalActorRef } from "effect-frame/actor";
 import type { Behavior } from "../../src/actor/behavior.js";
@@ -95,7 +94,7 @@ const concurrentLayer = ActorHost.layer({
   store: ActorHost.memoryStore,
 }).pipe(Layer.provide(policies));
 const id = Schema.decodeSync(CommandId);
-const localSpawnEffect = spawn(localBehavior);
+const localSpawnEffect = Actor.local(localBehavior);
 const localSpawnRequirements: Equals<
   Effect.Services<typeof localSpawnEffect>,
   LocalValue | Scope.Scope
@@ -142,7 +141,7 @@ describe("private actor engines", () => {
   it.scoped.layer(hostedLayer)("uses host construction services for hosted behavior", () =>
     Effect.gen(function* () {
       const run = Effect.gen(function* () {
-        const actor = yield* ref(Counter, "same");
+        const actor = yield* Actor.remote(Counter, "same");
         return yield* actor.call(
           { _tag: "EngineAdd", amount: 1 },
           { commandId: id("host-context"), timeout: "1 second" },
@@ -159,7 +158,11 @@ describe("private actor engines", () => {
     Effect.gen(function* () {
       opens = 0;
       const actors = yield* Effect.all(
-        [ref(Counter, "concurrent"), ref(Counter, "concurrent"), ref(Counter, "concurrent")],
+        [
+          Actor.remote(Counter, "concurrent"),
+          Actor.remote(Counter, "concurrent"),
+          Actor.remote(Counter, "concurrent"),
+        ],
         { concurrency: 3 },
       );
       expect(opens).toBe(1);

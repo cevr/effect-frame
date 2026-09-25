@@ -1,7 +1,7 @@
 import { Context, Effect, Option, Schema, Stream } from "effect";
 import type { Scope } from "effect";
 import { describe, expect, test } from "bun:test";
-import { Behavior as Behaviors, Refused, durable, spawn } from "effect-frame/actor";
+import { Actor, Behavior as Behaviors, Refused } from "effect-frame/actor";
 import type {
   ActorRef,
   ActorStopped,
@@ -151,7 +151,7 @@ const refusing = Behaviors.reducer({
       Refused.make({ reason: "negative" }),
     ),
 });
-const spawnRefusing = () => spawn(refusing);
+const spawnRefusing = () => Actor.local(refusing);
 declare const refusingLocal: Effect.Success<ReturnType<typeof spawnRefusing>>;
 const refusingLocalCall = () => refusingLocal.call(message);
 const refusingLocalCallCanBeRefused: Equals<
@@ -163,7 +163,7 @@ const refusingLocalState: Equals<
   CommandAdmitted | CommandApplied<number> | CommandRejected<ActorStopped | Refused>
 > = true;
 const durableRefusing = () =>
-  durable({
+  Actor.durable({
     behavior: refusing,
     state: Schema.fromJsonString(Schema.Finite),
     message: Schema.fromJsonString(
@@ -196,7 +196,7 @@ const needing: Behavior.Behavior<number, SetValue<number>, Needed> = {
       };
     }),
 };
-const spawnNeeding = () => spawn(needing);
+const spawnNeeding = () => Actor.local(needing);
 const localRequirementsAreExact: Equals<
   Effect.Services<ReturnType<typeof spawnNeeding>>,
   Needed | Scope.Scope
@@ -206,7 +206,7 @@ const localRefType: Equals<
   LocalActorRef<number, SetValue<number>>
 > = true;
 const durableNeeding = () =>
-  durable({
+  Actor.durable({
     behavior: needing,
     state: Schema.fromJsonString(Schema.Finite),
     message: Schema.fromJsonString(

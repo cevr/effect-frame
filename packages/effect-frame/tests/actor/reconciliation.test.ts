@@ -19,6 +19,7 @@ import { randomBytes } from "node:crypto";
 import { TestClock } from "effect/testing";
 import { describe, expect, it, yieldFibers } from "effect-bun-test";
 import {
+  Actor,
   ActorHost,
   ActorTransport,
   CommandId,
@@ -27,7 +28,6 @@ import {
   Policy,
   contract,
   implement,
-  ref,
 } from "effect-frame/actor";
 import type {
   Action,
@@ -255,7 +255,7 @@ const makeHarness = Effect.fn("ReconciliationTest.makeHarness")(function* (
 });
 
 const makeReference = (harness: Harness) =>
-  ref(Counter, key).pipe(Effect.provideService(ActorTransport, harness.wrapped));
+  Actor.remote(Counter, key).pipe(Effect.provideService(ActorTransport, harness.wrapped));
 
 const storedReceipt = (harness: Harness, commandId: string) =>
   Effect.map(

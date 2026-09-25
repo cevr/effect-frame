@@ -3,8 +3,8 @@ import { platformFetch, registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { serverOnly } from "effect-frame/actor";
-import { CommandId, Form, ref } from "effect-frame/actor/client";
+import { Actor, serverOnly } from "effect-frame/actor";
+import { CommandId, Form } from "effect-frame/actor/client";
 import { make as makeTuiHost } from "effect-frame/view/opentui";
 import type { TestRendererSetup } from "@opentui/core/testing";
 import { createTestRenderer } from "@opentui/core/testing";
@@ -80,7 +80,7 @@ describe("notes end to end", () => {
       );
       expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
 
-      const writer = yield* (yield* clientOf(server.url))(ref(Notes, demoKey));
+      const writer = yield* (yield* clientOf(server.url))(Actor.remote(Notes, demoKey));
       yield* writer.call(
         { _tag: "Add", id: "n1", text: "buy milk" },
         { commandId: id("c1"), timeout: "2 seconds" },
@@ -100,7 +100,7 @@ describe("notes end to end", () => {
       const root = yield* install(page);
 
       const browser = yield* (yield* clientOf(server.url))(
-        Effect.andThen(hydrateAt(root, `${server.url}${inbox}`), ref(Notes, demoKey)),
+        Effect.andThen(hydrateAt(root, `${server.url}${inbox}`), Actor.remote(Notes, demoKey)),
       );
 
       const setup: TestRendererSetup = yield* Effect.promise(() =>
@@ -116,7 +116,7 @@ describe("notes end to end", () => {
             makeTuiHost(setup.renderer),
             setup.renderer.root,
           ),
-          ref(Notes, demoKey),
+          Actor.remote(Notes, demoKey),
         ),
       );
 
@@ -148,7 +148,7 @@ describe("notes end to end", () => {
       const root = yield* install(page);
 
       const client = yield* (yield* clientOf(first.url))(
-        Effect.andThen(hydrateAt(root, `${first.url}${inbox}`), ref(Notes, demoKey)),
+        Effect.andThen(hydrateAt(root, `${first.url}${inbox}`), Actor.remote(Notes, demoKey)),
       );
 
       yield* Effect.promise(() => first.stop());
@@ -172,7 +172,7 @@ describe("notes end to end", () => {
       const root = yield* install(page);
 
       const client = yield* (yield* clientOf(server.url))(
-        Effect.andThen(hydrateAt(root, `${server.url}${inbox}`), ref(Notes, demoKey)),
+        Effect.andThen(hydrateAt(root, `${server.url}${inbox}`), Actor.remote(Notes, demoKey)),
       );
       const form = elementOf(root, "#compose", HTMLFormElement);
       const draft = elementOf(root, "#draft", HTMLInputElement);

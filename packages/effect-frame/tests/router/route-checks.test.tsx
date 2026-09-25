@@ -3,6 +3,7 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import {
+  Actor,
   ActorStopped,
   ActorTransport,
   Behavior,
@@ -12,7 +13,6 @@ import {
   implementQuery,
   implementTransparent,
   query as queryContract,
-  spawn,
   Policies,
   Policy,
 } from "effect-frame/actor";
@@ -418,7 +418,7 @@ const LayoutRevision = 30;
 const PostRevision = 40;
 
 const spawnAtRevision = Effect.fn("ChecksTest.spawnAtRevision")(function* (revision: number) {
-  const local = yield* spawn(Behavior.value(0));
+  const local = yield* Actor.local(Behavior.value(0));
   for (let next = 1; next <= revision; next += 1) {
     yield* Effect.orDie(local.call(Value.Set(next)));
   }

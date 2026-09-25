@@ -7,7 +7,8 @@
 export * as Behavior from "./behavior.js";
 export { Value } from "./behavior.js";
 export type { SetValue, Turn } from "./behavior.js";
-export { modify, spawn, type LocalActorRef } from "./actor.js";
+export { modify, type LocalActorRef } from "./actor.js";
+export { Actor } from "./placement.js";
 export * from "./vocabulary.js";
 export {
   contract,
@@ -21,13 +22,7 @@ export {
   type Pure,
   type SnapshotOf,
 } from "./contract.js";
-export {
-  commandRef,
-  ref,
-  type RefOptions,
-  type RemoteActorRef,
-  type RemoteCommandRef,
-} from "./ref.js";
+export { type RefOptions, type RemoteActorRef, type RemoteCommandRef } from "./ref.js";
 // The Query primitive's client half.
 export {
   InvalidQueryArgs,

@@ -1,5 +1,5 @@
 import type { Applied, SnapshotOf } from "effect-frame/actor/client";
-import { Behavior, ref, spawn, Source } from "effect-frame/actor/client";
+import { Actor, Behavior, Source } from "effect-frame/actor/client";
 import { For, View } from "effect-frame/view";
 import type { Option } from "effect";
 import { Effect } from "effect";
@@ -28,8 +28,8 @@ const line = (note: Note): string => {
 
 export const NotesTerminal = (props: NotesTerminalProps) =>
   Effect.gen(function* () {
-    const notes = yield* ref(Notes, props.key, { resume: props.resume });
-    const draft = yield* spawn(Behavior.value(""));
+    const notes = yield* Actor.remote(Notes, props.key, { resume: props.resume });
+    const draft = yield* Actor.local(Behavior.value(""));
     const setDraft = writeDraft(draft);
 
     return (

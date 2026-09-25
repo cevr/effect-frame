@@ -3,13 +3,14 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import {
+  Actor,
   ActorHost,
   MailboxStore,
   implementTransparent,
   Policies,
   Policy,
 } from "effect-frame/actor";
-import { ActorTransport, contract, ref, Source } from "effect-frame/actor/client";
+import { ActorTransport, contract, Source } from "effect-frame/actor/client";
 import type { TransportService } from "effect-frame/actor/client";
 import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -82,7 +83,7 @@ interface NoProps {
 /** The click handler only starts the command. It returns before any reply. */
 const Clicker = (_props: NoProps) =>
   Effect.gen(function* () {
-    const counter = yield* ref(Counter, "one");
+    const counter = yield* Actor.remote(Counter, "one");
     return (
       <div>
         <span id="count">{View.bind(Source.select(counter.state, (n) => String(n)))}</span>

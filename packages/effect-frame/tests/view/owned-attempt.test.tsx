@@ -3,11 +3,11 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import {
+  Actor,
   Behavior,
   Value,
   implementQuery,
   query,
-  spawn,
   Policies,
   Policy,
   QueryCache,
@@ -171,7 +171,7 @@ const push = <A,>(ref: Ref.Ref<ReadonlyArray<A>>, value: A) =>
 
 /** Increment Value actor revisions so a record can be told apart in a snapshot. */
 const spawnAtRevision = Effect.fn("OwnedAttemptTest.spawnAtRevision")(function* (revision: number) {
-  const actor = yield* spawn(Behavior.value(0));
+  const actor = yield* Actor.local(Behavior.value(0));
   for (let next = 1; next <= revision; next += 1) {
     yield* Effect.orDie(actor.call(Value.Set(next)));
   }
@@ -322,7 +322,7 @@ describe("private owned attempt", () => {
         const setups = yield* Ref.make<ReadonlyArray<string>>([]);
         const closedB = yield* Deferred.make<void>();
         const parentSetups = yield* Ref.make(0);
-        const rowsSource = yield* spawn(
+        const rowsSource = yield* Actor.local(
           Behavior.value<
             ReadonlyArray<{
               readonly id: string;
@@ -804,7 +804,7 @@ describe("private owned attempt", () => {
     () =>
       Effect.gen(function* () {
         const root = yield* makeRoot;
-        const rowsSource = yield* spawn(Behavior.value<ReadonlyArray<string>>([]));
+        const rowsSource = yield* Actor.local(Behavior.value<ReadonlyArray<string>>([]));
         const fallbackClosed = yield* Ref.make<ReadonlyMap<string, Deferred.Deferred<void>>>(
           new Map(),
         );
@@ -856,7 +856,7 @@ describe("private owned attempt", () => {
         const Page = () =>
           Effect.gen(function* () {
             yield* Ref.update(parentSetups, (count) => count + 1);
-            const parent = yield* spawn(Behavior.value("parent"));
+            const parent = yield* Actor.local(Behavior.value("parent"));
             yield* QueryCache.use((cache) => cache.open(AttemptQuery, { id: "parent" }));
             const rows = yield* View.list({
               each: rowsSource.state,
@@ -965,7 +965,7 @@ describe("private owned attempt", () => {
       overlap: boolean,
     ) {
       const owner = yield* Effect.scope;
-      const current = yield* spawn(Behavior.value<ReadonlyArray<ChildRoute>>([initial]));
+      const current = yield* Actor.local(Behavior.value<ReadonlyArray<ChildRoute>>([initial]));
       const declare = Effect.fn("OwnedAttemptTest.declare")(function* (route: ChildRoute) {
         const declarations = yield* Scope.fork(owner);
         if (overlap) {
@@ -1298,7 +1298,7 @@ describe("private owned attempt", () => {
     it.scoped("keeps ordinary Show destructive; the attempt stays owned by its caller", () =>
       Effect.gen(function* () {
         const root = yield* makeRoot;
-        const visible = yield* spawn(Behavior.value(true));
+        const visible = yield* Actor.local(Behavior.value(true));
         const setups = yield* Ref.make(0);
         const closed = yield* Ref.make(0);
         const childScope = yield* Deferred.make<Scope.Scope>();

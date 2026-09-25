@@ -1,4 +1,4 @@
-import { Behavior, Value, modify, spawn, Source } from "effect-frame/actor";
+import { Actor, Behavior, Value, modify, Source } from "effect-frame/actor";
 import type { LocalActorRef, SetValue } from "effect-frame/actor";
 import { View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -68,7 +68,7 @@ describe("terminal view", () => {
   it.scoped("the same view draws a bound source in a terminal", () =>
     Effect.gen(function* () {
       const setup = yield* makeTerminal();
-      const count = yield* spawn(Behavior.value(0));
+      const count = yield* Actor.local(Behavior.value(0));
       const page = yield* ViewTest.make({
         host: makeHost(setup.renderer),
         root: setup.renderer.root,
@@ -91,7 +91,7 @@ describe("terminal view", () => {
   it.scoped("typing into an input sends every keystroke to the draft actor", () =>
     Effect.gen(function* () {
       const setup = yield* makeTerminal();
-      const draft = yield* spawn(Behavior.value(""));
+      const draft = yield* Actor.local(Behavior.value(""));
       yield* View.mount(Composer, { draft }, makeHost(setup.renderer), setup.renderer.root);
 
       // A terminal input only receives keys while it holds focus.

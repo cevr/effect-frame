@@ -3,6 +3,7 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import {
+  Actor,
   Behavior,
   CommandId,
   QueryCache,
@@ -11,7 +12,6 @@ import {
   implementQuery,
   implementTransparent,
   query,
-  ref,
   Policies,
   Policy,
   batchedQuery,
@@ -80,7 +80,7 @@ const testLayer = QueryTest.layer({
     implementQuery(Count, {
       run: (args) =>
         Effect.gen(function* () {
-          const counter = yield* ref(Counter, args);
+          const counter = yield* Actor.remote(Counter, args);
           const state = yield* counter.state.get;
           const control = countControl.current;
           if (Option.isSome(control)) {
@@ -173,7 +173,7 @@ describe("local query test transport", () => {
 
       const gate = yield* Deferred.make<void>();
       countControl.current = Option.some({ gate });
-      const counter = yield* ref(Counter, key);
+      const counter = yield* Actor.remote(Counter, key);
       const calling = yield* Effect.forkChild(
         counter.call(
           { _tag: "Increment", amount: 1 },

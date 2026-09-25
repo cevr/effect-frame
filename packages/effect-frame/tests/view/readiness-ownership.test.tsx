@@ -3,11 +3,11 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import {
+  Actor,
   Behavior,
   Value,
   implementQuery,
   query,
-  spawn,
   Policies,
   Policy,
   QueryCache,
@@ -213,7 +213,7 @@ describe("readiness ownership", () => {
         const gate = yield* Deferred.make<void>();
         const setups = yield* Ref.make<ReadonlyArray<string>>([]);
         const closed = yield* Ref.make<ReadonlyArray<string>>([]);
-        const items = yield* spawn(Behavior.value<ReadonlyArray<string>>(["a"]));
+        const items = yield* Actor.local(Behavior.value<ReadonlyArray<string>>(["a"]));
         yield* setResponse(
           fixtures,
           "a",
@@ -258,7 +258,7 @@ describe("readiness ownership", () => {
         const cGate = yield* Deferred.make<void>();
         const setups = yield* Ref.make<ReadonlyArray<string>>([]);
         const closed = yield* Ref.make<ReadonlyArray<string>>([]);
-        const items = yield* spawn(Behavior.value<ReadonlyArray<string>>(["a"]));
+        const items = yield* Actor.local(Behavior.value<ReadonlyArray<string>>(["a"]));
         yield* setResponse(fixtures, "a", readyResponse("alpha"));
         yield* setResponse(fixtures, "b", pendingResponse(bGate, "beta", Option.some(bStarted)));
         yield* setResponse(fixtures, "c", pendingResponse(cGate, "gamma", Option.some(cStarted)));
@@ -531,7 +531,7 @@ describe("readiness ownership", () => {
       Effect.gen(function* () {
         const tags: ReadonlyArray<"section" | "p"> = ["section", "p"];
         for (const tag of tags) {
-          const loadingState = yield* spawn(
+          const loadingState = yield* Actor.local(
             Behavior.value<QueryState<string, string>>({ _tag: "Loading" }),
           );
           const Page = () =>
@@ -646,7 +646,9 @@ describe("readiness ownership", () => {
           createTestRenderer({ width: 32, height: 6 }),
         );
         yield* Effect.addFinalizer(() => Effect.sync(() => setup.renderer.destroy()));
-        const state = yield* spawn(Behavior.value<QueryState<string, string>>({ _tag: "Loading" }));
+        const state = yield* Actor.local(
+          Behavior.value<QueryState<string, string>>({ _tag: "Loading" }),
+        );
         const Page = () =>
           Effect.gen(function* () {
             const boundary = yield* View.loading({

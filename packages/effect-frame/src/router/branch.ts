@@ -19,13 +19,13 @@ import type {
   TransportService,
 } from "effect-frame/actor";
 import {
+  Actor,
   ActorTransport,
   QueryCache,
   Source,
   canonicalize,
   keyOf,
   committedRevision,
-  ref,
   QueryState,
 } from "effect-frame/actor/client";
 import type { Node, Remote } from "effect-frame/view";
@@ -252,7 +252,7 @@ export const actor = <C extends AnyContract>(
     key,
     open: (seed) =>
       Effect.map(
-        ref(contract, key, {
+        Actor.remote(contract, key, {
           resume: Option.flatMap(seed, resumeOf),
           ...Option.match(Option.fromNullishOr(options.behavior), {
             onNone: () => ({}),

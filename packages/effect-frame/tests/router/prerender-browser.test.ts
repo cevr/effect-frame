@@ -9,6 +9,7 @@
  */
 import { tmpdir } from "node:os";
 import {
+  Actor,
   ActorHost,
   Behavior,
   CommandId,
@@ -18,7 +19,6 @@ import {
   implementTransparent,
 } from "effect-frame/actor";
 import type { ActorTransport } from "effect-frame/actor";
-import { ref } from "effect-frame/actor/client";
 import * as Prerender from "effect-frame/router/prerender";
 import { Html } from "effect-frame/view";
 import { BunServices } from "@effect/platform-bun";
@@ -56,7 +56,7 @@ const commandId = Schema.decodeSync(CommandId);
 
 const add = (id: string) =>
   Effect.gen(function* () {
-    const note = yield* ref(Note, "n1");
+    const note = yield* Actor.remote(Note, "n1");
     return yield* note.call(
       { _tag: "Add", amount: 1 },
       { commandId: commandId(id), timeout: "1 second" },
@@ -66,7 +66,7 @@ const add = (id: string) =>
 /** The page's document: the frame around `#app`, and the island's resume script. */
 const noteDocument = (_page: Prerender.Page) =>
   Effect.gen(function* () {
-    const note = yield* Effect.orDie(ref(Note, "n1"));
+    const note = yield* Effect.orDie(Actor.remote(Note, "n1"));
     const snapshot = yield* note.applied.get;
     const payload = yield* Effect.orDie(Schema.encodeEffect(Resume)(snapshot));
     return {

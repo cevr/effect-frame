@@ -1,5 +1,4 @@
-import { implementQuery } from "effect-frame/actor";
-import { ref } from "effect-frame/actor/client";
+import { Actor, implementQuery } from "effect-frame/actor";
 import { Effect, Option } from "effect";
 import { Notes } from "./contract.js";
 import type { ListName } from "./queries.js";
@@ -12,7 +11,7 @@ import { ListCounts, ListIndex, catalog, keyOf, shows } from "./queries.js";
  */
 
 const notesOf = (list: ListName) =>
-  Effect.flatMap(ref(Notes, keyOf(list)), (notes) =>
+  Effect.flatMap(Actor.remote(Notes, keyOf(list)), (notes) =>
     Effect.map(notes.state.get, (snapshot) => snapshot.notes),
   );
 

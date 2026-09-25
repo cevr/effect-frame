@@ -1,10 +1,7 @@
 export * from "./client.js";
-export {
-  DurableHostConfig,
-  durable,
-  type DurableHostSettings,
-  type DurableOptions,
-} from "./durable.js";
+// The server's `Actor` is the client's plus `Actor.durable`.
+export { Actor } from "./placement-host.js";
+export { DurableHostConfig, type DurableHostSettings, type DurableOptions } from "./durable.js";
 export {
   MailboxStore,
   type Appended,

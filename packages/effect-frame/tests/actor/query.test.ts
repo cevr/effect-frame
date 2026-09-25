@@ -12,6 +12,7 @@ import {
 } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import {
+  Actor,
   ActorHost,
   Behavior,
   CommandId,
@@ -36,8 +37,6 @@ import {
   followQuery,
   keyOf,
   query,
-  commandRef,
-  ref,
 } from "effect-frame/actor/client";
 import type { PolicyTable, Subject } from "effect-frame/actor";
 import type { Address, QueryEntry, QueryState, Source } from "effect-frame/actor/client";
@@ -191,7 +190,7 @@ const runsOf = (name: string): number =>
 
 const readBook = (tenant: string) =>
   Effect.gen(function* () {
-    const book = yield* ref(OrderBook, { tenant });
+    const book = yield* Actor.remote(OrderBook, { tenant });
     return yield* book.state.get;
   });
 
@@ -488,7 +487,7 @@ describe("Query: the Dashboard shape", () => {
       const revenue = yield* QueryCache.use((cache) => cache.open(Revenue, acme));
       const topSku = yield* QueryCache.use((cache) => cache.open(TopSku, acme));
       const rate = yield* QueryCache.use((cache) => cache.open(ExchangeRate, { pair: "USDEUR" }));
-      const book = yield* ref(OrderBook, acme);
+      const book = yield* Actor.remote(OrderBook, acme);
       yield* Effect.all([settledEntry(revenue), settledEntry(topSku), settledEntry(rate)]);
 
       expect(valueOf(yield* revenue.state.get)).toEqual(Option.some({ total: 0 }));
@@ -556,7 +555,7 @@ describe("Query: the Dashboard shape", () => {
       const revenueRuns = runsOf(Revenue.name);
       const topSkuRuns = runsOf(TopSku.name);
 
-      const book = yield* ref(OrderBook, acme);
+      const book = yield* Actor.remote(OrderBook, acme);
       yield* book.call(
         { _tag: "PlaceOrder", sku: "offscreen", amount: 3 },
         { commandId: id("order-offscreen"), timeout: "1 second" },
@@ -576,7 +575,7 @@ describe("Query: the Dashboard shape", () => {
       yield* Effect.all([settledEntry(revenue), settledEntry(topSku)]);
       const mark = calls.length;
       const runs = [...handlerRuns.entries()];
-      const heartbeat = yield* ref(Heartbeat, acme);
+      const heartbeat = yield* Actor.remote(Heartbeat, acme);
       yield* heartbeat.call({ _tag: "Ping" }, { commandId: id("beat-1"), timeout: "1 second" });
       // The call declared both active keys; the host found no dependent of
       // Heartbeat among them, so its reply is empty and no handler ran.
@@ -615,7 +614,7 @@ describe("Query: the Dashboard shape", () => {
       const revenue = yield* QueryCache.use((cache) => cache.open(Revenue, acme));
       const funnel = yield* QueryCache.use((cache) => cache.open(Funnel, acme));
       yield* Effect.all([settledEntry(revenue), settledEntry(funnel)]);
-      const book = yield* ref(OrderBook, acme);
+      const book = yield* Actor.remote(OrderBook, acme);
       const before = yield* book.state.get;
       const mark = calls.length;
       const commandId = id("order-funnel-down");
@@ -676,7 +675,7 @@ describe("Query: the Dashboard shape", () => {
       const before = Option.getOrThrow(valueOf(yield* revenue.state.get)).total;
       const actorReads = { snapshots: snapshotRequests, streams: changeStreams };
 
-      const book = yield* commandRef(OrderBook, acme);
+      const book = yield* Actor.remoteCommands(OrderBook, acme);
       const handle = yield* book.send(
         { _tag: "PlaceOrder", sku: "command-only", amount: 7 },
         { commandId: id("command-only-1") },
@@ -698,7 +697,7 @@ describe("Query: the Dashboard shape", () => {
       // And it read nothing of the actor: no snapshot, no change stream.
       expect({ snapshots: snapshotRequests, streams: changeStreams }).toEqual(actorReads);
       // A full reference, for contrast, reads the snapshot and follows.
-      yield* ref(OrderBook, acme);
+      yield* Actor.remote(OrderBook, acme);
       yield* Effect.yieldNow;
       expect(snapshotRequests).toBe(actorReads.snapshots + 1);
     }),
@@ -727,7 +726,7 @@ describe("Query: the Dashboard shape", () => {
     Effect.gen(function* () {
       const revenue = yield* QueryCache.use((cache) => cache.open(Revenue, acme));
       yield* settledEntry(revenue);
-      const book = yield* ref(OrderBook, acme);
+      const book = yield* Actor.remote(OrderBook, acme);
 
       // A command reply's refresh. The cache cannot tell which command an
       // override was for, so any refreshed value replaces it.
@@ -802,7 +801,7 @@ describe("Query: the Dashboard shape", () => {
       const cache = yield* QueryCache;
       // The cache exists here, but nothing was opened, so nothing is active.
       expect(yield* cache.active).toEqual([]);
-      const book = yield* ref(OrderBook, acme);
+      const book = yield* Actor.remote(OrderBook, acme);
       const applied = yield* book.call(
         { _tag: "PlaceOrder", sku: "bolt", amount: 5 },
         { commandId: id("order-2"), timeout: "1 second" },
@@ -1159,7 +1158,7 @@ describe("Query: declared batches", () => {
       );
       yield* Effect.all([settledEntry(first), settledEntry(second)], { concurrency: "unbounded" });
       const beforeCalls = batchCalls;
-      const book = yield* ref(OrderBook, acme);
+      const book = yield* Actor.remote(OrderBook, acme);
       yield* book.call(
         { _tag: "PlaceOrder", sku: "batch-refresh", amount: 1 },
         { commandId: id("batch-refresh"), timeout: "1 second" },
@@ -1197,7 +1196,7 @@ describe("Query: declared batches", () => {
             cache.open(Chronology, { ...acme, id: 1 }),
           );
           yield* Deferred.await(firstStarted);
-          const book = yield* ref(OrderBook, acme);
+          const book = yield* Actor.remote(OrderBook, acme);
           yield* book.call(
             { _tag: "PlaceOrder", sku: "chronology", amount: 1 },
             { commandId: id("chronology-failure"), timeout: "1 second" },

@@ -1,4 +1,4 @@
-import { commandRef } from "effect-frame/actor/client";
+import { Actor } from "effect-frame/actor/client";
 import type {
   ActorTransport,
   AnyContract,
@@ -56,7 +56,9 @@ export const sender = Effect.fn("Dashboard.sender")(function* <
       if (Option.isSome(known)) {
         return known.value;
       }
-      const fresh = yield* commandRef(contract, keyOf(now)).pipe(Effect.provideContext(context));
+      const fresh = yield* Actor.remoteCommands(contract, keyOf(now)).pipe(
+        Effect.provideContext(context),
+      );
       opened.set(now.tenant, fresh);
       return fresh;
     }),

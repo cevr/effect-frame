@@ -3,6 +3,7 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import {
+  Actor,
   ActorHost,
   ActorTransport,
   Behavior,
@@ -12,7 +13,7 @@ import {
   implementTransparent,
   QueryCache,
 } from "effect-frame/actor";
-import { contract, ref, resumeCodec } from "effect-frame/actor/client";
+import { contract, resumeCodec } from "effect-frame/actor/client";
 import type { Applied, SnapshotOf } from "effect-frame/actor/client";
 import { Location, Route, mount as mountRouter } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
@@ -160,7 +161,7 @@ const noteRoute = Route.prerender(
   "notes",
   Route.leaf(noteSegment, () =>
     Effect.gen(function* () {
-      const note = yield* Effect.orDie(ref(Note, "n1", { resume: yield* Baked }));
+      const note = yield* Effect.orDie(Actor.remote(Note, "n1", { resume: yield* Baked }));
       return (
         <article id="note">
           <p id="count">{View.bind(note.state, (state) => state.count)}</p>
@@ -174,7 +175,7 @@ const noteRoute = Route.prerender(
 /** The page's document writes the resume script for its island, as SSR does. */
 const noteDocument = (_page: Prerender.Page) =>
   Effect.gen(function* () {
-    const note = yield* Effect.orDie(ref(Note, "n1"));
+    const note = yield* Effect.orDie(Actor.remote(Note, "n1"));
     const snapshot = yield* note.applied.get;
     const payload = yield* Effect.orDie(Schema.encodeEffect(Resume)(snapshot));
     return {
@@ -198,7 +199,7 @@ const commandId = Schema.decodeSync(CommandId);
 
 const add = (store: Context.Context<ActorTransport>, id: string) =>
   Effect.gen(function* () {
-    const note = yield* ref(Note, "n1");
+    const note = yield* Actor.remote(Note, "n1");
     return yield* note.call(
       { _tag: "Add", amount: 1 },
       { commandId: commandId(id), timeout: "1 second" },

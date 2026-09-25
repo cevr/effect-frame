@@ -19,6 +19,7 @@ import { Event, Machine, State } from "effect-machine";
 import { TestClock } from "effect/testing";
 import { describe, expect, it, yieldFibers } from "effect-bun-test";
 import {
+  Actor,
   ActorStopped,
   Behavior,
   CommandConflict,
@@ -27,7 +28,6 @@ import {
   Refused,
   Uncertain,
   committedRevision,
-  durable,
 } from "effect-frame/actor";
 import type { CommandSettled, DurableOptions } from "effect-frame/actor";
 
@@ -175,7 +175,7 @@ const withStore = it.scoped.layer(MailboxStore.layerMemory);
 describe("durable actor", () => {
   withStore("a machine's echo of an older command never takes its state back", () =>
     Effect.gen(function* () {
-      const tally = yield* durable({
+      const tally = yield* Actor.durable({
         behavior: Behavior.machine(tallyMachine),
         state: Schema.fromJsonString(tallyMachine.stateSchema),
         message: Schema.fromJsonString(tallyMachine.eventSchema),
@@ -216,7 +216,7 @@ describe("durable actor", () => {
         commit: (commandId, state, wake) =>
           Effect.tap(inner.commit(commandId, state, wake), () => Deferred.await(hold)),
       });
-      const counter = yield* durable(counterOptions).pipe(
+      const counter = yield* Actor.durable(counterOptions).pipe(
         Effect.provideService(MailboxStore, store),
       );
       const call = yield* Effect.forkScoped(
@@ -235,7 +235,7 @@ describe("durable actor", () => {
 
   withStore("call commits the command and returns the applied revision", () =>
     Effect.gen(function* () {
-      const counter = yield* durable(counterOptions);
+      const counter = yield* Actor.durable(counterOptions);
       const applied = yield* counter.call(add(3), {
         commandId: id("c1"),
         timeout: "1 second",
@@ -247,7 +247,7 @@ describe("durable actor", () => {
 
   withStore("the same command ID with the same payload applies once", () =>
     Effect.gen(function* () {
-      const counter = yield* durable(counterOptions);
+      const counter = yield* Actor.durable(counterOptions);
       const first = yield* counter.call(add(3), {
         commandId: id("c1"),
         timeout: "1 second",
@@ -280,7 +280,7 @@ describe("durable actor", () => {
             changes: Stream.fromQueue(autonomous),
           }),
       };
-      const counter = yield* durable({ ...counterOptions, behavior });
+      const counter = yield* Actor.durable({ ...counterOptions, behavior });
 
       const first = yield* counter.call(add(1), { commandId: id("older"), timeout: "1 second" });
       const newer = yield* counter.call(add(2), { commandId: id("newer"), timeout: "1 second" });
@@ -305,7 +305,7 @@ describe("durable actor", () => {
 
   withStore("the same command ID with a different payload is a conflict", () =>
     Effect.gen(function* () {
-      const counter = yield* durable(counterOptions);
+      const counter = yield* Actor.durable(counterOptions);
       yield* counter.call(add(3), { commandId: id("c1"), timeout: "1 second" });
       const conflicting = yield* counter.send(add(4), { commandId: id("c1") });
       expect(yield* conflicting.settled).toEqual({
@@ -319,7 +319,7 @@ describe("durable actor", () => {
   withStore("a refused command is not admitted, and its retry is refused again", () =>
     Effect.gen(function* () {
       const store = yield* MailboxStore;
-      const counter = yield* durable({ ...counterOptions, behavior: refusingCounter });
+      const counter = yield* Actor.durable({ ...counterOptions, behavior: refusingCounter });
       const refused = yield* counter.send(add(-1), { commandId: id("c1") });
       const expected = {
         _tag: "Rejected",
@@ -344,14 +344,14 @@ describe("durable actor", () => {
     Effect.gen(function* () {
       const store = yield* MailboxStore;
       const firstLife = yield* Scope.make();
-      const before = yield* durable(counterOptions).pipe(Scope.provide(firstLife));
+      const before = yield* Actor.durable(counterOptions).pipe(Scope.provide(firstLife));
       const committed = yield* before.call(add(-1), { commandId: id("c1"), timeout: "1 second" });
       yield* Effect.repeat(store.receipt(id("c1")), { until: Option.isSome });
       yield* Scope.close(firstLife, Exit.void);
 
       // The rule now refuses these bytes, but the command was admitted
       // before it: a same-ID retry gets its receipt, never a refusal.
-      const after = yield* durable({ ...counterOptions, behavior: refusingCounter });
+      const after = yield* Actor.durable({ ...counterOptions, behavior: refusingCounter });
       const retried = yield* after.call(add(-1), { commandId: id("c1"), timeout: "1 second" });
       expect(retried).toEqual(committed);
     }),
@@ -362,12 +362,12 @@ describe("durable actor", () => {
       const store = yield* MailboxStore;
 
       const firstLife = yield* Scope.make();
-      const before = yield* durable(counterOptions).pipe(Scope.provide(firstLife));
+      const before = yield* Actor.durable(counterOptions).pipe(Scope.provide(firstLife));
       yield* before.send(add(3), { commandId: id("c1") });
       yield* Effect.repeat(store.receipt(id("c1")), { until: Option.isSome });
       yield* Scope.close(firstLife, Exit.void);
 
-      const after = yield* durable(counterOptions);
+      const after = yield* Actor.durable(counterOptions);
       expect(yield* after.state.get).toBe(3);
       const retried = yield* after.call(add(3), {
         commandId: id("c1"),
@@ -389,7 +389,7 @@ describe("durable actor", () => {
       yield* store.append({ commandId: id("c1"), payload, payloadHash: Hash.string(payload) });
       expect(yield* store.pending).toEqual([id("c1")]);
 
-      const counter = yield* durable(counterOptions);
+      const counter = yield* Actor.durable(counterOptions);
       const applied = yield* counter.call(add(7), {
         commandId: id("c1"),
         timeout: "1 second",
@@ -401,7 +401,7 @@ describe("durable actor", () => {
 
   withStore("a timed-out call is Uncertain and the command still commits", () =>
     Effect.gen(function* () {
-      const counter = yield* durable({ ...counterOptions, behavior: slowBehavior });
+      const counter = yield* Actor.durable({ ...counterOptions, behavior: slowBehavior });
       const waiting = yield* Effect.forkScoped(
         Effect.flip(counter.call(add(1), { commandId: id("c1"), timeout: "1 second" })),
       );
@@ -443,7 +443,7 @@ describe("durable actor", () => {
           }),
         ),
       );
-      const counter = yield* durable({
+      const counter = yield* Actor.durable({
         behavior: Behavior.reducer<number, number>({
           initial: 0,
           reduce: (state, amount) => state + amount,
@@ -490,7 +490,7 @@ describe("durable actor", () => {
             }),
           ),
         );
-        const counter = yield* durable({
+        const counter = yield* Actor.durable({
           behavior: Behavior.reducer<number, number>({
             initial: 0,
             reduce: (state, amount) => state + amount,
@@ -520,7 +520,7 @@ describe("durable actor", () => {
 
       const firstLife = yield* Scope.make();
       const blocked = yield* gateThatNeverOpens;
-      const before = yield* durable(uploadOptions).pipe(
+      const before = yield* Actor.durable(uploadOptions).pipe(
         Effect.provideService(Gate, blocked),
         Scope.provide(firstLife),
       );
@@ -532,7 +532,9 @@ describe("durable actor", () => {
       expect(started.state._tag).toBe("Uploading");
       yield* Scope.close(firstLife, Exit.void);
 
-      const after = yield* durable(uploadOptions).pipe(Effect.provideService(Gate, gateThatOpens));
+      const after = yield* Actor.durable(uploadOptions).pipe(
+        Effect.provideService(Gate, gateThatOpens),
+      );
       const done = yield* Stream.runHead(
         Stream.filter(after.state.changes, (state) => state._tag === "Done"),
       );
@@ -551,7 +553,7 @@ describe("durable actor", () => {
       );
 
       const firstLife = yield* Scope.make();
-      const before = yield* durable(reminderOptions).pipe(Scope.provide(firstLife));
+      const before = yield* Actor.durable(reminderOptions).pipe(Scope.provide(firstLife));
       yield* before.call(ReminderEvent.Schedule({ at: 60_000 }), {
         commandId: id("r1"),
         timeout: "1 second",
@@ -561,7 +563,7 @@ describe("durable actor", () => {
       yield* TestClock.adjust("10 seconds");
       yield* Scope.close(firstLife, Exit.void);
 
-      const after = yield* durable(reminderOptions);
+      const after = yield* Actor.durable(reminderOptions);
       yield* TestClock.adjust("49 seconds");
       expect((yield* after.state.get)._tag).toBe("Scheduled");
       // It fires at the stored time, not a full wait after the reopen.
@@ -577,7 +579,7 @@ describe("durable actor", () => {
   withStore("an initial state that names a wake is stored with it when the actor opens", () =>
     Effect.gen(function* () {
       const store = yield* MailboxStore;
-      const running = yield* durable({
+      const running = yield* Actor.durable({
         ...counterOptions,
         behavior: { ...counterBehavior, wakeAt: () => Option.some(0) },
       });
@@ -591,7 +593,9 @@ describe("durable actor", () => {
   withStore("a machine's initial state does not spend a revision", () =>
     Effect.gen(function* () {
       const store = yield* MailboxStore;
-      const upload = yield* durable(uploadOptions).pipe(Effect.provideService(Gate, gateThatOpens));
+      const upload = yield* Actor.durable(uploadOptions).pipe(
+        Effect.provideService(Gate, gateThatOpens),
+      );
       yield* yieldFibers;
       expect(yield* store.latest).toEqual(Option.none());
       const started = yield* upload.call(UploadEvent.Start({ file: "a.txt" }), {
@@ -605,7 +609,7 @@ describe("durable actor", () => {
   withStore("closing the scope ends a waiting call as Uncertain: the row may still commit", () =>
     Effect.gen(function* () {
       const life = yield* Scope.make();
-      const counter = yield* durable({ ...counterOptions, behavior: slowBehavior }).pipe(
+      const counter = yield* Actor.durable({ ...counterOptions, behavior: slowBehavior }).pipe(
         Scope.provide(life),
       );
       const waiting = yield* Effect.forkScoped(

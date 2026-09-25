@@ -1,6 +1,6 @@
 import { platformFetch } from "./dom-setup.js";
 
-import { Form, ref } from "effect-frame/actor/client";
+import { Actor, Form } from "effect-frame/actor/client";
 import { Effect, Option, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { Notes, demoKey } from "../src/contract.js";
@@ -53,7 +53,7 @@ const notesAt = (url: string, revision: number) =>
   Effect.scoped(
     Effect.gen(function* () {
       const client = yield* clientOf(url);
-      const notes = yield* client(ref(Notes, demoKey));
+      const notes = yield* client(Actor.remote(Notes, demoKey));
       return yield* Stream.runHead(
         Stream.filter(notes.applied.changes, (applied) => applied.revision.value >= revision),
       );

@@ -1,5 +1,6 @@
 import type { AnyImplementation } from "effect-frame/actor";
 import {
+  Actor,
   ActorHost,
   Behavior,
   MailboxStore,
@@ -14,8 +15,6 @@ import {
   Refused,
   Unreachable,
   contract,
-  ref,
-  spawn,
 } from "effect-frame/actor/client";
 import type { CommandId, DurableReceipt, TransportService } from "effect-frame/actor/client";
 import { Html, View } from "effect-frame/view";
@@ -212,8 +211,8 @@ export const noProps: NoProps = { _tag: "NoProps" };
  */
 export const TasksPage = (_props: NoProps) =>
   Effect.gen(function* () {
-    const tasks = yield* ref(Tasks, board);
-    const draft = yield* spawn(Behavior.value(""));
+    const tasks = yield* Actor.remote(Tasks, board);
+    const draft = yield* Actor.local(Behavior.value(""));
     const add = yield* View.form({
       ref: tasks,
       contract: Tasks,
@@ -274,7 +273,7 @@ export const TasksDocument = Effect.scoped(
 /** The unlock form alone: a label and a redacted, required pin. */
 export const VaultPage = (_props: NoProps) =>
   Effect.gen(function* () {
-    const vaults = yield* ref(Vault, vault);
+    const vaults = yield* Actor.remote(Vault, vault);
     const unlock = yield* View.form({
       ref: vaults,
       contract: Vault,

@@ -2,7 +2,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Behavior, Value, spawn } from "effect-frame/actor";
+import { Actor, Behavior, Value } from "effect-frame/actor";
 import type { QueryState, Source } from "effect-frame/actor";
 import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -133,8 +133,8 @@ describe("nested readiness presentation", () => {
     for (const { toggleInner, name } of cases) {
       it.scoped(name, () =>
         Effect.gen(function* () {
-          const outer = yield* spawn(Behavior.value<State>(hiddenState(outerKind)));
-          const inner = yield* spawn(Behavior.value<State>(readyState));
+          const outer = yield* Actor.local(Behavior.value<State>(hiddenState(outerKind)));
+          const inner = yield* Actor.local(Behavior.value<State>(readyState));
           const attached: Array<boolean> = [];
           const made = new Map<string, Node>();
           const root = yield* connectedRoot;
@@ -225,9 +225,9 @@ describe("nested readiness presentation", () => {
   for (const { nested, name } of removals) {
     it.scoped(name, () =>
       Effect.gen(function* () {
-        const outer = yield* spawn(Behavior.value<State>(hiddenState("Errored")));
-        const inner = yield* spawn(Behavior.value<State>(readyState));
-        const items = yield* spawn(Behavior.value<ReadonlyArray<string>>(["row"]));
+        const outer = yield* Actor.local(Behavior.value<State>(hiddenState("Errored")));
+        const inner = yield* Actor.local(Behavior.value<State>(readyState));
+        const items = yield* Actor.local(Behavior.value<ReadonlyArray<string>>(["row"]));
         const attached: Array<boolean> = [];
         let rowClosed = false;
         const made = new Map<string, Node>();

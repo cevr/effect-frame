@@ -1,6 +1,6 @@
 /* oxlint-disable effect/noGlobals -- Bun.serve and fetch are this test's platform boundary: a real socket and a browser with no script. */
-import { HttpServer } from "effect-frame/actor";
-import { ActorTransport, Form, contract, ref } from "effect-frame/actor/client";
+import { Actor, HttpServer } from "effect-frame/actor";
+import { ActorTransport, Form, contract } from "effect-frame/actor/client";
 import type { AnyContract } from "effect-frame/actor/client";
 import { Context, Effect, Hash, Layer, Option, Ref, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -145,7 +145,7 @@ const withField = (body: string, name: string, value: string): string =>
  */
 const snapshot = (served: Served, revision = 0) =>
   Effect.scoped(
-    Effect.flatMap(ref(Tasks, board), (tasks) =>
+    Effect.flatMap(Actor.remote(Tasks, board), (tasks) =>
       Stream.runHead(
         Stream.filter(tasks.applied.changes, (applied) => applied.revision.value >= revision),
       ),
@@ -162,7 +162,7 @@ const sends = (served: Served) => Ref.get(served.wire.sends);
 /** The `Vault` actor's committed state at `revision`, read through the same host. */
 const vaultAt = (served: Served, revision: number) =>
   Effect.scoped(
-    Effect.flatMap(ref(Vault, vaultKey), (vaults) =>
+    Effect.flatMap(Actor.remote(Vault, vaultKey), (vaults) =>
       Stream.runHead(
         Stream.filter(vaults.applied.changes, (applied) => applied.revision.value >= revision),
       ),

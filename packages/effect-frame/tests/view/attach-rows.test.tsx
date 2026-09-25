@@ -2,7 +2,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Behavior, spawn } from "effect-frame/actor";
+import { Actor, Behavior } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
 import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -90,7 +90,7 @@ describe("attached behaviours in rows and at the top", () => {
       const log: Array<string> = [];
       const gate = yield* Deferred.make<boolean>();
       const attached = yield* Deferred.make<void>();
-      const items = yield* spawn(Behavior.value<ReadonlyArray<string>>(["a", "b"]));
+      const items = yield* Actor.local(Behavior.value<ReadonlyArray<string>>(["a", "b"]));
       const page = yield* ViewTest.make({
         host: Dom.host,
         root,

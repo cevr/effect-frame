@@ -1,6 +1,7 @@
 import { Effect, Exit, Layer, Option, Schema, Scope, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import {
+  Actor,
   ActorHost,
   Behavior,
   CommandId,
@@ -21,7 +22,6 @@ import {
   Wire,
   committedRevision,
   contract,
-  ref,
 } from "effect-frame/actor/client";
 import type { Address, CommandSettled } from "effect-frame/actor/client";
 
@@ -101,13 +101,13 @@ const withInProcess = it.scoped.layer(inProcess);
 describe("http transport in process", () => {
   withInProcess("call, snapshot, and changes cross the wire", () =>
     Effect.gen(function* () {
-      const writer = yield* ref(Counter, alice);
-      const reader = yield* ref(Counter, alice);
+      const writer = yield* Actor.remote(Counter, alice);
+      const reader = yield* Actor.remote(Counter, alice);
       const applied = yield* writer.call(add(3), { commandId: id("c1"), timeout: "1 second" });
       expect(applied).toEqual({ revision: committedRevision(1), state: 3 });
       const seen = yield* Stream.runHead(Stream.filter(reader.state.changes, (n) => n === 3));
       expect(seen).toEqual(Option.some(3));
-      const fresh = yield* ref(Counter, alice);
+      const fresh = yield* Actor.remote(Counter, alice);
       expect(yield* fresh.applied.get).toEqual({ revision: committedRevision(1), state: 3 });
     }),
   );
@@ -135,7 +135,7 @@ describe("http transport in process", () => {
 
   withInProcess("a command handle settles over the wire, and a resend gets its stored result", () =>
     Effect.gen(function* () {
-      const counter = yield* ref(Counter, alice);
+      const counter = yield* Actor.remote(Counter, alice);
       const first = yield* counter.send(add(1));
       const applied: CommandSettled<number, "remote"> = {
         _tag: "Applied",
@@ -152,14 +152,14 @@ describe("http transport in process", () => {
 
   withInProcess("typed failures survive the wire with their status", () =>
     Effect.gen(function* () {
-      const counter = yield* ref(Counter, alice);
+      const counter = yield* Actor.remote(Counter, alice);
       yield* counter.call(add(1), { commandId: id("c1"), timeout: "1 second" });
       const conflict = yield* counter.send(add(2), { commandId: id("c1") });
       expect(yield* conflict.settled).toEqual({
         _tag: "Rejected",
         reason: CommandConflict.make({ commandId: id("c1") }),
       });
-      const denied = yield* Effect.flip(ref(Counter, { tenant: "other", id: "x" }));
+      const denied = yield* Effect.flip(Actor.remote(Counter, { tenant: "other", id: "x" }));
       expect(denied._tag).toBe("Unauthorized");
       const Stale = contract("Counter", {
         ...Counter,
@@ -169,7 +169,7 @@ describe("http transport in process", () => {
         snapshot: Schema.Finite,
         message: Schema.Union([Add]),
       });
-      const stale = yield* Effect.flip(ref(Stale, alice));
+      const stale = yield* Effect.flip(Actor.remote(Stale, alice));
       expect(stale._tag).toBe("ContractMismatch");
     }),
   );
@@ -178,7 +178,7 @@ describe("http transport in process", () => {
     "a refusal crosses the wire as 422 Refused, is conclusive, and is never predicted",
     () =>
       Effect.gen(function* () {
-        const counter = yield* ref(Counter, alice, {
+        const counter = yield* Actor.remote(Counter, alice, {
           resume: Option.none(),
           behavior: counterBehavior,
         });
@@ -246,7 +246,7 @@ describe("http transport over a real socket", () => {
       const baseUrl = `http://127.0.0.1:${port}`;
 
       const [reader, writer] = yield* asClientOf(baseUrl)(
-        Effect.all([ref(Counter, alice), ref(Counter, alice)]),
+        Effect.all([Actor.remote(Counter, alice), Actor.remote(Counter, alice)]),
       );
 
       yield* writer.call(add(1), { commandId: id("c1"), timeout: "1 second" });

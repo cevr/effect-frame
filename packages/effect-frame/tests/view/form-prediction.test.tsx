@@ -2,8 +2,15 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { ActorHost, Behavior, Policies, Policy, implementTransparent } from "effect-frame/actor";
-import { ActorTransport, contract, ref } from "effect-frame/actor/client";
+import {
+  Actor,
+  ActorHost,
+  Behavior,
+  Policies,
+  Policy,
+  implementTransparent,
+} from "effect-frame/actor";
+import { ActorTransport, contract } from "effect-frame/actor/client";
 import type { TransportService } from "effect-frame/actor/client";
 import { Dom, Html, View } from "effect-frame/view";
 import { Deferred, Effect, Layer, Option, Ref, Schedule, Schema } from "effect";
@@ -39,7 +46,10 @@ const ShelfLive = implementTransparent(Shelf, { behavior: reducer });
 
 const ShelfPage = (_props: NoProps) =>
   Effect.gen(function* () {
-    const shelf = yield* ref(Shelf, shelfKey, { resume: Option.none(), behavior: reducer });
+    const shelf = yield* Actor.remote(Shelf, shelfKey, {
+      resume: Option.none(),
+      behavior: reducer,
+    });
     const note = yield* View.form({
       ref: shelf,
       contract: Shelf,

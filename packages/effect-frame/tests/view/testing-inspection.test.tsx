@@ -3,10 +3,10 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import {
+  Actor,
   Behavior,
   implementQuery,
   query,
-  spawn,
   type LocalActorRef,
   type SetValue,
   Policies,
@@ -170,7 +170,7 @@ describe("ViewTest Frame inspection", () => {
   )("reports the same root's blocked query and local actor on failure", () =>
     Effect.gen(function* () {
       const control = yield* BlockControl;
-      const local = yield* spawn(Behavior.value("local"));
+      const local = yield* Actor.local(Behavior.value("local"));
       const root = document.createElement("main");
       const page = yield* ViewTest.make({
         host: Dom.host,

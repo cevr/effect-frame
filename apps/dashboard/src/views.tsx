@@ -1,4 +1,4 @@
-import { Behavior, Form, Value, spawn, Source } from "effect-frame/actor/client";
+import { Actor, Behavior, Form, Value, Source } from "effect-frame/actor/client";
 import { Link, link } from "effect-frame/router";
 import type { NotFoundProps, Route } from "effect-frame/router";
 import { View } from "effect-frame/view";
@@ -46,7 +46,7 @@ export const failure = (first: Source<Option.Option<unknown>>): Node => (
  */
 const MemoCard = (memo: MemoCommands) =>
   Effect.gen(function* () {
-    const saved = yield* spawn(Behavior.value(""));
+    const saved = yield* Actor.local(Behavior.value(""));
     const write = (next: string) =>
       Effect.gen(function* () {
         const handle = yield* writeMemo(memo, next);

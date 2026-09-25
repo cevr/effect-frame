@@ -1,6 +1,7 @@
 import { Effect, Exit, Layer, Match, Option, Schema, Scope, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import {
+  Actor,
   ActorHost,
   Behavior,
   CommandId,
@@ -16,7 +17,6 @@ import {
   CurrentPrincipal,
   committedRevision,
   contract,
-  ref,
 } from "effect-frame/actor/client";
 
 const CounterKey = Schema.Struct({ tenant: Schema.String, id: Schema.String });
@@ -82,7 +82,7 @@ const withHost = it.scoped.layer(Layer.provide(host, Layer.succeed(Policies, ope
 describe("remote reference", () => {
   withHost("call applies through the transport and updates the snapshot", () =>
     Effect.gen(function* () {
-      const counter = yield* ref(Counter, alice);
+      const counter = yield* Actor.remote(Counter, alice);
       expect(counter.kind).toBe("remote");
       expect(yield* counter.state.get).toBe(0);
       const applied = yield* counter.call(add(3), { commandId: id("c1"), timeout: "1 second" });
@@ -93,20 +93,20 @@ describe("remote reference", () => {
 
   withHost("two references to one key observe the same actor", () =>
     Effect.gen(function* () {
-      const first = yield* ref(Counter, alice);
-      const second = yield* ref(Counter, alice);
+      const first = yield* Actor.remote(Counter, alice);
+      const second = yield* Actor.remote(Counter, alice);
       yield* first.call(add(2), { commandId: id("c1"), timeout: "1 second" });
       const seen = yield* Stream.runHead(Stream.filter(second.state.changes, (n) => n === 2));
       expect(seen).toEqual(Option.some(2));
-      const other = yield* ref(Counter, { tenant: "acme", id: "bob" });
+      const other = yield* Actor.remote(Counter, { tenant: "acme", id: "bob" });
       expect(yield* other.state.get).toBe(0);
     }),
   );
 
   withHost("a retried command ID applies once across references", () =>
     Effect.gen(function* () {
-      const first = yield* ref(Counter, alice);
-      const second = yield* ref(Counter, alice);
+      const first = yield* Actor.remote(Counter, alice);
+      const second = yield* Actor.remote(Counter, alice);
       const a = yield* first.call(add(2), { commandId: id("c1"), timeout: "1 second" });
       const b = yield* second.call(add(2), { commandId: id("c1"), timeout: "1 second" });
       expect(b).toEqual(a);
@@ -120,11 +120,11 @@ describe("remote reference", () => {
 
   withHost("a reference resumes from a held snapshot and receives only later revisions", () =>
     Effect.gen(function* () {
-      const writer = yield* ref(Counter, alice);
+      const writer = yield* Actor.remote(Counter, alice);
       const held = yield* writer.call(add(1), { commandId: id("c1"), timeout: "1 second" });
       yield* writer.call(add(1), { commandId: id("c2"), timeout: "1 second" });
 
-      const resumed = yield* ref(Counter, alice, { resume: Option.some(held) });
+      const resumed = yield* Actor.remote(Counter, alice, { resume: Option.some(held) });
       const caughtUp = yield* Stream.runHead(
         Stream.filter(resumed.applied.changes, (committed) => committed.revision.value >= 2),
       );
@@ -134,7 +134,7 @@ describe("remote reference", () => {
 
   withHost("the snapshot hides private state", () =>
     Effect.gen(function* () {
-      const secret = yield* ref(Secret, "s1");
+      const secret = yield* Actor.remote(Secret, "s1");
       const applied = yield* secret.call(
         { _tag: "Add", amount: 4 },
         { commandId: id("c1"), timeout: "1 second" },
@@ -153,7 +153,7 @@ describe("remote reference", () => {
         snapshot: Schema.Finite,
         message: CounterMessage,
       });
-      const failure = yield* Effect.flip(ref(CounterV2, alice));
+      const failure = yield* Effect.flip(Actor.remote(CounterV2, alice));
       expect(failure._tag).toBe("ContractMismatch");
       const Unknown = contract("Nope", {
         ...Counter,
@@ -162,7 +162,7 @@ describe("remote reference", () => {
         snapshot: Schema.Finite,
         message: CounterMessage,
       });
-      const unknown = yield* Effect.flip(ref(Unknown, alice));
+      const unknown = yield* Effect.flip(Actor.remote(Unknown, alice));
       expect(unknown._tag).toBe("UnknownContract");
     }),
   );
@@ -170,10 +170,10 @@ describe("remote reference", () => {
   withHost("the host scope owns the actors", () =>
     Effect.gen(function* () {
       const life = yield* Scope.make();
-      const counter = yield* ref(Counter, alice).pipe(Scope.provide(life));
+      const counter = yield* Actor.remote(Counter, alice).pipe(Scope.provide(life));
       yield* counter.call(add(1), { commandId: id("c1"), timeout: "1 second" });
       yield* Scope.close(life, Exit.void);
-      const again = yield* ref(Counter, alice);
+      const again = yield* Actor.remote(Counter, alice);
       expect(yield* again.state.get).toBe(1);
     }),
   );
@@ -204,19 +204,21 @@ describe("authorization", () => {
 
   withMembers("the policy sees the principal and can refuse another tenant", () =>
     Effect.gen(function* () {
-      const mine = yield* ref(Counter, alice).pipe(
+      const mine = yield* Actor.remote(Counter, alice).pipe(
         Effect.provideService(CurrentPrincipal, member("alice", "acme")),
       );
       expect(yield* mine.state.get).toBe(0);
 
       // Another tenant's member is refused on the same key.
       const other = yield* Effect.flip(
-        ref(Counter, alice).pipe(Effect.provideService(CurrentPrincipal, member("eve", "rival"))),
+        Actor.remote(Counter, alice).pipe(
+          Effect.provideService(CurrentPrincipal, member("eve", "rival")),
+        ),
       );
       expect(other._tag).toBe("Unauthorized");
 
       // Nobody in particular is refused on a key a member is granted.
-      const anonymous = yield* Effect.flip(ref(Counter, alice));
+      const anonymous = yield* Effect.flip(Actor.remote(Counter, alice));
       expect(anonymous._tag).toBe("Unauthorized");
     }),
   );

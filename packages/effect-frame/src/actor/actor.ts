@@ -112,7 +112,7 @@ export interface LocalActorRef<State, Message, Refusal = never> extends ActorRef
  * Closing the scope stops the actor; every waiting `call` fails with
  * `ActorStopped`.
  */
-export const spawn = Effect.fn("Actor.spawn")(function* <
+export const local = Effect.fn("Actor.local")(function* <
   State,
   Message,
   R,

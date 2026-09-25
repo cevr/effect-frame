@@ -4,7 +4,7 @@ registerDom();
 
 import { Location, Route, Router, UrlState, link, mount } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
-import { Behavior, Value, spawn } from "effect-frame/actor";
+import { Actor, Behavior, Value } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
 import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -311,7 +311,7 @@ const opaqueRoute = Route.client("opaque-route", {
 
 const ReusableClaims = (_props: Route.RouteProps<{}, {}>) =>
   Effect.gen(function* () {
-    const items = yield* spawn(Behavior.value<ReadonlyArray<string>>(["first"]));
+    const items = yield* Actor.local(Behavior.value<ReadonlyArray<string>>(["first"]));
     reusableItems = Option.some((next) =>
       Effect.asVoid(
         Effect.catchTag(items.call(Value.Set(next)), "ActorStopped", () => Effect.void),

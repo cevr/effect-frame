@@ -1,7 +1,7 @@
 import { Deferred, Effect, Fiber, Option, Predicate, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { Event, Machine, State } from "effect-machine";
-import { ActorHost, Behavior, Policies, Policy, implement } from "effect-frame/actor";
+import { Actor, ActorHost, Behavior, Policies, Policy, implement } from "effect-frame/actor";
 import {
   ActorTransport,
   CommandId,
@@ -10,7 +10,6 @@ import {
   Unreachable,
   committedRevision,
   contract,
-  ref,
 } from "effect-frame/actor/client";
 import type {
   Displayed,
@@ -184,7 +183,7 @@ describe("optimistic sends (#19, #67)", () => {
       const held = yield* wire.holdSend("a");
       yield* wire.streamDown;
       const list = yield* Effect.provideService(
-        ref(List, "shelf", { resume: Option.none(), behavior: predicting }),
+        Actor.remote(List, "shelf", { resume: Option.none(), behavior: predicting }),
         ActorTransport,
         wire.transport,
       );
@@ -217,7 +216,7 @@ describe("optimistic sends (#19, #67)", () => {
       const wire = yield* heldWire();
       const heldB = yield* wire.holdCall("b");
       const list = yield* Effect.provideService(
-        ref(List, "shelf", { resume: Option.none(), behavior: predicting }),
+        Actor.remote(List, "shelf", { resume: Option.none(), behavior: predicting }),
         ActorTransport,
         wire.transport,
       );
@@ -260,7 +259,7 @@ describe("optimistic sends (#19, #67)", () => {
       const heldB = yield* wire.holdSend("b");
       yield* wire.refuse("a");
       const list = yield* Effect.provideService(
-        ref(List, "shelf", { resume: Option.none(), behavior: predicting }),
+        Actor.remote(List, "shelf", { resume: Option.none(), behavior: predicting }),
         ActorTransport,
         wire.transport,
       );
@@ -295,7 +294,7 @@ describe("optimistic sends (#19, #67)", () => {
       const wire = yield* heldWire();
       const heldA = yield* wire.holdSend("a");
       const list = yield* Effect.provideService(
-        ref(List, "shelf", { resume: Option.none(), behavior: predicting }),
+        Actor.remote(List, "shelf", { resume: Option.none(), behavior: predicting }),
         ActorTransport,
         wire.transport,
       );
@@ -372,7 +371,7 @@ describe("optimistic sends (#19, #67)", () => {
         },
       });
       const list = yield* Effect.provideService(
-        ref(List, "shelf", { resume: Option.none(), behavior: fragile }),
+        Actor.remote(List, "shelf", { resume: Option.none(), behavior: fragile }),
         ActorTransport,
         wire.transport,
       );
@@ -416,7 +415,7 @@ describe("optimistic sends (#19, #67)", () => {
       const wire = yield* heldWire();
       const held = yield* wire.holdSend("a");
       const list = yield* Effect.provideService(
-        ref(List, "shelf", { resume: Option.none(), behavior: predicting }),
+        Actor.remote(List, "shelf", { resume: Option.none(), behavior: predicting }),
         ActorTransport,
         wire.transport,
       );
@@ -434,7 +433,7 @@ describe("optimistic sends (#19, #67)", () => {
       const wire = yield* heldWire();
       const held = yield* wire.holdSend("a");
       const list = yield* Effect.provideService(
-        ref(List, "shelf", { resume: Option.none(), behavior: predicting }),
+        Actor.remote(List, "shelf", { resume: Option.none(), behavior: predicting }),
         ActorTransport,
         wire.transport,
       );
@@ -454,7 +453,7 @@ describe("optimistic sends (#19, #67)", () => {
     Effect.gen(function* () {
       const wire = yield* heldWire();
       const list = yield* Effect.provideService(
-        ref(List, "shelf", { resume: Option.none(), behavior: predicting }),
+        Actor.remote(List, "shelf", { resume: Option.none(), behavior: predicting }),
         ActorTransport,
         wire.transport,
       );
@@ -488,7 +487,7 @@ describe("optimistic sends (#19, #67)", () => {
       const wire = yield* heldWire();
       const held = yield* wire.holdSend("a");
       const list = yield* Effect.provideService(
-        ref(List, "shelf", { resume: Option.none(), behavior: predicting }),
+        Actor.remote(List, "shelf", { resume: Option.none(), behavior: predicting }),
         ActorTransport,
         wire.transport,
       );
@@ -508,7 +507,7 @@ describe("optimistic sends (#19, #67)", () => {
       const wire = yield* heldWire();
       const held = yield* wire.holdSend("a");
       const list = yield* Effect.provideService(
-        ref(List, "shelf", { resume: Option.none(), behavior: predicting }),
+        Actor.remote(List, "shelf", { resume: Option.none(), behavior: predicting }),
         ActorTransport,
         wire.transport,
       );
@@ -540,7 +539,7 @@ describe("optimistic sends (#19, #67)", () => {
       const wire = yield* heldWire();
       yield* wire.loseCalls("a", 1);
       const list = yield* Effect.provideService(
-        ref(List, "shelf", { resume: Option.none(), behavior: predicting }),
+        Actor.remote(List, "shelf", { resume: Option.none(), behavior: predicting }),
         ActorTransport,
         wire.transport,
       ).pipe(
@@ -639,7 +638,7 @@ describe("a machine behavior (#19)", () => {
           ),
       };
       const counter = yield* Effect.provideService(
-        ref(Counter, "one", { resume: Option.none(), behavior: counterBehavior }),
+        Actor.remote(Counter, "one", { resume: Option.none(), behavior: counterBehavior }),
         ActorTransport,
         transport,
       );

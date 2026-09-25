@@ -1,6 +1,6 @@
 /* oxlint-disable effect/noGlobals, effect/noNullish, effect/noRuntimeTypeof, effect/noTernary -- this browser fixture is the benchmark boundary: it must use DOM globals, nullable DOM state, and the canonical imperative callback shape. */
 
-import { Behavior, Value, spawn, Source } from "effect-frame/actor/client";
+import { Actor, Behavior, Value, Source } from "effect-frame/actor/client";
 import { Dom, View } from "effect-frame/view";
 import { Effect } from "effect";
 import {
@@ -21,8 +21,8 @@ const operation = (value: OperationName, state: BenchmarkState): BenchmarkState 
 
 const Benchmark = (props: BenchmarkProps) =>
   Effect.gen(function* () {
-    const rows = yield* spawn(Behavior.value<ReadonlyArray<Row>>(initialState.rows));
-    const selected = yield* spawn(Behavior.value<number | null>(initialState.selected));
+    const rows = yield* Actor.local(Behavior.value<ReadonlyArray<Row>>(initialState.rows));
+    const selected = yield* Actor.local(Behavior.value<number | null>(initialState.selected));
     let state: BenchmarkState = initialState;
     window.__benchVersion = 0;
     window.__benchNodeId = 0;

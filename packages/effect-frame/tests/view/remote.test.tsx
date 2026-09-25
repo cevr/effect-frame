@@ -3,6 +3,7 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import {
+  Actor,
   ActorHost,
   Behavior,
   CommandId,
@@ -11,7 +12,7 @@ import {
   Policy,
 } from "effect-frame/actor";
 import type { KeyOf, TransportService } from "effect-frame/actor/client";
-import { ActorTransport, contract, ref, Source } from "effect-frame/actor/client";
+import { ActorTransport, contract, Source } from "effect-frame/actor/client";
 import type { Host } from "effect-frame/view";
 import { Dom, For, Html, Remote, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -95,7 +96,7 @@ interface PageProps {
 /** One view for every host: the recorder, the HTML host, and the DOM. */
 const NotesPage = (props: PageProps) =>
   Effect.gen(function* () {
-    const notes = yield* ref(Notes, props.key);
+    const notes = yield* Actor.remote(Notes, props.key);
     return (
       <section id="notes-page">
         <button
@@ -128,7 +129,7 @@ const NotesPage = (props: PageProps) =>
 /** The same list, with each row drawn only after its setup yields: a late setup. */
 const LateRows = (props: PageProps) =>
   Effect.gen(function* () {
-    const notes = yield* ref(Notes, props.key);
+    const notes = yield* Actor.remote(Notes, props.key);
     const rows = yield* View.list({
       each: Source.select(notes.state, (snapshot) => snapshot.notes),
       keyBy: (note: Note) => note.id,
@@ -149,7 +150,7 @@ interface GatedProps extends PageProps {
 /** Each row draws only once the test opens the gate: a late setup the test holds. */
 const GatedRows = (props: GatedProps) =>
   Effect.gen(function* () {
-    const notes = yield* ref(Notes, props.key);
+    const notes = yield* Actor.remote(Notes, props.key);
     const rows = yield* View.list({
       each: Source.select(notes.state, (snapshot) => snapshot.notes),
       keyBy: (note: Note) => note.id,
@@ -170,15 +171,15 @@ const GatedRows = (props: GatedProps) =>
 /** A view that reads a second actor besides its drive. */
 const TwoActors = (props: PageProps) =>
   Effect.gen(function* () {
-    yield* ref(Notes, props.key);
-    const other = yield* ref(Notes, `${props.key}-other`);
+    yield* Actor.remote(Notes, props.key);
+    const other = yield* Actor.remote(Notes, `${props.key}-other`);
     return <p>{View.bind(other.state, (snapshot) => snapshot.notes.length)}</p>;
   });
 
 /** One button per note, whose handler runs on the server. */
 const RowButtons = (props: PageProps) =>
   Effect.gen(function* () {
-    const notes = yield* ref(Notes, props.key);
+    const notes = yield* Actor.remote(Notes, props.key);
     return (
       <ul id="buttons">
         <For
@@ -206,7 +207,7 @@ const RowButtons = (props: PageProps) =>
 let drawings = 0;
 const Counted = (props: PageProps) =>
   Effect.gen(function* () {
-    yield* ref(Notes, props.key);
+    yield* Actor.remote(Notes, props.key);
     drawings += 1;
     return <p id="counted">{`drawing ${String(drawings)}`}</p>;
   });
@@ -215,7 +216,7 @@ const Counted = (props: PageProps) =>
 let titled = 0;
 const TitledByNumber = (props: PageProps) =>
   Effect.gen(function* () {
-    yield* ref(Notes, props.key);
+    yield* Actor.remote(Notes, props.key);
     const title = [Number.NaN, Number.POSITIVE_INFINITY][titled % 2] ?? 0;
     titled += 1;
     return <div id="titled" title={title} />;
@@ -233,7 +234,7 @@ const withHost = it.scoped.layer(
 
 const call = (key: string, message: NotesMessage, commandId: string) =>
   Effect.gen(function* () {
-    const notes = yield* ref(Notes, key);
+    const notes = yield* Actor.remote(Notes, key);
     yield* notes.call(message, { commandId: id(commandId), timeout: "1 second" });
   });
 
@@ -379,7 +380,7 @@ const sessionOf = (payload: string) =>
 /** One note as the actor holds it now. */
 const noteOf = (key: string, noteId: string) =>
   Effect.gen(function* () {
-    const notes = yield* ref(Notes, key);
+    const notes = yield* Actor.remote(Notes, key);
     const snapshot = yield* notes.state.get;
     return Option.fromNullishOr(snapshot.notes.find((note) => note.id === noteId));
   });
@@ -928,7 +929,7 @@ describe("what a session and a client guarantee each other (#87)", () => {
       const { root, client } = yield* domClient("g5");
       const { session, next } = yield* connect("g5");
       yield* client.resume(session.resume);
-      const notes = yield* ref(Notes, "g5");
+      const notes = yield* Actor.remote(Notes, "g5");
       const send = (message: NotesMessage, commandId: string) =>
         notes.call(message, { commandId: id(commandId), timeout: "1 second" });
       const first = () =>

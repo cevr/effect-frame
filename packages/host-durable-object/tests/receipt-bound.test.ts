@@ -2,6 +2,7 @@ import { Context, Effect, Layer, Option, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
 import {
+  Actor,
   ActorHost,
   Behavior,
   MailboxStore,
@@ -14,7 +15,6 @@ import {
   Unreachable,
   committedRevision,
   contract,
-  ref,
 } from "effect-frame/actor/client";
 import type { TransportService } from "effect-frame/actor/client";
 import type { StoreFactory } from "effect-frame/actor/testing";
@@ -83,7 +83,7 @@ describe("a receipt outlives the retry bound", () => {
               );
             }),
         };
-        const counter = yield* ref(Counter, "alice").pipe(
+        const counter = yield* Actor.remote(Counter, "alice").pipe(
           Effect.provideService(ActorTransport, wire),
         );
 

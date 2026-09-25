@@ -15,7 +15,7 @@ import {
 import type { Scope } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
-import { ActorHost, HttpServer, Policies } from "effect-frame/actor";
+import { Actor, ActorHost, HttpServer, Policies } from "effect-frame/actor";
 import type {
   Address,
   Principal,
@@ -36,7 +36,6 @@ import {
   Principal as Principals,
   QueryState,
   followQuery,
-  ref,
   QueryCache,
 } from "effect-frame/actor/client";
 import type { Served } from "./auth-fixture.js";
@@ -657,7 +656,7 @@ describe("a client cache across a principal change", () => {
             );
             yield* Deferred.await(watching);
             // A live actor reference: the client's view of the session's validity.
-            yield* ref(Ledger, book);
+            yield* Actor.remote(Ledger, book);
 
             yield* command(served, "s1", SessionEvent.SignOut);
 
@@ -870,7 +869,7 @@ describe("every refusal the client receives", () => {
             "3 seconds",
           );
           const recorded = yield* statesUntilFailed(followed.state.changes);
-          yield* ref(Ledger, book);
+          yield* Actor.remote(Ledger, book);
 
           yield* command(served, "s1", SessionEvent.SignOut);
 
@@ -903,7 +902,7 @@ describe("every refusal the client receives", () => {
             cache.open(LedgerCount, { tenant: "acme" }),
           );
           yield* firstState(count, QueryState.isReady);
-          const ledger = yield* ref(Ledger, book);
+          const ledger = yield* Actor.remote(Ledger, book);
           // The reply carries the count read for alice after her entry.
           const sent = yield* Effect.forkScoped(
             Effect.exit(ledger.call(Entry.make({ text: "line" }), { timeout: "5 seconds" })),
@@ -943,7 +942,7 @@ describe("every refusal the client receives", () => {
             cache.open(LedgerCount, { tenant: "acme" }),
           );
           yield* firstState(count, QueryState.isReady);
-          yield* ref(Ledger, book);
+          yield* Actor.remote(Ledger, book);
           const recorded = yield* statesUntilFailed(count.state.changes);
 
           // The server answers a read for alice; the answer is on the client.
@@ -983,7 +982,7 @@ describe("every refusal the client receives", () => {
             cache.open(LedgerCount, { tenant: "acme" }),
           );
           yield* firstState(count, QueryState.isReady);
-          const ledger = yield* ref(Ledger, book);
+          const ledger = yield* Actor.remote(Ledger, book);
           const recorded = yield* statesUntilFailed(count.state.changes);
 
           yield* command(served, "s1", SessionEvent.SignOut);
@@ -1077,7 +1076,7 @@ describe("an adapter keeps its derivation's requirements", () => {
         Effect.sync(() => HttpServer.toWebHandler(host, { principal: snapshotPrincipal })),
         (running) => Effect.promise(() => running.dispose()),
       );
-      const session = yield* ref(Session, { sessionId: "s1" }).pipe(
+      const session = yield* Actor.remote(Session, { sessionId: "s1" }).pipe(
         throughAdapter(web, Option.none()),
       );
       yield* session.call(
@@ -1088,10 +1087,10 @@ describe("an adapter keeps its derivation's requirements", () => {
       );
 
       const member = yield* Effect.result(
-        ref(Ledger, book).pipe(throughAdapter(web, Option.some("s1"))),
+        Actor.remote(Ledger, book).pipe(throughAdapter(web, Option.some("s1"))),
       );
       const stranger = yield* Effect.flip(
-        ref(Ledger, book).pipe(throughAdapter(web, Option.none())),
+        Actor.remote(Ledger, book).pipe(throughAdapter(web, Option.none())),
       );
       expect(member._tag).toBe("Success");
       expect(stranger._tag).toBe("Unauthorized");

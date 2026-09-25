@@ -2,7 +2,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Behavior, Value, spawn } from "effect-frame/actor";
+import { Actor, Behavior, Value } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
 import { Dom, For, Portal, Show, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -105,7 +105,7 @@ describe("mount failure ownership", () => {
       unrelatedPortal.textContent = "keep portal";
       into.appendChild(unrelatedPortal);
 
-      const tasks = yield* spawn(
+      const tasks = yield* Actor.local(
         Behavior.value<ReadonlyArray<Task>>([
           { id: "a", title: "alpha" },
           { id: "b", title: "beta" },
@@ -137,8 +137,8 @@ describe("mount failure ownership", () => {
   it.scoped("forgets nested host ownership through repeated branch and row turnover", () =>
     Effect.gen(function* () {
       const root = document.createElement("main");
-      const open = yield* spawn(Behavior.value(true));
-      const tasks = yield* spawn(
+      const open = yield* Actor.local(Behavior.value(true));
+      const tasks = yield* Actor.local(
         Behavior.value<ReadonlyArray<Task>>([
           { id: "a", title: "alpha" },
           { id: "b", title: "beta" },

@@ -1,6 +1,7 @@
 import { Clock, Effect, Layer, Option, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import {
+  Actor,
   ActorHost,
   Behavior,
   HttpServer,
@@ -8,7 +9,7 @@ import {
   Policy,
   implementTransparent,
 } from "effect-frame/actor";
-import { HttpTransport, committedRevision, contract, ref } from "effect-frame/actor/client";
+import { HttpTransport, committedRevision, contract } from "effect-frame/actor/client";
 import type { IdentifiedCommandHandle } from "effect-frame/actor/client";
 import type { CommandPolicySettings } from "../../src/actor/command-owner.js";
 import { CommandPolicy } from "../../src/actor/command-owner.js";
@@ -135,7 +136,7 @@ const client = (settings: Partial<CommandPolicySettings>) =>
   Effect.gen(function* () {
     const transport = yield* serve;
     const context = yield* Layer.build(transport);
-    return yield* ref(Counter, "impaired").pipe(
+    return yield* Actor.remote(Counter, "impaired").pipe(
       Effect.provideContext(context),
       Effect.provideService(CommandPolicy, policy(settings)),
     );

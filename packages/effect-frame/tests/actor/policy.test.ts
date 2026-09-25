@@ -1,6 +1,7 @@
 import { Effect, Exit, Layer, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import {
+  Actor,
   ActorHost,
   Behavior,
   Policies,
@@ -10,7 +11,7 @@ import {
   implementTransparent,
 } from "effect-frame/actor";
 import type { PolicyTable } from "effect-frame/actor";
-import { ActorTransport, contract, query, ref } from "effect-frame/actor/client";
+import { ActorTransport, contract, query } from "effect-frame/actor/client";
 
 /**
  * A required table, validated at construction (#20 §3). A host whose
@@ -126,7 +127,7 @@ describe("a required policy table", () => {
             implementations: [OpenLive],
             store: ActorHost.memoryStore,
           }).pipe(Effect.provideService(Policies, { public: Policy.allowAll }));
-          const counter = yield* ref(Open, "anyone").pipe(
+          const counter = yield* Actor.remote(Open, "anyone").pipe(
             Effect.provideService(ActorTransport, host),
           );
           const applied = yield* counter.call({ _tag: "Add", amount: 2 }, { timeout: "1 second" });

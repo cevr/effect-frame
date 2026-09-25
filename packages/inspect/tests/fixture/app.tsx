@@ -7,12 +7,12 @@
  * direct read of the same Frame service, and root close.
  */
 import {
+  Actor,
   Behavior,
   Policies,
   Policy,
   implementQuery,
   query,
-  spawn,
   QueryCache,
 } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
@@ -121,7 +121,7 @@ export const start = (
     search: Route.search(Schema.Struct({})),
     view: (props) =>
       Effect.gen(function* () {
-        const local = yield* spawn(Behavior.value("local"));
+        const local = yield* Actor.local(Behavior.value("local"));
         const id = yield* props.params.get;
         const held = yield* View.loading({
           fallback: <p id="loading">loading</p>,

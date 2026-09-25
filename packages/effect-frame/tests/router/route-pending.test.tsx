@@ -3,11 +3,11 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import {
+  Actor,
   Behavior,
   Value,
   implementQuery,
   query as queryContract,
-  spawn,
   Policies,
   Policy,
 } from "effect-frame/actor";
@@ -271,7 +271,7 @@ const PostRevision = 40;
 const BumpedRevision = 99;
 
 const spawnAtRevision = Effect.fn("PendingTest.spawnAtRevision")(function* (revision: number) {
-  const local = yield* spawn(Behavior.value(0));
+  const local = yield* Actor.local(Behavior.value(0));
   for (let next = 1; next <= revision; next += 1) {
     yield* Effect.orDie(local.call(Value.Set(next)));
   }

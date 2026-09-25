@@ -4,7 +4,7 @@
  * to a file; `prerender-app.tsx`, bundled as the build's `client.js`,
  * hydrates that file in WebKit or Chrome.
  */
-import { contract, ref, resumeCodec } from "effect-frame/actor/client";
+import { Actor, contract, resumeCodec } from "effect-frame/actor/client";
 import type { Applied, SnapshotOf } from "effect-frame/actor/client";
 import { Route } from "effect-frame/router";
 import type { NotFoundProps } from "effect-frame/router";
@@ -42,7 +42,7 @@ export const noteRoute = Route.prerender(
   "notes",
   Route.leaf(noteSegment, () =>
     Effect.gen(function* () {
-      const note = yield* Effect.orDie(ref(Note, "n1", { resume: yield* Baked }));
+      const note = yield* Effect.orDie(Actor.remote(Note, "n1", { resume: yield* Baked }));
       return (
         <article id="note">
           <p id="count">{View.bind(note.state, (state) => state.count)}</p>

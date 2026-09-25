@@ -5,7 +5,7 @@ import { callThrough, identifiedHandle, suppliedId, toApplied } from "./command-
 import { isMinted } from "./command-id.js";
 import * as Commands from "./command-owner.js";
 import type { Committed } from "./engine-types.js";
-import { remoteCommands } from "./remote-commands.js";
+import { transportCommands } from "./remote-commands.js";
 import type { RemoteRejection } from "./remote-commands.js";
 import type { Address, AnyContract, KeyOf, MessageOf, SnapshotOf } from "./contract.js";
 import type { QueryKey } from "./query.js";
@@ -187,7 +187,7 @@ const commandSurface = Effect.fn("Actor.commandSurface")(function* <C extends An
         }),
     });
 
-  const adapter = remoteCommands(transport, address, (projection) =>
+  const adapter = transportCommands(transport, address, (projection) =>
     decodeProjection(contract, projection),
   );
   // The admission position each live record's last send reported. A receipt
@@ -247,7 +247,7 @@ const commandSurface = Effect.fn("Actor.commandSurface")(function* <C extends An
       enlist(identified, message),
     );
 
-  const send = Effect.fn("Actor.ref.send")(function* (
+  const send = Effect.fn("Actor.remote.send")(function* (
     message: MessageOf<C>,
     sendOptions: DurableSendOptions | void,
   ) {
@@ -256,7 +256,7 @@ const commandSurface = Effect.fn("Actor.commandSurface")(function* <C extends An
     return identifiedHandle(owned) satisfies IdentifiedCommandHandle<SnapshotOf<C>, "remote">;
   });
 
-  const call = Effect.fn("Actor.ref.call")(function* (
+  const call = Effect.fn("Actor.remote.call")(function* (
     message: MessageOf<C>,
     callOptions: DurableCallOptions,
   ) {
@@ -280,7 +280,7 @@ const commandSurface = Effect.fn("Actor.commandSurface")(function* <C extends An
  * retries, receipts, and single-flight refreshes of the page's active
  * queries. It never predicts; there is no state to predict into.
  */
-export const commandRef = Effect.fn("Actor.commandRef")(function* <C extends AnyContract>(
+export const remoteCommands = Effect.fn("Actor.remoteCommands")(function* <C extends AnyContract>(
   contract: C,
   key: KeyOf<C>,
 ) {
@@ -308,7 +308,7 @@ export const commandRef = Effect.fn("Actor.commandRef")(function* <C extends Any
  * pass, retries a lost pass within its bound, and keeps the exact bytes
  * while the command is unresolved.
  */
-export const ref = Effect.fn("Actor.ref")(function* <C extends AnyContract>(
+export const remote = Effect.fn("Actor.remote")(function* <C extends AnyContract>(
   contract: C,
   key: KeyOf<C>,
   options: RefOptions<C> = { resume: Option.none() },

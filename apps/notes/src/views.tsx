@@ -1,4 +1,4 @@
-import { Behavior, spawn, Source } from "effect-frame/actor/client";
+import { Actor, Behavior, Source } from "effect-frame/actor/client";
 import { Link, link } from "effect-frame/router";
 import type { NotFoundProps, Route } from "effect-frame/router";
 import { For, View } from "effect-frame/view";
@@ -132,7 +132,7 @@ export const IndexView = (props: Route.PropsOf<typeof index>) =>
 /** A draft that lives in this tab only. The server draws nothing here and reads nothing. */
 export const ScratchView = (_props: Route.PropsOf<typeof scratch>) =>
   Effect.gen(function* () {
-    const draft = yield* spawn(Behavior.value(""));
+    const draft = yield* Actor.local(Behavior.value(""));
     const setDraft = writeDraft(draft);
     return (
       <section id="scratch">

@@ -3,12 +3,12 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import {
+  Actor,
   ActorTransport,
   Generated,
   QueryCache,
   Refused,
   Unauthorized,
-  ref,
 } from "effect-frame/actor/client";
 import type { QueryState } from "effect-frame/actor/client";
 import { Effect, Layer, Option, Schema, Stream } from "effect";
@@ -95,7 +95,9 @@ describe("the compose form's command", () => {
           Effect.sync(() => textOf(app.root, "#status") === "Applied"),
           "first add",
         );
-        const before = yield* app.run(ref(Notes, keyOf(inboxName), { resume: Option.none() }));
+        const before = yield* app.run(
+          Actor.remote(Notes, keyOf(inboxName), { resume: Option.none() }),
+        );
         const committed = yield* before.applied.get;
 
         const held = yield* wire.holdSend(refusedText);
@@ -133,7 +135,9 @@ describe("the compose form's command", () => {
         const wire = yield* tappedHost;
         const app = yield* mountApp({ transport: wire.transport, href: archive, routes });
         yield* settle(Effect.sync(() => textOf(app.root, "#counts") === "0 of 0 done"));
-        const before = yield* app.run(ref(Notes, keyOf(archiveName), { resume: Option.none() }));
+        const before = yield* app.run(
+          Actor.remote(Notes, keyOf(archiveName), { resume: Option.none() }),
+        );
         const committed = yield* before.applied.get;
 
         const held = yield* wire.holdSend("file me");
@@ -191,7 +195,7 @@ describe("the compose form's command", () => {
               Effect.map(counts.state.get, (state) => state._tag === "Ready"),
               "the first counts",
             );
-            const notes = yield* ref(Notes, keyOf(inboxName), {
+            const notes = yield* Actor.remote(Notes, keyOf(inboxName), {
               resume: Option.none(),
               behavior: notesBehavior,
             });

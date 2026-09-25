@@ -2,8 +2,8 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Behavior, implementTransparent } from "effect-frame/actor";
-import { Generated, contract, ref } from "effect-frame/actor/client";
+import { Actor, Behavior, implementTransparent } from "effect-frame/actor";
+import { Generated, contract } from "effect-frame/actor/client";
 import { Dom, Html, View } from "effect-frame/view";
 import {
   Deferred,
@@ -60,7 +60,7 @@ const heldForm = (gate: Deferred.Deferred<void>) => {
   });
   const HeldPage = (_props: NoProps) =>
     Effect.gen(function* () {
-      const notes = yield* ref(Held, heldKey);
+      const notes = yield* Actor.remote(Held, heldKey);
       const note = yield* View.form({
         ref: notes,
         contract: Held,
@@ -78,7 +78,7 @@ const heldForm = (gate: Deferred.Deferred<void>) => {
     });
   const notesAt = (revision: number) =>
     Effect.scoped(
-      Effect.flatMap(ref(Held, heldKey), (notes) =>
+      Effect.flatMap(Actor.remote(Held, heldKey), (notes) =>
         Stream.runHead(
           Stream.filter(notes.applied.changes, (applied) => applied.revision.value >= revision),
         ),

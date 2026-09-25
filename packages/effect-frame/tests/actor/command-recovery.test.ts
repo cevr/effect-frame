@@ -1,13 +1,14 @@
 import { Context, Effect, Exit, Layer, Option, Ref, Schema, Scope, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import {
+  Actor,
   ActorHost,
   MailboxStore,
   Policies,
   Policy,
   implementTransparent,
 } from "effect-frame/actor";
-import { ActorTransport, committedRevision, contract, ref } from "effect-frame/actor/client";
+import { ActorTransport, committedRevision, contract } from "effect-frame/actor/client";
 import type { TransportService } from "effect-frame/actor/client";
 import { CommandPolicy } from "../../src/actor/command-owner.js";
 
@@ -76,7 +77,7 @@ describe("process recovery", () => {
           Stream.unwrap(Effect.map(Ref.get(current), (target) => target.changes(address, after))),
       };
 
-      const counter = yield* ref(Counter, "one").pipe(
+      const counter = yield* Actor.remote(Counter, "one").pipe(
         Effect.provideService(ActorTransport, swappable),
         Effect.provideService(CommandPolicy, {
           passes: 8,

@@ -40,7 +40,7 @@ const classify = (failure: TransportCallError) => {
  * supplies admission order and carries no query keys, and one same-ID call,
  * which supplies the exact stored public result and the captured refreshes.
  */
-export const remoteCommands = <State>(
+export const transportCommands = <State>(
   transport: TransportService,
   address: Address,
   decode: (projection: Projection) => Effect.Effect<Committed<State>>,

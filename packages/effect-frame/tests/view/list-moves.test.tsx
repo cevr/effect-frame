@@ -2,7 +2,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Behavior, Value, spawn } from "effect-frame/actor";
+import { Actor, Behavior, Value } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
 import type { Host } from "effect-frame/view";
 import { Dom, For, Html, View } from "effect-frame/view";
@@ -103,7 +103,7 @@ describe("a keyed list moves only what moved", () => {
       const root = yield* makeRoot;
       document.body.appendChild(root);
       const { host, inserted } = counting();
-      const items = yield* spawn(
+      const items = yield* Actor.local(
         Behavior.value<ReadonlyArray<LabeledItem>>([
           { key: "a", label: "alpha" },
           { key: "b", label: "beta" },
@@ -160,7 +160,7 @@ describe("a keyed list moves only what moved", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const { host } = counting();
-      const items = yield* spawn(Behavior.value<ReadonlyArray<string>>(["a", "b", "c"]));
+      const items = yield* Actor.local(Behavior.value<ReadonlyArray<string>>(["a", "b", "c"]));
       const page = yield* ViewTest.make({
         host,
         root,
@@ -186,7 +186,7 @@ describe("a keyed list moves only what moved", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const { host, inserted } = counting();
-      const items = yield* spawn(
+      const items = yield* Actor.local(
         Behavior.value<ReadonlyArray<string>>(["a", "b", "c", "d", "e", "f"]),
       );
       const page = yield* ViewTest.make({
@@ -215,7 +215,7 @@ describe("a keyed list moves only what moved", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const keys = Array.from({ length: 12 }, (_, index) => String.fromCharCode(97 + index));
-      const items = yield* spawn(Behavior.value<ReadonlyArray<string>>(keys));
+      const items = yield* Actor.local(Behavior.value<ReadonlyArray<string>>(keys));
       const page = yield* ViewTest.make({
         host: Dom.host,
         root,
@@ -259,7 +259,7 @@ describe("a keyed list moves only what moved", () => {
   it.scoped("a moved last row stays before content after the list", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
-      const items = yield* spawn(Behavior.value<ReadonlyArray<string>>(["a", "b", "c"]));
+      const items = yield* Actor.local(Behavior.value<ReadonlyArray<string>>(["a", "b", "c"]));
       const page = yield* ViewTest.make({
         host: Dom.host,
         root,
@@ -279,7 +279,7 @@ describe("a keyed list moves only what moved", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const { host } = counting();
-      const items = yield* spawn(Behavior.value<ReadonlyArray<string>>(["a", "b", "c"]));
+      const items = yield* Actor.local(Behavior.value<ReadonlyArray<string>>(["a", "b", "c"]));
       const page = yield* ViewTest.make({
         host,
         root,

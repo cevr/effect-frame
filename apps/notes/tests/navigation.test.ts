@@ -9,7 +9,7 @@
  * facts, so no fake window proves them.
  */
 import { afterAll, describe, expect, it } from "bun:test";
-import { ActorTransport, CommandId, ref } from "effect-frame/actor/client";
+import { Actor, ActorTransport, CommandId } from "effect-frame/actor/client";
 import { Effect, Exit, Layer, Schema, Scope } from "effect";
 import { Notes } from "../src/contract.js";
 import { ListName, keyOf } from "../src/queries.js";
@@ -28,7 +28,7 @@ const start = Effect.gen(function* () {
   const runtime = makeRuntime(Layer.succeed(ActorTransport, wire.transport));
   const server = yield* Effect.promise(() => makeServer({ port: 0, runtime }));
   const client = yield* clientOf(server.url);
-  const writer = yield* client(ref(Notes, keyOf(listName("inbox"))));
+  const writer = yield* client(Actor.remote(Notes, keyOf(listName("inbox"))));
   for (let index = 0; index < 80; index += 1) {
     yield* writer.call(
       { _tag: "Add", id: `n${String(index)}`, text: `note ${String(index)}` },

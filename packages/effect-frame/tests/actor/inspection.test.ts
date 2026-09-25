@@ -15,16 +15,15 @@ import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
 import { Event, Machine, State } from "effect-machine";
 import {
+  Actor,
   Behavior,
   CommandId,
   MailboxStore,
   Policies,
   Policy,
   contract,
-  durable,
   implementQuery,
   query,
-  spawn,
   Value,
 } from "effect-frame/actor";
 import { QueryCache, Uncertain } from "effect-frame/actor/client";
@@ -142,14 +141,14 @@ const makeFrame = (name: string) => Frame.layer({ name });
 describe("Frame.inspect actor and query records", () => {
   it.scoped.layer(makeFrame("actors"))("samples local actors from applied memory", () =>
     Effect.gen(function* () {
-      const cell = yield* spawn(Behavior.value(0));
-      const reducer = yield* spawn(
+      const cell = yield* Actor.local(Behavior.value(0));
+      const reducer = yield* Actor.local(
         Behavior.reducer<number, { readonly _tag: "Increment" }>({
           initial: 0,
           reduce: (state) => state + 1,
         }),
       );
-      const machine = yield* spawn(Behavior.machine(stepMachine));
+      const machine = yield* Actor.local(Behavior.machine(stepMachine));
 
       const initial = yield* Frame.inspect;
       expect(initial.actors).toHaveLength(3);
@@ -164,7 +163,7 @@ describe("Frame.inspect actor and query records", () => {
       expect(changed.actors.map((actor) => actor.revision).toSorted()).toEqual([1, 1, 1]);
 
       const child = yield* Scope.make();
-      yield* spawn(Behavior.value("owned")).pipe(Scope.provide(child));
+      yield* Actor.local(Behavior.value("owned")).pipe(Scope.provide(child));
       expect((yield* Frame.inspect).actors).toHaveLength(4);
       yield* Scope.close(child, Exit.void);
       expect((yield* Frame.inspect).actors).toHaveLength(3);
@@ -175,7 +174,7 @@ describe("Frame.inspect actor and query records", () => {
     Effect.gen(function* () {
       const taskStarted = yield* Deferred.make<void>();
       const taskRelease = yield* Deferred.make<void>();
-      const machine = yield* spawn(
+      const machine = yield* Actor.local(
         Behavior.machine(makeAutonomousMachine(taskStarted, taskRelease)),
       );
       yield* machine.call(AutonomousEvent.Begin);
@@ -203,7 +202,7 @@ describe("Frame.inspect actor and query records", () => {
         const release = yield* Deferred.make<void>();
         let setupCalls = 0;
         let commandCalls = 0;
-        const actor = yield* spawn({
+        const actor = yield* Actor.local({
           initial: 0,
           open: () =>
             Effect.sync(() => {
@@ -240,7 +239,7 @@ describe("Frame.inspect actor and query records", () => {
     "samples durable wrapper revisions from applied memory",
     () =>
       Effect.gen(function* () {
-        const actor = yield* durable(durableOptions);
+        const actor = yield* Actor.durable(durableOptions);
         const initial = yield* Frame.inspect;
         expect(initial.actors).toEqual([expect.objectContaining({ kind: "durable", revision: 0 })]);
 
@@ -271,7 +270,7 @@ describe("Frame.inspect actor and query records", () => {
               changes: Stream.empty,
             }),
         };
-        const actor = yield* durable({ ...durableOptions, behavior: slowBehavior });
+        const actor = yield* Actor.durable({ ...durableOptions, behavior: slowBehavior });
         const empty = yield* Frame.inspect;
         expect(empty.commands).toEqual({ _tag: "Available", records: [] });
         const waiting = yield* Effect.forkScoped(
@@ -340,7 +339,7 @@ describe("Frame.inspect actor and query records", () => {
           const context = yield* Layer.build(makeFrame(name));
           return yield* Effect.provideContext(
             Effect.gen(function* () {
-              yield* spawn(Behavior.value(value));
+              yield* Actor.local(Behavior.value(value));
               return yield* Frame.inspect;
             }),
             context,
@@ -364,7 +363,10 @@ describe("Frame.inspect actor and query records", () => {
       const openRoot = Effect.gen(function* () {
         const rootScope = yield* Scope.make();
         const context = yield* Scope.provide(Layer.build(rootLayer), rootScope);
-        yield* Scope.provide(Effect.provideContext(spawn(Behavior.value(1)), context), rootScope);
+        yield* Scope.provide(
+          Effect.provideContext(Actor.local(Behavior.value(1)), context),
+          rootScope,
+        );
         const consumerScope = yield* Scope.make();
         const queryEntry = yield* Scope.provide(
           Effect.provideContext(

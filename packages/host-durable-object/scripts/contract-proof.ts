@@ -33,7 +33,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Scope } from "effect";
 import { Duration, Effect, Fiber, Option, Schedule, Schema, Stream } from "effect";
-import { CommandId, HttpTransport, ref } from "effect-frame/actor/client";
+import { Actor, CommandId, HttpTransport } from "effect-frame/actor/client";
 import type { AnyContract, KeyOf, RemoteActorRef } from "effect-frame/actor/client";
 import {
   Counter,
@@ -83,7 +83,7 @@ const transportFor = (port: number, name: string, version: number, key: string) 
 
 type CounterRef = RemoteActorRef<typeof Counter>;
 
-const counterRef = (key: string) => ref(Counter, key);
+const counterRef = (key: string) => Actor.remote(Counter, key);
 
 const rowCounterSurvivesKill = async (node: Node): Promise<Node> => {
   const key = "row-e";
@@ -281,7 +281,7 @@ const runUpload = <A>(
       // Each proof step is its own entry point: one process, one transport, one scope.
       // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(
-        Effect.flatMap(Effect.orDie(ref(Upload, key)), use),
+        Effect.flatMap(Effect.orDie(Actor.remote(Upload, key)), use),
         transportFor(port, Upload.name, Upload.version, key),
       ),
     ),
@@ -330,7 +330,7 @@ const runRef = <C extends AnyContract, A>(
       // Each proof step is its own entry point: one process, one transport, one scope.
       // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(
-        Effect.flatMap(Effect.orDie(ref(actor, key)), use),
+        Effect.flatMap(Effect.orDie(Actor.remote(actor, key)), use),
         transportFor(port, actor.name, actor.version, String(key)),
       ),
     ),

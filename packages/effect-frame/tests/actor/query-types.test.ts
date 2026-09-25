@@ -1,4 +1,5 @@
 import {
+  Actor,
   ActorHost,
   ActorTransport,
   Behavior,
@@ -11,7 +12,6 @@ import {
   query,
   batchedQuery,
 } from "effect-frame/actor";
-import { ref } from "effect-frame/actor/client";
 import { QueryTest } from "effect-frame/actor/testing";
 import { Dom, View } from "effect-frame/view";
 import { Empty } from "effect-frame/view/jsx-runtime";
@@ -89,7 +89,7 @@ const BatchedLive = implementBatchedQuery(Batched, {
 const ActorReadingLive = implementQuery(ActorReading, {
   run: (args) =>
     Effect.gen(function* () {
-      const actor = yield* ref(Probe, { id: args.id });
+      const actor = yield* Actor.remote(Probe, { id: args.id });
       return yield* actor.state.get;
     }),
 });

@@ -2,7 +2,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { ActorTransport, ref } from "effect-frame/actor/client";
+import { Actor, ActorTransport } from "effect-frame/actor/client";
 import * as Prerender from "effect-frame/router/prerender";
 import { BunServices } from "@effect/platform-bun";
 import { Context, Effect, Schema } from "effect";
@@ -40,7 +40,7 @@ const firstLight = Schema.decodeSync(Slug)("first-light");
 /** What the store holds for the first post's hearts. */
 const heartsIn = (store: Store) =>
   Effect.gen(function* () {
-    const reactions = yield* ref(Reactions, { slug: firstLight });
+    const reactions = yield* Actor.remote(Reactions, { slug: firstLight });
     return yield* reactions.state.get;
   }).pipe(Effect.orDie, Effect.scoped, Effect.provideContext(store));
 

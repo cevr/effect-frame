@@ -3,12 +3,12 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import {
+  Actor,
   Behavior,
   Source,
   implementQuery,
   modify,
   query,
-  spawn,
   Policies,
   Policy,
   QueryCache,
@@ -194,7 +194,7 @@ describe("scoped view test harness", () => {
   it.scoped("mounts through the production runtime and waits for the observed result", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
-      const count = yield* spawn(Behavior.value(0));
+      const count = yield* Actor.local(Behavior.value(0));
       const page = yield* ViewTest.make({
         host: Dom.host,
         root,
@@ -220,7 +220,7 @@ describe("scoped view test harness", () => {
   it.scoped("observes a deep asynchronous source chain without a yield count", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
-      const count = yield* spawn(Behavior.value(0));
+      const count = yield* Actor.local(Behavior.value(0));
       let source: SourceType<QueryState<number, never>> = yield* Source.load(count.state, (value) =>
         Effect.andThen(Effect.yieldNow, Effect.succeed(value + 1)),
       );
@@ -269,7 +269,7 @@ describe("scoped view test harness", () => {
   it.scoped("does not lose a host write scheduled after action completion", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
-      const count = yield* spawn(Behavior.value(0));
+      const count = yield* Actor.local(Behavior.value(0));
       const release = yield* Deferred.make<void>();
       const page = yield* ViewTest.make({
         host: Dom.host,
@@ -416,7 +416,7 @@ describe("scoped view test harness", () => {
   it.scoped("closes a blocked action through the operation scope", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
-      const count = yield* spawn(Behavior.value(0));
+      const count = yield* Actor.local(Behavior.value(0));
       const started = yield* Deferred.make<void>();
       const page = yield* ViewTest.make({
         host: Dom.host,
@@ -700,7 +700,7 @@ describe("scoped view test harness", () => {
   it.scoped("keeps a reentrant host write observable", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
-      const count = yield* spawn(Behavior.value(0));
+      const count = yield* Actor.local(Behavior.value(0));
       let wrapped: Option.Option<Host<Node>> = Option.none();
       let nestedWrites = 0;
       let reentrant = false;
@@ -805,7 +805,7 @@ describe("scoped view test harness", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       let checks = 0;
-      const count = yield* spawn(Behavior.value(0));
+      const count = yield* Actor.local(Behavior.value(0));
       const page = yield* ViewTest.make({
         host: Dom.host,
         root,
@@ -878,7 +878,7 @@ describe("scoped view test harness", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const interrupted = yield* Deferred.make<void>();
-      const count = yield* spawn(Behavior.value(0));
+      const count = yield* Actor.local(Behavior.value(0));
       const page = yield* ViewTest.make({
         host: Dom.host,
         root,
@@ -912,8 +912,8 @@ describe("scoped view test harness", () => {
     Effect.gen(function* () {
       const firstRoot = yield* makeRoot;
       const secondRoot = yield* makeRoot;
-      const first = yield* spawn(Behavior.value(0));
-      const second = yield* spawn(Behavior.value(0));
+      const first = yield* Actor.local(Behavior.value(0));
+      const second = yield* Actor.local(Behavior.value(0));
       const firstPage = yield* ViewTest.make({
         host: Dom.host,
         root: firstRoot,
@@ -958,7 +958,7 @@ describe("scoped view test harness", () => {
     () =>
       Effect.gen(function* () {
         const root = yield* makeRoot;
-        const count = yield* spawn(Behavior.value(0));
+        const count = yield* Actor.local(Behavior.value(0));
         const page = yield* ViewTest.make({
           host: Dom.host,
           root,
@@ -995,9 +995,9 @@ describe("scoped view test harness", () => {
     () =>
       Effect.gen(function* () {
         const root = yield* makeRoot;
-        const input = yield* spawn(Behavior.value(0));
+        const input = yield* Actor.local(Behavior.value(0));
         const debounced = yield* Source.debounce(input.state, "1 second");
-        const recurring = yield* spawn(Behavior.value(0));
+        const recurring = yield* Actor.local(Behavior.value(0));
         const recurringReached = yield* Deferred.make<void>();
         const Page = () =>
           Effect.gen(function* () {

@@ -4,6 +4,7 @@ import type { Scope } from "effect";
 import { Event, Machine, State } from "effect-machine";
 import type { PolicyTable, Subject } from "effect-frame/actor";
 import {
+  Actor,
   ActorHost,
   Behavior,
   HttpServer,
@@ -22,7 +23,6 @@ import {
   Principal,
   contract,
   query,
-  ref,
 } from "effect-frame/actor/client";
 
 /**
@@ -144,7 +144,10 @@ export const LedgerCount = query("LedgerCount", {
 /** The entries in the tenant's book, read through the host under the caller's principal. */
 export const LedgerCountLive = implementQuery(LedgerCount, {
   run: (args) =>
-    Effect.flatMap(ref(Ledger, { tenant: args.tenant, id: "book" }), (book) => book.state.get),
+    Effect.flatMap(
+      Actor.remote(Ledger, { tenant: args.tenant, id: "book" }),
+      (book) => book.state.get,
+    ),
 });
 
 const decodeLedgerKey = Schema.decodeUnknownOption(Ledger.key);

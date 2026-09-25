@@ -2,6 +2,7 @@ import { Context, Deferred, Effect, Exit, Layer, Option, Ref, Schema, Scope, Str
 import { TestClock } from "effect/testing";
 import { describe, expect, it, yieldFibers } from "effect-bun-test";
 import {
+  Actor,
   ActorHost,
   MailboxStore,
   Policies,
@@ -9,7 +10,7 @@ import {
   implementQuery,
   implementTransparent,
 } from "effect-frame/actor";
-import { ActorTransport, QueryCache, contract, query, ref } from "effect-frame/actor/client";
+import { ActorTransport, QueryCache, contract, query } from "effect-frame/actor/client";
 import type {
   CommandState,
   QueryEntry,
@@ -219,7 +220,7 @@ describe("cache command ownership", () => {
       yield* until(unrelated, isReady("unrelated:one", false));
       const gateA = yield* gate(1);
       const gateB = yield* gate(2);
-      const counter = yield* ref(Counter, "one");
+      const counter = yield* Actor.remote(Counter, "one");
 
       const a = yield* counter.send(1);
       const b = yield* counter.send(2);
@@ -251,7 +252,7 @@ describe("cache command ownership", () => {
       const admission = yield* Deferred.make<void>();
       yield* Ref.set(control.sendHold, Option.some(admission));
       const turn = yield* gate(1);
-      const counter = yield* ref(Counter, "one");
+      const counter = yield* Actor.remote(Counter, "one");
 
       const command = yield* counter.send(1);
       // No reply has arrived: the command is only sent, and the value is
@@ -283,7 +284,7 @@ describe("cache command ownership", () => {
   withApp("a query mounted after the command began is stale and reads again after it", () =>
     Effect.gen(function* () {
       const held = yield* gate(1);
-      const counter = yield* ref(Counter, "one");
+      const counter = yield* Actor.remote(Counter, "one");
       const command = yield* counter.send(1);
       yield* startedTurns(1);
 
@@ -308,7 +309,7 @@ describe("cache command ownership", () => {
     Effect.gen(function* () {
       const control = yield* Control;
       const held = yield* gate(1);
-      const counter = yield* ref(Counter, "one");
+      const counter = yield* Actor.remote(Counter, "one");
       const command = yield* counter.send(1);
       yield* startedTurns(1);
 
@@ -360,7 +361,9 @@ describe("cache command ownership", () => {
         };
         const value = yield* QueryCache.use((cache) => cache.open(CounterValue, "one"));
         yield* until(value, isReady(0, false));
-        const counter = yield* ref(Counter, "one").pipe(Effect.provideService(QueryCache, custom));
+        const counter = yield* Actor.remote(Counter, "one").pipe(
+          Effect.provideService(QueryCache, custom),
+        );
         const command = yield* counter.send(1);
         expect((yield* command.settled)._tag).toBe("Applied");
         // The public contract a custom cache had before command ownership: the
@@ -379,7 +382,7 @@ describe("cache command ownership", () => {
       const value = yield* cache.open(CounterValue, "one").pipe(Scope.provide(view));
       yield* until(value, isReady(0, false));
       const held = yield* gate(1);
-      const counter = yield* ref(Counter, "one");
+      const counter = yield* Actor.remote(Counter, "one");
       const command = yield* counter.send(1);
       yield* startedTurns(1);
       yield* Scope.close(view, Exit.void);
@@ -404,7 +407,7 @@ describe("cache command ownership", () => {
       yield* until(value, isReady(0, false));
       yield* gate(1);
       const life = yield* Scope.make();
-      const counter = yield* ref(Counter, "one").pipe(Scope.provide(life));
+      const counter = yield* Actor.remote(Counter, "one").pipe(Scope.provide(life));
       const command = yield* counter.send(1);
       yield* startedTurns(1);
       expect(yield* value.state.get).toEqual(ready(0, true));
@@ -422,7 +425,7 @@ describe("cache command ownership", () => {
       const value = yield* QueryCache.use((cache) => cache.open(CounterValue, "one"));
       yield* until(value, isReady(0, false));
       const held = yield* gate(1);
-      const counter = yield* ref(Counter, "one").pipe(
+      const counter = yield* Actor.remote(Counter, "one").pipe(
         Effect.provideService(CommandPolicy, {
           passes: 1,
           passDeadline: "1 second",
@@ -466,7 +469,7 @@ describe("Frame command inspection", () => {
       const sendHold = yield* Deferred.make<void>();
       yield* Ref.set(control.sendHold, Option.some(sendHold));
       const held = yield* gate(1);
-      const counter = yield* ref(Counter, "one");
+      const counter = yield* Actor.remote(Counter, "one");
       const command = yield* counter.send(1);
       yield* yieldFibers;
 
@@ -513,8 +516,8 @@ describe("Frame command inspection", () => {
       const otherRegistry = Context.get(other, Inspection.Registry);
       const otherFrame = Context.get(other, Frame.Service);
 
-      const here = yield* ref(Counter, "one");
-      const there = yield* ref(Counter, "two").pipe(
+      const here = yield* Actor.remote(Counter, "one");
+      const there = yield* Actor.remote(Counter, "two").pipe(
         Effect.provideService(Inspection.Registry, otherRegistry),
       );
       const first = yield* here.send(1);

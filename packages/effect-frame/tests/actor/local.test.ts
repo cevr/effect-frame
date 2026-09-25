@@ -12,6 +12,7 @@ import {
 import { describe, expect, it, yieldFibers } from "effect-bun-test";
 import { Event, Machine, State } from "effect-machine";
 import {
+  Actor,
   ActorStopped,
   Behavior,
   Refused,
@@ -19,7 +20,6 @@ import {
   Value,
   committedRevision,
   modify,
-  spawn,
 } from "effect-frame/actor";
 import type { CommandSettled } from "effect-frame/actor";
 
@@ -71,7 +71,7 @@ const listBehavior = Behavior.reducer<ReadonlyArray<string>, Append>({
 describe("local actor", () => {
   it.scoped("a refused message is Rejected with its reason and commits no revision", () =>
     Effect.gen(function* () {
-      const list = yield* spawn(
+      const list = yield* Actor.local(
         Behavior.reducer<ReadonlyArray<string>, Append, Refused>({
           initial: [],
           reduce: (state, message) => [...state, message.item],
@@ -98,7 +98,7 @@ describe("local actor", () => {
 
   it.scoped("a value actor refuses by its rule, and modify reports the refusal", () =>
     Effect.gen(function* () {
-      const count = yield* spawn(
+      const count = yield* Actor.local(
         Behavior.value(0, {
           refuse: (value) =>
             Option.as(
@@ -115,7 +115,7 @@ describe("local actor", () => {
 
   it.scoped("simple state replaces its value through Set", () =>
     Effect.gen(function* () {
-      const count = yield* spawn(Behavior.value(0));
+      const count = yield* Actor.local(Behavior.value(0));
       const applied = yield* count.call(Value.Set(10));
       expect(applied).toEqual({ revision: committedRevision(1), state: 10 });
       expect(yield* count.state.get).toBe(10);
@@ -124,7 +124,7 @@ describe("local actor", () => {
 
   it.scoped("modify computes the Set inside the turn, so concurrent updates never lose one", () =>
     Effect.gen(function* () {
-      const count = yield* spawn(Behavior.value(0));
+      const count = yield* Actor.local(Behavior.value(0));
       yield* Effect.forEach(
         Array.from({ length: 50 }, (_, index) => index),
         () => modify(count, (n) => n + 1),
@@ -136,7 +136,7 @@ describe("local actor", () => {
 
   it.scoped("a selector projects state without a second actor", () =>
     Effect.gen(function* () {
-      const count = yield* spawn(Behavior.value(2));
+      const count = yield* Actor.local(Behavior.value(2));
       const doubled = Source.select(count.state, (n) => n * 2);
       expect(yield* doubled.get).toBe(4);
       yield* count.call(Value.Set(5));
@@ -146,7 +146,7 @@ describe("local actor", () => {
 
   it.scoped("messages apply in admission order", () =>
     Effect.gen(function* () {
-      const list = yield* spawn(listBehavior);
+      const list = yield* Actor.local(listBehavior);
       const first = yield* list.send({ _tag: "Append", item: "a" });
       const second = yield* list.send({ _tag: "Append", item: "b" });
       const applied = yield* list.call({ _tag: "Append", item: "c" });
@@ -168,7 +168,7 @@ describe("local actor", () => {
 
   it.scoped("state changes stream every committed revision", () =>
     Effect.gen(function* () {
-      const count = yield* spawn(Behavior.value(0));
+      const count = yield* Actor.local(Behavior.value(0));
       const collected = yield* Stream.runCollect(Stream.take(count.state.changes, 3)).pipe(
         Effect.forkScoped,
       );
@@ -181,7 +181,7 @@ describe("local actor", () => {
 
   it.scoped("a machine is one kind of behavior behind the same reference", () =>
     Effect.gen(function* () {
-      const counter = yield* spawn(Behavior.machine(counterMachine));
+      const counter = yield* Actor.local(Behavior.machine(counterMachine));
       yield* counter.send(CounterEvent.Increment);
       const applied = yield* counter.call(CounterEvent.Increment);
       expect(applied.revision.value).toBe(2);
@@ -193,7 +193,7 @@ describe("local actor", () => {
 
   it.scoped("a machine's echo of an older message never takes its state back", () =>
     Effect.gen(function* () {
-      const counter = yield* spawn(Behavior.machine(counterMachine));
+      const counter = yield* Actor.local(Behavior.machine(counterMachine));
       const seen: Array<number> = [];
       yield* Effect.forkScoped(
         Stream.runForEach(counter.applied.changes, (applied) =>
@@ -218,7 +218,7 @@ describe("local actor", () => {
 
   it.scoped("a machine refuses by its rule: Rejected, and no transition runs", () =>
     Effect.gen(function* () {
-      const counter = yield* spawn(
+      const counter = yield* Actor.local(
         Behavior.machine(counterMachine, {
           refuse: (event) =>
             Option.as(
@@ -241,7 +241,7 @@ describe("local actor", () => {
 
   it.scoped("a machine's own transition reaches the state source", () =>
     Effect.gen(function* () {
-      const step = yield* spawn(Behavior.machine(stepMachine));
+      const step = yield* Actor.local(Behavior.machine(stepMachine));
       const applied = yield* step.call(StepEvent.Go);
       expect(applied.state._tag).toBe("Middle");
       const end = yield* Stream.runHead(
@@ -262,7 +262,7 @@ describe("local actor", () => {
             changes: Stream.empty,
           }),
       };
-      const count = yield* spawn(held);
+      const count = yield* Actor.local(held);
       const handle = yield* count.send(2);
       expect(yield* handle.state.get).toEqual({ _tag: "Admitted", admitted: 1 });
       const states = yield* Effect.forkScoped(Stream.runCollect(handle.state.changes));
@@ -286,7 +286,7 @@ describe("local actor", () => {
             changes: Stream.empty,
           }),
       };
-      const count = yield* spawn(never).pipe(Scope.provide(scope));
+      const count = yield* Actor.local(never).pipe(Scope.provide(scope));
       const handle = yield* count.send(1);
       yield* Scope.close(scope, Exit.void);
       const stopped: CommandSettled<number, "local"> = {
@@ -301,7 +301,7 @@ describe("local actor", () => {
   it.effect("closing the scope stops the actor and fails later sends", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make();
-      const count = yield* spawn(Behavior.value(0)).pipe(Scope.provide(scope));
+      const count = yield* Actor.local(Behavior.value(0)).pipe(Scope.provide(scope));
       yield* count.call(Value.Set(1));
       yield* Scope.close(scope, Exit.void);
       const refused = yield* count.send(Value.Set(2));
@@ -346,8 +346,8 @@ describe("source combinators", () => {
 
   it.scoped("zip reads both sides on either side's change", () =>
     Effect.gen(function* () {
-      const left = yield* spawn(Behavior.value(1));
-      const right = yield* spawn(Behavior.value("a"));
+      const left = yield* Actor.local(Behavior.value(1));
+      const right = yield* Actor.local(Behavior.value("a"));
       const pair = Source.zip(left.state, right.state, (n, s) => `${s}${String(n)}`);
       expect(yield* pair.get).toBe("a1");
 
@@ -364,8 +364,8 @@ describe("source combinators", () => {
 describe("source products and followers", () => {
   it.scoped("all builds a struct and a tuple, and re-reads on either side's change", () =>
     Effect.gen(function* () {
-      const n = yield* spawn(Behavior.value(1));
-      const s = yield* spawn(Behavior.value("a"));
+      const n = yield* Actor.local(Behavior.value(1));
+      const s = yield* Actor.local(Behavior.value("a"));
       const struct = Source.all({ n: n.state, s: s.state });
       const tuple = Source.all([n.state, s.state]);
       expect(yield* struct.get).toEqual({ n: 1, s: "a" });
@@ -386,7 +386,7 @@ describe("source products and followers", () => {
 
   it.scoped("on runs for the current value and every change, and ends with the scope", () =>
     Effect.gen(function* () {
-      const cell = yield* spawn(Behavior.value(0));
+      const cell = yield* Actor.local(Behavior.value(0));
       const seen: Array<number> = [];
       const scope = yield* Scope.make();
       yield* Scope.provide(

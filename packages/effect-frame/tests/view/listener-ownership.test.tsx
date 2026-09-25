@@ -2,7 +2,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Behavior, Value, modify, spawn } from "effect-frame/actor";
+import { Actor, Behavior, Value, modify } from "effect-frame/actor";
 import type { LocalActorRef, SetValue, Source } from "effect-frame/actor";
 import { Dom, For, Portal, Show, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -273,8 +273,8 @@ describe("view listener ownership", () => {
   it.scoped("turns over Show listeners while siblings and replacement branches stay live", () =>
     Effect.gen(function* () {
       const root = document.createElement("main");
-      const open = yield* spawn(Behavior.value(true));
-      const events = yield* spawn(Behavior.value<ReadonlyArray<string>>([]));
+      const open = yield* Actor.local(Behavior.value(true));
+      const events = yield* Actor.local(Behavior.value<ReadonlyArray<string>>([]));
       const receipts = yield* Queue.unbounded<ListenerReceipt>();
       const counts: ListenerCounts = { attached: 0, released: 0 };
       const host = listenerHost(receipts, counts);
@@ -362,8 +362,8 @@ describe("view listener ownership", () => {
   it.scoped("turns over For row listeners without affecting siblings", () =>
     Effect.gen(function* () {
       const root = document.createElement("main");
-      const tasks = yield* spawn(Behavior.value<ReadonlyArray<Task>>([{ id: "a" }]));
-      const events = yield* spawn(Behavior.value<ReadonlyArray<string>>([]));
+      const tasks = yield* Actor.local(Behavior.value<ReadonlyArray<Task>>([{ id: "a" }]));
+      const events = yield* Actor.local(Behavior.value<ReadonlyArray<string>>([]));
       const receipts = yield* Queue.unbounded<ListenerReceipt>();
       const counts: ListenerCounts = { attached: 0, released: 0 };
       const host = listenerHost(receipts, counts);
@@ -451,8 +451,8 @@ describe("view listener ownership", () => {
   it.scoped("does not start a removed handler while owner cleanup is blocked", () =>
     Effect.gen(function* () {
       const root = document.createElement("main");
-      const open = yield* spawn(Behavior.value(true));
-      const events = yield* spawn(Behavior.value<ReadonlyArray<string>>([]));
+      const open = yield* Actor.local(Behavior.value(true));
+      const events = yield* Actor.local(Behavior.value<ReadonlyArray<string>>([]));
       const attached = yield* Deferred.make<void>();
       const blocked = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();
@@ -562,8 +562,8 @@ describe("view listener ownership", () => {
     Effect.gen(function* () {
       const root = document.createElement("main");
       const into = document.createElement("section");
-      const open = yield* spawn(Behavior.value(false));
-      const events = yield* spawn(Behavior.value<ReadonlyArray<string>>([]));
+      const open = yield* Actor.local(Behavior.value(false));
+      const events = yield* Actor.local(Behavior.value<ReadonlyArray<string>>([]));
       const receipts = yield* Queue.unbounded<ListenerReceipt>();
       const counts: ListenerCounts = { attached: 0, released: 0 };
       const host = listenerHost(receipts, counts);

@@ -3,13 +3,13 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import {
+  Actor,
   ActorHost,
   Behavior,
   HttpServer,
   implementBatchedQuery,
   QueryCache,
   Value,
-  spawn,
   Policies,
   Policy,
   batchedQuery,
@@ -208,7 +208,7 @@ describe("View.list and declared query batches", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       document.body.appendChild(root);
-      const items = yield* spawn(Behavior.value<ReadonlyArray<number>>([1, 2]));
+      const items = yield* Actor.local(Behavior.value<ReadonlyArray<number>>([1, 2]));
       const started = yield* Deferred.make<void>();
       const gate = yield* Deferred.make<void>();
       const cleaned = yield* Deferred.make<void>();
@@ -249,7 +249,7 @@ describe("View.list and declared query batches", () => {
       Effect.gen(function* () {
         const root = yield* makeRoot;
         document.body.appendChild(root);
-        const items = yield* spawn(Behavior.value<ReadonlyArray<number>>([1, 2]));
+        const items = yield* Actor.local(Behavior.value<ReadonlyArray<number>>([1, 2]));
         const disposed = yield* Ref.make(0);
         const allDisposed = yield* Deferred.make<void>();
         const started = yield* Deferred.make<void>();

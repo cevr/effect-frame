@@ -1,6 +1,7 @@
 import { Context, Deferred, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import {
+  Actor,
   ActorHost,
   CommandId,
   MailboxStore,
@@ -15,7 +16,6 @@ import {
   committedRevision,
   contract,
   query,
-  ref,
 } from "effect-frame/actor/client";
 import type { QueryEntry } from "effect-frame/actor/client";
 
@@ -125,7 +125,7 @@ describe("ActorHost command admission refresh", () => {
       });
       expect(yield* Ref.get(control.queryReads)).toBe(1);
 
-      const counter = yield* ref(HeldCounter, "one");
+      const counter = yield* Actor.remote(HeldCounter, "one");
       const commandId = id("held-before-commit");
       const handle = yield* counter.send(1, { commandId });
       yield* Deferred.await(control.started);

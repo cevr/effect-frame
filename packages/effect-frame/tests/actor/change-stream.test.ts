@@ -1,14 +1,20 @@
 import { Context, Effect, Option, Queue, Schema, Stream, SubscriptionRef } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
-import { ActorHost, CommandId, Policies, Policy, implementTransparent } from "effect-frame/actor";
+import {
+  Actor,
+  ActorHost,
+  CommandId,
+  Policies,
+  Policy,
+  implementTransparent,
+} from "effect-frame/actor";
 import {
   ActorTransport,
   Unreachable,
   Wire,
   committedRevision,
   contract,
-  ref,
 } from "effect-frame/actor/client";
 import type {
   Address,
@@ -236,7 +242,7 @@ const exhaustThenRetry = Effect.fn("ChangeStreamTest.exhaustThenRetry")(function
   dropStream: boolean,
 ) {
   const wire = yield* impairedWire(yield* host);
-  const counter = yield* ref(Clocked, key).pipe(
+  const counter = yield* Actor.remote(Clocked, key).pipe(
     Effect.provideService(ActorTransport, wire.transport),
   );
   if (dropStream) {

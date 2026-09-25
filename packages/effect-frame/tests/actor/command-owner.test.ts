@@ -32,7 +32,7 @@ import * as Commands from "../../src/actor/command-owner.js";
 import { durableCommands } from "../../src/actor/durable-commands.js";
 import { openDurable } from "../../src/actor/durable-engine.js";
 import type { Committed } from "../../src/actor/engine-types.js";
-import { remoteCommands } from "../../src/actor/remote-commands.js";
+import { transportCommands } from "../../src/actor/remote-commands.js";
 
 const Add = Schema.TaggedStruct("OwnerAdd", { amount: Schema.Finite });
 type Add = Schema.Schema.Type<typeof Add>;
@@ -216,7 +216,7 @@ const remoteOwner = Effect.fn("CommandOwnerTest.remoteOwner")(function* (
     store: ActorHost.memoryStore,
   }).pipe(Effect.provideService(Policies, policies));
   const wire = impaired(real);
-  const owner = yield* Commands.make(remoteCommands(wire.transport, address, decode));
+  const owner = yield* Commands.make(transportCommands(wire.transport, address, decode));
   return { owner, wire };
 });
 
@@ -553,7 +553,7 @@ describe("private command owner", () => {
       }).pipe(Effect.provideService(Policies, allowGuarded));
       const wire = impaired(host);
       let interrupted = 0;
-      const adapter = remoteCommands(wire.transport, address, decode);
+      const adapter = transportCommands(wire.transport, address, decode);
       const owner = yield* Commands.make({
         ...adapter,
         call: (commandId, payload, deadline, active) =>
@@ -619,7 +619,7 @@ describe("private command owner", () => {
         store: ActorHost.memoryStore,
       }).pipe(Effect.provideService(Policies, allowGuarded));
       const wire = impaired(host);
-      const owner = yield* Commands.make(remoteCommands(wire.transport, address, decode)).pipe(
+      const owner = yield* Commands.make(transportCommands(wire.transport, address, decode)).pipe(
         Scope.provide(lifetime),
       );
       const baseline = finalizerCount(lifetime);

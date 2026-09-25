@@ -1,4 +1,5 @@
-import type { Attached, Child, ElementNode, ElementProps, Node } from "effect-frame/view";
+import type { Attached, Child, Node } from "effect-frame/view";
+import type { ElementNode, ElementProps } from "../view/jsx-runtime.js";
 import { View } from "effect-frame/view";
 import { Effect, Option, Predicate, Ref } from "effect";
 

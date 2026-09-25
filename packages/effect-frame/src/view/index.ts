@@ -6,12 +6,9 @@ export {
   Show,
   type ForProps,
   type ListOptions,
-  type MatchCases,
   type MatchProps,
   type PortalProps,
-  type ShowIfProps,
   type ShowProps,
-  type ShowWhenProps,
   type Tagged,
 } from "./control.js";
 export { mount, render } from "./runtime.js";
@@ -27,21 +24,9 @@ export type {
 export type { Attached, Bind, Bound, Handler, PlainPost, Prepared } from "./view.js";
 export type { CommandForm, FormBinding } from "./form.js";
 export type { Module as LazyModule } from "./lazy.js";
-export type {
-  BoundaryKind,
-  Child,
-  Component,
-  ControlNode,
-  ElementNode,
-  ElementProps,
-  ForNode,
-  MatchNode,
-  Node,
-  PortalNode,
-  PropValue,
-  ShowNode,
-  Tag,
-} from "./jsx-runtime.js";
+// The interpreter's node model stays inside the package: an author needs
+// only `Node`, `Child`, and the props of the tags it wraps.
+export type { Child, Node } from "./jsx-runtime.js";
 export * as Dom from "./hosts/dom.js";
 export * as Html from "./hosts/html-public.js";
 // The streamed host-operation wire (#15), client half. The server half is `effect-frame/view/driven`.

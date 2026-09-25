@@ -1,5 +1,6 @@
 import type { QueryState } from "effect-frame/actor";
-import type { ErroredScope, Host, LoadingScope, MatchNode } from "effect-frame/view";
+import type { ErroredScope, Host, LoadingScope } from "effect-frame/view";
+import type { MatchNode } from "../../src/view/jsx-runtime.js";
 import { For, Loading, Match, View, mount, orErrored, ready } from "effect-frame/view";
 import { Source } from "effect-frame/actor";
 import type { Scope } from "effect";

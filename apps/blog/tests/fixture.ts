@@ -2,7 +2,7 @@ import { platformFetch } from "./dom-setup.js";
 
 import type { QueryKey, TransportService } from "effect-frame/actor/client";
 import { Actor, ActorTransport, CommandId, QueryCache } from "effect-frame/actor/client";
-import { Location } from "effect-frame/router";
+import { Location, hydrate } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
 import * as Prerender from "effect-frame/router/prerender";
 import {
@@ -18,7 +18,6 @@ import {
   Schema,
   Stream,
 } from "effect";
-import { hydrateApp } from "../src/app.js";
 import type { Slug } from "../src/contract.js";
 import { Reactions } from "../src/contract.js";
 import type { SiteRoute } from "../src/prerender.server.js";
@@ -27,6 +26,7 @@ import type { PostSourceService } from "../src/posts.server.js";
 import { PostSource, fromDirectory } from "../src/posts.server.js";
 import { siteOver } from "../src/reactions.server.js";
 import { routes } from "../src/routes.js";
+import { NotFound } from "../src/views.js";
 import { makeRuntime, makeServer } from "../src/server.js";
 
 /**
@@ -352,7 +352,7 @@ export const hydrateAt = (client: Client, html: string, href: string) =>
   Effect.gen(function* () {
     const root = yield* install(html);
     const location = yield* locationAt(href);
-    return yield* hydrateApp(root).pipe(
+    return yield* hydrate({ routes, notFound: NotFound, root }).pipe(
       Effect.provideService(Location, location),
       Effect.provideContext(client),
     );

@@ -1,4 +1,4 @@
-import { Streaming } from "effect-frame/actor/client";
+import { Form, Streaming } from "effect-frame/actor/client";
 import { Dom, View } from "effect-frame/view";
 import { Deferred, Effect, Option } from "effect";
 import type { OpWireService } from "./driven.js";
@@ -8,8 +8,11 @@ import { mount } from "./router.js";
 
 /**
  * The client half of a page load (#22 §5, #36). One call reads the records
- * the document carries, puts them in the query cache, mounts the route tree
- * over the server's nodes, and lets the seed go once hydration is done. A
+ * the document carries, puts them in the query cache, reads the issues of a
+ * refused plain post when the document carries them (`Form.issuesScriptId`),
+ * mounts the route tree over the server's nodes under those issues, and
+ * lets the seed go once hydration is done. An app writes no page-load
+ * sequence of its own. A
  * `ClientOnly` document has an empty root, so the same call draws it fresh.
  *
  * It is the one owner that sees both the end of the record channel
@@ -26,13 +29,24 @@ export interface HydrateOptions<R, N = R> extends Omit<
   readonly wire?: OpWireService;
 }
 
+/** The issues of a refused plain post, when the document carries them. */
+const readIssues: Effect.Effect<Option.Option<Form.FormIssues>> = Effect.suspend(() =>
+  Option.match(Dom.readJsonScript(Form.issuesScriptId), {
+    onNone: () => Effect.succeed(Option.none<Form.FormIssues>()),
+    onSome: (json) => Effect.map(Effect.orDie(Form.decodeIssues(json)), Option.some),
+  }),
+);
+
 export const hydrate = <R, N = R>(options: HydrateOptions<R, N>) =>
   Effect.gen(function* () {
     const records = yield* Dom.readRecords;
     const resumed = yield* Streaming.resume(records);
+    const issues = yield* readIssues;
     const over = yield* Deferred.make<void>();
     const hydration = Dom.hydrate(options.root);
-    const mounting = mount<R, Dom.DomNode, N>({ ...options, host: hydration.host });
+    const mounting = Form.provideIssues(issues)(
+      mount<R, Dom.DomNode, N>({ ...options, host: hydration.host }),
+    );
     const router = yield* Option.match(Option.fromNullishOr(options.wire), {
       onNone: () => mounting,
       onSome: (wire) =>

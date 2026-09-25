@@ -531,6 +531,11 @@ const start = Effect.gen(function* () {
   seeds call for (a stale value, a failure that is not final). Until then
   a seeded entry shows what the server drew, so run it after
   `hydration.finish`.
+- A routed page does not write this sequence. It calls
+  `hydrate({ routes, notFound, root })` from `effect-frame/router`, the one
+  owner of a page load: it reads the records, reads the issues of a refused
+  plain post (`Form.issuesScriptId`) and provides them, mounts the tree over
+  the server's nodes, and holds the op wire until the document is over.
 - `HydrationReport.resolvedAhead` counts boundaries that the client drew
   with the other branch, because their query settled before hydration.
   That is not a mismatch.

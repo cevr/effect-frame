@@ -24,10 +24,9 @@ describe("the Notes browser entry and its server modules (#24)", () => {
         [
           "refused a server module (*.server.*):",
           "  ./client.tsx",
-          "    -> ./app.ts",
-          "      -> ./routes.tsx",
-          "        -> ./page.tsx",
-          "          -> ./queries.server.js",
+          "    -> ./routes.tsx",
+          "      -> ./page.tsx",
+          "        -> ./queries.server.js",
         ].join("\n"),
       ]);
     }),

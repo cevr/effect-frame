@@ -9,11 +9,11 @@ import type {
   Unauthorized,
 } from "effect-frame/actor/client";
 import { ActorTransport, HttpTransport, QueryCache } from "effect-frame/actor/client";
-import { Location, mount } from "effect-frame/router";
+import { Location, hydrate, mount } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import { Context, Deferred, Effect, Layer, Option, Predicate, Ref, Schema, Stream } from "effect";
-import { hydrateApp } from "../src/app.js";
+import { routes } from "../src/routes.js";
 import { NotFound } from "../src/views.js";
 import { inProcess } from "../src/notes.server.js";
 import type { NotesRuntime, RunningServer } from "../src/server.js";
@@ -116,7 +116,11 @@ export const locationAt = (href: string) =>
 /** Hydrate the installed page at `href`, as `client.tsx` does. */
 export const hydrateAt = Effect.fn("test.hydrateAt")(function* (root: HTMLElement, href: string) {
   const { location } = yield* locationAt(href);
-  return yield* Effect.provideService(hydrateApp(root), Location, location);
+  return yield* Effect.provideService(
+    hydrate({ routes, notFound: NotFound, root }),
+    Location,
+    location,
+  );
 });
 
 export const textOf = (root: ParentNode, selector: string): string =>

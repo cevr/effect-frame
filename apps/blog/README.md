@@ -31,9 +31,8 @@ Open <http://127.0.0.1:3000/posts>. Every post link is a built file. Delete one 
 | `src/routes.tsx`               | The one tree, `Route.prerender("blog", ...)`, and the post inputs: `runQuery(PostIndex)`, the same key the index reads.               |
 | `src/page.tsx`                 | The post page and its island.                                                                                                         |
 | `src/views.tsx`                | The chrome, the index and the not-found page.                                                                                         |
-| `src/app.ts`                   | Hydrate the tree over a built or rendered document, then let the baked values be read again.                                          |
 | `src/document.ts`              | The document around every page. The build and the server add the one module tag.                                                      |
-| `src/client.tsx`               | The browser entry.                                                                                                                    |
+| `src/client.tsx`               | The browser entry: `hydrate` the routes.                                                                                              |
 | `src/posts.server.ts`          | The post files, and the three query handlers. A server module.                                                                        |
 | `src/policies.server.ts`       | `public` and `editor`. A server module.                                                                                               |
 | `src/reactions.server.ts`      | The host: the actor and the queries over one post directory. A server module.                                                         |

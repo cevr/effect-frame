@@ -1,7 +1,8 @@
 import { HttpTransport, QueryCache } from "effect-frame/actor/client";
-import { Location, browserNavigation, followLinks } from "effect-frame/router";
+import { Location, browserNavigation, followLinks, hydrate } from "effect-frame/router";
 import { Effect, Layer, Option } from "effect";
-import { hydrateApp } from "./app.js";
+import { routes } from "./routes.js";
+import { NotFound } from "./views.js";
 
 /**
  * The browser entry. It hydrates the route tree over the server's document,
@@ -17,7 +18,7 @@ const start = Effect.gen(function* () {
   }
   const navigation = yield* browserNavigation;
   const { router, report } = yield* Effect.provideService(
-    hydrateApp(found.value),
+    hydrate({ routes, notFound: NotFound, root: found.value }),
     Location,
     navigation,
   );

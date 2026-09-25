@@ -3,11 +3,10 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import { ActorTransport, QueryCache } from "effect-frame/actor/client";
-import { Location, Route, renderDocument } from "effect-frame/router";
+import { Location, Route, hydrate, renderDocument } from "effect-frame/router";
 import type { AnyRoute, RenderedDocument, Router } from "effect-frame/router";
 import { Context, Effect, Layer, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
-import { hydrateRoutes } from "../src/app.js";
 import { inProcess } from "../src/notes.server.js";
 import { listBranch } from "../src/routes.js";
 import { notesDocument, renderPage } from "../src/server.js";
@@ -157,7 +156,7 @@ describe("one ListView in every rendering mode", () => {
           const snapshots: Array<string> = [];
           const client = yield* clientOver(host, snapshots);
           const { location } = yield* locationAt(inbox);
-          const { report } = yield* hydrateRoutes([mode.tree])(root).pipe(
+          const { report } = yield* hydrate({ routes: [mode.tree], notFound: NotFound, root }).pipe(
             Effect.provideService(Location, location),
             Effect.provideContext(client),
           );

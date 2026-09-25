@@ -36,14 +36,13 @@ Type a note in either client and press Enter. Both update. Tick a box in the bro
 | `src/routes.tsx`           | The route tree. Each page names its rendering mode here, and only here.                                                         |
 | `src/page.tsx`             | The list page. The same view for `/lists/:list` and `/lists/:list/print`.                                                       |
 | `src/views.tsx`            | The shell, the index, the scratch page, and the fallbacks.                                                                      |
-| `src/app.ts`               | Hydrate the route tree over the server's nodes.                                                                                 |
 | `src/notes.server.ts`      | The host, and the two transports the server can run over. A server module: `bun run boundary` fails if `client.tsx` reaches it. |
 | `src/queries.server.ts`    | The query handlers. A server module.                                                                                            |
 | `src/policies.server.ts`   | The policy table: `public` for the queries, `notes` for the actor (a send to `archive` is refused). A server module.            |
 | `src/commands.ts`          | Command ids and the send helpers both views share.                                                                              |
 | `src/terminal-view.tsx`    | The terminal view. Same setup, different tags.                                                                                  |
 | `src/server.ts`            | The platform boundary: `Bun.serve`, `Bun.build`, and the environment.                                                           |
-| `src/client.tsx`           | The browser entry: read the records, hydrate, follow.                                                                           |
+| `src/client.tsx`           | The browser entry: `hydrate` the routes, then follow links.                                                                     |
 | `src/terminal.tsx`         | The terminal entry.                                                                                                             |
 | `tests/e2e.test.tsx`       | A real server on a free port, a real socket, both clients.                                                                      |
 | `tests/modes.test.tsx`     | One list view under SSR, streaming, `AwaitAll` and client-only, each hydrated clean.                                            |

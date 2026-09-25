@@ -40,14 +40,13 @@ member on each request instead. Set `PORT` to use another port.
 | `src/overview.tsx`             | The overview's cards. The slowest endpoints sit under a nested `Loading`; the funnel mounts on a reveal.        |
 | `src/orders-page.tsx`          | The orders page: every order, and the open ones.                                                                |
 | `src/commands.ts`              | `Fulfil`, `Cancel`, `Ack`, `Write`, and the snapshot of a bound actor.                                          |
-| `src/app.ts`                   | Hydrate the route tree over the server's nodes.                                                                 |
 | `src/orders.server.ts`         | The `Orders` actor. A server module.                                                                            |
 | `src/alerts.server.ts`         | The `Alerts` and `Memo` actors. A server module.                                                                |
 | `src/queries.server.ts`        | The query handlers. They read the actors through the host they run in. A server module.                         |
 | `src/policies.server.ts`       | `tenantMember`: one policy for every actor and query, read off the `tenant` field. A server module.             |
 | `src/host.server.ts`           | The in-memory host over the actors and queries. A server module.                                                |
 | `src/server.ts`                | The platform boundary: `Bun.serve`, `Bun.build`, and the request's principal.                                   |
-| `src/client.tsx`               | The browser entry.                                                                                              |
+| `src/client.tsx`               | The browser entry: `hydrate` the routes.                                                                        |
 | `tests/single-flight.test.tsx` | Each command's reply refreshes exactly its dependents on screen; a memo write refreshes none.                   |
 | `tests/query.test.tsx`         | One read of the layout's tenant; canonical keys; stale from send until the last reply.                          |
 | `tests/readiness.test.tsx`     | The nested `Loading`; the late funnel card; one fallback on failure.                                            |

@@ -664,8 +664,8 @@ const handler = Effect.flatMap(principal, (derive) => HttpServer.make({ principa
 ```
 
 - `effect-frame/actor` exports `Policy` (`allowAll`, `authenticated`,
-  `of`, `all`, `any`, `byAction`), `Policies`, `PolicyNamesMissing`,
-  `MissingPolicy`, and the types `PolicyTable`, `Subject`, `Action`.
+  `of`, `all`, `any`, `byAction`), `Policies`, `PolicyNamesMissing`, and
+  the types `PolicyTable`, `Subject`, `Action`.
 - `effect-frame/actor/client` exports `Principal` (`anonymous`,
   `constant`, `equals`, `isAuthenticated`), `Anonymous`, `Authenticated`,
   `Claims`, `CurrentPrincipal`, and the type `PrincipalSource`. The client

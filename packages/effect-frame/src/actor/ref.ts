@@ -1,5 +1,5 @@
 import { Effect, Option, Schema, Stream, SubscriptionRef } from "effect";
-import { refusalOf } from "./behavior.js";
+import { refusalOf } from "./behavior-rules.js";
 import type { Behavior } from "./behavior.js";
 import { callThrough, identifiedHandle, suppliedId, toApplied } from "./command-handle.js";
 import { isMinted } from "./command-id.js";

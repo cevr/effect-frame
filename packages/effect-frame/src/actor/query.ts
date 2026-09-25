@@ -325,5 +325,3 @@ export const QueryFailure = Schema.Union([
   Unreachable,
   StreamEnded,
 ]);
-
-export const isQueryFailure = Schema.is(QueryFailure);

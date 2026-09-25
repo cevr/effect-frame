@@ -15,7 +15,7 @@ import {
 } from "effect";
 import * as Inspection from "../inspection.js";
 import type { Behavior } from "./behavior.js";
-import { refusalOf, wakeOf } from "./behavior.js";
+import { refusalOf, wakeOf } from "./behavior-rules.js";
 import type { Committed } from "./engine-types.js";
 import type { PendingCommand, StoredReceipt } from "./mailbox-store.js";
 import { MailboxStore } from "./mailbox-store.js";

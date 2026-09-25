@@ -345,14 +345,18 @@ const start = (): void => {
       return yield* Effect.die("fixture: no #root element");
     }
     const router = yield* mount({
+      landing: NavigationBehavior.Restore,
       routes: [app],
       notFound: NotFound,
       host: Dom.host,
       root: found.value,
-      ...Option.match(Option.fromNullishOr(window.__navConfig.traversalReadLimitMillis), {
-        onNone: () => ({}),
-        onSome: (millis) => ({ traversalReadLimit: Duration.millis(millis) }),
-      }),
+      traversalReadLimit: Option.match(
+        Option.fromNullishOr(window.__navConfig.traversalReadLimitMillis),
+        {
+          onNone: (): Duration.Input => "3 seconds",
+          onSome: (millis) => Duration.millis(millis),
+        },
+      ),
     }).pipe(Effect.provideService(Location, location));
     yield* followLinks(document, router);
     const receipts = Receipt.of(router);

@@ -2,7 +2,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Location, Route, mount } from "effect-frame/router";
+import { Location, Route, mount, NavigationBehavior } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
 import { Dom, Html, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -66,9 +66,14 @@ const serverHtml = (path: string) =>
   Effect.scoped(
     Effect.gen(function* () {
       const root = Html.element("main");
-      yield* mount({ routes: [app], notFound: NotFound, host: Html.host, root }).pipe(
-        Effect.provideService(Location, locationAt(`http://site.test${path}`)),
-      );
+      yield* mount({
+        landing: NavigationBehavior.Restore,
+        traversalReadLimit: "3 seconds",
+        routes: [app],
+        notFound: NotFound,
+        host: Html.host,
+        root,
+      }).pipe(Effect.provideService(Location, locationAt(`http://site.test${path}`)));
       yield* View.flush;
       return Html.serializeChildren(root.children);
     }),
@@ -108,9 +113,14 @@ const fresh = (path: string) =>
       host: Dom.host,
       root: main,
       setup: (host, root) =>
-        mount({ routes: [app], notFound: NotFound, host, root }).pipe(
-          Effect.provideService(Location, locationAt(`http://site.test${path}`)),
-        ),
+        mount({
+          landing: NavigationBehavior.Restore,
+          traversalReadLimit: "3 seconds",
+          routes: [app],
+          notFound: NotFound,
+          host,
+          root,
+        }).pipe(Effect.provideService(Location, locationAt(`http://site.test${path}`))),
     });
     yield* page.waitFor({
       label: "leaf shown",
@@ -129,9 +139,14 @@ const hydrated = (path: string) =>
       host: hydration.host,
       root: main,
       setup: (host, root) =>
-        mount({ routes: [app], notFound: NotFound, host, root }).pipe(
-          Effect.provideService(Location, locationAt(`http://site.test${path}`)),
-        ),
+        mount({
+          landing: NavigationBehavior.Restore,
+          traversalReadLimit: "3 seconds",
+          routes: [app],
+          notFound: NotFound,
+          host,
+          root,
+        }).pipe(Effect.provideService(Location, locationAt(`http://site.test${path}`))),
     });
     yield* page.waitFor({
       label: "leaf hydrated",

@@ -2,7 +2,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Location, Route, UrlState, mount } from "effect-frame/router";
+import { Location, Route, UrlState, mount, NavigationBehavior } from "effect-frame/router";
 import type { AnyRoute, Entered, LocationService } from "effect-frame/router";
 import type { Source } from "effect-frame/actor";
 import { Dom, View } from "effect-frame/view";
@@ -124,6 +124,8 @@ const makeStart = <R,>(initial: string, routes: ReadonlyArray<Route.AnyRoute<R>>
       root,
       setup: (host, mountRoot) =>
         mount({
+          landing: NavigationBehavior.Restore,
+          traversalReadLimit: "3 seconds",
           routes,
           notFound: NotFound,
           host,
@@ -771,6 +773,8 @@ describe("Frame router inspection", () => {
         const location = yield* makeLocation("http://app.test/blocked");
         const mounting = yield* Effect.forkChild(
           mount({
+            landing: NavigationBehavior.Restore,
+            traversalReadLimit: "3 seconds",
             routes: [blocked],
             notFound: NotFound,
             host: Dom.host,
@@ -846,6 +850,8 @@ describe("Frame router inspection", () => {
         const location = yield* makeLocation("http://app.test/same");
         const router = yield* Effect.provideContext(
           mount({
+            landing: NavigationBehavior.Restore,
+            traversalReadLimit: "3 seconds",
             routes: [route],
             notFound: NotFound,
             host: Dom.host,

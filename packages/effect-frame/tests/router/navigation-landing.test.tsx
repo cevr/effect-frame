@@ -2,7 +2,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Location, Route, Router, mount } from "effect-frame/router";
+import { Location, Route, Router, mount, NavigationBehavior } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
 import { Dom } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -112,9 +112,14 @@ describe("navigation landing order", () => {
         host: Dom.host,
         root: main,
         setup: (host, root) =>
-          mount({ routes: [app], notFound: NotFound, host, root }).pipe(
-            Effect.provideService(Location, location.service),
-          ),
+          mount({
+            landing: NavigationBehavior.Restore,
+            traversalReadLimit: "3 seconds",
+            routes: [app],
+            notFound: NotFound,
+            host,
+            root,
+          }).pipe(Effect.provideService(Location, location.service)),
       });
       yield* page.setup.navigate("/site/first");
       yield* until(() => location.log.includes("land /site/second placed"));

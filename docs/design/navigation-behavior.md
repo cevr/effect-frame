@@ -42,8 +42,15 @@ import {
 } from "effect-frame/router";
 
 Route.leaf(tabs, TabsView, { landing: NavigationBehavior.Preserve }); // per leaf
-mount({ routes, notFound, host, root, landing: NavigationBehavior.Restore }); // default: Restore
-mount({ routes, notFound, host, root, traversalReadLimit: "3 seconds" }); // default: 3 seconds
+// Both are required: the router has no hidden default.
+mount({
+  routes,
+  notFound,
+  host,
+  root,
+  landing: NavigationBehavior.Restore,
+  traversalReadLimit: "3 seconds",
+});
 
 const location = browserNavigation; // Effect<Location, never, Scope>: Navigation API, History fallback
 ```

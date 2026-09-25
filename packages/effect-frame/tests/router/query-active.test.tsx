@@ -14,7 +14,7 @@ import type { QueryKey, TransportService } from "effect-frame/actor";
 import { canonicalize } from "effect-frame/actor/client";
 import { QueryTest } from "effect-frame/actor/testing";
 import type { FollowedQuery, QueryFailure } from "effect-frame/actor/client";
-import { Location, Route, mount as mountRouter } from "effect-frame/router";
+import { Location, Route, mount as mountRouter, NavigationBehavior } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
 import { Html, View } from "effect-frame/view";
 import { Context, Deferred, Effect, Fiber, Layer, Option, Ref, Schema, Stream } from "effect";
@@ -213,6 +213,8 @@ const mountAt = (path: string) =>
       pops: Stream.never,
     };
     return yield* mountRouter({
+      landing: NavigationBehavior.Restore,
+      traversalReadLimit: "3 seconds",
       routes: [app],
       notFound: NotFound,
       host: Html.host,
@@ -339,6 +341,8 @@ describe("a route query binding's override (#19)", () => {
         pops: Stream.never,
       };
       const router = yield* mountRouter({
+        landing: NavigationBehavior.Restore,
+        traversalReadLimit: "3 seconds",
         routes: [overrideApp],
         notFound: NotFound,
         host: Html.host,
@@ -395,6 +399,8 @@ describe("a route query binding's override (#19)", () => {
           pops: Stream.never,
         };
         const router = yield* mountRouter({
+          landing: NavigationBehavior.Restore,
+          traversalReadLimit: "3 seconds",
           routes: [overrideApp],
           notFound: NotFound,
           host: Html.host,

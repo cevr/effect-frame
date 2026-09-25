@@ -2,7 +2,7 @@ import { platformFetch } from "./dom-setup.js";
 
 import type { QueryKey, TransportService } from "effect-frame/actor/client";
 import { Actor, ActorTransport, CommandId, QueryCache } from "effect-frame/actor/client";
-import { Location, hydrate } from "effect-frame/router";
+import { Location, hydrate, NavigationBehavior } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
 import * as Prerender from "effect-frame/router/prerender";
 import {
@@ -352,10 +352,13 @@ export const hydrateAt = (client: Client, html: string, href: string) =>
   Effect.gen(function* () {
     const root = yield* install(html);
     const location = yield* locationAt(href);
-    return yield* hydrate({ routes, notFound: NotFound, root }).pipe(
-      Effect.provideService(Location, location),
-      Effect.provideContext(client),
-    );
+    return yield* hydrate({
+      landing: NavigationBehavior.Restore,
+      traversalReadLimit: "3 seconds",
+      routes,
+      notFound: NotFound,
+      root,
+    }).pipe(Effect.provideService(Location, location), Effect.provideContext(client));
   });
 
 export const textOf = (selector: string): string =>

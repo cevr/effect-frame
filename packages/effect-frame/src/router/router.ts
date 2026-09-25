@@ -35,7 +35,6 @@ import type { Landing, Shell, WriteKind, Written } from "./landing.js";
 import { readShell, readSurface, registerShell } from "./landing.js";
 import * as LeafRoot from "./leaf-root.js";
 import type { NavigationBehavior } from "./navigation-behavior.js";
-import { Restore } from "./navigation-behavior.js";
 
 /**
  * The router (#18 §7). The URL is the state: the router holds nothing about
@@ -116,22 +115,21 @@ export interface MountOptions<R, HostNode, N = R> {
   readonly root: HostNode;
   /**
    * What a navigation does to scroll and focus at shell commit (#31), unless
-   * the destination leaf names its own `landing`. Absent: `NavigationBehavior.Restore`.
+   * the destination leaf names its own `landing`. Required: the router has
+   * no hidden default. `NavigationBehavior.Restore` is the platform's own
+   * behavior for a document load.
    */
-  readonly landing?: NavigationBehavior;
+  readonly landing: NavigationBehavior;
   /**
    * How long a traversal (Back, Forward, a history jump) waits for the
    * reads its page declared before it places the saved position. At the
    * limit it lands on the page as it is, so the scroll may clamp, and it
    * never places again when the reads settle later: a late jump after the
    * reader has been looking at the page is worse than a clamped one.
-   * Absent: 3 seconds.
+   * Required, as `Pending` durations are: the router has no hidden timing.
    */
-  readonly traversalReadLimit?: Duration.Input;
+  readonly traversalReadLimit: Duration.Input;
 }
-
-/** How long a traversal waits for its declared reads when `mount` names no limit. */
-const defaultTraversalReadLimit: Duration.Input = "3 seconds";
 
 interface Mounted<R> {
   readonly route: AnyRoute<R>;
@@ -287,11 +285,8 @@ export const mount: <R, HostNode, N = R>(
   });
   const requests = yield* Queue.unbounded<Request>();
   const surface = readSurface(location);
-  const defaultBehavior = Option.getOrElse(Option.fromNullishOr(options.landing), () => Restore);
-  const traversalReadLimit = Option.getOrElse(
-    Option.fromNullishOr(options.traversalReadLimit),
-    () => defaultTraversalReadLimit,
-  );
+  const defaultBehavior = options.landing;
+  const traversalReadLimit = options.traversalReadLimit;
   const drawing = drawingOf(options.host);
   const pending = new Set<Request>();
   let closed = false;

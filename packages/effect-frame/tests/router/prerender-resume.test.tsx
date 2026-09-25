@@ -15,7 +15,7 @@ import {
 } from "effect-frame/actor";
 import { contract, resumeCodec } from "effect-frame/actor/client";
 import type { Applied, SnapshotOf } from "effect-frame/actor/client";
-import { Location, Route, mount as mountRouter } from "effect-frame/router";
+import { Location, Route, mount as mountRouter, NavigationBehavior } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
 import * as Prerender from "effect-frame/router/prerender";
 import { Dom, Html, View } from "effect-frame/view";
@@ -81,9 +81,14 @@ describe("a prerendered page's baked queries (#23 §3.2)", () => {
         const location = yield* locationAt(`${origin}/blog/first`);
         yield* install(html);
         const { report } = yield* hydrateWith(client, (host, root) =>
-          mountRouter({ routes: blogRoutes, notFound: NotFound, host, root }).pipe(
-            Effect.provideService(Location, location),
-          ),
+          mountRouter({
+            landing: NavigationBehavior.Restore,
+            traversalReadLimit: "3 seconds",
+            routes: blogRoutes,
+            notFound: NotFound,
+            host,
+            root,
+          }).pipe(Effect.provideService(Location, location)),
         );
         expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
         // No readiness state is drawn: the baked value is on screen, and stale.
@@ -261,7 +266,14 @@ const mountNote = (html: string, client: Context.Context<QueryCache | ActorTrans
     });
     const location = yield* locationAt(`${origin}/notes/n1`);
     const { report } = yield* hydrateWith(client, (host, root) =>
-      mountRouter({ routes: [noteRoute], notFound: NotFound, host, root }).pipe(
+      mountRouter({
+        landing: NavigationBehavior.Restore,
+        traversalReadLimit: "3 seconds",
+        routes: [noteRoute],
+        notFound: NotFound,
+        host,
+        root,
+      }).pipe(
         Effect.provideService(Location, location),
         Effect.provideService(Baked, Option.some(baked)),
       ),

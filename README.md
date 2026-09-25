@@ -125,7 +125,7 @@ rendering mode for a whole tree: `Route.client`, `Route.ssr`,
 `Route.streamed`, or `Route.awaitAll`.
 
 ```tsx
-import { Link, Route, link, mount } from "effect-frame/router";
+import { Link, NavigationBehavior, Route, link, mount } from "effect-frame/router";
 import { View } from "effect-frame/view";
 import { Effect, Schema } from "effect";
 
@@ -187,7 +187,14 @@ const App = Route.client(
 );
 
 const program = Effect.gen(function* () {
-  yield* mount({ routes: [App, Login], notFound, host, root });
+  yield* mount({
+    routes: [App, Login],
+    notFound,
+    host,
+    root,
+    landing: NavigationBehavior.Restore,
+    traversalReadLimit: "3 seconds",
+  });
 });
 ```
 
@@ -227,9 +234,14 @@ import {
 
 const program = Effect.gen(function* () {
   const location = yield* browserNavigation;
-  const router = yield* mount({ routes: [App, Login], notFound, host, root }).pipe(
-    Effect.provideService(Location, location),
-  );
+  const router = yield* mount({
+    routes: [App, Login],
+    notFound,
+    host,
+    root,
+    landing: NavigationBehavior.Restore,
+    traversalReadLimit: "3 seconds",
+  }).pipe(Effect.provideService(Location, location));
   yield* followLinks(document, router);
 });
 
@@ -238,7 +250,7 @@ Route.leaf(tab, TabView, { landing: NavigationBehavior.Preserve });
 ```
 
 - At shell commit (the new branch is in the document, fallbacks included),
-  `NavigationBehavior.Restore`, the default, puts the viewport at the top, at
+  `NavigationBehavior.Restore` puts the viewport at the top, at
   the URL's fragment, or at the entry's saved position on Back and Forward.
   It then focuses the entering leaf's root, or the first `autofocus` element
   inside that leaf. It does not wait for queries.
@@ -247,6 +259,9 @@ Route.leaf(tab, TabView, { landing: NavigationBehavior.Preserve });
   (`mount({ ..., landing })`). A layout takes no `landing`: the destination
   leaf decides. The option is `landing`, not `behavior`: `behavior` is an
   actor's reducer.
+- `mount` and `hydrate` require `landing` and `traversalReadLimit` (how long
+  Back and Forward wait for a page's declared reads before they land). The
+  router has no hidden default.
 - A leaf's root element gets `tabindex="-1"`, unless the view wrote a tab
   index (either spelling) or the element is focusable already, such as a
   `<button>`.

@@ -8,7 +8,15 @@ import { implementQuery, query as queryContract, Policies, Policy } from "effect
 import type { ActorTransport, QueryCache, Source } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import * as Frame from "effect-frame/frame";
-import { Link, Location, Route, Router, link, mount as mountRouter } from "effect-frame/router";
+import {
+  Link,
+  Location,
+  Route,
+  Router,
+  link,
+  mount as mountRouter,
+  NavigationBehavior,
+} from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -343,9 +351,14 @@ const mountApp = <R,>(app: AnyRoute<R>, root: HTMLElement, path: string) =>
       host: Dom.host,
       root,
       setup: (host, mountRoot) =>
-        mountRouter({ routes: [app, LoginRoute], notFound: NotFound, host, root: mountRoot }).pipe(
-          Effect.provideService(Location, location.service),
-        ),
+        mountRouter({
+          landing: NavigationBehavior.Restore,
+          traversalReadLimit: "3 seconds",
+          routes: [app, LoginRoute],
+          notFound: NotFound,
+          host,
+          root: mountRoot,
+        }).pipe(Effect.provideService(Location, location.service)),
     });
     return { page, router: page.setup, location };
   });
@@ -465,6 +478,8 @@ const withoutClipboard = (
 const mountsFullApp = (root: HTMLElement) =>
   withoutClipboard(
     mountRouter({
+      landing: NavigationBehavior.Restore,
+      traversalReadLimit: "3 seconds",
       routes: [makeApp(fixtureProbes, fixtureImporter)],
       notFound: NotFound,
       host: Dom.host,

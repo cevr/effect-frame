@@ -2,7 +2,15 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Location, Route, Router, UrlState, link, mount } from "effect-frame/router";
+import {
+  Location,
+  Route,
+  Router,
+  UrlState,
+  link,
+  mount,
+  NavigationBehavior,
+} from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
 import { Actor, Behavior, Value } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
@@ -412,6 +420,8 @@ const startWith = <R,>(initial: string, routes: ReadonlyArray<Route.AnyRoute<R>>
       root,
       setup: (host, mountRoot) =>
         mount({
+          landing: NavigationBehavior.Restore,
+          traversalReadLimit: "3 seconds",
           routes,
           notFound: NotFound,
           host,

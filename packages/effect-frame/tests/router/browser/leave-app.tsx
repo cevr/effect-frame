@@ -7,7 +7,7 @@
  * asked, the router's diagnostics, and the receipt-returning `navigate`.
  */
 import type { Source } from "effect-frame/actor";
-import { Location, Route, mount } from "effect-frame/router";
+import { Location, Route, mount, NavigationBehavior } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import { Deferred, Effect, Logger, Option, Schema } from "effect";
 import * as LeaveBranch from "../../../src/router/leave-branch.js";
@@ -135,6 +135,8 @@ const start = (): void => {
       return yield* Effect.die("fixture: no #root element");
     }
     const router = yield* mount({
+      landing: NavigationBehavior.Restore,
+      traversalReadLimit: "3 seconds",
       routes: [app],
       notFound: NotFound,
       host: Dom.host,

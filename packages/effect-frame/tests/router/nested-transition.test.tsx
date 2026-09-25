@@ -25,7 +25,7 @@ import type {
   TransportService,
 } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
-import { Location, Route, mount as mountRouter } from "effect-frame/router";
+import { Location, Route, mount as mountRouter, NavigationBehavior } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
 import { Dom, Html, Await, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -565,9 +565,14 @@ const mountApp = <R,>(app: AnyRoute<R>, root: HTMLElement, path: string) =>
       host: Dom.host,
       root,
       setup: (host, mountRoot) =>
-        mountRouter({ routes: [app], notFound: NotFound, host, root: mountRoot }).pipe(
-          Effect.provideService(Location, location.service),
-        ),
+        mountRouter({
+          landing: NavigationBehavior.Restore,
+          traversalReadLimit: "3 seconds",
+          routes: [app],
+          notFound: NotFound,
+          host,
+          root: mountRoot,
+        }).pipe(Effect.provideService(Location, location.service)),
     });
     return { page, router: page.setup, location };
   });
@@ -1148,6 +1153,8 @@ describe("private nested transition", () => {
         const scope = yield* Scope.make();
         const htmlRoot = Html.element("#root");
         yield* mountRouter({
+          landing: NavigationBehavior.Restore,
+          traversalReadLimit: "3 seconds",
           routes: [makeTree(probes)],
           notFound: NotFound,
           host: Html.host,

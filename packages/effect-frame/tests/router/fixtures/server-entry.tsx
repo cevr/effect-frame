@@ -42,6 +42,8 @@ export const renderUrl = (href: string) =>
       };
       const root = Html.element("#root");
       yield* mount({
+        landing: NavigationBehavior.Restore,
+        traversalReadLimit: "3 seconds",
         routes: [app],
         notFound: () => Effect.succeed(<p>missing</p>),
         host: Html.host,

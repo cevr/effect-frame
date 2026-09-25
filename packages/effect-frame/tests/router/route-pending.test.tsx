@@ -13,7 +13,7 @@ import {
 } from "effect-frame/actor";
 import type { ActorTransport, QueryCache, Source } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
-import { Location, Route, mount as mountRouter } from "effect-frame/router";
+import { Location, Route, mount as mountRouter, NavigationBehavior } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
 import { Dom, Html, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -585,9 +585,14 @@ const mountApp = <R,>(app: AnyRoute<R>, root: HTMLElement, path: string) =>
       host: Dom.host,
       root,
       setup: (host, mountRoot) =>
-        mountRouter({ routes: [app, LoginRoute], notFound: NotFound, host, root: mountRoot }).pipe(
-          Effect.provideService(Location, location.service),
-        ),
+        mountRouter({
+          landing: NavigationBehavior.Restore,
+          traversalReadLimit: "3 seconds",
+          routes: [app, LoginRoute],
+          notFound: NotFound,
+          host,
+          root: mountRoot,
+        }).pipe(Effect.provideService(Location, location.service)),
     });
     return { page, receipts: Receipt.of(page.setup), location };
   });
@@ -1111,6 +1116,8 @@ describe("private route pending and lazy views", () => {
         const htmlRoot = Html.element("#root");
         const mounting = yield* Effect.forkChild(
           mountRouter({
+            landing: NavigationBehavior.Restore,
+            traversalReadLimit: "3 seconds",
             routes: [makeFirstFrameApp(probes, importer, access.events)],
             notFound: NotFound,
             host: Html.host,

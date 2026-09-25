@@ -3,7 +3,7 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import { CommandId, Form, QueryCache } from "effect-frame/actor/client";
-import { Location, Route, hydrate } from "effect-frame/router";
+import { Location, Route, hydrate, NavigationBehavior } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
 import { Html } from "effect-frame/view";
 import { Effect, Option, Schema, Stream } from "effect";
@@ -71,9 +71,13 @@ const installDocument = (issues: Option.Option<string>) =>
 const hydrated = (issues: Option.Option<string>) =>
   Effect.gen(function* () {
     const root = yield* installDocument(issues);
-    const { report } = yield* hydrate({ routes: [app], notFound: NotFound, root }).pipe(
-      Effect.provideService(Location, location),
-    );
+    const { report } = yield* hydrate({
+      landing: NavigationBehavior.Restore,
+      traversalReadLimit: "3 seconds",
+      routes: [app],
+      notFound: NotFound,
+      root,
+    }).pipe(Effect.provideService(Location, location));
     return { text: root.querySelector("#issues")?.textContent, report };
   });
 

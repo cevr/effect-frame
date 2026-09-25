@@ -20,6 +20,7 @@ import {
   mount as mountRouter,
   type LocationService,
   type NotFoundProps,
+  NavigationBehavior,
 } from "effect-frame/router";
 import { Dom, Await, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -585,9 +586,14 @@ describe("ViewTest Frame inspection", () => {
         root,
         rootId: "view-test-routed-root",
         setup: (host, mountRoot) =>
-          mountRouter({ routes: [route], notFound, host, root: mountRoot }).pipe(
-            Effect.provideService(Location, location),
-          ),
+          mountRouter({
+            landing: NavigationBehavior.Restore,
+            traversalReadLimit: "3 seconds",
+            routes: [route],
+            notFound,
+            host,
+            root: mountRoot,
+          }).pipe(Effect.provideService(Location, location)),
       });
 
       yield* Deferred.await(control.started);

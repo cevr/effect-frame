@@ -15,7 +15,13 @@ import {
 } from "effect-frame/actor";
 import type { TransportService } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
-import { Location, Route, mount as mountRouter, renderDocument } from "effect-frame/router";
+import {
+  Location,
+  Route,
+  mount as mountRouter,
+  renderDocument,
+  NavigationBehavior,
+} from "effect-frame/router";
 import type { AnyRoute, LocationService, NotFoundProps } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import { Context, Deferred, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
@@ -227,9 +233,14 @@ describe("a route actor is seeded into the document (#37)", () => {
           const location = yield* locationAt(url.href);
           yield* install(html);
           const { report } = yield* hydrateWith(client, (over, root) =>
-            mountRouter({ routes: [app], notFound: NotFound, host: over, root }).pipe(
-              Effect.provideService(Location, location),
-            ),
+            mountRouter({
+              landing: NavigationBehavior.Restore,
+              traversalReadLimit: "3 seconds",
+              routes: [app],
+              notFound: NotFound,
+              host: over,
+              root,
+            }).pipe(Effect.provideService(Location, location)),
           );
           expect(report.mismatches).toEqual([]);
           expect(textOf("#count")).toBe("7");
@@ -301,9 +312,14 @@ describe("a route actor is seeded into the document (#37)", () => {
       const location = yield* locationAt(url.href);
       yield* install(html);
       const { report } = yield* hydrateWith(client, (over, root) =>
-        mountRouter({ routes: [app], notFound: NotFound, host: over, root }).pipe(
-          Effect.provideService(Location, location),
-        ),
+        mountRouter({
+          landing: NavigationBehavior.Restore,
+          traversalReadLimit: "3 seconds",
+          routes: [app],
+          notFound: NotFound,
+          host: over,
+          root,
+        }).pipe(Effect.provideService(Location, location)),
       );
       expect(report.mismatches).toEqual([]);
       expect([textOf("#count"), textOf("#again")]).toEqual(["4", "4"]);
@@ -358,9 +374,14 @@ describe("a route actor is seeded into the document (#37)", () => {
         const location = yield* locationAt(url.href);
         yield* install(html);
         const { report } = yield* hydrateWith(client, (over, root) =>
-          mountRouter({ routes: [app], notFound: NotFound, host: over, root }).pipe(
-            Effect.provideService(Location, location),
-          ),
+          mountRouter({
+            landing: NavigationBehavior.Restore,
+            traversalReadLimit: "3 seconds",
+            routes: [app],
+            notFound: NotFound,
+            host: over,
+            root,
+          }).pipe(Effect.provideService(Location, location)),
         );
         expect(report.mismatches).toEqual([]);
         expect(textOf("#count")).toBe(textOf("#again"));
@@ -386,9 +407,14 @@ describe("a route actor is seeded into the document (#37)", () => {
         let navigate: (href: string) => Effect.Effect<void> = () => Effect.void;
         yield* hydrateWith(client, (over, root) =>
           Effect.map(
-            mountRouter({ routes: [app], notFound: NotFound, host: over, root }).pipe(
-              Effect.provideService(Location, location),
-            ),
+            mountRouter({
+              landing: NavigationBehavior.Restore,
+              traversalReadLimit: "3 seconds",
+              routes: [app],
+              notFound: NotFound,
+              host: over,
+              root,
+            }).pipe(Effect.provideService(Location, location)),
             (router) => {
               navigate = router.navigate;
             },
@@ -429,9 +455,14 @@ describe("a route actor is seeded into the document (#37)", () => {
         yield* resumed.hydrated;
         const root = document.createElement("main");
         document.body.replaceChildren(root);
-        yield* mountRouter({ routes: [app], notFound: NotFound, host: Dom.host, root }).pipe(
-          Effect.provideService(Location, location),
-        );
+        yield* mountRouter({
+          landing: NavigationBehavior.Restore,
+          traversalReadLimit: "3 seconds",
+          routes: [app],
+          notFound: NotFound,
+          host: Dom.host,
+          root,
+        }).pipe(Effect.provideService(Location, location));
         yield* View.flush;
       }).pipe(Effect.provideContext(client));
       yield* eventually("the current count", () => textOf("#count") === "5");
@@ -458,9 +489,14 @@ describe("a route actor is seeded into the document (#37)", () => {
       const location = yield* locationAt(`${origin}/counter/p`);
       yield* install('<body><main id="app"></main></body>');
       yield* hydrateWith(client, (over, root) =>
-        mountRouter({ routes: [app], notFound: NotFound, host: over, root }).pipe(
-          Effect.provideService(Location, location),
-        ),
+        mountRouter({
+          landing: NavigationBehavior.Restore,
+          traversalReadLimit: "3 seconds",
+          routes: [app],
+          notFound: NotFound,
+          host: over,
+          root,
+        }).pipe(Effect.provideService(Location, location)),
       );
       yield* eventually("the counter", () => textOf("#count") === "0");
       yield* Effect.sync(() => document.getElementById("add")?.dispatchEvent(new Event("click")));

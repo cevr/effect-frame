@@ -16,7 +16,7 @@ import {
 } from "effect-frame/actor";
 import type { TransportService } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
-import { Location, Route, hydrate, renderDocument } from "effect-frame/router";
+import { Location, Route, hydrate, renderDocument, NavigationBehavior } from "effect-frame/router";
 import type { AnyRoute, LocationService, NotFoundProps } from "effect-frame/router";
 import { For, View } from "effect-frame/view";
 import * as Driven from "effect-frame/view/driven";
@@ -289,6 +289,8 @@ const hydratePage = (
     const root = yield* Effect.fromOption(Option.fromNullishOr(document.getElementById("app")));
     const location = yield* locationAt(url.href);
     return yield* hydrate({
+      landing: NavigationBehavior.Restore,
+      traversalReadLimit: "3 seconds",
       routes,
       notFound: NotFound,
       root,

@@ -1,5 +1,11 @@
 import { HttpTransport, QueryCache } from "effect-frame/actor/client";
-import { Location, browserNavigation, followLinks, hydrate } from "effect-frame/router";
+import {
+  Location,
+  browserNavigation,
+  followLinks,
+  hydrate,
+  NavigationBehavior,
+} from "effect-frame/router";
 import { Effect, Layer, Option } from "effect";
 import { routes } from "./routes.js";
 import { NotFound } from "./views.js";
@@ -18,7 +24,13 @@ const start = Effect.gen(function* () {
   }
   const navigation = yield* browserNavigation;
   const { router, report } = yield* Effect.provideService(
-    hydrate({ routes, notFound: NotFound, root: found.value }),
+    hydrate({
+      landing: NavigationBehavior.Restore,
+      traversalReadLimit: "3 seconds",
+      routes,
+      notFound: NotFound,
+      root: found.value,
+    }),
     Location,
     navigation,
   );

@@ -7,7 +7,7 @@ import {
   QueryFailed,
   QueryCache,
 } from "effect-frame/actor/client";
-import { Location, mount } from "effect-frame/router";
+import { Location, mount, NavigationBehavior } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import { Context, Deferred, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
@@ -326,6 +326,8 @@ export const mountApp = Effect.fn("test.mountApp")(function* <R>(options: {
   );
   const { location, current } = yield* locationAt(options.href);
   const router = yield* mount({
+    landing: NavigationBehavior.Restore,
+    traversalReadLimit: "3 seconds",
     routes: options.routes,
     notFound: NotFound,
     host: Dom.host,

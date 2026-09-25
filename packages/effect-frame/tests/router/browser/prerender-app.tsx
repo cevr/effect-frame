@@ -6,7 +6,7 @@
  * saw on `window.__prerender`.
  */
 import { HttpTransport, QueryCache } from "effect-frame/actor/client";
-import { Location, browserLocation, mount } from "effect-frame/router";
+import { Location, browserLocation, mount, NavigationBehavior } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import type { Dom as DomTypes } from "effect-frame/view";
 import { Effect, Layer, Option, Schema } from "effect";
@@ -41,7 +41,14 @@ const start = Effect.gen(function* () {
     onSome: (json) => Effect.orDie(Schema.decodeEffect(Resume)(json)),
   });
   const hydration = Dom.hydrate(root);
-  yield* mount({ routes: [noteRoute], notFound: NotFound, host: hydration.host, root }).pipe(
+  yield* mount({
+    landing: NavigationBehavior.Restore,
+    traversalReadLimit: "3 seconds",
+    routes: [noteRoute],
+    notFound: NotFound,
+    host: hydration.host,
+    root,
+  }).pipe(
     Effect.provideService(Location, browserLocation),
     Effect.provideService(Baked, Option.some(baked)),
   );

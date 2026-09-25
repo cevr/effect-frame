@@ -17,7 +17,7 @@ import {
 } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import * as Frame from "effect-frame/frame";
-import { Location, Route, browserLocation, mount } from "effect-frame/router";
+import { Location, Route, browserLocation, mount, NavigationBehavior } from "effect-frame/router";
 import type { Source } from "effect-frame/actor";
 import { Dom, Await, View } from "effect-frame/view";
 import { Deferred, Effect, Fiber, Layer, Option, Schema } from "effect";
@@ -174,7 +174,14 @@ export const start = (
     if (Option.isNone(found)) {
       return yield* Effect.die("fixture: no #root element");
     }
-    yield* mount({ routes: [book], notFound: NotFound, host: Dom.host, root: found.value });
+    yield* mount({
+      landing: NavigationBehavior.Restore,
+      traversalReadLimit: "3 seconds",
+      routes: [book],
+      notFound: NotFound,
+      host: Dom.host,
+      root: found.value,
+    });
     fixture.mountedAt = performance.now();
     return yield* Effect.never;
   });

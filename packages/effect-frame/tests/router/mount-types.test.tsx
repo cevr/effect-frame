@@ -4,7 +4,7 @@ registerDom();
 
 import type { Source } from "effect-frame/actor";
 import type { QueryCache } from "effect-frame/actor/client";
-import { Route, Router, hydrate, mount } from "effect-frame/router";
+import { Route, Router, hydrate, mount, NavigationBehavior } from "effect-frame/router";
 import type { Location } from "effect-frame/router";
 import { Dom } from "effect-frame/view";
 import { Context, Effect, Schema } from "effect";
@@ -46,6 +46,8 @@ const NotFound = (_props: { readonly url: Source<URL> }) =>
   });
 
 const mountEffect = mount({
+  landing: NavigationBehavior.Restore,
+  traversalReadLimit: "3 seconds",
   routes: [plain],
   notFound: NotFound,
   host: Dom.host,
@@ -58,6 +60,8 @@ const mountRequirements: Equals<
 > = true;
 
 const hydrateEffect = hydrate({
+  landing: NavigationBehavior.Restore,
+  traversalReadLimit: "3 seconds",
   routes: [plain],
   notFound: NotFound,
   root: document.createElement("main"),

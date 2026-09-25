@@ -4,7 +4,7 @@ registerDom();
 
 import type { Source } from "effect-frame/actor";
 import * as Frame from "effect-frame/frame";
-import { Location, Route, mount } from "effect-frame/router";
+import { Location, Route, mount, NavigationBehavior } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -79,6 +79,8 @@ describe("one-leaf route publish rule", () => {
           root,
           setup: (host, mountRoot) =>
             mount({
+              landing: NavigationBehavior.Restore,
+              traversalReadLimit: "3 seconds",
               routes: [makeBook(published)],
               notFound: NotFound,
               host,

@@ -22,6 +22,7 @@ import {
   Route,
   mount as mountRouter,
   renderDocument,
+  NavigationBehavior,
 } from "effect-frame/router";
 import type {
   AnyRoute,
@@ -260,9 +261,14 @@ describe("declared data on the server (#18 §3.3)", () => {
         const location = yield* locationAt(postUrl.href);
         yield* install(html);
         const { report } = yield* hydrateWith(client, (host, root) =>
-          mountRouter({ routes: [ssrApp], notFound: NotFound, host, root }).pipe(
-            Effect.provideService(Location, location),
-          ),
+          mountRouter({
+            landing: NavigationBehavior.Restore,
+            traversalReadLimit: "3 seconds",
+            routes: [ssrApp],
+            notFound: NotFound,
+            host,
+            root,
+          }).pipe(Effect.provideService(Location, location)),
         );
         expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
         expect(textOf("#post")).toBe("Hello");
@@ -311,9 +317,14 @@ describe("declared data on the server (#18 §3.3)", () => {
           const location = yield* locationAt(postUrl.href);
           yield* install(html);
           const { report } = yield* hydrateWith(client, (host, root) =>
-            mountRouter({ routes: [app], notFound: NotFound, host, root }).pipe(
-              Effect.provideService(Location, location),
-            ),
+            mountRouter({
+              landing: NavigationBehavior.Restore,
+              traversalReadLimit: "3 seconds",
+              routes: [app],
+              notFound: NotFound,
+              host,
+              root,
+            }).pipe(Effect.provideService(Location, location)),
           );
           expect(report).toEqual({ mismatches: [], unclaimed: 0, resolvedAhead: 0 });
           expect(textOf("#post")).toBe("Acme: Hello");
@@ -376,9 +387,14 @@ describe("declared data on the server (#18 §3.3)", () => {
         const location = yield* locationAt(postUrl.href);
         yield* install(html);
         const { report, resumed } = yield* hydrateWith(client, (host, root) =>
-          mountRouter({ routes: [streamedApp], notFound: NotFound, host, root }).pipe(
-            Effect.provideService(Location, location),
-          ),
+          mountRouter({
+            landing: NavigationBehavior.Restore,
+            traversalReadLimit: "3 seconds",
+            routes: [streamedApp],
+            notFound: NotFound,
+            host,
+            root,
+          }).pipe(Effect.provideService(Location, location)),
         );
         yield* resumed.closed;
         yield* View.flush;
@@ -965,9 +981,14 @@ describe("nesting and inheritance (#18 §2.2, §3.2)", () => {
         const client = yield* sideOf(clientControl);
         const root = document.createElement("main");
         yield* Effect.gen(function* () {
-          yield* mountRouter({ routes: [orgApp], notFound: NotFound, host: Dom.host, root }).pipe(
-            Effect.provideService(Location, yield* locationAt(memberUrl)),
-          );
+          yield* mountRouter({
+            landing: NavigationBehavior.Restore,
+            traversalReadLimit: "3 seconds",
+            routes: [orgApp],
+            notFound: NotFound,
+            host: Dom.host,
+            root,
+          }).pipe(Effect.provideService(Location, yield* locationAt(memberUrl)));
           yield* eventuallyEffect(
             "every view shows the org",
             Effect.map(View.flush, () => root.textContent === "Org OneOrg Oneo1/t2/m3Org One"),
@@ -1049,6 +1070,8 @@ describe("an exited segment releases its scope and its unshared keys (#18 §4.3)
       const root = document.createElement("main");
       yield* Effect.gen(function* () {
         const router = yield* mountRouter({
+          landing: NavigationBehavior.Restore,
+          traversalReadLimit: "3 seconds",
           routes: [releaseApp(closed), scratch],
           notFound: NotFound,
           host: Dom.host,

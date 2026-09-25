@@ -2,7 +2,13 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Location, Route, Router, mount as mountRouter } from "effect-frame/router";
+import {
+  Location,
+  Route,
+  Router,
+  mount as mountRouter,
+  NavigationBehavior,
+} from "effect-frame/router";
 import { Dom } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import * as Receipt from "../../src/router/receipt.js";
@@ -109,6 +115,8 @@ const mountApp = (gate: Gate, initial: string) =>
       root,
       setup: (host, mountRoot) =>
         mountRouter({
+          landing: NavigationBehavior.Restore,
+          traversalReadLimit: "3 seconds",
           routes: [makeApp(gate), Login, Home, Old],
           notFound: NotFound,
           host,

@@ -49,6 +49,23 @@ const withDefault: MountOptions<never, globalThis.Node> = {
   host: Dom.host,
   root: document.createElement("main"),
   landing: NavigationBehavior.Restore,
+  traversalReadLimit: "3 seconds",
+};
+// @ts-expect-error the router's landing is named at the mount: it has no hidden default.
+const withoutLanding: MountOptions<never, globalThis.Node> = {
+  routes: [],
+  notFound: NotFound,
+  host: Dom.host,
+  root: document.createElement("main"),
+  traversalReadLimit: "3 seconds",
+};
+// @ts-expect-error the traversal read limit is named at the mount: it has no hidden default.
+const withoutLimit: MountOptions<never, globalThis.Node> = {
+  routes: [],
+  notFound: NotFound,
+  host: Dom.host,
+  root: document.createElement("main"),
+  landing: NavigationBehavior.Restore,
 };
 const withFlag: MountOptions<never, globalThis.Node> = {
   ...withDefault,
@@ -86,7 +103,11 @@ describe("navigation behavior", () => {
       expect(NavigationBehavior.Restore).toEqual({ _tag: "Restore" });
       expect(NavigationBehavior.Preserve).toEqual({ _tag: "Preserve" });
       expect(preserved._tag).toBe("Branch");
-      expect(withFlag.routes).toEqual([]);
+      expect([withFlag, withoutLanding, withoutLimit].map((options) => options.routes)).toEqual([
+        [],
+        [],
+        [],
+      ]);
       expect([restoreExact._tag, preserveExact._tag]).toEqual(["Restore", "Preserve"]);
     }),
   );

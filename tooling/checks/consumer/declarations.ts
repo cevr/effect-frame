@@ -1,7 +1,7 @@
 import type { ActorTransport, QueryCache, TransportReadError } from "effect-frame/actor/client";
 import { Source } from "effect-frame/actor/client";
 import type { AnyRoute, Location, NotFoundProps } from "effect-frame/router";
-import { hydrate } from "effect-frame/router";
+import { hydrate, NavigationBehavior } from "effect-frame/router";
 import type { Dom, View } from "effect-frame/view";
 import { session } from "effect-frame/view/driven";
 import type { Effect, Scope } from "effect";
@@ -33,7 +33,13 @@ interface ViewFailed {
 declare const root: Dom.DomNode;
 declare const routes: ReadonlyArray<AnyRoute<RouteService>>;
 declare const notFound: View.View<NotFoundProps, never, NotFoundService>;
-const hydrated = hydrate({ routes, notFound, root });
+const hydrated = hydrate({
+  landing: NavigationBehavior.Restore,
+  traversalReadLimit: "3 seconds",
+  routes,
+  notFound,
+  root,
+});
 
 export const hydrateRequirements: Equals<
   Effect.Services<typeof hydrated>,

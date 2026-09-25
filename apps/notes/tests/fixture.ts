@@ -9,7 +9,7 @@ import type {
   Unauthorized,
 } from "effect-frame/actor/client";
 import { ActorTransport, HttpTransport, QueryCache } from "effect-frame/actor/client";
-import { Location, hydrate, mount } from "effect-frame/router";
+import { Location, hydrate, mount, NavigationBehavior } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import { Context, Deferred, Effect, Layer, Option, Predicate, Ref, Schema, Stream } from "effect";
@@ -117,7 +117,13 @@ export const locationAt = (href: string) =>
 export const hydrateAt = Effect.fn("test.hydrateAt")(function* (root: HTMLElement, href: string) {
   const { location } = yield* locationAt(href);
   return yield* Effect.provideService(
-    hydrate({ routes, notFound: NotFound, root }),
+    hydrate({
+      landing: NavigationBehavior.Restore,
+      traversalReadLimit: "3 seconds",
+      routes,
+      notFound: NotFound,
+      root,
+    }),
     Location,
     location,
   );
@@ -320,6 +326,8 @@ export const mountApp = Effect.fn("test.mountApp")(function* <R>(options: {
   );
   const { location, current } = yield* locationAt(options.href);
   const router = yield* mount({
+    landing: NavigationBehavior.Restore,
+    traversalReadLimit: "3 seconds",
     routes: options.routes,
     notFound: NotFound,
     host: Dom.host,

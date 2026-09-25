@@ -1,7 +1,7 @@
 /**
  * What a navigation does to the viewport and to keyboard focus once the
  * destination's shell is in the document (#31). A value, not a flag: the
- * router has one default (`mount({ landing })`, `Restore` when absent) and
+ * router has one default (`mount({ landing })`, which every mount names) and
  * a leaf may override it (`Route.leaf(segment, view, { landing })`). A
  * layout cannot: a navigation has one destination, and only its leaf knows
  * whether it is a page or a panel. See `docs/design/navigation-behavior.md`.

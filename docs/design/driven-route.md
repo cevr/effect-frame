@@ -58,7 +58,7 @@ they hydrate, and their queries stream. Only its leaves are driven.
 2. **The client's page.** The same leaf draws the container only, with no
    children. `Dom.hydrate` claims the container and does not walk its
    children, so the server's nodes stay as they are, with no mismatch.
-3. **The hand-over.** `hydrate({ routes, notFound, root, wire })` reads the
+3. **The hand-over.** `hydrate({ routes, notFound, root, landing, traversalReadLimit })` reads the
    records, mounts the tree over the server's nodes, and finishes
    hydration. Once hydration is done and the record channel has ended
    (`Streaming.Resumed.closed`), each driven leaf connects for the page's

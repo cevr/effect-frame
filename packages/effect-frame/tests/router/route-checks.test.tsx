@@ -18,7 +18,7 @@ import {
 } from "effect-frame/actor";
 import type { QueryCache, RemoteActorRef, Source, TransportService } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
-import { Location, Route, mount as mountRouter } from "effect-frame/router";
+import { Location, Route, mount as mountRouter, NavigationBehavior } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
 import { Dom, Await, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -605,9 +605,14 @@ const mountApp = <R,>(app: AnyRoute<R>, root: HTMLElement, path: string) =>
       host: Dom.host,
       root,
       setup: (host, mountRoot) =>
-        mountRouter({ routes: [app, LoginRoute], notFound: NotFound, host, root: mountRoot }).pipe(
-          Effect.provideService(Location, location.service),
-        ),
+        mountRouter({
+          landing: NavigationBehavior.Restore,
+          traversalReadLimit: "3 seconds",
+          routes: [app, LoginRoute],
+          notFound: NotFound,
+          host,
+          root: mountRoot,
+        }).pipe(Effect.provideService(Location, location.service)),
     });
     return { page, router: page.setup, receipts: Receipt.of(page.setup), location };
   });

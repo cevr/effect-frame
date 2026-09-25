@@ -1,5 +1,5 @@
 import type { View } from "effect-frame/view";
-import { Deferred, Effect, Exit, Option, Schema, Scope, Stream } from "effect";
+import { Deferred, Duration, Effect, Exit, Option, Schema, Scope, Stream } from "effect";
 import type { ActorTransport } from "effect-frame/actor/client";
 import { QueryCache } from "effect-frame/actor/client";
 import type {
@@ -14,6 +14,7 @@ import { ResolveBeforeRender } from "./branch.js";
 import type { AnyRoute } from "./codec.js";
 import type { RenderingMode } from "./rendering-mode.js";
 import { read as readMode } from "./rendering-mode.js";
+import { Restore } from "./navigation-behavior.js";
 import type { LocationService, NotFoundProps, Router } from "./router.js";
 import { Location, SettledRequest, mount, settleRequest } from "./router.js";
 import type { Runtime as UrlStateRuntime } from "./url-state-runtime.js";
@@ -215,6 +216,10 @@ export const settleAndPrepare = <R, N, A>(
             notFound: options.notFound,
             host,
             root,
+            // The server Location has no surface to land on and no
+            // traversals, so neither option is ever read here.
+            landing: Restore,
+            traversalReadLimit: Duration.zero,
           }).pipe(
             Effect.provideService(Location, requestLocation(options.url)),
             Effect.provideService(

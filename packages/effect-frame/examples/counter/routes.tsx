@@ -3,7 +3,7 @@ import type { QueryState, RemoteActorRef } from "effect-frame/actor/client";
 import { Source } from "effect-frame/actor/client";
 import type { NotFoundProps } from "effect-frame/router";
 import { Link, Route, link } from "effect-frame/router";
-import { Show, View } from "effect-frame/view";
+import { For, Show, View } from "effect-frame/view";
 import { Effect, Schema } from "effect";
 import { Counter, CounterNames, Increment, Reset, counterBehavior } from "./contract.js";
 // #endregion imports
@@ -71,9 +71,9 @@ const Controls = (props: { readonly counter: RemoteActorRef<typeof Counter> }) =
           <input name="by" value="1" />
           <button type="submit">add</button>
         </form>
-        {add.issues.map((issue) => (
-          <p>{issue.message}</p>
-        ))}
+        <For each={add.issues} keyBy={(issue) => `${issue.field}:${issue.message}`}>
+          {(issue) => <p>{View.bind(issue, (one) => one.message)}</p>}
+        </For>
         <button type="button" onClick={reset}>
           reset
         </button>

@@ -17,7 +17,7 @@ import {
   contract,
 } from "effect-frame/actor/client";
 import type { CommandId, DurableReceipt, TransportService } from "effect-frame/actor/client";
-import { Html, View } from "effect-frame/view";
+import { For, Html, View } from "effect-frame/view";
 import { Effect, Layer, Match, Option, Ref, Schema } from "effect";
 
 /**
@@ -237,9 +237,13 @@ export const TasksPage = (_props: NoProps) =>
           <button type="submit">add</button>
         </form>
         <ul id="issues">
-          {add.issues.map((issue) => (
-            <li data-field={issue.field}>{issue.message}</li>
-          ))}
+          <For each={add.issues} keyBy={(issue) => `${issue.field}:${issue.message}`}>
+            {(issue) => (
+              <li data-field={View.bind(issue, (one) => one.field)}>
+                {View.bind(issue, (one) => one.message)}
+              </li>
+            )}
+          </For>
         </ul>
         <form id="tag" onSubmit={tag.submit}>
           <input id="label" name="label" />
@@ -284,9 +288,13 @@ export const VaultPage = (_props: NoProps) =>
           <input id="pin" name="_pin" />
         </form>
         <ul id="issues">
-          {unlock.issues.map((issue) => (
-            <li data-field={issue.field}>{issue.message}</li>
-          ))}
+          <For each={unlock.issues} keyBy={(issue) => `${issue.field}:${issue.message}`}>
+            {(issue) => (
+              <li data-field={View.bind(issue, (one) => one.field)}>
+                {View.bind(issue, (one) => one.message)}
+              </li>
+            )}
+          </For>
         </ul>
       </main>
     );

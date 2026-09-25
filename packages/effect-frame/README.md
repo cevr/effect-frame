@@ -150,7 +150,7 @@ import type { QueryState, RemoteActorRef } from "effect-frame/actor/client";
 import { Source } from "effect-frame/actor/client";
 import type { NotFoundProps } from "effect-frame/router";
 import { Link, Route, link } from "effect-frame/router";
-import { Show, View } from "effect-frame/view";
+import { For, Show, View } from "effect-frame/view";
 import { Effect, Schema } from "effect";
 import { Counter, CounterNames, Increment, Reset, counterBehavior } from "./contract.js";
 ```
@@ -226,9 +226,9 @@ const Controls = (props: { readonly counter: RemoteActorRef<typeof Counter> }) =
           <input name="by" value="1" />
           <button type="submit">add</button>
         </form>
-        {add.issues.map((issue) => (
-          <p>{issue.message}</p>
-        ))}
+        <For each={add.issues} keyBy={(issue) => `${issue.field}:${issue.message}`}>
+          {(issue) => <p>{View.bind(issue, (one) => one.message)}</p>}
+        </For>
         <button type="button" onClick={reset}>
           reset
         </button>
@@ -956,9 +956,9 @@ export const Compose = (props: { readonly notes: RemoteActorRef<typeof Notes> })
         <input name="text" />
         <input type="checkbox" name="pinned" />
         <button type="submit">add</button>
-        {add.issues.map((issue) => (
-          <p>{issue.message}</p>
-        ))}
+        <For each={add.issues} keyBy={(issue) => `${issue.field}:${issue.message}`}>
+          {(issue) => <p>{View.bind(issue, (one) => one.message)}</p>}
+        </For>
       </form>
     );
   });
@@ -975,6 +975,10 @@ export const addFromCode = (notes: RemoteActorRef<typeof Notes>) =>
 - `View.form` returns `{ submit, issues, commandId }`. The runtime draws
   `method`, `action`, and the hidden `$command`, `$contract`, `$version`,
   `$key`, `$return`, `$form`, `_tag`, and generated inputs in every host.
+- `issues` is a `Source`, drawn with `<For>`. It holds a refused plain
+  post's issues, and a scripted submit that does not decode shows the same
+  issues there, so a form reads alike with a script or without one. A
+  submit that decodes clears them.
 - The form route answers 303 to `$return` on success, 200 with the page
   and its `FormIssues` on a validation failure, 504 with the same id on a
   lost reply, and 400 or 415 before any send. An `Unauthorized` anonymous

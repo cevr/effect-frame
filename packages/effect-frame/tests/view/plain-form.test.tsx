@@ -9,6 +9,7 @@ import { Effect, Option, Random, Ref, Schedule, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import type { Wire } from "../plain-form-fixture.js";
 import {
+  AddTask,
   Tasks,
   TasksDocument,
   TasksPage,
@@ -315,6 +316,51 @@ describe("the command form binding", () => {
           expect(title.getAttribute("aria-invalid")).toBe("true");
         }),
       ),
+  );
+
+  it.scopedLive("a scripted submit that does not decode draws the issues a plain post draws", () =>
+    withWire((wire) =>
+      Effect.gen(function* () {
+        const html = yield* renderServer;
+        const main = yield* install(html);
+        const hydration = Dom.hydrate(main);
+        yield* View.mount(TasksPage, noProps, hydration.host, main);
+        yield* View.flush;
+        yield* hydration.finish;
+        const form = element(main, "#add", HTMLFormElement);
+        const issues = () =>
+          Array.from(main.querySelectorAll("#issues li"), (li) => ({
+            field: li.getAttribute("data-field"),
+            message: li.textContent,
+          }));
+        expect(issues()).toEqual([]);
+
+        // The plain post answers these issues for the same title.
+        const expected = Form.issuesOf(
+          yield* Effect.flip(
+            Schema.decodeUnknownEffect(AddTask)({
+              _tag: "AddTask",
+              id: "x",
+              title: "far too long a title",
+              done: false,
+            }),
+          ),
+        );
+        element(form, "#title", HTMLInputElement).value = "far too long a title";
+        yield* submit(form);
+        yield* Effect.sleep("50 millis");
+        yield* View.flush;
+        expect(yield* Ref.get(wire.sends)).toEqual([]);
+        expect(issues()).toEqual([...expected]);
+
+        // A submit that decodes sends, and clears them.
+        element(form, "#title", HTMLInputElement).value = "milk";
+        yield* submit(form);
+        yield* sendsAfter(wire, 1);
+        yield* View.flush;
+        expect(issues()).toEqual([]);
+      }),
+    ),
   );
 
   it.scopedLive("the hydrated binding sends the adopted `id`, not a fresh one", () =>

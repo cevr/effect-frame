@@ -95,9 +95,13 @@ const ListBody = (props: BodyProps) =>
           <output id="status">{View.bind(status.state)}</output>
         </form>
         <ul id="issues">
-          {compose.issues.map((issue) => (
-            <li data-field={issue.field}>{issue.message}</li>
-          ))}
+          <For each={compose.issues} keyBy={(issue) => `${issue.field}:${issue.message}`}>
+            {(issue) => (
+              <li data-field={View.bind(issue, (one) => one.field)}>
+                {View.bind(issue, (one) => one.message)}
+              </li>
+            )}
+          </For>
         </ul>
         <ul id="list">
           <For each={filtered(all, props.filter)} keyBy={(note) => note.id}>

@@ -7,11 +7,17 @@ import type {
 } from "effect-frame/actor";
 import { CommandId as CommandIdSchema, Form, Generated, Wire } from "effect-frame/actor/client";
 import { Effect, Option, Predicate, Ref, Schema, Semaphore } from "effect";
+import type { Scope } from "effect";
 import type { MachineEventSchema } from "effect-machine";
 // Relative on purpose: the mark is module-private to the actor area and no
 // public entry exports it (#67 §3). With one module per source file, this
 // is the module the reference itself reads.
 import { mintedFor } from "../actor/command-id.js";
+import { local } from "../actor/actor.js";
+import type { LocalValueRef } from "../actor/actor.js";
+import * as Behavior from "../actor/behavior.js";
+import { Value } from "../actor/set-value.js";
+import type { Source } from "../actor/source.js";
 import type { HostEvent } from "./host.js";
 import type { ElementNode, ElementProps, Node } from "./jsx-runtime.js";
 import type { PlainPost, Prepared } from "./view.js";
@@ -59,8 +65,13 @@ export interface CommandForm<C extends AnyContract, M, Typed extends string> {
 export interface FormBinding {
   /** `<form onSubmit={binding.submit}>`. */
   readonly submit: Prepared<"submit">;
-  /** The issues of a refused post of this form. Empty on an ordinary render. */
-  readonly issues: ReadonlyArray<Form.FormIssue>;
+  /**
+   * The issues of this form: those of a refused plain post on a server
+   * render, then those of a scripted submit that did not decode. A submit
+   * that decodes clears them. Empty on an ordinary render. Draw them with
+   * `<For each={binding.issues}>`.
+   */
+  readonly issues: Source<ReadonlyArray<Form.FormIssue>>;
   /**
    * The id this render drew. On a server render it is the id the markup
    * carries. A hydrating client keeps the server's markup, so its first
@@ -137,7 +148,7 @@ export const form = <
   const Typed extends string,
 >(
   options: CommandForm<C, M, Typed>,
-): Effect.Effect<FormBinding> =>
+): Effect.Effect<FormBinding, never, Scope.Scope> =>
   Effect.gen(function* () {
     const member = yield* onlyMember(options.message);
     const contract = options.ref.contract;
@@ -201,13 +212,16 @@ export const form = <
       onNone: () => Option.some(commandId),
       onSome: () => Option.none<CommandId>(),
     });
-    const send = yield* scriptedSend(options, member, own);
+    // The issues are view state: a local value actor, seeded from the
+    // server's refusal and written by the scripted submit.
+    const shown = yield* local(Behavior.value(issues));
+    const send = yield* scriptedSend(options, member, own, shown);
     const handler = (event: HostEvent): Effect.Effect<void> =>
       Option.match(event.form, { onNone: () => Effect.void, onSome: send });
 
     return {
       submit: { _tag: "Prepared", kind: "submit", handler, post: Option.some(post) },
-      issues,
+      issues: shown.state,
       commandId,
     };
   });
@@ -215,12 +229,15 @@ export const form = <
 /**
  * The DOM half. The first send adopts the rendered identity; every later
  * one mints its own, with its generated values, in one step. A form the
- * client cannot decode sends nothing and logs why.
+ * client cannot decode sends nothing and shows the issues a plain post of
+ * it would show; a body that cannot nest, which a plain post answers 400,
+ * sends nothing and logs why.
  */
 const scriptedSend = <C extends AnyContract, M, Typed extends string>(
   options: CommandForm<C, M, Typed>,
   member: Generated.Member,
   own: Option.Option<CommandId>,
+  shown: LocalValueRef<ReadonlyArray<Form.FormIssue>>,
 ) =>
   Effect.gen(function* () {
     const spent = yield* Ref.make<ReadonlySet<string>>(new Set());
@@ -269,16 +286,23 @@ const scriptedSend = <C extends AnyContract, M, Typed extends string>(
         }),
       );
 
+    const show = (next: ReadonlyArray<Form.FormIssue>) =>
+      Effect.asVoid(shown.send(Value.Set(next)));
+
     return (fields: Form.FormFields): Effect.Effect<void> =>
       Effect.gen(function* () {
         const prepared = yield* prepare(fields);
+        yield* show([]);
         const handle = yield* options.ref.send(prepared.message, sendOptions(prepared));
         yield* Option.match(onSend, {
           onNone: () => Effect.void,
           onSome: (run) => Effect.asVoid(run(handle)),
         });
       }).pipe(
-        Effect.catch((error) => Effect.logWarning("View.form: the form did not decode", error)),
+        Effect.catchTags({
+          SchemaError: (error) => show(Form.issuesOf(error)),
+          FormMalformed: (error) => Effect.logWarning("View.form: the form did not nest", error),
+        }),
       );
   });
 

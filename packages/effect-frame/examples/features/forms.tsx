@@ -1,6 +1,6 @@
 import type { RemoteActorRef } from "effect-frame/actor/client";
 import { Behavior, Form, Generated, contract } from "effect-frame/actor/client";
-import { View } from "effect-frame/view";
+import { For, View } from "effect-frame/view";
 import { Effect, Schema } from "effect";
 
 // #region message
@@ -48,9 +48,9 @@ export const Compose = (props: { readonly notes: RemoteActorRef<typeof Notes> })
         <input name="text" />
         <input type="checkbox" name="pinned" />
         <button type="submit">add</button>
-        {add.issues.map((issue) => (
-          <p>{issue.message}</p>
-        ))}
+        <For each={add.issues} keyBy={(issue) => `${issue.field}:${issue.message}`}>
+          {(issue) => <p>{View.bind(issue, (one) => one.message)}</p>}
+        </For>
       </form>
     );
   });

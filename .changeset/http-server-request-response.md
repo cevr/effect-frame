@@ -1,7 +1,0 @@
----
-"effect-frame": minor
----
-
-<!-- removed: HttpServer.WebHandler, Prerender.WebHandler, HttpTest.Handler -->
-
-The server edge speaks `HttpServerRequest` → `HttpServerResponse` from `effect/unstable/http`, and `effect` supplies both adapters. `HttpServer.make` returns an app, an Effect that answers the `HttpServerRequest` in context; the new `HttpServer.layer` mounts it on an `HttpRouter` at `prefix/*`, and `HttpEffect.toWebHandlerWith` (or `HttpRouter.toWebHandler`) serves it as a web `fetch`. `respondDocument(render, options)` takes `render` as `(url) => Effect<DocumentOutcome>`, reads the request's URL itself, and answers an `HttpServerResponse` whose body is a `Stream`; `onTimeout` answers an `HttpServerResponse`. `Prerender.serve` takes and returns an app; a HEAD's body is dropped by the web adapter. `HttpTest.client(app)` passes each client request to the app in process. `HttpServer.DerivePrincipal` and `HttpServer.readText` take an `HttpServerRequest` (cookies come parsed as `request.cookies`); `readText` still reads `request.stream` under the byte limit. `HttpServer.WebHandler`, `Prerender.WebHandler` and `HttpTest.Handler` are removed.

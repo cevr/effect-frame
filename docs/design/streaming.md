@@ -39,12 +39,13 @@ parser appended and watches the container for the rest.
     …
   </head>
   <body>
-    <main id="app">
+    <div id="app">
+      <!-- the renderer writes this element for Html.Document.rootId -->
       <!-- the shell: each open readiness boundary draws its fallback -->
       <!--frame-boundary:fallback-->
       <p>loading</p>
       <!--/frame-boundary-->
-    </main>
+    </div>
     <!-- tail: actor resume payloads, form issues -->
     <div id="frame-records" hidden>
       <script type="application/json" class="frame-record">

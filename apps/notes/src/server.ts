@@ -7,6 +7,7 @@ import { Html } from "effect-frame/view";
 import { Effect, ManagedRuntime, Option, Schema, Stream } from "effect";
 import { Notes } from "./contract.js";
 import { inProcess, upstream } from "./notes.server.js";
+import { rootId } from "./document.js";
 import { routes } from "./routes.js";
 import { NotFound } from "./views.js";
 
@@ -49,8 +50,9 @@ const buildClient = Effect.fn("Notes.buildClient")(function* () {
 
 /** The document around the routed markup. A refused post adds its issues. */
 export const notesDocument = (issues = ""): Html.Document => ({
-  head: '<!doctype html><html><head><meta charset="utf-8"><title>Notes</title></head><body><main id="app">',
-  tail: `</main>${issues}`,
+  head: '<!doctype html><html><head><meta charset="utf-8"><title>Notes</title></head><body>',
+  rootId,
+  tail: issues,
   bootstrap: '<script type="module" src="/client.js"></script>',
   end: "</body></html>",
 });

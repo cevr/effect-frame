@@ -129,8 +129,9 @@ export const Page = (props: PageProps) =>
 export const bootstrap = '<script type="module" src="/client.js"></script>';
 
 export const frame: Html.Document = {
-  head: '<!doctype html><html><head><meta charset="utf-8"></head><body><main id="app">',
-  tail: "</main>",
+  head: '<!doctype html><html><head><meta charset="utf-8"></head><body>',
+  rootId: "app",
+  tail: "",
   bootstrap,
   end: "</body></html>",
 };

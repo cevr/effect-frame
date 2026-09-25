@@ -276,8 +276,9 @@ describe("the command form binding", () => {
               TasksPage,
               noProps,
               {
-                head: '<main id="app">',
-                tail: `</main>${Html.jsonScript(Form.issuesScriptId, issues)}`,
+                head: "",
+                rootId: "app",
+                tail: Html.jsonScript(Form.issuesScriptId, issues),
                 bootstrap: "",
                 end: "",
               },

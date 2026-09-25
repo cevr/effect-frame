@@ -289,30 +289,50 @@ See [the public route design](docs/design/route-public.md).
 
 In the browser, provide `browserNavigation` as the `Location`. It uses the
 Navigation API, and the History API where that is absent. `followLinks`
-follows ordinary same-origin anchors.
+follows ordinary same-origin anchors. `Dom.root` finds the element the
+server's document wrote for its `rootId`, or fails with `RootNotFound`.
+This is the one browser entry every example app uses:
 
 ```tsx
+import { HttpTransport, QueryCache } from "effect-frame/actor/client";
 import {
   Location,
   NavigationBehavior,
   Route,
   browserNavigation,
   followLinks,
-  mount,
+  hydrate,
 } from "effect-frame/router";
+import { Dom } from "effect-frame/view";
+import { Effect, Layer } from "effect";
+import { FetchHttpClient } from "effect/unstable/http";
+import { rootId } from "./document.js"; // the same id the server's Html.Document names
 
-const program = Effect.gen(function* () {
-  const location = yield* browserNavigation;
-  const router = yield* mount({
+const start = Effect.gen(function* () {
+  const root = yield* Dom.root(rootId);
+  const { router } = yield* hydrate({
     routes: [App, Login],
     notFound,
-    host,
     root,
     landing: NavigationBehavior.Restore,
     traversalReadLimit: "3 seconds",
-  }).pipe(Effect.provideService(Location, location));
+  });
   yield* followLinks(document, router);
+  return yield* Effect.never;
 });
+
+const services = Layer.mergeAll(
+  Layer.provideMerge(
+    QueryCache.layer,
+    HttpTransport.layer({
+      baseUrl: `${location.origin}/actors`,
+      reconnect: HttpTransport.defaultReconnect,
+    }).pipe(Layer.provide(FetchHttpClient.layer)),
+  ),
+  Layer.effect(Location, browserNavigation),
+);
+
+Effect.runFork(Effect.scoped(Effect.provide(start, services)));
 
 // A tab strip that keeps the reader where they are.
 Route.leaf(tab, TabView, { landing: NavigationBehavior.Preserve });
@@ -584,8 +604,9 @@ import { Effect, Stream } from "effect";
 
 // Server: the shell and its fallbacks first, then one patch per query.
 const page: Html.Document = {
-  head: '<!doctype html><html><head><meta charset="utf-8"></head><body><main id="app">',
-  tail: "</main>", // resume payloads and form issues go here
+  head: '<!doctype html><html><head><meta charset="utf-8"></head><body>',
+  rootId: "app", // the renderer writes <div id="app"> around the drawing
+  tail: "", // resume payloads and form issues go here
   bootstrap: '<script type="module" src="/client.js"></script>',
   end: "</body></html>",
 };

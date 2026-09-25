@@ -441,7 +441,15 @@ describe("declared data on the server (#18 §3.3)", () => {
       expect(rendered.route).toEqual({ _tag: "Matched", route: clientApp });
       expect(rendered.mode).toBe("ClientOnly");
       const html = (yield* collect(rendered.body)).join("");
-      expect(html).toBe([frame.head, frame.tail, frame.bootstrap, frame.end].join(""));
+      expect(html).toBe(
+        [
+          frame.head,
+          `<div id="${frame.rootId}"></div>`,
+          frame.tail,
+          frame.bootstrap,
+          frame.end,
+        ].join(""),
+      );
       expect(serverControl.calls).toEqual([]);
     }),
   );

@@ -93,7 +93,7 @@ export const blogRoutes = [indexRoute, postsRoute];
 
 /** The document around each page: the streaming fixture's frame, without its bootstrap. */
 export const pageDocument = (_page: Prerender.Page) =>
-  Effect.succeed({ head: frame.head, tail: frame.tail, end: frame.end });
+  Effect.succeed({ head: frame.head, rootId: frame.rootId, tail: frame.tail, end: frame.end });
 
 export const clientBundle = 'console.log("client");';
 

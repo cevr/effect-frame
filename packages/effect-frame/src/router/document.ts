@@ -9,7 +9,13 @@ import type {
   HtmlNode,
   RecordsUnsettled,
 } from "../view/hosts/html.js";
-import { awaitAllDrawing, renderSeeded, requestCache, streamPrepared } from "../view/hosts/html.js";
+import {
+  awaitAllDrawing,
+  mountElement,
+  renderSeeded,
+  requestCache,
+  streamPrepared,
+} from "../view/hosts/html.js";
 import { ResolveBeforeRender } from "./branch.js";
 import type { AnyRoute } from "./codec.js";
 import { modeOf } from "./codec.js";
@@ -318,7 +324,15 @@ const prepareBody = <R, N>(
     // Nothing is drawn and nothing is read: the client mounts into the empty element.
     return Effect.as(
       releaseChecks,
-      Stream.succeed([document.head, document.tail, document.bootstrap, document.end].join("")),
+      Stream.succeed(
+        [
+          document.head,
+          mountElement(document, ""),
+          document.tail,
+          document.bootstrap,
+          document.end,
+        ].join(""),
+      ),
     );
   }
   if (mode === "SSR") {

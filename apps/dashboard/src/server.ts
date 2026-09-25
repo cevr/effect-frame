@@ -7,6 +7,7 @@ import type { Html } from "effect-frame/view";
 import { Effect, ManagedRuntime, Option } from "effect";
 import { demoTenant } from "./contract.js";
 import { inProcess } from "./host.server.js";
+import { rootId } from "./document.js";
 import { routes } from "./routes.js";
 import { NotFound } from "./views.js";
 
@@ -65,8 +66,9 @@ const buildClient = Effect.fn("Dashboard.buildClient")(function* () {
 
 /** The document around the routed markup. */
 export const dashboardDocument: Html.Document = {
-  head: '<!doctype html><html><head><meta charset="utf-8"><title>Dashboard</title></head><body><main id="app">',
-  tail: "</main>",
+  head: '<!doctype html><html><head><meta charset="utf-8"><title>Dashboard</title></head><body>',
+  rootId,
+  tail: "",
   bootstrap: '<script type="module" src="/client.js"></script>',
   end: "</body></html>",
 };

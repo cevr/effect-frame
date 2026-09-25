@@ -185,6 +185,7 @@ const noteDocument = (_page: Prerender.Page) =>
     const payload = yield* Effect.orDie(Schema.encodeEffect(Resume)(snapshot));
     return {
       head: frame.head,
+      rootId: frame.rootId,
       tail: `${frame.tail}${Html.jsonScript(bakedId, payload)}`,
       end: frame.end,
     };

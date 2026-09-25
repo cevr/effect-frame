@@ -70,8 +70,9 @@ const noteDocument = (_page: Prerender.Page) =>
     const snapshot = yield* note.applied.get;
     const payload = yield* Effect.orDie(Schema.encodeEffect(Resume)(snapshot));
     return {
-      head: '<!doctype html><html><head><meta charset="utf-8"><title>prerender</title></head><body><main id="app">',
-      tail: `</main>${Html.jsonScript(bakedId, payload)}`,
+      head: '<!doctype html><html><head><meta charset="utf-8"><title>prerender</title></head><body>',
+      rootId: "app",
+      tail: Html.jsonScript(bakedId, payload),
       end: "</body></html>",
     };
   });

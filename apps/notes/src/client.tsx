@@ -6,8 +6,10 @@ import {
   hydrate,
   NavigationBehavior,
 } from "effect-frame/router";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
+import { Dom } from "effect-frame/view";
+import { rootId } from "./document.js";
 import { routes } from "./routes.js";
 import { NotFound } from "./views.js";
 
@@ -19,22 +21,14 @@ import { NotFound } from "./views.js";
  */
 
 const start = Effect.gen(function* () {
-  const found = yield* Effect.sync(() => Option.fromNullishOr(document.getElementById("app")));
-  if (Option.isNone(found)) {
-    return yield* Effect.die("notes: no #app element to hydrate");
-  }
-  const navigation = yield* browserNavigation;
-  const { router, report } = yield* Effect.provideService(
-    hydrate({
-      landing: NavigationBehavior.Restore,
-      traversalReadLimit: "3 seconds",
-      routes,
-      notFound: NotFound,
-      root: found.value,
-    }),
-    Location,
-    navigation,
-  );
+  const root = yield* Dom.root(rootId);
+  const { router, report } = yield* hydrate({
+    landing: NavigationBehavior.Restore,
+    traversalReadLimit: "3 seconds",
+    routes,
+    notFound: NotFound,
+    root,
+  });
   yield* followLinks(document, router);
   if (report.mismatches.length > 0) {
     yield* Effect.logWarning("notes: hydration mismatches", report);
@@ -47,12 +41,15 @@ const start = Effect.gen(function* () {
   return yield* Effect.never;
 });
 
-const services = Layer.provideMerge(
-  QueryCache.layer,
-  HttpTransport.layer({
-    baseUrl: `${location.origin}/actors`,
-    reconnect: HttpTransport.defaultReconnect,
-  }).pipe(Layer.provide(FetchHttpClient.layer)),
+const services = Layer.mergeAll(
+  Layer.provideMerge(
+    QueryCache.layer,
+    HttpTransport.layer({
+      baseUrl: `${location.origin}/actors`,
+      reconnect: HttpTransport.defaultReconnect,
+    }).pipe(Layer.provide(FetchHttpClient.layer)),
+  ),
+  Layer.effect(Location, browserNavigation),
 );
 
 // The browser entry point: the one place the client services are provided.

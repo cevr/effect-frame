@@ -399,9 +399,21 @@ export const streamRecord = (record: Streaming.StreamRecord): string =>
  * module script; `end` closes the document.
  */
 export interface Document {
-  /** The doctype, the head, and the mount element's open tag. */
+  /** The doctype, the head, and the body up to the mount element. */
   readonly head: string;
-  /** The mount element's close tag, then any settled payload: actor resume, form issues. */
+  /**
+   * The mount element's id. The renderer writes the element,
+   * `<div id="…">`, around the drawing; the browser entry finds it with
+   * `Dom.root(rootId)`. Name it once and import it on both sides.
+   *
+   * ```ts
+   * export const rootId = "app";
+   * const document: Html.Document = { head, rootId, tail: "", bootstrap, end: "</body></html>" };
+   * // client: const root = yield* Dom.root(rootId);
+   * ```
+   */
+  readonly rootId: string;
+  /** Anything after the mount element: settled payload such as actor resume or form issues. */
   readonly tail: string;
   /** The module script. A streamed document writes it before the later patches. */
   readonly bootstrap: string;
@@ -524,7 +536,7 @@ export const streamPrepared = <E, R>(
     const shell = serializeChildren(root.children);
     const first = [
       document.head,
-      shell,
+      mountElement(document, shell),
       document.tail,
       `<div id="${Streaming.containerId}" hidden>`,
       ...records.actors.map(streamRecord),
@@ -740,6 +752,10 @@ export const renderSeeded: <E, R>(
   },
 );
 
+/** The mount element around `inner`: the one place its id is written. */
+export const mountElement = (document: Document, inner: string): string =>
+  `<div id="${escapeAttribute(document.rootId)}">${inner}</div>`;
+
 const page = (
   document: Document,
   root: HtmlElement,
@@ -748,7 +764,7 @@ const page = (
 ): string =>
   [
     document.head,
-    serializeChildren(root.children),
+    mountElement(document, serializeChildren(root.children)),
     document.tail,
     actorSeedScript(actors),
     seedScript(seed),

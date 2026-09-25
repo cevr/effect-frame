@@ -51,7 +51,7 @@ const start = Effect.gen(function* () {
   const resumed = yield* Streaming.resume(records);
   const hydration = Dom.hydrate(root);
   // The server names the page on the root: an inline script cannot run here.
-  if (root.dataset["page"] === "tall") {
+  if (document.body.dataset["page"] === "tall") {
     yield* View.mount(TallPage, { id: "a" }, hydration.host, root);
   } else {
     yield* View.mount(Page, { id: "a" }, hydration.host, root);

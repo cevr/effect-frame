@@ -113,11 +113,12 @@ const servePage = async (mode: Mode): Promise<PageServer> => {
   if (mode === "async" || mode === "split" || mode === "tall") {
     bootstrap = '<script type="module" async src="/client.js"></script>';
   }
-  let main = '<main id="app">';
-  if (mode === "tall") main = '<main id="app" data-page="tall">';
+  let body = "<body>";
+  if (mode === "tall") body = '<body data-page="tall">';
   const frame: Html.Document = {
-    head: `<!doctype html><html><head><meta charset="utf-8"><title>streaming</title></head><body>${main}`,
-    tail: "</main>",
+    head: `<!doctype html><html><head><meta charset="utf-8"><title>streaming</title></head>${body}`,
+    rootId: "app",
+    tail: "",
     bootstrap,
     end: "</body></html>",
   };

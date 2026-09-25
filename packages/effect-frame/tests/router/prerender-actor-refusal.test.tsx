@@ -88,7 +88,7 @@ describe("a prerendered page that declares a protected actor (#23 §2.3)", () =>
           Prerender.build({
             routes: [ledgerRoute],
             notFound: NotFound,
-            document: () => Effect.succeed({ head: "<main>", tail: "</main>", end: "" }),
+            document: () => Effect.succeed({ head: "", rootId: "app", tail: "", end: "" }),
             client: Effect.succeed("export {};"),
             out,
             timeLimit: "5 seconds",

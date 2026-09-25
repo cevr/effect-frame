@@ -483,6 +483,35 @@ const describe = (node: Node): string => {
   return `text "${String(node.textContent)}"`;
 };
 
+/** The page has no element with the id the browser entry looked for. */
+export class RootNotFound extends Schema.TaggedError<RootNotFound>()("RootNotFound", {
+  id: Schema.String,
+}) {
+  override get message(): string {
+    return `no element with id "${this.id}" to mount into`;
+  }
+}
+
+/**
+ * The mount element the server's document wrote for `Html.Document.rootId`.
+ * Import the id from the module the server's document reads it from, so it
+ * has one owner.
+ *
+ * ```ts
+ * const root = yield* Dom.root(rootId);
+ * const { router } = yield* hydrate({ routes, notFound, root, ... });
+ * ```
+ */
+export const root = (id: string): Effect.Effect<HTMLElement, RootNotFound> =>
+  Effect.flatMap(
+    Effect.sync(() => Option.fromNullishOr(document.getElementById(id))),
+    (found) =>
+      Option.match(found, {
+        onNone: () => Effect.fail(RootNotFound.make({ id })),
+        onSome: (element) => Effect.succeed(element),
+      }),
+  );
+
 /** Read a payload the server wrote with `Html.jsonScript`. */
 export const readJsonScript = (id: string): Option.Option<string> =>
   Option.flatMap(Option.fromNullishOr(document.getElementById(id)), (script) =>

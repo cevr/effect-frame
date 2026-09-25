@@ -95,7 +95,7 @@ const modes: ReadonlyArray<Mode> = [
     tree: Route.client("modes-client", listBranch),
     reported: "ClientOnly",
     drawn: (html) => {
-      expect(html).toContain('<main id="app"></main>');
+      expect(html).toContain('<div id="app"></div>');
       expect(html).not.toContain("frame-query-seed");
       expect(html).not.toContain("frame-actor-seed");
     },

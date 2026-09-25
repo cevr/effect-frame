@@ -53,7 +53,7 @@ describe("notes end to end", () => {
       const server = yield* serve(runtime);
 
       const page = yield* fetchText(`${server.url}${inbox}`);
-      expect(page).toContain('<main id="app">');
+      expect(page).toContain('<div id="app">');
       expect(page).toContain('<h1 id="list-name">inbox</h1>');
       expect(page).toContain('<ul id="list"></ul>');
       expect(page).toContain('<p id="count">0</p>');

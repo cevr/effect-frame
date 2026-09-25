@@ -46,7 +46,7 @@ export interface LocalEngine<State, Message, Refusal = never> {
 }
 
 /**
- * Opens the private in-process engine used by `Actor.spawn`.
+ * Opens the private in-process engine used by `Actor.local`.
  *
  * The engine owns one behavior turn, one mailbox, one commit source, and two
  * workers. The public actor module only supplies the stable facade and the

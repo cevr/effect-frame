@@ -20,7 +20,7 @@ export interface StoredReceipt {
 
 /**
  * The latest committed state and its revision. `wake` is when that state
- * next needs the actor with no request (`Behavior.wakeAt`), stored with it.
+ * next needs the actor with no request (the behavior's `wakeAt`), stored with it.
  */
 export interface Committed {
   readonly revision: number;

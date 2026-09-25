@@ -16,7 +16,7 @@ const decodeCommandId = Schema.decodeSync(CommandId);
  * The tables one actor owns inside its object. `commands.admitted` is the
  * mailbox order. A row without a `revision` is still pending. `committed`
  * holds one row: the actor's latest revision, encoded state, and the wake
- * that state asked for (`Behavior.wakeAt`), NULL when it waits for nothing.
+ * that state asked for (the behavior's `wakeAt`), NULL when it waits for nothing.
  */
 export const schema: ReadonlyArray<string> = [
   `CREATE TABLE IF NOT EXISTS commands (

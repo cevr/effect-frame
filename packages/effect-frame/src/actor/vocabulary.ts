@@ -18,7 +18,7 @@ export class CommandConflict extends Schema.TaggedError<CommandConflict>()("Comm
 }) {}
 
 /**
- * The behavior refused this message (`Behavior.refuse`). Its rule reads the
+ * The behavior's `refuse` rule refused this message. The rule reads the
  * message alone, so the same bytes are refused every time: the refusal is
  * conclusive, never retried, and no revision is committed for it. `reason`
  * is the application's own words.

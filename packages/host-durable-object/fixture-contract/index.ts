@@ -28,7 +28,7 @@ import { route } from "../src/route.js";
  * kill during machine work, and the restart must run the task again and
  * commit its own `Done` transition once a request wakes the object.
  *
- * `Job` and `Reminder` name a wake (`Behavior.wakeAt`, #101 §5), so they
+ * `Job` and `Reminder` name a wake (the behavior's `wakeAt`, #101 §5), so they
  * need no request at all. `Job` is work in flight: its steps continue after
  * a kill with no client attached. `Reminder` is a deadline: it fires at the
  * time its state holds, even when that time passed while the node was down.

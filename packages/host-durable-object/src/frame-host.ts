@@ -27,7 +27,7 @@ import * as StorageStore from "./storage-store.js";
  * again. Opening restores the committed state, drains pending commands, and
  * re-enters machine work, because the instance runs the same durable actor a
  * client request would have started. A command's admission arms the alarm,
- * and so does a commit whose state names a wake (`Behavior.wakeAt`), so a
+ * and so does a commit whose state names a wake (the behavior's `wakeAt`), so a
  * machine deadline fires with no client attached.
  */
 
@@ -272,7 +272,7 @@ export const defineFrameHost = <R>(options: FrameHostOptions<R>): FrameHostClass
 
 /**
  * What still needs the object awake: a pending command, or a committed wake
- * (`Behavior.wakeAt`) at or before now. `Some` is the time to wake again.
+ * (the behavior's `wakeAt`) at or before now. `Some` is the time to wake again.
  * It reads through the object's `MailboxStore`, which owns the tables.
  */
 const due = (store: MailboxStore["Service"], now: number): Effect.Effect<Option.Option<number>> =>

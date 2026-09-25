@@ -75,7 +75,7 @@ export interface Behavior<State, Message, R = never, Refusal extends Refused = n
 
 /** What `Behavior.value` accepts besides its initial value. */
 export interface ValueOptions<A, Refusal extends Refused> {
-  /** A value this actor refuses to hold. See `Behavior.refuse`. */
+  /** A value this actor refuses to hold. See the `refuse` field of `Behavior`. */
   readonly refuse?: (value: A) => Option.Option<Refusal>;
 }
 
@@ -110,7 +110,7 @@ export interface ReducerOptions<State, Message, Refusal extends Refused = never>
   readonly initial: State;
   /** Total: every message the behavior does not refuse reduces. */
   readonly reduce: (state: State, message: Message) => State;
-  /** The messages this behavior refuses. See `Behavior.refuse`. */
+  /** The messages this behavior refuses. See the `refuse` field of `Behavior`. */
   readonly refuse?: (message: Message) => Option.Option<Refusal>;
 }
 
@@ -145,9 +145,9 @@ interface Tagged {
  * client could run.
  */
 export interface MachineOptions<State, Event, Refusal extends Refused = never> {
-  /** The events this behavior refuses. See `Behavior.refuse`. */
+  /** The events this behavior refuses. See the `refuse` field of `Behavior`. */
   readonly refuse?: (event: Event) => Option.Option<Refusal>;
-  /** When a state next needs the actor with no request. See `Behavior.wakeAt`. */
+  /** When a state next needs the actor with no request. See the `wakeAt` field of `Behavior`. */
   readonly wakeAt?: (state: State) => Option.Option<number>;
 }
 

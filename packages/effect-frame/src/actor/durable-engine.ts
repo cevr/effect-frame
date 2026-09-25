@@ -113,7 +113,7 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <
   /**
    * The state a fresh actor starts from. It is not committed: a fresh actor
    * does not spend a revision on it. The exception is an initial state that
-   * names a wake (`Behavior.wakeAt`): the host can wake the actor only for a
+   * names a wake (the behavior's `wakeAt`): the host can wake the actor only for a
    * wake it stored, so that state is committed as revision 1 with its wake
    * before anything reads it.
    */

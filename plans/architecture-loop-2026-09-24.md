@@ -105,6 +105,7 @@ More pass 2 candidates, found while applying pass 1:
 - `link` `aria-current` ignores params (defect D13-link above).
 - A gate rule for inline citations: a backticked `Namespace.member` in a reference doc must resolve (runtime keys, then the declarations for type-only names). A one-off run on 2026-09-25 found none stale; `bun run docs` checks code blocks only.
 - Flaky test: `packages/effect-frame/tests/view/streaming.test.tsx` "a placeholder always precedes its patch, and Closed lists every settle" failed once (5 patches seen, 4 expected).
+- Flaky test: `packages/effect-frame/tests/router/prerender-build.test.tsx` "a crashed build leaves the previous tree serving, and leaves no staging behind" failed once in the gate (a staging directory left after the interrupt); six runs alone passed.
 
 
 | ID  | Candidate | North star | Files | Lines removed | Risk | Status (`done <hash>` / `rejected: <receipt>`) |

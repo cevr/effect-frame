@@ -140,7 +140,7 @@ const build = <R>(
             return existing.value;
           }
           // The host is the boundary: each instance gets the host's context.
-          // oxlint-disable-next-line effect/noInlineProvide
+          // oxlint-disable-next-line effect/noInlineProvide -- the host is the boundary that gives each instance its context.
           const instance = yield* Effect.provide(
             implementation.open(store(address), hostScope),
             context,

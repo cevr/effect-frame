@@ -106,7 +106,7 @@ const collectUntil = (released: () => boolean) =>
   Effect.gen(function* () {
     for (let turn = 0; turn < 64 && !released(); turn += 1) {
       // A heap observation needs a real event-loop turn between collections.
-      // oxlint-disable-next-line effect/noNewPromise, effect/noGlobals
+      // oxlint-disable-next-line effect/noNewPromise, effect/noGlobals -- a heap observation needs a real event-loop turn.
       yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
       yield* Effect.sync(() => Bun.gc(true));
     }

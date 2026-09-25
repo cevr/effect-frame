@@ -6,7 +6,7 @@
     "perf": "error"
   },
   "plugins": ["typescript", "unicorn", "oxc", "import", "node"],
-  "jsPlugins": ["oxlint-plugin-effect/plugin"],
+  "jsPlugins": ["oxlint-plugin-effect/plugin", "./tooling/checks/src/lint-plugin.ts"],
   "rules": {
     "typescript/no-explicit-any": "error",
     "typescript/no-unsafe-type-assertion": "error",
@@ -21,6 +21,11 @@
       }
     ],
     "import/no-duplicates": "error",
+    "import/no-cycle": "error",
+    "unicorn/filename-case": ["error", { "case": "kebabCase" }],
+    "frame/no-switch": "error",
+    "frame/disable-reason": "error",
+    "frame/span-name": "error",
     "node/no-process-env": "error",
     "no-unused-vars": [
       "error",

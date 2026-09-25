@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option, Schema } from "effect";
+import { Context, Effect, Layer, Match, Option, Schema } from "effect";
 import type { Record as InspectionRecord, Sample } from "./inspection/registry.js";
 import * as Inspection from "./inspection/registry.js";
 
@@ -422,12 +422,12 @@ const toSnapshot = (sample: Sample): Snapshot => {
   const urlStates: Array<Snapshot["urlStates"][number]> = [];
   const commands: Array<Snapshot["commands"]["records"][number]> = [];
 
-  for (const record of sample.records) {
-    switch (record._tag) {
-      case "Mount":
+  for (const sampled of sample.records) {
+    Match.valueTags(sampled, {
+      Mount: (record) => {
         mounts.push({ ...base(record), _tag: "Mount", phase: record.phase });
-        break;
-      case "Route":
+      },
+      Route: (record) => {
         routes.push({
           ...base(record),
           _tag: "Route",
@@ -440,16 +440,16 @@ const toSnapshot = (sample: Sample): Snapshot => {
           canonicalRouteName: record.canonicalRouteName,
           canonicalUrl: record.canonicalUrl,
         });
-        break;
-      case "Actor":
+      },
+      Actor: (record) => {
         actors.push({
           ...base(record),
           _tag: "Actor",
           kind: record.kind,
           revision: record.revision,
         });
-        break;
-      case "Query":
+      },
+      Query: (record) => {
         queries.push({
           ...base(record),
           _tag: "Query",
@@ -461,8 +461,8 @@ const toSnapshot = (sample: Sample): Snapshot => {
           value: record.value,
           failure: Option.getOrNull(Option.map(record.failure, toDiagnostic)),
         });
-        break;
-      case "Command":
+      },
+      Command: (record) => {
         commands.push({
           ...base(record),
           _tag: "Command",
@@ -473,8 +473,8 @@ const toSnapshot = (sample: Sample): Snapshot => {
           running: record.running,
           lifecycle: record.lifecycle,
         });
-        break;
-      case "UrlState":
+      },
+      UrlState: (record) => {
         urlStates.push({
           ...base(record),
           _tag: "UrlState",
@@ -482,8 +482,8 @@ const toSnapshot = (sample: Sample): Snapshot => {
           keys: [...record.keys],
           value: toDiagnostic(record.value),
         });
-        break;
-    }
+      },
+    });
   }
 
   return {

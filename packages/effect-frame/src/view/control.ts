@@ -57,7 +57,7 @@ export const list = <Item, R>(
     // leaves `Scope`, which the checker cannot reduce for a generic `R`, so
     // the assertion states what the arithmetic already means.
     const setup = (item: Source<Item>) => Effect.provide(options.row(item), context);
-    // oxlint-disable-next-line effect/noAs
+    // oxlint-disable-next-line effect/noAs -- the row setup is the For node's setup with its context provided.
     const rows = setup as ForNode<Item>["setup"];
     return { _tag: "For", each: options.each, keyBy: options.keyBy, setup: rows };
   });

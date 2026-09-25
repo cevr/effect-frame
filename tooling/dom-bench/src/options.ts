@@ -115,33 +115,27 @@ export const parseOptions = (argv: ReadonlyArray<string>): BenchOptions => {
     const argument = argv[index];
     // oxlint-disable-next-line effect/noNullish -- a missing argv entry ends iteration safely.
     if (argument === undefined) continue;
-    switch (argument) {
-      case "-h":
-      case "--help":
-        help = true;
-        break;
-      case "--framework":
-        framework = requireFramework(requireValue(argv, index, argument), argument);
-        index += 1;
-        break;
-      case "--engine":
-        engines = [requireEngine(requireValue(argv, index, argument))];
-        index += 1;
-        break;
-      case "--count":
-        count = requireCount(requireValue(argv, index, argument));
-        index += 1;
-        break;
-      case "--official":
-        official = true;
-        break;
-      case "--only":
-        only = requireOperation(requireValue(argv, index, argument));
-        index += 1;
-        break;
-      default:
-        invalid(`unknown option ${argument}`);
+    if (argument === "-h" || argument === "--help") {
+      help = true;
+      continue;
     }
+    if (argument === "--official") {
+      official = true;
+      continue;
+    }
+    if (argument === "--framework") {
+      framework = requireFramework(requireValue(argv, index, argument), argument);
+    } else if (argument === "--engine") {
+      engines = [requireEngine(requireValue(argv, index, argument))];
+    } else if (argument === "--count") {
+      count = requireCount(requireValue(argv, index, argument));
+    } else if (argument === "--only") {
+      only = requireOperation(requireValue(argv, index, argument));
+    } else {
+      invalid(`unknown option ${argument}`);
+    }
+    // Each option above takes the next argument as its value.
+    index += 1;
   }
   return { help, framework, engines, count, official, only };
 };

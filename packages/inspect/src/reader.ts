@@ -278,20 +278,26 @@ const runningText = (running: boolean): string => {
 
 const errorText = (error: { readonly _tag: string }): string => {
   const detail = escapeText(JSON.stringify(error));
-  switch (error._tag) {
-    case "AmbiguousRoot":
-      return `error: the selector matches several roots; pass an exact --root\n${detail}\n`;
-    case "RootNotFound":
-      return `error: no attached root matches; list roots with: roots --url <gateway>\n${detail}\n`;
-    case "Unauthorized":
-      return `error: the gateway refused the capability; check --token-file or ${TOKEN_ENV}\n`;
-    case "MissingCapability":
-      return `error: no read capability; pass --token-file <path> or set ${TOKEN_ENV}\n`;
-    case "Interrupted":
-      return "interrupted\n";
-    default:
-      return `error: ${escapeText(error._tag)}\n${detail}\n`;
-  }
+  return Match.value(error._tag).pipe(
+    Match.when(
+      "AmbiguousRoot",
+      () => `error: the selector matches several roots; pass an exact --root\n${detail}\n`,
+    ),
+    Match.when(
+      "RootNotFound",
+      () => `error: no attached root matches; list roots with: roots --url <gateway>\n${detail}\n`,
+    ),
+    Match.when(
+      "Unauthorized",
+      () => `error: the gateway refused the capability; check --token-file or ${TOKEN_ENV}\n`,
+    ),
+    Match.when(
+      "MissingCapability",
+      () => `error: no read capability; pass --token-file <path> or set ${TOKEN_ENV}\n`,
+    ),
+    Match.when("Interrupted", () => "interrupted\n"),
+    Match.orElse((tag) => `error: ${escapeText(tag)}\n${detail}\n`),
+  );
 };
 
 // ---------------------------------------------------------------------------

@@ -14,7 +14,7 @@ import { Effect, Predicate, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 /** One headless terminal per test, destroyed with the test's scope. */
-const makeTerminal = Effect.fn("test.makeTerminal")(function* () {
+const makeTerminal = Effect.fn("OpenTuiTest.makeTerminal")(function* () {
   const setup: TestRendererSetup = yield* Effect.promise(() =>
     createTestRenderer({ width: 32, height: 6 }),
   );
@@ -23,7 +23,7 @@ const makeTerminal = Effect.fn("test.makeTerminal")(function* () {
 });
 
 /** Flush the reactive graph, draw one frame, and read it back. */
-const draw = Effect.fn("test.draw")(function* (setup: TestRendererSetup) {
+const draw = Effect.fn("OpenTuiTest.draw")(function* (setup: TestRendererSetup) {
   yield* View.flush;
   yield* Effect.promise(() => setup.renderOnce());
   return setup.captureCharFrame();

@@ -109,7 +109,7 @@ const serve = Effect.gen(function* () {
   const server = yield* Effect.acquireRelease(
     Effect.sync(() =>
       // Bun.serve is this test's platform boundary.
-      // oxlint-disable-next-line effect/noGlobals
+      // oxlint-disable-next-line effect/noGlobals -- Bun.serve is this test's platform boundary.
       Bun.serve({
         port: 0,
         fetch: (request) => {

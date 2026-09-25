@@ -49,7 +49,7 @@ export const clientServices = (
  * layer; this is the client's entry point instead, and the only place they
  * are provided. Two calls are two tabs.
  */
-export const clientOf = Effect.fn("test.clientOf")(function* (
+export const clientOf = Effect.fn("NotesTest.clientOf")(function* (
   url: string,
   transport: Layer.Layer<ActorTransport> = transportTo(url),
 ) {
@@ -75,7 +75,7 @@ export const serve = (runtime: NotesRuntime, port = 0) =>
 /** A runtime and a server on a free port, both released with the test. */
 export const serveFresh = Effect.flatMap(notesRuntime, (runtime) => serve(runtime));
 
-export const fetchPage = Effect.fn("test.fetchPage")(function* (url: string) {
+export const fetchPage = Effect.fn("NotesTest.fetchPage")(function* (url: string) {
   const response = yield* Effect.promise(() => platformFetch(url, { redirect: "manual" }));
   const text = yield* Effect.promise(() => response.text());
   return { status: response.status, headers: response.headers, text };
@@ -116,7 +116,10 @@ export const locationAt = (href: string) =>
   });
 
 /** Hydrate the installed page at `href`, as `client.tsx` does. */
-export const hydrateAt = Effect.fn("test.hydrateAt")(function* (root: HTMLElement, href: string) {
+export const hydrateAt = Effect.fn("NotesTest.hydrateAt")(function* (
+  root: HTMLElement,
+  href: string,
+) {
   const { location } = yield* locationAt(href);
   return yield* Effect.provideService(
     hydrate({
@@ -144,7 +147,7 @@ export const has = (root: ParentNode, selector: string): boolean =>
  * Flush and poll until `check` holds, for at most two seconds. A check that
  * never holds is a defect naming `what`, so a wait can never pass silently.
  */
-export const settle = Effect.fn("test.settle")(function* (
+export const settle = Effect.fn("NotesTest.settle")(function* (
   check: Effect.Effect<boolean>,
   what = "the awaited state",
 ) {
@@ -317,7 +320,7 @@ export const tappedHost = Effect.gen(function* () {
  * its own query cache over `transport`. `run` provides that client, so a
  * test can open a reference or read the cache as the page would.
  */
-export const mountApp = Effect.fn("test.mountApp")(function* <R>(options: {
+export const mountApp = Effect.fn("NotesTest.mountApp")(function* <R>(options: {
   readonly transport: TransportService;
   readonly href: string;
   readonly routes: ReadonlyArray<Route.AnyRoute<R>>;

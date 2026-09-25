@@ -315,7 +315,7 @@ export const locationAt = (href: string) =>
  * its own query cache over `transport`. `run` provides that client, so a
  * test can read the cache as the page would.
  */
-export const mountApp = Effect.fn("test.mountApp")(function* <R>(options: {
+export const mountApp = Effect.fn("DashboardTest.mountApp")(function* <R>(options: {
   readonly transport: TransportService;
   readonly href: string;
   readonly routes: ReadonlyArray<Route.AnyRoute<R>>;
@@ -358,7 +358,7 @@ export const has = (root: ParentNode, selector: string): boolean =>
  * Flush and poll until `check` holds, for at most two seconds. A check that
  * never holds is a defect naming `what`, so a wait can never pass silently.
  */
-export const settle = Effect.fn("test.settle")(function* (
+export const settle = Effect.fn("DashboardTest.settle")(function* (
   check: Effect.Effect<boolean>,
   what = "the awaited state",
 ) {

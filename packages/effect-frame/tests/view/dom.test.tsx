@@ -776,7 +776,7 @@ const titlesAt = (root: Node): ReadonlyArray<string> => {
   return titles(root);
 };
 
-const setTasks = Effect.fn("test.setTasks")(function* (
+const setTasks = Effect.fn("DomTest.setTasks")(function* (
   tasks: LocalActorRef<ReadonlyArray<Task>, SetValue<ReadonlyArray<Task>>>,
   next: ReadonlyArray<Task>,
 ) {

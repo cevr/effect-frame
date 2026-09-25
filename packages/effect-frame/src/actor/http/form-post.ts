@@ -315,24 +315,18 @@ const sendFailure = (
   login: Option.Option<string>,
 ): Effect.Effect<Reply> => {
   const issues = [failureIssue(error)];
-  switch (error._tag) {
-    case "Unreachable":
-    case "Uncertain":
-      return page(posted, 504, issues, "same");
-    case "CommandConflict":
-    case "ContractMismatch":
-      return page(posted, 409, issues, "fresh");
-    case "Unauthorized":
-      return unauthorized(posted, issues, principal, login);
-    case "UnknownContract":
-      return page(posted, 404, issues, "fresh");
-    case "ActorStopped":
-      return page(posted, 503, issues, "fresh");
+  return Match.valueTags(error, {
+    Unreachable: () => page(posted, 504, issues, "same"),
+    Uncertain: () => page(posted, 504, issues, "same"),
+    CommandConflict: () => page(posted, 409, issues, "fresh"),
+    ContractMismatch: () => page(posted, 409, issues, "fresh"),
+    Unauthorized: () => unauthorized(posted, issues, principal, login),
+    UnknownContract: () => page(posted, 404, issues, "fresh"),
+    ActorStopped: () => page(posted, 503, issues, "fresh"),
     // The same bytes are refused every time: the page draws the reason, and
     // a corrected post is a new form with a new id.
-    case "Refused":
-      return page(posted, 422, issues, "fresh");
-  }
+    Refused: () => page(posted, 422, issues, "fresh"),
+  });
 };
 
 const malformed = (error: FormMalformed): Reply => refused(400, error.reason);

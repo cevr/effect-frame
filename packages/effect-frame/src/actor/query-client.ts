@@ -1389,7 +1389,7 @@ export namespace QueryCache {
  * `inputs` read the list its pages come from this way: in a build, the
  * read is shared with every page that declares the same key.
  */
-export const runQuery = Effect.fn("runQuery")(function* <Q extends AnyQuery>(
+export const runQuery = Effect.fn("Query.run")(function* <Q extends AnyQuery>(
   contract: Q,
   args: ArgsOf<Q>,
 ) {
@@ -1500,7 +1500,7 @@ const openStamped = <Q extends AnyQuery>(
  * the key on screen. `None` declares nothing: there is no question to ask,
  * and the state is `Loading` until there is one.
  */
-export const followQuery = Effect.fn("followQuery")(function* <Q extends AnyQuery>(
+export const followQuery = Effect.fn("Query.follow")(function* <Q extends AnyQuery>(
   contract: Q,
   args: Source<Option.Option<ArgsOf<Q>>>,
 ) {

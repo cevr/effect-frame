@@ -182,7 +182,7 @@ export const all = <
   });
   // The mapped type says field by field what `assemble` builds key by key;
   // no cast-free spelling of that exists at the value level.
-  // oxlint-disable-next-line effect/noAs
+  // oxlint-disable-next-line effect/noAs -- a tuple of sources has no cast-free product type at the value level.
   return select(values, (product) => assemble(product) as AllValues<Sources>);
 };
 

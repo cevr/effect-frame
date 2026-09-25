@@ -49,6 +49,17 @@ const makeTimingEvent = (type: string, ts: number, dur: number, pid: number): Ti
   pid,
 });
 
+/** The timing type of each complete ("X") trace event the benchmark counts. */
+const timingTypes: ReadonlyMap<string, string> = new Map([
+  ["Layout", "layout"],
+  ["FunctionCall", "functioncall"],
+  ["HitTest", "hittest"],
+  ["Commit", "commit"],
+  ["Paint", "paint"],
+  ["FireAnimationFrame", "fireAnimationFrame"],
+  ["TimerFire", "timerFire"],
+]);
+
 const xEvent = (
   entry: ChromeTraceEvent,
   ts: number,
@@ -56,24 +67,12 @@ const xEvent = (
   pid: number,
 ): TimingEvent | undefined => {
   if (entry.ph !== "X") return undefined;
-  switch (entry.name) {
-    case "Layout":
-      return makeTimingEvent("layout", ts, dur, pid);
-    case "FunctionCall":
-      return makeTimingEvent("functioncall", ts, dur, pid);
-    case "HitTest":
-      return makeTimingEvent("hittest", ts, dur, pid);
-    case "Commit":
-      return makeTimingEvent("commit", ts, dur, pid);
-    case "Paint":
-      return makeTimingEvent("paint", ts, dur, pid);
-    case "FireAnimationFrame":
-      return makeTimingEvent("fireAnimationFrame", ts, dur, pid);
-    case "TimerFire":
-      return makeTimingEvent("timerFire", ts, 0, pid);
-    default:
-      return undefined;
-  }
+  if (entry.name === undefined) return undefined;
+  const type = timingTypes.get(entry.name);
+  if (type === undefined) return undefined;
+  // A timer fire is an instant: its duration is not counted.
+  if (type === "timerFire") return makeTimingEvent(type, ts, 0, pid);
+  return makeTimingEvent(type, ts, dur, pid);
 };
 
 const eventData = (args: unknown): object | undefined => {

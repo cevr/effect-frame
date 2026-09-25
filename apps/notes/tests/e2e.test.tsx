@@ -40,7 +40,7 @@ const id = Schema.decodeSync(CommandId);
 const inbox = "/lists/inbox/print";
 
 /** Flush the reactive graph, draw one terminal frame, and read it back. */
-const draw = Effect.fn("test.draw")(function* (setup: TestRendererSetup) {
+const draw = Effect.fn("NotesTest.draw")(function* (setup: TestRendererSetup) {
   yield* View.flush;
   yield* Effect.promise(() => setup.renderOnce());
   return setup.captureCharFrame();

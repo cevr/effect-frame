@@ -126,7 +126,7 @@ const guardedAddress = { contract: "Guarded", version: 1, key: JSON.stringify("v
 const WireBody = Schema.Struct({ revision: Schema.Finite, snapshot: Schema.String });
 const decodeWire = Schema.decodeUnknownEffect(Schema.fromJsonString(WireBody));
 
-const read = Effect.fn("frameHost.read")(function* (response: Response) {
+const read = Effect.fn("FrameHostTest.read")(function* (response: Response) {
   const text = yield* Effect.promise(() => response.text());
   return yield* Effect.orDie(decodeWire(text));
 });

@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { Effect, Match, Schema } from "effect";
 import {
   InvalidQueryArgs,
   PolicyMissing,
@@ -188,48 +188,33 @@ export const ReadWireError = Schema.Union([
   Unreachable,
 ]);
 
-export const statusOf = (error: WireError): number => {
-  switch (error._tag) {
-    case "Unauthorized":
-      return 403;
-    case "UnknownContract":
-      return 404;
-    case "CommandConflict":
-    case "ContractMismatch":
-      return 409;
+export const statusOf = (error: WireError): number =>
+  Match.valueTags(error, {
+    Unauthorized: () => 403,
+    UnknownContract: () => 404,
+    CommandConflict: () => 409,
+    ContractMismatch: () => 409,
     // The behavior read the message and will never apply it: a typed,
     // conclusive answer the client decodes, never a 5xx it would retry.
-    case "Refused":
-      return 422;
-    case "Uncertain":
-      return 504;
-    case "ActorStopped":
-      return 503;
-    case "Unreachable":
-      return 502;
-  }
-};
+    Refused: () => 422,
+    Uncertain: () => 504,
+    ActorStopped: () => 503,
+    Unreachable: () => 502,
+  });
 
-export const queryStatusOf = (error: WireQueryError): number => {
-  switch (error._tag) {
-    case "Unauthorized":
-    case "PolicyMissing":
-      return 403;
-    case "UnknownQuery":
-      return 404;
-    case "InvalidQueryArgs":
-      return 400;
-    case "QueryVersionMismatch":
-      return 409;
+export const queryStatusOf = (error: WireQueryError): number =>
+  Match.valueTags(error, {
+    Unauthorized: () => 403,
+    PolicyMissing: () => 403,
+    UnknownQuery: () => 404,
+    InvalidQueryArgs: () => 400,
+    QueryVersionMismatch: () => 409,
     // Not 500: the client turns an unexpected 5xx into `Unreachable`, and a
     // handler failure is a typed answer the caller must be able to decode.
-    case "QueryFailed":
-      return 422;
-    case "Unreachable":
-    case "StreamEnded":
-      return 502;
-  }
-};
+    QueryFailed: () => 422,
+    Unreachable: () => 502,
+    StreamEnded: () => 502,
+  });
 
 export const paths = {
   send: "/send",

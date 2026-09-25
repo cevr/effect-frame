@@ -243,7 +243,7 @@ const matcher = <A, E, Out>(
   // `Match` types its result as `Unify<Out>`, which the checker cannot reduce
   // for a generic `Out`; at every call site `Out` is concrete and the two
   // are the same type.
-  // oxlint-disable-next-line effect/noAs
+  // oxlint-disable-next-line effect/noAs -- the two fold types are the same type, which TypeScript cannot see.
   return fold as (state: QueryState<A, E>) => Out;
 };
 

@@ -321,13 +321,13 @@ describe("scoped view test harness", () => {
       let writeDuringRegistration = false;
       // Test-only fault injection. The actual observed host write runs while
       // the waiter's Set registration is in progress.
-      // oxlint-disable-next-line no-extend-native
+      // oxlint-disable-next-line no-extend-native -- the test injects at the waiter's Set registration.
       Set.prototype.add = function <T>(this: Set<T>, value: T): Set<T> {
         if (
           !injected &&
-          // oxlint-disable-next-line effect/noRuntimeTypeof
+          // oxlint-disable-next-line effect/noRuntimeTypeof -- the injected Set.add reads an untyped value.
           typeof value === "object" &&
-          // oxlint-disable-next-line effect/noNullish
+          // oxlint-disable-next-line effect/noNullish -- the injected Set.add reads an untyped value.
           value !== null &&
           "afterRevision" in value &&
           "resume" in value
@@ -355,7 +355,7 @@ describe("scoped view test harness", () => {
           until: (actualRoot) => countText(actualRoot) === "raced",
         }),
         Effect.sync(() => {
-          // oxlint-disable-next-line no-extend-native
+          // oxlint-disable-next-line no-extend-native -- the test restores the Set.add it replaced.
           Set.prototype.add = originalAdd;
         }),
       );
@@ -791,7 +791,7 @@ describe("scoped view test harness", () => {
           label: "throwing predicate",
           until: () => {
             // This verifies that a programmer defect escapes the harness.
-            // oxlint-disable-next-line effect/noThrowStatement, effect/noNewError
+            // oxlint-disable-next-line effect/noThrowStatement, effect/noNewError -- a programmer defect escaping the harness is the case under test.
             throw new Error("predicate boom");
           },
         }),

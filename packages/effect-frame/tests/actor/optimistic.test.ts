@@ -364,7 +364,7 @@ describe("optimistic sends (#19, #67)", () => {
         reduce: (items, message) => {
           if (items.some((item) => item.text === "boom")) {
             // Application code can throw; this is the case under test.
-            // oxlint-disable-next-line effect/noThrowStatement, effect/noNewError
+            // oxlint-disable-next-line effect/noThrowStatement, effect/noNewError -- a throwing prediction is the case under test.
             throw new Error("the prediction cannot run here");
           }
           return [...items, pending(message.text)];

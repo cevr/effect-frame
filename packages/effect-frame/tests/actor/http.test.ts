@@ -248,7 +248,7 @@ describe("http transport over a real socket", () => {
       // test is web-standard and does not know about it.
       const serve = (port: number) =>
         Effect.acquireRelease(
-          // oxlint-disable-next-line effect/noGlobals
+          // oxlint-disable-next-line effect/noGlobals -- Bun.serve is this test's platform boundary.
           Effect.sync(() => Bun.serve({ port, fetch: app.fetch })),
           (server) => Effect.promise(() => server.stop(true)),
         );

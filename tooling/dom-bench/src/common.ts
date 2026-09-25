@@ -130,35 +130,41 @@ const swapRows = (rows: ReadonlyArray<Row>): ReadonlyArray<Row> => {
   return next;
 };
 
-export const apply = (state: BenchmarkState, operation: OperationName): BenchmarkState => {
-  switch (operation) {
-    case "create-1k":
-    case "replace-1k":
-      return { rows: makeRows(1_000, state.nextId), selected: null, nextId: state.nextId + 1_000 };
-    case "update-10th-10k":
-      return { ...state, rows: updateEveryTenth(state.rows) };
-    case "select-1k":
-      return { ...state, selected: 1 };
-    case "swap-1k":
-      return { ...state, rows: swapRows(state.rows) };
-    case "remove-1k":
-      return { ...state, rows: state.rows.filter((row) => row.id !== 1), selected: null };
-    case "create-10k":
-      return {
-        rows: makeRows(10_000, state.nextId),
-        selected: null,
-        nextId: state.nextId + 10_000,
-      };
-    case "append-10k":
-      return {
-        ...state,
-        rows: [...state.rows, ...makeRows(1_000, state.nextId)],
-        nextId: state.nextId + 1_000,
-      };
-    case "clear-10k":
-      return { rows: [], selected: null, nextId: state.nextId };
-  }
-};
+/** Each operation's next state. A record keyed by every name, so a new name does not compile until it has one. */
+const operations = {
+  "create-1k": (state) => ({
+    rows: makeRows(1_000, state.nextId),
+    selected: null,
+    nextId: state.nextId + 1_000,
+  }),
+  "replace-1k": (state) => ({
+    rows: makeRows(1_000, state.nextId),
+    selected: null,
+    nextId: state.nextId + 1_000,
+  }),
+  "update-10th-10k": (state) => ({ ...state, rows: updateEveryTenth(state.rows) }),
+  "select-1k": (state) => ({ ...state, selected: 1 }),
+  "swap-1k": (state) => ({ ...state, rows: swapRows(state.rows) }),
+  "remove-1k": (state) => ({
+    ...state,
+    rows: state.rows.filter((row) => row.id !== 1),
+    selected: null,
+  }),
+  "create-10k": (state) => ({
+    rows: makeRows(10_000, state.nextId),
+    selected: null,
+    nextId: state.nextId + 10_000,
+  }),
+  "append-10k": (state) => ({
+    ...state,
+    rows: [...state.rows, ...makeRows(1_000, state.nextId)],
+    nextId: state.nextId + 1_000,
+  }),
+  "clear-10k": (state) => ({ rows: [], selected: null, nextId: state.nextId }),
+} satisfies Readonly<Record<OperationName, (state: BenchmarkState) => BenchmarkState>>;
+
+export const apply = (state: BenchmarkState, operation: OperationName): BenchmarkState =>
+  operations[operation](state);
 
 const mismatch = (reason: string, state: BenchmarkState): InvariantResult => ({
   ok: false,

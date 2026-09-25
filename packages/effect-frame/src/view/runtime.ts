@@ -1348,7 +1348,8 @@ const switchOn =
 
 const isEventProp = (name: string): boolean => name.length > 2 && name.startsWith("on");
 
-const eventNameOf = (name: string): string => `${name.slice(2, 3).toLowerCase()}${name.slice(3)}`;
+/** The prop names the host event: `onKeyDown` listens for `keydown`, as the DOM spells it. */
+const eventNameOf = (name: string): string => name.slice(2).toLowerCase();
 
 interface ElementPlan<HostNode> {
   readonly tag: string;

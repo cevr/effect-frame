@@ -590,6 +590,23 @@ describe("browser view", () => {
     }),
   );
 
+  it.scoped("a multi-word event prop listens for the lowercase DOM event", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const handled = yield* Deferred.make<void>();
+      const Keys = (_props: NoProps) =>
+        Effect.succeed(
+          <input id="keys" onKeyDown={View.event(() => Deferred.succeed(handled, void 0))} />,
+        );
+      const page = yield* pageMount(root, Keys, noProps);
+      yield* page.act(
+        Effect.sync(() => root.querySelector("#keys")?.dispatchEvent(new Event("keydown"))),
+        { label: "keydown reaches its handler", until: () => true },
+      );
+      yield* Deferred.await(handled);
+    }),
+  );
+
   it.scoped("submit suppresses the form's own navigation before it runs", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;

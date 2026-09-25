@@ -2,6 +2,7 @@ import { ActorHost, implementTransparent } from "effect-frame/actor";
 import type { ActorTransport } from "effect-frame/actor/client";
 import { HttpTransport } from "effect-frame/actor/client";
 import { Layer } from "effect";
+import { FetchHttpClient } from "effect/unstable/http";
 import { notesBehavior } from "./behavior.js";
 import { Notes } from "./contract.js";
 import { policies } from "./policies.server.js";
@@ -31,4 +32,7 @@ export const inProcess: Layer.Layer<ActorTransport> = ActorHost.layer({
  * only proxies. `server.ts` picks between the two at the boundary.
  */
 export const upstream = (baseUrl: string): Layer.Layer<ActorTransport> =>
-  HttpTransport.layer({ baseUrl: `${baseUrl}/actors`, reconnect: HttpTransport.defaultReconnect });
+  HttpTransport.layer({
+    baseUrl: `${baseUrl}/actors`,
+    reconnect: HttpTransport.defaultReconnect,
+  }).pipe(Layer.provide(FetchHttpClient.layer));

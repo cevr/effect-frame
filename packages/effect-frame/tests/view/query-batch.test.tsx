@@ -18,7 +18,8 @@ import type { Source } from "effect-frame/actor";
 import { HttpTransport } from "effect-frame/actor/client";
 import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
-import { Deferred, Effect, Exit, Layer, Option, Ref, Schema, Sink, Stream } from "effect";
+import { HttpTest } from "effect-frame/actor/testing";
+import { Deferred, Effect, Layer, Option, Ref, Schema, Sink, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 /** The one policy table: every contract and query here declares `public`. */
@@ -31,10 +32,6 @@ const RowQuery = batchedQuery("ViewListRow", {
   result: Schema.Struct({ id: Schema.Finite }),
   depends: [],
 });
-
-class TestFetchFailure extends Schema.TaggedError<TestFetchFailure>()("TestFetchFailure", {
-  reason: Schema.String,
-}) {}
 
 interface BatchControl {
   readonly started: Deferred.Deferred<void>;
@@ -87,79 +84,26 @@ const inProcess = Layer.unwrap(
       maxBodyBytes: HttpServer.defaultMaxBodyBytes,
       form: Option.none(),
     });
-    const context = yield* Effect.context<never>();
-    const run = Effect.runPromiseWith(context);
-    const fetch: HttpTransport.FetchLike = (input, init) => {
-      if (input.endsWith("/query/batch")) {
+    // An interrupted request interrupts the handler: that is the abort the rows count.
+    const counted = (request: Request) => {
+      const path = new URL(request.url).pathname;
+      if (path.endsWith("/query/batch")) {
         batchRequests += 1;
-      } else if (input.endsWith("/query")) {
+        return Effect.onInterrupt(server(request), () =>
+          Effect.sync(() => {
+            batchAborts += 1;
+          }),
+        );
+      }
+      if (path.endsWith("/query")) {
         singleRequests += 1;
       }
-      return run(
-        Effect.callback<Response, TestFetchFailure>((resume, effectSignal) => {
-          const signal = Option.fromNullishOr(init?.signal);
-          const fiber = Effect.runForkWith(context)(server(new Request(input, init)));
-          let settled = false;
-          const removeAbort = () =>
-            Option.match(signal, {
-              onNone: () => {},
-              onSome: (value) => value.removeEventListener("abort", abort),
-            });
-          const removeEffectAbort = () => effectSignal.removeEventListener("abort", abort);
-          const abort = () => {
-            if (settled) {
-              return;
-            }
-            settled = true;
-            removeAbort();
-            removeEffectAbort();
-            if (input.endsWith("/query/batch")) {
-              batchAborts += 1;
-            }
-            fiber.interruptUnsafe();
-            resume(Effect.fail(TestFetchFailure.make({ reason: "request aborted" })));
-          };
-          Option.match(signal, {
-            onNone: () => {},
-            onSome: (value) => value.addEventListener("abort", abort, { once: true }),
-          });
-          fiber.addObserver((exit) => {
-            if (settled) {
-              return;
-            }
-            settled = true;
-            removeAbort();
-            removeEffectAbort();
-            if (Exit.isSuccess(exit)) {
-              resume(Effect.succeed(exit.value));
-            } else {
-              resume(Effect.fail(TestFetchFailure.make({ reason: String(exit.cause) })));
-            }
-          });
-          Option.match(signal, {
-            onNone: () => {},
-            onSome: (value) => {
-              if (value.aborted) {
-                abort();
-              }
-            },
-          });
-          effectSignal.addEventListener("abort", abort, { once: true });
-          return Effect.sync(() => {
-            if (!settled) {
-              settled = true;
-              removeAbort();
-              removeEffectAbort();
-              fiber.interruptUnsafe();
-            }
-          });
-        }),
-      );
+      return server(request);
     };
     return HttpTransport.layer({
       baseUrl: "http://actors.test/actors",
       reconnect: HttpTransport.defaultReconnect,
-    }).pipe(Layer.provide(Layer.succeed(HttpTransport.Fetch, fetch)));
+    }).pipe(Layer.provide(HttpTest.client(counted)));
   }),
 ).pipe(Layer.provide(hostLayer));
 

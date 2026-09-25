@@ -442,3 +442,4 @@ export const factoryFromLayer = (layer: Layer.Layer<MailboxStore>): StoreFactory
   Effect.provide(MailboxStore, layer);
 
 export * as QueryTest from "./query.js";
+export * as HttpTest from "./http.js";

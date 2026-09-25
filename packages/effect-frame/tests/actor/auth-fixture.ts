@@ -1,6 +1,7 @@
 /* oxlint-disable effect/noGlobals -- Bun.serve and fetch are the platform boundary of the wire tests that share this fixture: a real socket on a free port. */
 import { Clock, Duration, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
 import type { Scope } from "effect";
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { Event, Machine, State } from "effect-machine";
 import type { PolicyTable, Subject } from "effect-frame/actor";
 import {
@@ -386,19 +387,21 @@ export const serveHost = (makePrincipal: MakePrincipal) =>
     return served;
   });
 
-/** A browser that carries one cookie on every request, or none. */
-export const browserFetch =
-  (cookie: Option.Option<string>): HttpTransport.FetchLike =>
-  (input, init) => {
-    const headers = new Headers(
-      Option.getOrElse(
-        Option.flatMap(Option.fromNullishOr(init), (given) => Option.fromNullishOr(given.headers)),
-        (): HeadersInit => [],
-      ),
-    );
-    Option.map(cookie, (value) => headers.set("cookie", `${sessionCookie}${value}`));
-    return fetch(input, { ...init, headers });
-  };
+/** A browser over the real socket that carries one cookie on every request, or none. */
+export const browserClient = (cookie: Option.Option<string>) =>
+  Layer.effect(
+    HttpClient.HttpClient,
+    Effect.map(HttpClient.HttpClient, (client: HttpClient.HttpClient) =>
+      Option.match(cookie, {
+        onNone: () => client,
+        onSome: (value) =>
+          HttpClient.mapRequest(
+            client,
+            HttpClientRequest.setHeader("cookie", `${sessionCookie}${value}`),
+          ),
+      }),
+    ),
+  ).pipe(Layer.provide(FetchHttpClient.layer));
 
 /** The client transport of one browser against one served host. */
 export const browser = (
@@ -407,7 +410,7 @@ export const browser = (
   reconnect: HttpTransport.HttpClientOptions["reconnect"],
 ) =>
   HttpTransport.layer({ baseUrl: served.baseUrl, reconnect }).pipe(
-    Layer.provide(Layer.succeed(HttpTransport.Fetch, browserFetch(cookie))),
+    Layer.provide(browserClient(cookie)),
   );
 
 /** Runs `effect` as one browser: its own transport, its own cookie. */

@@ -10,6 +10,7 @@ import { Dom, View } from "effect-frame/view";
 import type { QueryFailure, QueryState } from "effect-frame/actor/client";
 import type { Dom as DomTypes } from "effect-frame/view";
 import { Effect, Layer, Option } from "effect";
+import { FetchHttpClient } from "effect/unstable/http";
 import { Label, Page, TallPage } from "./streaming-page.js";
 
 export interface StreamWindow {
@@ -90,7 +91,7 @@ const layer = Layer.provideMerge(
   HttpTransport.layer({
     baseUrl: `${location.origin}/actors`,
     reconnect: HttpTransport.defaultReconnect,
-  }),
+  }).pipe(Layer.provide(FetchHttpClient.layer)),
 );
 
 // The fixture's entry point: the one place its services are provided.

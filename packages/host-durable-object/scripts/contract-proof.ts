@@ -32,7 +32,8 @@
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Scope } from "effect";
-import { Duration, Effect, Fiber, Option, Schedule, Schema, Stream } from "effect";
+import { Duration, Effect, Fiber, Layer, Option, Schedule, Schema, Stream } from "effect";
+import { FetchHttpClient } from "effect/unstable/http";
 import { Actor, CommandId, HttpTransport } from "effect-frame/actor/client";
 import type { AnyContract, KeyOf, RemoteActorRef } from "effect-frame/actor/client";
 import {
@@ -75,7 +76,7 @@ const transportFor = (port: number, name: string, version: number, key: string) 
       JSON.stringify(key),
     )}`,
     reconnect: HttpTransport.defaultReconnect,
-  });
+  }).pipe(Layer.provide(FetchHttpClient.layer));
 
 // ---------------------------------------------------------------------------
 // Row e — Counter survives the kill

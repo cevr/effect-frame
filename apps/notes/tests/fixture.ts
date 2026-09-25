@@ -13,6 +13,7 @@ import { ActorTransport, HttpTransport, QueryCache } from "effect-frame/actor/cl
 import { Location, hydrate, mount, NavigationBehavior } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import { Context, Deferred, Effect, Layer, Option, Predicate, Ref, Schema, Stream } from "effect";
+import { FetchHttpClient } from "effect/unstable/http";
 import { routes } from "../src/routes.js";
 import { NotFound } from "../src/views.js";
 import { inProcess } from "../src/notes.server.js";
@@ -26,14 +27,15 @@ import { makeRuntime, makeServer } from "../src/server.js";
  * call wraps the transport it is given.
  */
 
-/** happy-dom replaces `fetch`; the actor transport needs the real one. */
-const realFetch: HttpTransport.FetchLike = (input, init) => platformFetch(input, init);
-
 export const transportTo = (url: string): Layer.Layer<ActorTransport> =>
   HttpTransport.layer({
     baseUrl: `${url}/actors`,
     reconnect: HttpTransport.defaultReconnect,
-  }).pipe(Layer.provide(Layer.succeed(HttpTransport.Fetch, realFetch)));
+    // happy-dom replaces `fetch`; the actor transport needs the real one.
+  }).pipe(
+    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(Layer.succeed(FetchHttpClient.Fetch, platformFetch)),
+  );
 
 /** The browser's services over `transport`: the query cache and the transport. */
 export const clientServices = (

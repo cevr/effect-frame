@@ -1323,7 +1323,13 @@ export namespace QueryCache {
    *
    * @example
    * ```ts
-   * const client = QueryCache.layer.pipe(Layer.provideMerge(HttpTransport.layer({ baseUrl })));
+   * const client = QueryCache.layer.pipe(
+   *   Layer.provideMerge(
+   *     HttpTransport.layer({ baseUrl, reconnect: HttpTransport.defaultReconnect }).pipe(
+   *       Layer.provide(FetchHttpClient.layer),
+   *     ),
+   *   ),
+   * );
    * ```
    */
   export const layer: LayerType.Layer<QueryCache> = Layer.effect(QueryCache, make());

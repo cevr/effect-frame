@@ -1,5 +1,7 @@
 import { Effect, Exit, Layer, Option, Schema, Scope, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
+import { HttpTest } from "effect-frame/actor/testing";
+import { FetchHttpClient } from "effect/unstable/http";
 import {
   Actor,
   ActorHost,
@@ -85,19 +87,16 @@ const inProcess = Layer.unwrap(
       maxBodyBytes: HttpServer.defaultMaxBodyBytes,
       form: Option.none(),
     });
-    const context = yield* Effect.context<never>();
-    const run = Effect.runPromiseWith(context);
-    const fetch: HttpTransport.FetchLike = (input, init) => {
-      const request = new Request(input, init);
-      return run(server(request)).then((response) => {
-        answered.push({ path: new URL(request.url).pathname, status: response.status });
-        return response;
-      });
-    };
+    const recorded = (request: Request) =>
+      Effect.tap(server(request), (response) =>
+        Effect.sync(() => {
+          answered.push({ path: new URL(request.url).pathname, status: response.status });
+        }),
+      );
     return HttpTransport.layer({
       baseUrl: "http://actors.test/actors",
       reconnect: HttpTransport.defaultReconnect,
-    }).pipe(Layer.provide(Layer.succeed(HttpTransport.Fetch, fetch)));
+    }).pipe(Layer.provide(HttpTest.client(recorded)));
   }),
 ).pipe(Layer.provide(hostLayer));
 
@@ -228,7 +227,9 @@ const asClientOf =
     // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(
       effect,
-      HttpTransport.layer({ baseUrl, reconnect: HttpTransport.defaultReconnect }),
+      HttpTransport.layer({ baseUrl, reconnect: HttpTransport.defaultReconnect }).pipe(
+        Layer.provide(FetchHttpClient.layer),
+      ),
     );
 
 describe("http transport over a real socket", () => {

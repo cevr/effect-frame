@@ -25,6 +25,7 @@ export const registerDom = (): void => {
   if (GlobalRegistrator.isRegistered) {
     return;
   }
-  GlobalRegistrator.register();
+  // An http origin: an `HttpClient` resolves every request against `location`.
+  GlobalRegistrator.register({ url: "http://dashboard.test/" });
   Object.assign(globalThis, platformWeb);
 };

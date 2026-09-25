@@ -7,6 +7,7 @@ import {
   NavigationBehavior,
 } from "effect-frame/router";
 import { Effect, Layer, Option } from "effect";
+import { FetchHttpClient } from "effect/unstable/http";
 import { routes } from "./routes.js";
 import { NotFound } from "./views.js";
 
@@ -51,7 +52,7 @@ const services = Layer.provideMerge(
   HttpTransport.layer({
     baseUrl: `${location.origin}/actors`,
     reconnect: HttpTransport.defaultReconnect,
-  }),
+  }).pipe(Layer.provide(FetchHttpClient.layer)),
 );
 
 // The browser entry point: the one place the client services are provided.

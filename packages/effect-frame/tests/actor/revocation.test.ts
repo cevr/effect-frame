@@ -15,6 +15,7 @@ import {
 import type { Scope } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
+import { HttpTest } from "effect-frame/actor/testing";
 import { Actor, ActorHost, HttpServer, Policies } from "effect-frame/actor";
 import type {
   Address,
@@ -1039,25 +1040,20 @@ describe("every refusal the client receives", () => {
   );
 });
 
-interface WebAdapter {
-  readonly fetch: (request: Request) => Promise<Response>;
-}
-
 /** A client of one web handler, in process, carrying one session cookie or none. */
-const adapterClient = (web: WebAdapter, cookie: Option.Option<string>) =>
+const adapterClient = (web: HttpServer.WebHandler, cookie: Option.Option<string>) =>
   HttpTransport.layer({ baseUrl: "http://adapter.test", reconnect: quickReconnect }).pipe(
     Layer.provide(
-      Layer.succeed(HttpTransport.Fetch, (input, init) => {
-        const request = new Request(input, init);
+      HttpTest.client((request) => {
         Option.map(cookie, (value) => request.headers.set("cookie", `session=${value}`));
-        return web.fetch(request);
+        return web(request);
       }),
     ),
   );
 
 /** Runs `effect` as that client. */
 const throughAdapter =
-  (web: WebAdapter, cookie: Option.Option<string>) =>
+  (web: HttpServer.WebHandler, cookie: Option.Option<string>) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(effect, adapterClient(web, cookie));
@@ -1080,8 +1076,7 @@ describe("an adapter keeps its derivation's requirements", () => {
           maxBodyBytes: HttpServer.defaultMaxBodyBytes,
           form: Option.none(),
         }).pipe(Effect.provideContext(built));
-        const run = Effect.runPromiseWith(yield* Effect.context<never>());
-        const web: WebAdapter = { fetch: (request) => run(handler(request)) };
+        const web = handler;
         const session = yield* Actor.remote(Session, { sessionId: "s1" }).pipe(
           throughAdapter(web, Option.none()),
         );

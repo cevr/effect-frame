@@ -3,7 +3,8 @@ import { HttpTransport } from "effect-frame/actor/client";
 import { make as makeHost } from "effect-frame/view/opentui";
 import type { BaseRenderable } from "@opentui/core";
 import { InputRenderable, createCliRenderer } from "@opentui/core";
-import { Effect, Option } from "effect";
+import { Effect, Layer, Option } from "effect";
+import { FetchHttpClient } from "effect/unstable/http";
 import { demoKey } from "./contract.js";
 import { NotesTerminal } from "./terminal-view.js";
 
@@ -52,7 +53,7 @@ const baseUrl = process.env["NOTES_URL"] ?? "http://127.0.0.1:3000";
 const transport = HttpTransport.layer({
   baseUrl: `${baseUrl}/actors`,
   reconnect: HttpTransport.defaultReconnect,
-});
+}).pipe(Layer.provide(FetchHttpClient.layer));
 
 // The terminal entry point: the one place the client transport is provided.
 // @effect-diagnostics-next-line strictEffectProvide:off

@@ -7,7 +7,9 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
  * reach a loopback socket, and `Bun.serve` rejects a `Response` it did not
  * define. The view tests need happy-dom for the DOM only, so the platform's
  * web classes are captured first and put back afterwards. The streamed
- * document proofs serve and read real HTTP in this same process.
+ * document proofs serve and read real HTTP in this same process. The
+ * document has an http origin, because an `HttpClient` resolves every
+ * request against `location`, and `about:blank` is no base.
  */
 const platformWeb = {
   fetch: globalThis.fetch,
@@ -24,7 +26,7 @@ const platformWeb = {
 
 export const registerDom = (): void => {
   if (!GlobalRegistrator.isRegistered) {
-    GlobalRegistrator.register();
+    GlobalRegistrator.register({ url: "http://app.test/" });
     Object.assign(globalThis, platformWeb);
   }
 };

@@ -1,5 +1,6 @@
 import { Clock, Effect, Layer, Option, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
+import { FetchHttpClient } from "effect/unstable/http";
 import {
   Actor,
   ActorHost,
@@ -132,7 +133,7 @@ const serve = Effect.gen(function* () {
   return HttpTransport.layer({
     baseUrl: `http://127.0.0.1:${port}`,
     reconnect: HttpTransport.defaultReconnect,
-  });
+  }).pipe(Layer.provide(FetchHttpClient.layer));
 });
 
 /** One client reference over the real socket, with a shortened retry policy. */

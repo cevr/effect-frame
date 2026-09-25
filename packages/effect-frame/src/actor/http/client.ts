@@ -1,15 +1,5 @@
-import {
-  Context,
-  Duration,
-  Effect,
-  Layer,
-  Option,
-  Predicate,
-  Ref,
-  Schedule,
-  Schema,
-  Stream,
-} from "effect";
+import { Duration, Effect, Layer, Predicate, Ref, Schedule, Schema, Stream } from "effect";
+import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import type { Address } from "../contract.js";
 import type { TransportService } from "../transport.js";
 import { ActorTransport } from "../transport.js";
@@ -33,13 +23,6 @@ import {
   eventPrefix,
   paths,
 } from "./wire.js";
-
-export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
-
-/** The fetch the client uses. Defaults to the platform one; tests inject a handler. */
-export const Fetch = Context.Reference<FetchLike>("effect-frame/src/actor/http/client/Fetch", {
-  defaultValue: (): FetchLike => (input, init) => globalThis.fetch(input, init),
-});
 
 export interface HttpClientOptions {
   /** For example `https://app.example.com/actors`. No trailing slash. */
@@ -105,22 +88,17 @@ const encodeQuery = Schema.encodeEffect(Schema.fromJsonString(QueryBody));
 const encodeQueryBatch = Schema.encodeEffect(Schema.fromJsonString(QueryBatchBody));
 
 const make = Effect.fn("ActorTransport.http")(function* (options: HttpClientOptions) {
-  const fetch = yield* Fetch;
+  const client = yield* HttpClient.HttpClient;
 
+  /** One POST. An interrupted request is aborted by the client. */
   const post = <E>(path: string, body: string, decodeError: (text: string) => Effect.Effect<E>) =>
     Effect.gen(function* () {
-      const received = yield* Effect.tryPromise({
-        try: (signal) =>
-          fetch(`${options.baseUrl}${path}`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body,
-            signal,
-          }).then((response) => response.text().then((text) => ({ response, text }))),
-        catch: unreachable,
-      });
-      const { response, text } = received;
-      if (response.ok) {
+      const request = HttpClientRequest.post(`${options.baseUrl}${path}`).pipe(
+        HttpClientRequest.bodyText(body, "application/json"),
+      );
+      const response = yield* Effect.mapError(client.execute(request), unreachable);
+      const text = yield* Effect.mapError(response.text, unreachable);
+      if (response.status >= 200 && response.status < 300) {
         return text;
       }
       if (response.status >= 500 && response.status !== 503 && response.status !== 504) {
@@ -185,25 +163,20 @@ const make = Effect.fn("ActorTransport.http")(function* (options: HttpClientOpti
   const connect = (address: Address, after: number) =>
     Stream.unwrap(
       Effect.gen(function* () {
-        const response = yield* Effect.tryPromise({
-          try: () => fetch(changesUrl(address, after), { method: "GET" }),
-          catch: unreachable,
-        });
-        if (!response.ok) {
-          const text = yield* Effect.tryPromise({
-            try: () => response.text(),
-            catch: unreachable,
-          });
+        const response = yield* Effect.mapError(
+          client.execute(HttpClientRequest.get(changesUrl(address, after))),
+          unreachable,
+        );
+        if (response.status < 200 || response.status >= 300) {
+          const text = yield* Effect.mapError(response.text, unreachable);
           return Stream.fail(yield* decodeReadError(text));
         }
-        const body = Option.fromNullishOr(response.body);
-        if (Option.isNone(body)) {
-          return Stream.fail(unreachable("event stream without a body"));
-        }
-        const lines = Stream.fromReadableStream({
-          evaluate: () => body.value,
-          onError: unreachable,
-        }).pipe(Stream.decodeText, Stream.splitLines);
+        // The body stream aborts the request when it ends or is interrupted.
+        const lines = response.stream.pipe(
+          Stream.mapError(unreachable),
+          Stream.decodeText,
+          Stream.splitLines,
+        );
         return readEvents(lines).pipe(
           Stream.mapEffect((event) => {
             if (event.error) {
@@ -245,7 +218,23 @@ const make = Effect.fn("ActorTransport.http")(function* (options: HttpClientOpti
   return transport;
 });
 
-export const layer = (options: HttpClientOptions): Layer.Layer<ActorTransport> =>
+/**
+ * The actor transport over HTTP, through the `HttpClient` in context. A
+ * browser or server provides `FetchHttpClient.layer`; a test provides a
+ * client whose `fetch` is the host's handler.
+ *
+ * ```ts
+ * import { FetchHttpClient } from "effect/unstable/http";
+ *
+ * const transport = HttpTransport.layer({
+ *   baseUrl: "/actors",
+ *   reconnect: HttpTransport.defaultReconnect,
+ * }).pipe(Layer.provide(FetchHttpClient.layer));
+ * ```
+ */
+export const layer = (
+  options: HttpClientOptions,
+): Layer.Layer<ActorTransport, never, HttpClient.HttpClient> =>
   Layer.effect(ActorTransport, make(options));
 
 export const defaultReconnect: Schedule.Schedule<unknown> = Schedule.exponential("100 millis").pipe(

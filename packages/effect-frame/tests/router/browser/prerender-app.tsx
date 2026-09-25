@@ -10,6 +10,7 @@ import { Location, browserLocation, mount, NavigationBehavior } from "effect-fra
 import { Dom, View } from "effect-frame/view";
 import type { Dom as DomTypes } from "effect-frame/view";
 import { Effect, Layer, Option, Schema } from "effect";
+import { FetchHttpClient } from "effect/unstable/http";
 import { Baked, NotFound, Resume, bakedId, noteRoute } from "./prerender-page.js";
 
 export interface PrerenderWindow {
@@ -69,7 +70,7 @@ const layer = Layer.provideMerge(
   HttpTransport.layer({
     baseUrl: `${location.origin}/actors`,
     reconnect: HttpTransport.defaultReconnect,
-  }),
+  }).pipe(Layer.provide(FetchHttpClient.layer)),
 );
 
 // The fixture's entry point: the one place its services are provided.

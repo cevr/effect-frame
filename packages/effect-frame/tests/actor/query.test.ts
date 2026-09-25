@@ -11,6 +11,7 @@ import {
   SubscriptionRef,
 } from "effect";
 import { describe, expect, it } from "effect-bun-test";
+import { HttpTest } from "effect-frame/actor/testing";
 import {
   Actor,
   ActorHost,
@@ -423,30 +424,26 @@ const inProcess = Layer.unwrap(
       maxBodyBytes: HttpServer.defaultMaxBodyBytes,
       form: Option.none(),
     });
-    const context = yield* Effect.context<never>();
-    const run = Effect.runPromiseWith(context);
-    const fetch: HttpTransport.FetchLike = (input, init) => {
-      if (input.endsWith("/query/batch")) {
+    const counted = (request: Request) => {
+      const url = new URL(request.url);
+      if (url.pathname.endsWith("/query/batch")) {
         batchRequests += 1;
       }
-      if (input.endsWith("/snapshot")) {
+      if (url.pathname.endsWith("/snapshot")) {
         snapshotRequests += 1;
       }
-      if (input.includes("/changes?")) {
+      if (url.pathname.endsWith("/changes")) {
         changeStreams += 1;
       }
-      const request = new Request(input, init);
-      if (input.endsWith("/call")) {
-        return run(
-          Effect.tap(server(request.clone()), (response) => recordCall(request, response)),
-        );
+      if (url.pathname.endsWith("/call")) {
+        return Effect.tap(server(request.clone()), (response) => recordCall(request, response));
       }
-      return run(server(request));
+      return server(request);
     };
     return HttpTransport.layer({
       baseUrl: "http://actors.test/actors",
       reconnect: HttpTransport.defaultReconnect,
-    }).pipe(Layer.provide(Layer.succeed(HttpTransport.Fetch, fetch)));
+    }).pipe(Layer.provide(HttpTest.client(counted)));
   }),
 ).pipe(Layer.provide(hostLayer));
 

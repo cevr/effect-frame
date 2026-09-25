@@ -8,6 +8,7 @@ import { ActorTransport, Form, HttpTransport } from "effect-frame/actor/client";
 import type { DurableReceipt, IdentifiedCommandHandle } from "effect-frame/actor/client";
 import { Dom, Html, View } from "effect-frame/view";
 import { Context, Deferred, Effect, Fiber, Layer, Option, Ref, Stream } from "effect";
+import { FetchHttpClient } from "effect/unstable/http";
 import { describe, expect, it } from "effect-bun-test";
 import type { TasksSnapshot, Wire } from "../plain-form-fixture.js";
 import {
@@ -192,7 +193,7 @@ const client = (served: Served) =>
     HttpTransport.layer({
       baseUrl: `${served.url}${actorPrefix}`,
       reconnect: HttpTransport.defaultReconnect,
-    }),
+    }).pipe(Layer.provide(FetchHttpClient.layer)),
   );
 
 /** Put a whole document into the body: the app root and its scripts. */

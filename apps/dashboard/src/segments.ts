@@ -43,7 +43,7 @@ export type OverviewSearch = Schema.Schema.Type<typeof OverviewSearch>;
 /**
  * The overview: five cards over four queries and one actor. The alerts are
  * the page's one live stream. The order book is not route data: the page
- * only commands it, through a `commandRef` its view holds (`commands.ts`).
+ * only commands it, through an `Actor.remoteCommands` reference its view holds (`commands.ts`).
  */
 export const overview = Route.child(dash, "overview", {
   path: "",

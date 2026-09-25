@@ -46,7 +46,7 @@ export const mintedFor = (commandId: CommandId): DurableSendOptions => {
  * Internal. It answers true once: the check consumes the registration, so
  * the same frozen options sent again (an application wrapper that kept
  * them) are a supplied ID, whose ID is already used. The one send path
- * that asks (`ref`'s `send`) asks once per send.
+ * that asks (`Actor.remote`'s `send`) asks once per send.
  */
 export const isMinted = (options: DurableSendOptions | void): boolean =>
   Predicate.isObject(options) && minted.delete(options);

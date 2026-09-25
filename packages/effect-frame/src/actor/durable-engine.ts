@@ -90,7 +90,7 @@ type Wake<State> =
   | { readonly _tag: "Autonomous"; readonly state: State };
 
 /**
- * The private durable engine. The public `durable` adapter and hosted
+ * The private durable engine. The public `Actor.durable` adapter and hosted
  * implementations both open this same engine, so one physical actor has one
  * behavior turn, mailbox worker, state source, and inspection registration.
  * The message codec is the prepared encoded boundary: an admitted payload is

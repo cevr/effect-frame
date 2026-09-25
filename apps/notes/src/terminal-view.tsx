@@ -8,7 +8,7 @@ import type { Note, NotesKey } from "./contract.js";
 import { Notes } from "./contract.js";
 
 /**
- * The terminal page. Setup is the same as the browser page: one `ref`, one
+ * The terminal page. Setup is the same as the browser page: one `Actor.remote`, one
  * local draft, the same `addNote`. Only the tags differ, because a terminal
  * has `box`, `text`, and `input` where a browser has `section`, `ul`, and
  * `li`. The host interface is what the two views share; the tags are not.

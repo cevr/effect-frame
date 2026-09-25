@@ -17,7 +17,7 @@ import type { Alert, Alerts, Memo, Orders, TenantId } from "./contract.js";
  * The four sends the dashboard makes, and the one reading every view
  * shares. The page draws one actor, `Alerts`: its route binding is the only
  * live stream on the page (#25 §4). The order book and the memo are only
- * commanded, so a view holds a `commandRef` to each: it sends, and it reads
+ * commanded, so a view holds an `Actor.remoteCommands` reference to each: it sends, and it reads
  * no snapshot and follows no stream. The framework mints the command id,
  * declares the page's active keys, and applies the refreshes the reply
  * carries; nothing here can fail, and a refusal is a state of the returned

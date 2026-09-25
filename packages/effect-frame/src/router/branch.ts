@@ -818,7 +818,7 @@ interface Instance<R> {
   /**
    * Completes once every query this instance declares has settled: its
    * current entry left `Loading`, `Ready` or `Failed`. An actor binding is
-   * settled when it is bound (`ref` waited for its first snapshot). Read
+   * settled when it is bound (`Actor.remote` waited for its first snapshot). Read
    * at the moment it runs, so it follows a binding the transition moved.
    */
   readonly settled: Effect.Effect<void>;
@@ -1401,7 +1401,7 @@ export const ResolveBeforeRender = Context.Reference<boolean>(
 
 /** Wait for a query entry to leave `Loading`, when the tree resolves before render. */
 const resolved = (tree: TreeState, resource: Resource): Effect.Effect<void> => {
-  // `ref` already waited for an actor's first snapshot.
+  // `Actor.remote` already waited for an actor's first snapshot.
   if (!tree.resolve || resource._tag !== "Query") {
     return Effect.void;
   }

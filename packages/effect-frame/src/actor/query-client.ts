@@ -270,7 +270,7 @@ class QueryCacheKey implements Equal.Equal {
 
 /**
  * The client's query cache. One per client runtime, wired centrally: a view
- * never constructs one, and `ref` reads this same service to learn which
+ * never constructs one, and `Actor.remote` reads this same service to learn which
  * keys to declare active. There is exactly one place that knows what is on
  * screen, so `active` is derived from the cache and never synced beside it.
  */

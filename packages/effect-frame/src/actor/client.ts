@@ -33,7 +33,6 @@ export {
   QueryVersionMismatch,
   StreamEnded,
   UnknownQuery,
-  canonicalize,
   batchedQuery,
   keyOf,
   query,
@@ -52,7 +51,7 @@ export {
   type ResultOf,
 } from "./query.js";
 // Streamed documents: the record channel and the cache's resume.
-export * as Streaming from "./streaming.js";
+export * as Streaming from "./streaming-api.js";
 export {
   QueryCache,
   followQuery,
@@ -74,12 +73,11 @@ export {
   type TransportService,
 } from "./transport.js";
 export * as HttpTransport from "./http/client.js";
-export * as Wire from "./http/wire.js";
 // One path per combinator: `Source.select`, `Source.zip`, and the rest.
 export { Source, type AllValues, type ValueOf } from "./source.js";
 // Plain-form posts and generated fields.
-export * as Form from "./form.js";
-export * as Generated from "./generated.js";
+export * as Form from "./form-api.js";
+export * as Generated from "./generated-api.js";
 // Authorization: who is asking. The rules that judge a principal
 // are server-only (`policy.ts`) and never reach this entry.
 export {

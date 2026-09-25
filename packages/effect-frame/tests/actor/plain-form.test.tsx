@@ -19,6 +19,7 @@ import {
   recordedTransport,
   refusedTitle,
 } from "../plain-form-fixture.js";
+import { withValues, without } from "../../src/actor/form.js";
 
 /**
  * Plain-form posts over a real socket (#21, #32). The browser is `fetch`
@@ -145,7 +146,7 @@ const fillForm = (html: string, formId: string, typed: ReadonlyArray<[string, st
 
 /** The body with one field's value replaced. */
 const withField = (body: string, name: string, value: string): string =>
-  Form.toBody(Form.withValues(Form.fromBody(body), [[name, value]]));
+  Form.toBody(withValues(Form.fromBody(body), [[name, value]]));
 
 /**
  * The actor's committed state at `revision`, read through the same host.
@@ -345,7 +346,7 @@ describe("plain-form posts", () => {
       const resubmit = fill(lost.body, [["title", "milk"]]);
       // The redraw adds only the `$uncertain` marker; every other field is byte-identical.
       expect(hiddenValue(lost.body, "add", "$uncertain")).toBe("true");
-      expect(Form.toBody(Form.without(Form.fromBody(resubmit), ["$uncertain"]))).toBe(body);
+      expect(Form.toBody(without(Form.fromBody(resubmit), ["$uncertain"]))).toBe(body);
 
       const retried = yield* post(served, resubmit);
 
@@ -363,12 +364,10 @@ describe("plain-form posts", () => {
       const served = yield* serve;
       const html = yield* getPage(served);
       const hostile = Form.toBody(
-        Form.withValues(Form.fromBody(fill(html, [["title", "milk"]])), [
-          ["$return", "//evil.test/"],
-        ]),
+        withValues(Form.fromBody(fill(html, [["title", "milk"]])), [["$return", "//evil.test/"]]),
       );
       const absolute = Form.toBody(
-        Form.withValues(Form.fromBody(fill(html, [["title", "milk"]])), [
+        withValues(Form.fromBody(fill(html, [["title", "milk"]])), [
           ["$return", "https://evil.test/"],
         ]),
       );

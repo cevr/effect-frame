@@ -12,7 +12,7 @@ import {
   ActorHost,
 } from "effect-frame/actor";
 import type { QueryKey, TransportService } from "effect-frame/actor";
-import { canonicalize } from "effect-frame/actor/client";
+import { canonicalize } from "../../src/actor/canonical-json.js";
 import type { FollowedQuery, QueryFailure } from "effect-frame/actor/client";
 import { Location, Route, mount as mountRouter, NavigationBehavior } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";

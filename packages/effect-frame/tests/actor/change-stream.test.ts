@@ -12,7 +12,6 @@ import {
 import {
   ActorTransport,
   Unreachable,
-  Wire,
   committedRevision,
   contract,
 } from "effect-frame/actor/client";
@@ -22,6 +21,7 @@ import type {
   Projection,
   TransportService,
 } from "effect-frame/actor/client";
+import * as Wire from "../../src/actor/http/wire.js";
 
 /**
  * #29: the change stream carries state, never command identity. A client

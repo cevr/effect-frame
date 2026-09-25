@@ -33,7 +33,6 @@ import {
   ActorTransport,
   QueryCache,
   Unauthorized,
-  Wire,
   contract,
   followQuery,
   keyOf,
@@ -41,6 +40,7 @@ import {
 } from "effect-frame/actor/client";
 import type { PolicyTable, Subject } from "effect-frame/actor";
 import type { Address, QueryEntry, QueryState, Source } from "effect-frame/actor/client";
+import * as Wire from "../../src/actor/http/wire.js";
 
 /**
  * The Dashboard shape (#17): several queries, one live actor, one command

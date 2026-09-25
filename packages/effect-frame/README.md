@@ -971,7 +971,7 @@ export const addFromCode = (notes: RemoteActorRef<typeof Notes>) =>
 - `effect-frame/actor/client` exports `Generated` (`fromCommandId`,
   `freshId`, `send`, `Input`) and `Form` (`codec`, `Checkbox`,
   `FormContext`, `FormIssues`, `issuesOf`, `encodeKey`, and the field-map
-  helpers). `Wire.paths.form` is `/form`.
+  helpers). A plain post goes to `endpoint` plus `/form`.
 - `View.form` returns `{ submit, issues, commandId }`. The runtime draws
   `method`, `action`, and the hidden `$command`, `$contract`, `$version`,
   `$key`, `$return`, `$form`, `_tag`, and generated inputs in every host.
@@ -1302,8 +1302,9 @@ export const handler = Effect.gen(function* () {
 - A host whose table lacks a declared name fails to build with
   `PolicyNamesMissing`, which lists every miss.
 - `HttpServer.make({ prefix, principal, maxBodyBytes, form })` is the
-  host's one handler. It answers each verb at exactly `prefix +
-Wire.paths.*`, so the app hands it every path under the prefix unchanged.
+  host's one handler. It answers each verb at exactly `prefix` plus
+  `/send`, `/call`, `/snapshot`, `/changes`, `/query`, `/query/batch` or
+  `/form`, so the app hands it every path under the prefix unchanged.
   `principal` is a derivation `(request) => Effect<PrincipalSource>`, run
   once per request for the JSON verbs and the form route alike;
   `HttpServer.anonymous` is the derivation for a host with no sessions. A

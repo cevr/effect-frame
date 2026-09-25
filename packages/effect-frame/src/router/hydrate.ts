@@ -1,4 +1,7 @@
-import { Form, Streaming } from "effect-frame/actor/client";
+// Relative: the form and record plumbing is the framework's, not the public
+// `Form` and `Streaming` namespaces.
+import * as Form from "../actor/form.js";
+import * as Streaming from "../actor/streaming.js";
 import { Dom, View } from "effect-frame/view";
 import { Deferred, Effect, Option } from "effect";
 import type { OpWireService } from "./driven.js";

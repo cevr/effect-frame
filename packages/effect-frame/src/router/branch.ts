@@ -24,11 +24,12 @@ import {
   ActorTransport,
   QueryCache,
   Source,
-  canonicalize,
   keyOf,
   committedRevision,
   QueryState,
 } from "effect-frame/actor/client";
+// Relative: canonical JSON is the framework's, not a public name.
+import { canonicalize } from "../actor/canonical-json.js";
 import type { Node, Remote, ScopesClosed } from "effect-frame/view";
 import { View } from "effect-frame/view";
 import {

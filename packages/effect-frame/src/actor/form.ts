@@ -416,8 +416,8 @@ export const codec = <S extends Schema.Top>(schema: S & Codable<S>) =>
  *
  * @example
  * ```ts
- * const decodeNotes = Form.decode(Notes.raw.message);
- * const message = yield* decodeNotes(Form.fromBody("_tag=Add&text=milk"));
+ * const decodeNotes = decode(Notes.raw.message);
+ * const message = yield* decodeNotes(fromBody("_tag=Add&text=milk"));
  * ```
  */
 export const decode = <S extends Schema.Top>(schema: S) => {

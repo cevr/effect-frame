@@ -62,7 +62,8 @@ export type DerivePrincipal<R = never> = (
 export interface ServerOptions<R = never, FE = never, FR = never> {
   /**
    * Where the handler is mounted. Each verb answers at exactly
-   * `prefix + Wire.paths.*`, so the app routes every path under the prefix
+   * `prefix` plus `/send`, `/call`, `/snapshot`, `/changes`, `/query`,
+   * `/query/batch` or `/form` (`paths` in `wire.ts`), so the app routes every path under the prefix
    * here unchanged, and any other path under it answers 404.
    */
   readonly prefix: Prefix;

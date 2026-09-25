@@ -1,5 +1,7 @@
 import type { ActorTransport } from "effect-frame/actor/client";
-import { QueryCache, Streaming } from "effect-frame/actor/client";
+import { QueryCache } from "effect-frame/actor/client";
+// Relative: writing a shell is the framework's, not the public `Streaming`.
+import * as Streaming from "../../actor/streaming.js";
 import type { CacheContext } from "../../actor/query-client.js";
 import { Deferred, Effect, Equal, Exit, Layer, Option, Schema, Scope, Stream } from "effect";
 import type { BoundaryMarks, Cleanup, Host, PropertyValue, StaticProps } from "../host.js";

@@ -21,11 +21,11 @@ import {
   Principal,
   Refused,
   Unauthorized,
-  Wire,
   committedRevision,
   contract,
 } from "effect-frame/actor/client";
 import type { Address, CommandSettled } from "effect-frame/actor/client";
+import * as Wire from "../../src/actor/http/wire.js";
 
 const Add = Schema.TaggedStruct("Add", { amount: Schema.Finite });
 type Add = Schema.Schema.Type<typeof Add>;

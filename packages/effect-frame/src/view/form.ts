@@ -5,14 +5,18 @@ import type {
   RemoteCommandRef,
   SnapshotOf,
 } from "effect-frame/actor";
-import { CommandId as CommandIdSchema, Form, Generated, Wire } from "effect-frame/actor/client";
+import { CommandId as CommandIdSchema } from "effect-frame/actor/client";
 import { Effect, Option, Predicate, Ref, Schema, Semaphore } from "effect";
 import type { Scope } from "effect";
 import type { MachineEventSchema } from "effect-machine";
 // Relative on purpose: the mark is module-private to the actor area and no
 // public entry exports it (#67 §3). With one module per source file, this
-// is the module the reference itself reads.
+// is the module the reference itself reads. The form, generation, and wire
+// plumbing is the framework's too, not the public namespaces.
 import { mintedFor } from "../actor/command-id.js";
+import * as Form from "../actor/form.js";
+import * as Generated from "../actor/generated.js";
+import * as Wire from "../actor/http/wire.js";
 import { local } from "../actor/actor.js";
 import type { LocalValueRef } from "../actor/actor.js";
 import * as Behavior from "../actor/behavior.js";
@@ -300,7 +304,7 @@ const scriptedSend = <C extends AnyContract, M, Typed extends string>(
         });
       }).pipe(
         Effect.catchTags({
-          SchemaError: (error) => show(Form.issuesOf(error)),
+          SchemaError: (error) => error.pipe(Form.issuesOf, show),
           FormMalformed: (error) => Effect.logWarning("View.form: the form did not nest", error),
         }),
       );

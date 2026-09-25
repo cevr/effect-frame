@@ -5,9 +5,12 @@ pages read them through queries and actor references, draw with typed JSX,
 and move with a router that owns its data.
 
 This README is the reference for writing an app. Every TypeScript block
-below is a region of a file in [`examples/`](examples), which the gate
-typechecks, lints and tests (`tests/examples/`). The words are defined in
-[the glossary](../../CONTEXT.md).
+below is a region of a file in
+[`packages/effect-frame/examples/`](https://github.com/cevr/effect-frame/tree/main/packages/effect-frame/examples),
+which the gate typechecks, lints and tests
+(`packages/effect-frame/tests/examples/`). The words are defined in
+[the glossary](https://github.com/cevr/effect-frame/blob/main/CONTEXT.md). The links point at the repository, so they
+work from the published package too.
 
 ## Rules an app follows
 
@@ -52,11 +55,19 @@ The JSX runtimes are `effect-frame/view/jsx-runtime`,
 `effect-frame/view/jsx-dev-runtime`, and their `view/opentui/` twins. A
 `tsconfig.json` names `"jsxImportSource": "effect-frame/view"`.
 
+That runtime is app config, as the port and the store are, and the app
+reads its config itself: the environment through `Config`, the JSX runtime
+through its `tsconfig.json`. `bun run` and `bun test` read only the
+tsconfig of the working directory, so a server runs from its app directory
+(`bun --cwd <app> server.ts`), and no file names the runtime again.
+
 ## A first app
 
 A counter per name, on one server page each, with the names beside it.
-The files are [`examples/counter/`](examples/counter), and
-`tests/examples/counter.test.tsx` runs them as the server does.
+The files are
+[`packages/effect-frame/examples/counter/`](https://github.com/cevr/effect-frame/tree/main/packages/effect-frame/examples/counter),
+and `packages/effect-frame/tests/examples/counter.test.tsx` runs them as the
+server does.
 
 The contract, the behavior and the query are shared by both sides.
 
@@ -141,6 +152,23 @@ export const host = ActorHost.layer({
 }).pipe(Layer.provide(policies), Layer.orDie);
 ```
 
+A query reads an actor through a reference, as a client does.
+
+<!-- example: examples/features/authorization.server.ts#query-reads-actor -->
+
+```ts
+// A query reads an actor through a reference, as a client does. The host
+// gives each run an `ActorTransport` and a `Scope`: the reference closes
+// when the read ends, so `run` needs no `Effect.scoped`.
+const TotalsLive = implementQuery(Totals, {
+  run: (args) =>
+    Effect.flatMap(
+      Actor.remote(Ledger, { tenant: args.tenant, id: "book" }),
+      (book) => book.state.get,
+    ),
+});
+```
+
 The routes file imports from the router, the view, and the contract.
 
 <!-- example: examples/counter/routes.tsx#imports -->
@@ -161,8 +189,8 @@ Segments are the addresses, and each one declares the data its page needs.
 
 ```tsx
 // A segment is an address: a path template, the params it declares, and the
-// data its page needs. `data` derives each declaration from the params, and
-// the route opens, moves and releases it.
+// data its page needs. `data` derives each declaration from the params and
+// the search, and the route opens, moves and releases it.
 export const shell = Route.segment("shell", {
   path: "/",
   data: () => ({ names: Route.query(CounterNames, {}) }),
@@ -486,6 +514,7 @@ Bun.serve({ port: 3000, fetch: (request) => handler(request) });
 
 | Write                                     | Kind           | For                                                                          |
 | ----------------------------------------- | -------------- | ---------------------------------------------------------------------------- |
+| `Actor.local(Behavior.value(initial))`    | yielded Effect | the view's own state: read `state`, write `send(Value.Set(next))`            |
 | `View.bind(source, f?)`                   | prop or child  | a value that follows a source, projected by `f` where it is drawn            |
 | `View.event(handler \| effect)`           | `on*` prop     | an event handler, or the Effect a handler that reads no event runs           |
 | `View.submit(handler \| effect)`          | `onSubmit`     | a submit whose default action the host suppresses                            |
@@ -585,6 +614,49 @@ export const Reference = (props: { readonly hit: Source<Hit> }) =>
   );
 ```
 
+## View state
+
+A view's own state is a local actor. It lives in the view's scope and
+stops with it. A write is a `send`, whose handle never fails, so it fits a
+handler as it is. A message with a generated field, such as the id of the
+thing it creates, is sent with `Generated.send`, which mints that field
+from the command's own id.
+
+<!-- example: examples/features/view-state.tsx#local-state -->
+
+```tsx
+// A view's own state is a local actor. `Behavior.value` holds one value:
+// `state` reads it, and `send(Value.Set(next))` writes it. The actor lives
+// in the view's scope and stops with it.
+export const Draft = (props: { readonly notes: RemoteActorRef<typeof Notes> }) =>
+  Effect.gen(function* () {
+    const draft = yield* Actor.local(Behavior.value(""));
+    const empty = Source.select(draft.state, (text) => text.trim() === "");
+    // A message with a generated field is sent without it: `Generated.send`
+    // mints `id` from the command's own id, so a retry sends the same one.
+    const add = Effect.gen(function* () {
+      const text = yield* draft.state.get;
+      yield* Generated.send(props.notes, { _tag: "Add", text, pinned: false });
+      yield* draft.send(Value.Set(""));
+    });
+    return (
+      <form onSubmit={View.submit(add)}>
+        <input
+          name="draft"
+          value={View.bind(draft.state)}
+          onInput={View.event((event) => draft.send(Value.Set(event.value)))}
+        />
+        <button type="submit" disabled={View.bind(empty)}>
+          add
+        </button>
+      </form>
+    );
+  });
+```
+
+`LocalValueRef<A>` types a prop that passes such a reference on. State the
+URL keeps is the segment's search or a `UrlState` (see "State in the URL").
+
 ## JSX
 
 The tags are a closed, typed map. A `tsconfig.json` with
@@ -602,14 +674,15 @@ missing`.
 - An `on*` prop is the event in lowercase (`onKeyDown` listens for
   `keydown`) and takes `View.event` or `View.submit`. A plain function
   reports `"wrap the handler with View.event(handler)"`. A handler that
-  reads its event is `View.event((event) => ...)`; one that reads none is
+  reads its event is `View.event((event) => ...)`, where `event.value` is
+  an input's text; one that reads none is
   the Effect itself, `View.event(addPane)`, run once per event. Either way
   the Effect cannot fail: a view has no place to return a failure. A write
   to a local actor fits as it is: `send` and `modify` return a handle and
   never fail, and a stopped actor is a `Rejected` state of that handle.
 - `View.submit` has the host suppress the default action first. A form's
-  `onSubmit` takes only that kind, `View.submit` or a `View.form` binding's
-  `submit`, so a form never posts natively by mistake. A view writes no
+  `onSubmit` takes only that kind, `View.submit` or the `submit` of
+  `View.form`'s result, so a form never posts natively by mistake. A view writes no
   `method` or `action`: the runtime writes a command form's plain post.
 - A void element (`input`, `img`, `br`) holds no children.
 
@@ -741,7 +814,7 @@ export const App = Route.client(
   `state` follows the reference the route holds now, and a send names it,
   `Effect.flatMap(props.data.counter.ref.get, (ref) => ref.send(message))`.
 - `Route.commandRef(contract, key)` declares an actor the page only
-  commands. Its binding is `{ ref }`, a `Source<RemoteCommandRef<C>>` the
+  commands: the route's form of `Actor.remoteCommands`. Its binding is `{ ref }`, a `Source<RemoteCommandRef<C>>` the
   route opens, moves with its params, and releases; it reads no snapshot
   and follows no stream.
 - A view written apart from its segment types its props from the segment:
@@ -765,7 +838,62 @@ it`). In a `.tsx` file the generic needs its trailing comma. Do not type
 - A mode constructor takes a branch of a root segment only. A mode is the
   constructor; no route value carries a mode field.
 
-See [the public route design](../../docs/design/route-public.md).
+See the public route design, [`docs/design/route-public.md`](https://github.com/cevr/effect-frame/blob/main/docs/design/route-public.md).
+
+### State in the URL
+
+A value the URL keeps, and the page's data may read, is the segment's
+search. A view keeps its own state in the URL with `UrlState.make(codec)`:
+it claims keys the route does not hold, and a key the route or another view
+holds dies with `UrlState.UrlStateConflict`. Both move with `push` or
+`replace`, and both take a value or an updater.
+
+<!-- example: examples/features/view-state.tsx#url-state -->
+
+```tsx
+// A filter the URL keeps, and the page's data may read, is the segment's
+// search. `withDefault` fills a missing key.
+export const tasks = Route.segment("tasks", {
+  path: "/tasks",
+  search: Route.search(
+    Schema.Struct({
+      filter: Schema.Literals(["all", "open", "done"]).pipe(Route.withDefault("all")),
+    }),
+  ),
+});
+
+// A view keeps its own state in the URL with `UrlState`: it claims keys the
+// route does not hold, and its codec decodes an absent key.
+const Panel = Route.search(
+  Schema.Struct({ panel: Schema.Literals(["closed", "open"]).pipe(Route.withDefault("closed")) }),
+);
+
+export const TasksView = (props: Route.PropsOf<typeof tasks>) =>
+  Effect.gen(function* () {
+    const panel = yield* UrlState.make(Panel);
+    return (
+      <section>
+        <p id="filter">{View.bind(props.search, (search) => search.filter)}</p>
+        {/* A search move takes a value, or an updater of the latest one. */}
+        <button id="open" onClick={View.event(props.replaceSearch({ filter: "open" }))}>
+          open
+        </button>
+        <button
+          id="all"
+          onClick={View.event(props.pushSearch((search) => ({ ...search, filter: "all" })))}
+        >
+          all
+        </button>
+        <button id="details" onClick={View.event(panel.push({ panel: "open" }))}>
+          details
+        </button>
+        <p id="panel">{View.bind(panel.state, (state) => state.panel)}</p>
+      </section>
+    );
+  });
+
+export const Tasks = Route.client("tasks", Route.leaf(tasks, TasksView));
+```
 
 ### Scroll and focus
 
@@ -804,7 +932,7 @@ Back and Forward do. It has no surface, so a landing places nothing.
   `followLinks` always pushes; a move that replaces is a `Link` with
   `replace`.
 
-See [the navigation behavior design](../../docs/design/navigation-behavior.md).
+See the navigation behavior design, [`docs/design/navigation-behavior.md`](https://github.com/cevr/effect-frame/blob/main/docs/design/navigation-behavior.md).
 
 ### Server documents
 
@@ -859,7 +987,7 @@ well-formed text that is not empty and not `.` or `..`, and a search key or
 value is well-formed text. `href` dies with `Route.UrlValueRejected` for
 another value, and parse never yields one.
 
-See [the route data design](../../docs/design/route-data.md).
+See the route data design, [`docs/design/route-data.md`](https://github.com/cevr/effect-frame/blob/main/docs/design/route-data.md).
 
 ### Prerendered pages
 
@@ -947,14 +1075,14 @@ export const pages = (
   baked: write its `resumeCodec` script in `document(page)`, as SSR does.
 
 The blog app (`apps/blog`) is a whole prerendered site. See
-[the prerender design](../../docs/design/prerender.md).
+the prerender design, [`docs/design/prerender.md`](https://github.com/cevr/effect-frame/blob/main/docs/design/prerender.md).
 
 ## Plain-form commands
 
 A command form works with no JavaScript. The server renders a real
 `<form method="post">`; the hydrated page sends the same message over the
 actor transport. The first app's `Controls` is one; the server's
-`HttpServer.make` above serves its route at `/actors/form`.
+`HttpServer.layer` above serves its route at `/actors/form`.
 
 <!-- example: examples/features/forms.tsx#message -->
 
@@ -1029,7 +1157,7 @@ export const addFromCode = (notes: RemoteActorRef<typeof Notes>) =>
 - `HostEvent.form` carries the submitted fields on a DOM submit.
   `Prepared.post` carries a form's plain post.
 
-See [the plain-form design](../../docs/design/plain-forms.md).
+See the plain-form design, [`docs/design/plain-forms.md`](https://github.com/cevr/effect-frame/blob/main/docs/design/plain-forms.md).
 
 ## Optimistic commands
 
@@ -1066,7 +1194,7 @@ export const program = Effect.gen(function* () {
 - A query `override` shows a value as stale until any authoritative value
   replaces it: a command reply's refresh, a `refresh`, or a new declaration.
 
-See [the optimistic send design](../../docs/design/optimistic.md).
+See the optimistic send design, [`docs/design/optimistic.md`](https://github.com/cevr/effect-frame/blob/main/docs/design/optimistic.md).
 
 ## Streamed documents
 
@@ -1151,7 +1279,7 @@ export const start = Effect.gen(function* () {
   and `setupStarted`. A custom host may omit them. The HTML host writes
   `<!--frame-boundary:…-->` marks around each readiness boundary.
 
-See [the streaming design](../../docs/design/streaming.md).
+See the streaming design, [`docs/design/streaming.md`](https://github.com/cevr/effect-frame/blob/main/docs/design/streaming.md).
 
 ## Server-driven views
 
@@ -1233,7 +1361,7 @@ export const follow = (key: RoomKey, root: Element, send: (event: Remote.RemoteE
   that drew the node ends. The recorder sends it as a `Forget` op, so a
   long session holds only live nodes.
 
-See [the op wire design](../../docs/design/op-wire.md).
+See the op wire design, [`docs/design/op-wire.md`](https://github.com/cevr/effect-frame/blob/main/docs/design/op-wire.md).
 
 ## Authorization
 
@@ -1354,7 +1482,8 @@ export const handler = Effect.gen(function* () {
 - `HttpServer.shareSessions({ read, follow })` keeps one subscription per
   session key, shared by every connection on it and released when the last
   one closes.
-- `HttpServer.make` and celld's `defineFrameHost` run the derivation in
+- `HttpServer.make` and the Durable Object host's `defineFrameHost`
+  (`packages/host-durable-object`) run the derivation in
   the context the app was built in, so a derivation may need
   `ActorTransport` and any service that context provides.
 - `QueryCache` has `principalChanged`: every live entry drops its value and
@@ -1366,7 +1495,7 @@ export const handler = Effect.gen(function* () {
   after a restart. It checks no policy, returns no state, and is never on
   the wire.
 
-See [the authorization design](../../docs/design/authorization.md).
+See the authorization design, [`docs/design/authorization.md`](https://github.com/cevr/effect-frame/blob/main/docs/design/authorization.md).
 
 ## Browser inspection
 
@@ -1413,5 +1542,5 @@ The browser-safe `effect-frame/inspection` subpath exports `Protocol` (the
 versioned wire contract) and `attachGateway`. A development entry attaches
 its root to a loopback gateway; a production entry imports nothing from
 this subpath and carries none of it. The gateway and the reader are the
-`effect-frame` executable in [`packages/inspect`](../inspect/README.md).
-See [the inspection gateway design](../../docs/design/inspection-gateway.md).
+`effect-frame` executable in [`packages/inspect`](https://github.com/cevr/effect-frame/blob/main/packages/inspect/README.md).
+See the inspection gateway design, [`docs/design/inspection-gateway.md`](https://github.com/cevr/effect-frame/blob/main/docs/design/inspection-gateway.md).

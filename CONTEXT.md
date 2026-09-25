@@ -36,7 +36,7 @@ A message a client submits to an actor to change its state. Every state change i
 _Avoid_: Mutation, action, server function.
 
 **View**:
-A function from props to an Effect that produces a node tree once, in a scope that owns everything the setup opened. A view is composed by yielding it inside another view's setup, never by placing it as a JSX tag; a JSX tag is a synchronous function or an intrinsic name. A view names the props it is given, even when it reads none: a leaf types them `Route.PropsOf<typeof segment>`. An exported view with no parameter is refused by the Effect language service's `lazyEffect` rule.
+A function from props to an Effect that produces a node tree once, in a scope that owns everything the setup opened. A view is composed by yielding it inside another view's setup, never by placing it as a JSX tag; a JSX tag is a synchronous function or an intrinsic name. A view names the props it is given, even when it reads none: a leaf types them `Route.PropsOf<typeof segment>`. A view's own state is a local actor, `Actor.local(Behavior.value(initial))`, which stops with the view's scope. An exported view with no parameter is refused by the Effect language service's `lazyEffect` rule.
 _Code_: `(props) => Effect.gen(function* () { ... })`, typed `View.View<Props, E, R>`. `View.mount` puts a view on a host; the router's `mount` puts a route tree on one.
 _Avoid_: Component, widget, render function.
 
@@ -52,7 +52,7 @@ _Avoid_: Teleport, overlay root.
 
 **Source**:
 A value that changes: its current value and a stream of its changes. A view reads state through sources and binds them into nodes, so a change moves only what reads it.
-_Code_: `Source<A>` and the `Source` namespace (`Source.select`, `Source.zip`, `Source.switchMap`, ...).
+_Code_: `Source<A>` and the `Source` namespace (`Source.select`, `Source.zip`, `Source.zipWith`, `Source.switchMap`, ...).
 _Avoid_: Signal, observable, atom, store.
 
 **Bound value**:
@@ -62,7 +62,7 @@ _Avoid_: Binding (that word is a route's data), reactive prop.
 
 **Prepared handler**:
 An event handler made ready for a host: an Effect to run on the event, and whether the host suppresses the default action.
-_Code_: `View.event(handler)` or `View.event(effect)` for a handler that reads no event (kind `"event"`), `View.submit(handler)` and a `View.form` binding's `submit` (kind `"submit"`), the type `Prepared`.
+_Code_: `View.event(handler)` or `View.event(effect)` for a handler that reads no event (kind `"event"`), `View.submit(handler)` and the `submit` of `View.form`'s result (kind `"submit"`), the type `Prepared`.
 _Avoid_: Callback, listener, event prop.
 
 **Rendering mode**:
@@ -99,7 +99,7 @@ _Avoid_: Path string, loader, route (a route is the mounted tree).
 
 **Declaration**:
 One item of a segment's `data`: a query with its arguments, an actor with its key, or a command-only actor. The route derives it from the params and search, opens it when the segment enters, and moves or releases it as they change.
-_Code_: `Route.query(contract, args)`, `Route.actor(contract, key, { behavior })`, `Route.commandRef(contract, key)`.
+_Code_: `Route.query(contract, args)`, `Route.actor(contract, key, { behavior })`, `Route.commandRef(contract, key)` (the route's form of `Actor.remoteCommands`).
 _Avoid_: Loader, fetcher, resource.
 
 **Binding**:

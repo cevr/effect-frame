@@ -25,7 +25,7 @@ export const ListIndexLive = implementQuery(ListIndex, {
         }),
       ),
       (name) => Effect.map(notesOf(name), (notes) => ({ name, count: notes.length })),
-    ).pipe(Effect.scoped),
+    ),
 });
 
 export const ListCountsLive = implementQuery(ListCounts, {
@@ -33,5 +33,5 @@ export const ListCountsLive = implementQuery(ListCounts, {
     Effect.map(notesOf(args.list), (notes) => {
       const visible = notes.filter(shows(Option.fromNullishOr(args.filter)));
       return { total: visible.length, done: visible.filter((note) => note.done).length };
-    }).pipe(Effect.scoped),
+    }),
 });

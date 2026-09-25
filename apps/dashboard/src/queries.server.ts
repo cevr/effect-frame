@@ -16,7 +16,7 @@ import { Funnel, OrderDetail, OrderList, Revenue, Slowest, TenantInfo, within } 
 const ordersOf = (tenant: TenantId) =>
   Effect.flatMap(Actor.remote(Orders, { tenant }), (book) =>
     Effect.map(book.state.get, (snapshot) => snapshot.orders),
-  ).pipe(Effect.scoped);
+  );
 
 const directory = new Map([
   ["acme", { name: "Acme Co", plan: "growth" }],
@@ -33,7 +33,7 @@ export const TenantInfoLive = implementQuery(TenantInfo, {
       const alerts = yield* Actor.remote(Alerts, { tenant });
       const snapshot = yield* alerts.state.get;
       return { ...found.value, alerts: snapshot.items.filter((item) => !item.acked).length };
-    }).pipe(Effect.scoped),
+    }),
 });
 
 export const RevenueLive = implementQuery(Revenue, {

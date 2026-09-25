@@ -10,8 +10,8 @@ import { Counter, CounterNames, Increment, Reset, counterBehavior } from "./cont
 
 // #region segments
 // A segment is an address: a path template, the params it declares, and the
-// data its page needs. `data` derives each declaration from the params, and
-// the route opens, moves and releases it.
+// data its page needs. `data` derives each declaration from the params and
+// the search, and the route opens, moves and releases it.
 export const shell = Route.segment("shell", {
   path: "/",
   data: () => ({ names: Route.query(CounterNames, {}) }),

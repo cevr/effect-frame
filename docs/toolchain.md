@@ -65,12 +65,8 @@ Installed source:
 - `node_modules/effect-bun-test/src/index.ts`
 - The exported `oxlint-plugin-effect/presets/recommended` rule map.
 
-Guidance:
-
-- `/Users/cvr/Developer/personal/dotfiles/skills/project-scaffolding/SKILL.md`
-- `/Users/cvr/Developer/personal/dotfiles/skills/project-scaffolding/references/monorepo.md`
-- `/Users/cvr/Developer/personal/dotfiles/skills/project-scaffolding/templates/tsconfig.json`
-- `/Users/cvr/Developer/personal/dotfiles/skills/project-scaffolding/templates/turbo.json`
-- `/Users/cvr/Developer/personal/dotfiles/skills/project-scaffolding/templates/ci.yml`
+Guidance: the `project-scaffolding` skill in the maintainer's dotfiles,
+its `SKILL.md` and `references/monorepo.md`, and its `tsconfig.json`,
+`turbo.json` and `ci.yml` templates.
 
 Version metadata came from the npm registry with `npm view` on the report date.

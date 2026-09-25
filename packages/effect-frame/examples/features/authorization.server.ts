@@ -17,6 +17,10 @@ import { Ledger, Totals, ledgerBehavior } from "./ledger.js";
 
 const LedgerLive = implementTransparent(Ledger, { behavior: ledgerBehavior });
 
+// #region query-reads-actor
+// A query reads an actor through a reference, as a client does. The host
+// gives each run an `ActorTransport` and a `Scope`: the reference closes
+// when the read ends, so `run` needs no `Effect.scoped`.
 const TotalsLive = implementQuery(Totals, {
   run: (args) =>
     Effect.flatMap(
@@ -24,6 +28,7 @@ const TotalsLive = implementQuery(Totals, {
       (book) => book.state.get,
     ),
 });
+// #endregion query-reads-actor
 
 // #region policy
 const decodeLedgerKey = Schema.decodeUnknownOption(Ledger.key);

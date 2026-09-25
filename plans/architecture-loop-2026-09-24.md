@@ -271,6 +271,14 @@ Apply groups (one after the other in the worktree):
 | 7 guards | P2-G1, P2-G2, P2-G3, P2-G4, P2-G6, P2-G7, P2-G8 |
 | 8 EGW | adopt the release in bible-tools `apps/egw-search` (AP12, delete `whileMounted` and `segments.ts` if unneeded, `View.event(effect)`, union `Match`) |
 
+Pass 2 rows:
+
+| ID   | Candidate                                                                          | North star     | Files                                                                                                 | Lines removed | Risk    | Status        |
+| ---- | ---------------------------------------------------------------------------------- | -------------- | ----------------------------------------------------------------------------------------------------- | ------------- | ------- | ------------- |
+| W2   | `Bound` keeps its projection; a projected row bind paints in its list's flush      | declarative    | `view/view.ts`, `view/runtime.ts`, `tests/view/projected-bind.test.tsx`, README, changeset (minor)    | 9 (+25 src)   | low-med | done 0cb0e0a  |
+| W7   | Streaming proofs wait on chunks, not sleeps (record order, early patch, nested, ended early) | explicit       | `tests/view/streaming.test.tsx`                                                                       | 19 (+39 test) | low     | done 1395218  |
+| R-Q4 | A prerender page's writes (and the client and manifest writes) run uninterruptibly | effect-native  | `router/prerender.server.ts`, `router/prerender-output.server.ts`, `tests/router/prerender-build.test.tsx`, changeset (patch) | 9 (+16 src)   | low     | done c51f860  |
+
 
 ## Close
 

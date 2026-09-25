@@ -1,4 +1,4 @@
-import type { Source } from "effect-frame/actor";
+import { Source } from "effect-frame/actor/client";
 import type { Host, View } from "effect-frame/view";
 import { mount as mountView, render } from "effect-frame/view";
 import { read as readInspection, register as registerInspection } from "./route-inspection.js";
@@ -153,7 +153,7 @@ const notFoundRoute = <R>(view: View.View<NotFoundProps, never, R>): AnyRoute<R>
           instance: { _tag: "RouteInstance" },
           setup: Effect.map(
             view({
-              url: { get: SubscriptionRef.get(current), changes: SubscriptionRef.changes(current) },
+              url: Source.fromSubscriptionRef(current),
             }),
             (node) => LeafRoot.mark(node, cell),
           ),

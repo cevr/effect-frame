@@ -141,7 +141,7 @@ describe("Effect-derived sources", () => {
           return yield* Effect.fail("invalid");
         });
 
-      const derived = yield* Source.mapEffect(cell.state, evaluate);
+      const derived = yield* Source.load(cell.state, evaluate);
       const observed = yield* Stream.take(derived.changes, 6).pipe(
         Stream.runCollect,
         Effect.forkScoped,
@@ -196,7 +196,7 @@ describe("Effect-derived sources", () => {
       const released = yield* Ref.make(false);
       const owner = yield* Scope.make();
       const cell = yield* Cell.make(0);
-      const derived = yield* Source.mapEffect(cell.state, () =>
+      const derived = yield* Source.load(cell.state, () =>
         Effect.acquireRelease(Effect.as(Deferred.succeed(started, void 0), "value"), () =>
           Ref.set(released, true),
         ).pipe(Effect.flatMap(() => Deferred.await(gate))),
@@ -207,6 +207,107 @@ describe("Effect-derived sources", () => {
 
       expect(yield* Ref.get(released)).toBe(true);
       expect(yield* derived.get).toEqual(QueryState.Loading());
+    }),
+  );
+});
+
+describe("composed sources", () => {
+  it.effect("succeed reads its value and emits it once", () =>
+    Effect.gen(function* () {
+      const fixed = Source.succeed("only");
+      expect(yield* fixed.get).toBe("only");
+      expect(Array.from(yield* Stream.runCollect(fixed.changes))).toEqual(["only"]);
+    }),
+  );
+
+  it.scoped("fromSubscriptionRef reads the value now, then every set", () =>
+    Effect.gen(function* () {
+      const ref = yield* SubscriptionRef.make(0);
+      const source = Source.fromSubscriptionRef(ref);
+      const seen = yield* Stream.take(source.changes, 2).pipe(Stream.runCollect, Effect.forkScoped);
+      yield* yieldFibers;
+      yield* SubscriptionRef.set(ref, 1);
+      expect(Array.from(yield* Fiber.join(seen))).toEqual([0, 1]);
+      expect(yield* source.get).toBe(1);
+    }),
+  );
+
+  it.scoped("switchMap follows the inner source the latest value names", () =>
+    Effect.gen(function* () {
+      const left = yield* SubscriptionRef.make("left 0");
+      const right = yield* SubscriptionRef.make("right 0");
+      const side = yield* SubscriptionRef.make<"left" | "right">("left");
+      const refs = { left, right };
+      const followed = Source.switchMap(Source.fromSubscriptionRef(side), (name) =>
+        Source.fromSubscriptionRef(refs[name]),
+      );
+      const seen = yield* Stream.take(followed.changes, 3).pipe(
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* yieldFibers;
+      expect(yield* followed.get).toBe("left 0");
+
+      yield* SubscriptionRef.set(side, "right");
+      yield* yieldFibers;
+      // The dropped inner source no longer reaches the followed one.
+      yield* SubscriptionRef.set(left, "left 1");
+      yield* yieldFibers;
+      yield* SubscriptionRef.set(right, "right 1");
+      expect(Array.from(yield* Fiber.join(seen))).toEqual(["left 0", "right 0", "right 1"]);
+      expect(yield* followed.get).toBe("right 1");
+    }),
+  );
+
+  it.scoped("flatten follows the source the outer source holds now", () =>
+    Effect.gen(function* () {
+      const inner = yield* SubscriptionRef.make(1);
+      const outer = yield* SubscriptionRef.make(Source.fromSubscriptionRef(inner));
+      const flat = Source.flatten(Source.fromSubscriptionRef(outer));
+      expect(yield* flat.get).toBe(1);
+      yield* SubscriptionRef.set(outer, Source.succeed(7));
+      expect(yield* flat.get).toBe(7);
+    }),
+  );
+
+  it.scoped("dedupe drops a change equal to the one before it", () =>
+    Effect.gen(function* () {
+      const ref = yield* SubscriptionRef.make("a");
+      const deduped = Source.dedupe(
+        Source.fromSubscriptionRef(ref),
+        (left: string, right: string) => left === right,
+      );
+      const seen = yield* Stream.take(deduped.changes, 2).pipe(
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* yieldFibers;
+      yield* SubscriptionRef.set(ref, "a");
+      yield* yieldFibers;
+      yield* SubscriptionRef.set(ref, "b");
+      expect(Array.from(yield* Fiber.join(seen))).toEqual(["a", "b"]);
+    }),
+  );
+
+  it.scoped("mapEffect runs the Effect on a read and on each change, in order", () =>
+    Effect.gen(function* () {
+      const ref = yield* SubscriptionRef.make(1);
+      const runs = yield* Ref.make<ReadonlyArray<number>>([]);
+      const doubled = Source.mapEffect(Source.fromSubscriptionRef(ref), (value) =>
+        Effect.as(
+          Ref.update(runs, (all) => [...all, value]),
+          value * 2,
+        ),
+      );
+      expect(yield* doubled.get).toBe(2);
+      const seen = yield* Stream.take(doubled.changes, 2).pipe(
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* yieldFibers;
+      yield* SubscriptionRef.set(ref, 5);
+      expect(Array.from(yield* Fiber.join(seen))).toEqual([2, 10]);
+      expect(yield* Ref.get(runs)).toEqual([1, 1, 5]);
     }),
   );
 });

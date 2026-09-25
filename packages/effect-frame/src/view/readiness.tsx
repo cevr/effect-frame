@@ -104,7 +104,7 @@ const makeRegistry: Effect.Effect<OwnRegistry> = Effect.gen(function* () {
         ),
         () => remove(registration),
       ),
-    entries: { get: SubscriptionRef.get(ref), changes: SubscriptionRef.changes(ref) },
+    entries: Source.fromSubscriptionRef(ref),
     onPending: (listener) => {
       listeners.add(listener);
       return () => {

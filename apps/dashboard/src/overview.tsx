@@ -1,9 +1,9 @@
-import { Behavior, Value, select, spawn } from "effect-frame/actor/client";
+import { Behavior, Source, Value, select, spawn } from "effect-frame/actor/client";
 import { Link, link } from "effect-frame/router";
 import type { Route } from "effect-frame/router";
 import { For, Loading, View, orErrored, ready, readyWithStale } from "effect-frame/view";
 import { Effect, Option } from "effect";
-import { ack, fulfil, sender, snapshotOf } from "./commands.js";
+import { ack, fulfil, sender } from "./commands.js";
 import type { OrdersCommands } from "./commands.js";
 import { Orders } from "./contract.js";
 import type { Alert, Order } from "./contract.js";
@@ -122,7 +122,10 @@ const SlowestCard = (props: OverviewProps) =>
 /** The live alerts: the route's `Alerts` actor, followed as it changes. */
 const AlertsCard = (props: OverviewProps) =>
   Effect.sync(() => {
-    const items = select(snapshotOf(props.data.alerts), (snapshot) => snapshot.items);
+    const items = select(
+      Source.switchMap(props.data.alerts, (current) => current.state),
+      (snapshot) => snapshot.items,
+    );
     return (
       <section id="alerts-card" class="card">
         <h2>alerts</h2>

@@ -217,13 +217,12 @@ describe("scoped view test harness", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const count = yield* spawn(Behavior.value(0));
-      let source: SourceType<QueryState<number, never>> = yield* Source.mapEffect(
-        count.state,
-        (value) => Effect.andThen(Effect.yieldNow, Effect.succeed(value + 1)),
+      let source: SourceType<QueryState<number, never>> = yield* Source.load(count.state, (value) =>
+        Effect.andThen(Effect.yieldNow, Effect.succeed(value + 1)),
       );
       for (let index = 1; index < 24; index += 1) {
         const previous = source;
-        source = yield* Source.mapEffect(previous, (state) =>
+        source = yield* Source.load(previous, (state) =>
           Match.value(state).pipe(
             Match.tagsExhaustive({
               Loading: () => Effect.never,

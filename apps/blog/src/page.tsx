@@ -1,9 +1,9 @@
-import type { RemoteActorRef, Source } from "effect-frame/actor/client";
-import { select } from "effect-frame/actor/client";
+import type { RemoteActorRef } from "effect-frame/actor/client";
+import { Source, select } from "effect-frame/actor/client";
 import { Router } from "effect-frame/router";
 import type { Route } from "effect-frame/router";
 import { View, orErrored, ready } from "effect-frame/view";
-import { Effect, Stream } from "effect";
+import { Effect } from "effect";
 import type { Slug } from "./contract.js";
 import { Heart, Reactions } from "./contract.js";
 import type { Block, PostBodyValue } from "./queries.js";
@@ -96,10 +96,7 @@ export const PostView = (props: PostProps) =>
     });
     // One island per post: a move to another post opens a new one.
     const island = yield* View.list({
-      each: {
-        get: Effect.flatMap(props.data.reactions.get, opened),
-        changes: Stream.mapEffect(props.data.reactions.changes, opened),
-      },
+      each: Source.mapEffect(props.data.reactions, opened),
       keyBy: (one: Opened) => one.slug,
       row: (one) =>
         Effect.flatMap(one.get, (current) =>

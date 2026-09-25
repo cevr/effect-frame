@@ -16,7 +16,6 @@ import type {
   RemoteActorRef,
   ResultOf,
   SnapshotOf,
-  Source,
   TransportReadError,
   TransportService,
 } from "effect-frame/actor";
@@ -24,6 +23,7 @@ import {
   ActorTransport,
   QueryCache,
   Ready,
+  Source,
   canonicalize,
   keyOf,
   committedRevision,
@@ -1568,10 +1568,9 @@ const actorBinding = (
   state: Source<InstanceState<unknown, unknown>>,
 ): Binding => {
   let current = first;
-  const exposed: Source<RemoteActorRef<AnyContract>> = {
-    get: Effect.flatMap(state.get, (value) => refIn(value, name)),
-    changes: Stream.mapEffect(state.changes, (value) => refIn(value, name)),
-  };
+  const exposed: Source<RemoteActorRef<AnyContract>> = Source.mapEffect(state, (value) =>
+    refIn(value, name),
+  );
   return {
     current: () => current,
     exposed,
@@ -1656,10 +1655,7 @@ const slotSetup = <R>(slot: Slot<R>): Effect.Effect<Node, never, R> =>
       }
     }
     return yield* View.list({
-      each: {
-        get: SubscriptionRef.get(slot.outlet),
-        changes: SubscriptionRef.changes(slot.outlet),
-      },
+      each: Source.fromSubscriptionRef(slot.outlet),
       keyBy: (instance) => instance.key,
       row: (item) =>
         Effect.flatMap(item.get, (instance) =>
@@ -1728,12 +1724,6 @@ const commitSlot = Effect.fn("Branch.commitSlot")(function* <R>(slot: Slot<R>, p
     yield* exited.value.close;
     yield* exited.value.release;
   }
-});
-
-/** A Source that holds one value. */
-const constant = <A>(value: A): Source<A> => ({
-  get: Effect.succeed(value),
-  changes: Stream.make(value),
 });
 
 /** What a pending presentation draws: nothing yet, the fallback, or the view. */
@@ -1838,7 +1828,7 @@ const presentWith = <R>(
           owner,
         );
         return yield* View.list({
-          each: { get: SubscriptionRef.get(shown), changes: SubscriptionRef.changes(shown) },
+          each: Source.fromSubscriptionRef(shown),
           keyBy: (one) => one.key,
           row: (item) => Effect.map(item.get, (one) => one.node),
         });
@@ -2003,7 +1993,7 @@ const makeBranch = <
             }),
           ),
           Effect.sync(() =>
-            boundary.setupShell(errored(constant<RouteFailure<E>>({ _tag: "Setup", error }))),
+            boundary.setupShell(errored(Source.succeed<RouteFailure<E>>({ _tag: "Setup", error }))),
           ),
         ),
     });
@@ -2031,7 +2021,7 @@ const makeBranch = <
           seg.name,
           identity,
           values,
-          () => errored(constant<RouteFailure<E>>({ _tag: "Declaration", error })),
+          () => errored(Source.succeed<RouteFailure<E>>({ _tag: "Declaration", error })),
           behavior,
         ),
       );
@@ -2059,10 +2049,7 @@ const makeBranch = <
       values,
       refs: new Map(),
     });
-    const stateSource: Source<InstanceState<Params, Search>> = {
-      get: SubscriptionRef.get(state),
-      changes: SubscriptionRef.changes(state),
-    };
+    const stateSource: Source<InstanceState<Params, Search>> = Source.fromSubscriptionRef(state);
     const bindings = new Map<string, Binding>();
     for (const one of acquired) {
       if (one.acquired.resource._tag === "Query") {

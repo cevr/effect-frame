@@ -1,9 +1,9 @@
-import type { RemoteActorRef, Source } from "effect-frame/actor/client";
-import { Behavior, Value, select, spawn } from "effect-frame/actor/client";
+import type { RemoteActorRef } from "effect-frame/actor/client";
+import { Behavior, Source, Value, select, spawn } from "effect-frame/actor/client";
 import { Link, Router, link } from "effect-frame/router";
 import type { Route } from "effect-frame/router";
 import { For, View, orErrored, ready } from "effect-frame/view";
-import { Effect, Option, Stream } from "effect";
+import { Effect, Option, Scope } from "effect";
 import { dispatch, writeDraft } from "./commands.js";
 import type { Note } from "./contract.js";
 import { Add, Notes } from "./contract.js";
@@ -43,14 +43,7 @@ interface Opened {
 const filtered = (
   notes: Source<ReadonlyArray<Note>>,
   filter: Source<Option.Option<Filter>>,
-): Source<ReadonlyArray<Note>> => ({
-  get: Effect.flatMap(filter.get, (only) =>
-    Effect.map(notes.get, (all) => all.filter(shows(only))),
-  ),
-  changes: Stream.map(Stream.zipLatest(notes.changes, filter.changes), ([all, only]) =>
-    all.filter(shows(only)),
-  ),
-});
+): Source<ReadonlyArray<Note>> => Source.zip(notes, filter, (all, only) => all.filter(shows(only)));
 
 const ListBody = (props: BodyProps) =>
   Effect.gen(function* () {
@@ -63,9 +56,8 @@ const ListBody = (props: BodyProps) =>
     const status = yield* spawn(Behavior.value("idle"));
     const scope = yield* Effect.scope;
     const follow = (state: Source<{ readonly _tag: string }>) =>
-      Effect.forkIn(
-        Stream.runForEach(state.changes, (current) => status.send(Value.Set(current._tag))),
-        scope,
+      Source.on(state, (current) => status.send(Value.Set(current._tag))).pipe(
+        Scope.provide(scope),
       );
 
     const here = yield* (yield* Router).current.get;
@@ -156,10 +148,7 @@ export const ListView = (props: ListProps) =>
       ]);
     // One body per list: a new list is a new body over the route's new reference.
     const body = yield* View.list({
-      each: {
-        get: Effect.flatMap(props.data.notes.get, opened),
-        changes: Stream.mapEffect(props.data.notes.changes, opened),
-      },
+      each: Source.mapEffect(props.data.notes, opened),
       keyBy: (one: Opened) => one.name,
       row: (one) =>
         Effect.flatMap(one.get, (current) =>

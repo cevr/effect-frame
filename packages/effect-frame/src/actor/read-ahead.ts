@@ -1,5 +1,6 @@
-import { Effect, Option, Stream } from "effect";
+import { Effect, Option } from "effect";
 import type { QueryState } from "./query.js";
+import { mapEffect } from "./source.js";
 import type { Source } from "./source.js";
 
 /**
@@ -74,11 +75,5 @@ export const readAhead = <A, E>(
       Option.getOrElse(() => state),
     );
   };
-  return holding(
-    {
-      get: Effect.flatMap(source.get, shown),
-      changes: Stream.mapEffect(source.changes, shown),
-    },
-    peek,
-  );
+  return holding(mapEffect(source, shown), peek);
 };

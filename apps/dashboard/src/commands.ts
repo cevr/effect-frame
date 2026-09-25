@@ -8,7 +8,7 @@ import type {
   RemoteCommandRef,
   Source,
 } from "effect-frame/actor/client";
-import { Effect, Option, Semaphore, Stream } from "effect";
+import { Effect, Option, Semaphore } from "effect";
 import type { Scope } from "effect";
 import { AlertsEvent } from "./contract.js";
 import type { Alert, Alerts, Memo, Orders, TenantId } from "./contract.js";
@@ -112,10 +112,4 @@ export const writeMemo = Effect.fn("Dashboard.writeMemo")(function* (
 ) {
   const current = yield* memo.current;
   return yield* current.send({ _tag: "Write", text });
-});
-
-/** The snapshot of whichever reference a route binding holds now. */
-export const snapshotOf = <S>(binding: Source<{ readonly state: Source<S> }>): Source<S> => ({
-  get: Effect.flatMap(binding.get, (current) => current.state.get),
-  changes: Stream.switchMap(binding.changes, (current) => current.state.changes),
 });

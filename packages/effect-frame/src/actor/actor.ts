@@ -2,7 +2,7 @@ import { Deferred, Effect, Function, Option, Stream } from "effect";
 import type { Behavior, SetValue } from "./behavior.js";
 import { Value } from "./behavior.js";
 import { openLocal } from "./local-engine.js";
-import { select } from "./source.js";
+import { select, succeed } from "./source.js";
 import { toApplied } from "./command-handle.js";
 import type { Committed } from "./engine-types.js";
 import type { LocalEngine } from "./local-engine.js";
@@ -34,7 +34,7 @@ const stoppedState: LocalSettled<never, never> = { _tag: "Rejected", reason: Act
 
 /** An actor that stopped before admission: the handle is already terminal. */
 const stoppedHandle = <State, Refusal>(): CommandHandle<State, "local", Refusal> => ({
-  state: { get: Effect.succeed(stoppedState), changes: Stream.succeed(stoppedState) },
+  state: succeed(stoppedState),
   settled: Effect.succeed(stoppedState),
 });
 

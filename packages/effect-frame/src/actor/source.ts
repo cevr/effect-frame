@@ -1,4 +1,4 @@
-import type { Duration, Scope } from "effect";
+import type { Duration, Equivalence, Scope } from "effect";
 import { Effect, Function, Option, Sink, Stream, SubscriptionRef } from "effect";
 import { Failed, Loading, Ready } from "./query.js";
 import type { QueryState } from "./query.js";
@@ -16,11 +16,27 @@ export interface Source<A> {
   readonly changes: Stream.Stream<A>;
 }
 
+/**
+ * A source over a `SubscriptionRef`: its value now, then every set.
+ *
+ * ```ts
+ * const ref = yield* SubscriptionRef.make(0);
+ * const count = Source.fromSubscriptionRef(ref);
+ * ```
+ */
 export const fromSubscriptionRef = <A>(ref: SubscriptionRef.SubscriptionRef<A>): Source<A> => ({
   get: SubscriptionRef.get(ref),
   changes: SubscriptionRef.changes(ref),
 });
 
+/**
+ * Project a source through a pure function. The projection runs on every
+ * read and every change.
+ *
+ * ```ts
+ * const title = Source.select(post.state, (post) => post.title);
+ * ```
+ */
 export const select: {
   <A, B>(project: (value: A) => B): (source: Source<A>) => Source<B>;
   <A, B>(source: Source<A>, project: (value: A) => B): Source<B>;
@@ -29,11 +45,75 @@ export const select: {
   changes: Stream.map(source.changes, project),
 }));
 
-/** A source that never changes: its current value, then nothing. */
-const constant = <A>(value: A): Source<A> => ({
+/**
+ * A source that never changes: its value, then nothing.
+ *
+ * ```ts
+ * const none = Source.succeed<ReadonlyArray<Note>>([]);
+ * ```
+ */
+export const succeed = <A>(value: A): Source<A> => ({
   get: Effect.succeed(value),
   changes: Stream.succeed(value),
 });
+
+/**
+ * Drop a change equal to the one before it, by `equivalence`. The first
+ * element is still the current value.
+ *
+ * ```ts
+ * const query = Source.dedupe(Source.select(params, (p) => p.q), Equivalence.String);
+ * ```
+ */
+export const dedupe = <A>(
+  source: Source<A>,
+  equivalence: Equivalence.Equivalence<A>,
+): Source<A> => ({
+  get: source.get,
+  changes: Stream.changesWith(source.changes, equivalence),
+});
+
+/**
+ * Run each value through an Effect, as `Stream.mapEffect` does: a read runs
+ * it on the value now, and each change runs it in order. It is not a load:
+ * `f` cannot fail, and there is no Loading state (see `load`).
+ *
+ * ```ts
+ * const opened = Source.mapEffect(noteId, (id) => Actor.remote(Note, { id }));
+ * ```
+ */
+export const mapEffect = <A, B>(
+  source: Source<A>,
+  f: (value: A) => Effect.Effect<B>,
+): Source<B> => ({
+  get: Effect.flatMap(source.get, f),
+  changes: Stream.mapEffect(source.changes, f),
+});
+
+/**
+ * Follow the source that the latest value names. A change of the outer
+ * source drops the inner source it named before and follows the new one,
+ * whose first element is its current value.
+ *
+ * ```ts
+ * const snapshot = Source.switchMap(binding, (current) => current.state);
+ * ```
+ */
+export const switchMap = <A, B>(source: Source<A>, f: (value: A) => Source<B>): Source<B> => ({
+  get: Effect.flatMap(source.get, (value) => f(value).get),
+  changes: Stream.switchMap(source.changes, (value) => f(value).changes),
+});
+
+/**
+ * Follow the source the outer source holds now: `switchMap` with no
+ * projection.
+ *
+ * ```ts
+ * const state = Source.flatten(Source.select(entry, (current) => current.state));
+ * ```
+ */
+export const flatten = <A>(source: Source<Source<A>>): Source<A> =>
+  switchMap(source, (inner) => inner);
 
 /**
  * One source from two. It reads both when either changes, so a change to
@@ -95,7 +175,7 @@ export const all = <
   // innermost change still reaches the outermost read. An empty product is
   // a constant, and never touches a merge.
   const values = Option.match(Option.fromNullishOr(members[0]), {
-    onNone: (): Source<ReadonlyArray<unknown>> => constant([]),
+    onNone: (): Source<ReadonlyArray<unknown>> => succeed([]),
     onSome: (first) =>
       members.slice(1).reduce<Source<ReadonlyArray<unknown>>>(
         // oxlint-disable-next-line oxc/no-accumulating-spread -- the reduce accumulates sources, and each read's tuple is as long as the product.
@@ -148,7 +228,13 @@ const derive = <A>(
     return fromSubscriptionRef(state);
   });
 
-/** Publish a source change after it has been quiet for the duration. */
+/**
+ * Publish a source change after it has been quiet for the duration.
+ *
+ * ```ts
+ * const typed = yield* Source.debounce(input.state, "300 millis");
+ * ```
+ */
 export const debounce: {
   (
     duration: Duration.Input,
@@ -160,7 +246,13 @@ export const debounce: {
     derive(source, (changes) => Stream.debounce(changes, duration)),
 );
 
-/** Rate-limit changes without conflation: later values remain queued. */
+/**
+ * Rate-limit changes without conflation: later values remain queued.
+ *
+ * ```ts
+ * const shaped = yield* Source.throttle(position, "100 millis");
+ * ```
+ */
 export const throttle: {
   (
     duration: Duration.Input,
@@ -183,54 +275,62 @@ export const throttle: {
 );
 
 /**
- * Run the latest source value through an Effect. A new input interrupts the
- * previous computation. The source starts Loading, carries a Ready value as
- * stale while the next computation runs, and turns expected failures into
- * Failed states.
+ * Load the latest source value through an Effect that may fail, as a
+ * `QueryState`. A new input interrupts the previous load. The source starts
+ * Loading, carries a Ready value as stale while the next load runs, and
+ * turns an expected failure into Failed. The loads run on a fiber in the
+ * current scope.
+ *
+ * ```ts
+ * const results = yield* Source.load(query, (q) => search(q));
+ * ```
  */
-export const mapEffect: {
-  <A, B, E, R>(
-    f: (value: A) => Effect.Effect<B, E, R>,
-  ): (source: Source<A>) => Effect.Effect<Source<QueryState<B, E>>, never, Scope.Scope | R>;
-  <A, B, E, R>(
-    source: Source<A>,
-    f: (value: A) => Effect.Effect<B, E, R>,
-  ): Effect.Effect<Source<QueryState<B, E>>, never, Scope.Scope | R>;
-} = Function.dual(
-  2,
-  <A, B, E, R>(
-    source: Source<A>,
-    f: (value: A) => Effect.Effect<B, E, R>,
-  ): Effect.Effect<Source<QueryState<B, E>>, never, Scope.Scope | R> =>
-    Effect.gen(function* () {
-      const state = yield* SubscriptionRef.make<QueryState<B, E>>(Loading());
-      const changes = source.changes.pipe(
-        Stream.switchMap((value) =>
-          Stream.fromEffect(
-            Effect.gen(function* () {
-              const previous = yield* SubscriptionRef.get(state);
-              if (previous._tag === "Ready" && !previous.stale) {
-                yield* SubscriptionRef.set(state, Ready(previous.value, true));
-              } else if (previous._tag === "Failed") {
-                yield* SubscriptionRef.set(state, Loading());
-              }
-              return yield* Effect.scoped(f(value)).pipe(
-                Effect.map((result) => Ready<B, E>(result, false)),
-                Effect.catch((error) => Effect.succeed(Failed<B, E>(error))),
-              );
-            }),
-          ),
+export const load = <A, B, E, R>(
+  source: Source<A>,
+  f: (value: A) => Effect.Effect<B, E, R>,
+): Effect.Effect<Source<QueryState<B, E>>, never, Scope.Scope | R> =>
+  Effect.gen(function* () {
+    const state = yield* SubscriptionRef.make<QueryState<B, E>>(Loading());
+    const changes = source.changes.pipe(
+      Stream.switchMap((value) =>
+        Stream.fromEffect(
+          Effect.gen(function* () {
+            const previous = yield* SubscriptionRef.get(state);
+            if (previous._tag === "Ready" && !previous.stale) {
+              yield* SubscriptionRef.set(state, Ready(previous.value, true));
+            } else if (previous._tag === "Failed") {
+              yield* SubscriptionRef.set(state, Loading());
+            }
+            return yield* Effect.scoped(f(value)).pipe(
+              Effect.map((result) => Ready<B, E>(result, false)),
+              Effect.catch((error) => Effect.succeed(Failed<B, E>(error))),
+            );
+          }),
         ),
-      );
-      yield* Effect.asVoid(
-        Effect.forkScoped(Stream.runForEach(changes, (next) => SubscriptionRef.set(state, next))),
-      );
-      return fromSubscriptionRef(state);
-    }),
-);
+      ),
+    );
+    yield* Effect.asVoid(
+      Effect.forkScoped(Stream.runForEach(changes, (next) => SubscriptionRef.set(state, next))),
+    );
+    return fromSubscriptionRef(state);
+  });
 
 /**
- * The combinators under the type's own name, so a reader writes
- * `Source.all` and `Source.on` beside `Source<A>`.
+ * The combinators under the type's own name: `Source.select` beside
+ * `Source<A>`, as `Stream.map` sits beside `Stream<A>`.
  */
-export const Source = { all, debounce, mapEffect, on, select, throttle, zip };
+export const Source = {
+  all,
+  debounce,
+  dedupe,
+  flatten,
+  fromSubscriptionRef,
+  load,
+  mapEffect,
+  on,
+  select,
+  succeed,
+  switchMap,
+  throttle,
+  zip,
+};

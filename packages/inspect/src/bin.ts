@@ -41,8 +41,9 @@ const env = (name: string) => Option.fromNullishOr(process.env[name]);
 
 Effect.runFork(
   Effect.gen(function* () {
-    // Listen from the start, so a signal before the command waits is not lost.
-    const listening = yield* Effect.forkChild(firstSignal);
+    // Listen from the start, so a signal before the command waits is not lost:
+    // the listeners are on the process before `forkChild` returns.
+    const listening = yield* Effect.forkChild(firstSignal, { startImmediately: true });
     const output = yield* makeOutput;
     const exitCode = yield* Cli.main({
       argv: process.argv.slice(2),

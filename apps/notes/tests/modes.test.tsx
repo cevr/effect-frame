@@ -131,7 +131,7 @@ const renderAt = (tree: ListTree, host: Context.Context<ActorTransport>) =>
       routes: [tree],
       notFound: NotFound,
       url: new URL(inbox),
-      document: notesDocument(),
+      document: notesDocument,
       closeWhen: Effect.sleep("5 seconds"),
       principal: Anonymous.make({}),
     }).pipe(Effect.provideContext(host));

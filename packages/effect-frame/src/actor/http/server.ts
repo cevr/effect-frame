@@ -255,7 +255,7 @@ export const shareSessions = <K, R>(
  *   form: Option.some({
  *     contracts: [Notes],
  *     login: Option.none(),
- *     render: drawAgain,
+ *     render: redrawDocument(renderPage),
  *     commitWithin: HttpServer.defaultCommitWithin,
  *   }),
  * });

@@ -1,7 +1,6 @@
 import type { Context, Duration } from "effect";
 import { Effect, Match, Option, Schema } from "effect";
-import type { HttpServerRequest } from "effect/unstable/http";
-import { Headers, HttpServerResponse } from "effect/unstable/http";
+import { Headers, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import type { Principal } from "../principal.js";
 import { CurrentPrincipal } from "../principal.js";
 import { freshCommandId } from "../command-id.js";
@@ -52,10 +51,12 @@ export interface FormRoute<E, R> {
    */
   readonly login: Option.Option<string>;
   /**
-   * Draw the page at `path` again. `FormContext` is in context: the view
-   * reads the issues, the submitted values, and the id the form carries.
+   * Draw the page at `url` again: the form's `$return`, at the posting
+   * request's own origin. `FormContext` is in context: the view reads the
+   * issues, the submitted values, and the id the form carries. A router app
+   * writes `redrawDocument` from `effect-frame/router` here.
    */
-  readonly render: (path: string) => Effect.Effect<string, E, R>;
+  readonly render: (url: URL) => Effect.Effect<string, E, R>;
   /**
    * How long a post waits for its command to commit before it answers 504
    * with the same command id. `HttpServer.defaultCommitWithin` is ten seconds.
@@ -403,11 +404,11 @@ export const formPost = <E, R>(
       yield* Effect.context<ActorTransport | Exclude<R, FormContext>>();
     const contracts = new Map(options.contracts.map((contract) => [contract.name, contract]));
     const draw = (
-      path: string,
+      url: URL,
       status: number,
       issues: FormIssues,
     ): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
-      options.render(path).pipe(
+      options.render(url).pipe(
         Effect.provideService(FormContext, issues),
         Effect.map((body) => html(status, body)),
         Effect.catch((error) =>
@@ -430,7 +431,14 @@ export const formPost = <E, R>(
                 Effect.succeed(HttpServerResponse.redirect(reply.location, { status: 303 })),
               Refused: (reply) =>
                 Effect.succeed(HttpServerResponse.text(reply.reason, { status: reply.status })),
-              Page: (reply) => draw(reply.path, reply.status, reply.issues),
+              Page: (reply) =>
+                Option.match(HttpServerRequest.toURL(request), {
+                  onNone: () =>
+                    Effect.succeed(
+                      HttpServerResponse.text("the request URL does not parse", { status: 400 }),
+                    ),
+                  onSome: (here) => draw(new URL(reply.path, here), reply.status, reply.issues),
+                }),
             }),
           ),
         ),

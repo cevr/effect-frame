@@ -2,7 +2,7 @@ import type { ScopesClosed, View } from "effect-frame/view";
 import { Deferred, Duration, Effect, Exit, Option, Schema, Scope, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import type { ActorTransport, Principal, QueryCache } from "effect-frame/actor/client";
-import { CurrentPrincipal } from "effect-frame/actor/client";
+import { CurrentPrincipal, Form } from "effect-frame/actor/client";
 import type {
   CacheSource,
   Document,
@@ -12,6 +12,7 @@ import type {
 } from "../view/hosts/html.js";
 import {
   awaitAllDrawing,
+  jsonScript,
   mountElement,
   renderSeeded,
   requestCache,
@@ -279,6 +280,11 @@ export interface RenderDocumentOptions<R, N = R> extends DocumentOptions<R, N> {
  * ends. On `DocumentTimedOut`, what the render opened is already closed.
  * `respondDocument` turns the outcome into a `Response` and owns that Scope.
  *
+ * A render that redraws a refused plain post has `Form.FormContext` in
+ * context. The document then carries the refusal's issues after its tail,
+ * as the `Form.issuesScriptId` script `hydrate` reads, so the client draws
+ * the same form.
+ *
  * ```ts
  * const outcome = yield* renderDocument({
  *   routes,
@@ -297,23 +303,39 @@ export const renderDocument = <R, N = R>(
   DocumentTimedOut,
   DocumentServices<R> | DocumentServices<N> | Scope.Scope
 > =>
-  Effect.map(
-    settleAndPrepare(options, requestCache, (mode, pipelines) =>
-      prepareBody(options.document, mode, pipelines),
-    ).pipe(Effect.provideService(CurrentPrincipal, options.principal)),
-    (outcome): DocumentOutcome<R> => {
-      if (outcome._tag === "Redirect") {
-        return outcome;
-      }
-      return {
-        _tag: "Rendered",
-        route: outcome.route,
-        mode: outcome.mode,
-        status: outcome.status,
-        body: outcome.body,
-      };
-    },
+  Effect.flatMap(refusalScript, (issues) =>
+    Effect.map(
+      settleAndPrepare(options, requestCache, (mode, pipelines) =>
+        prepareBody(
+          { ...options.document, tail: `${options.document.tail}${issues}` },
+          mode,
+          pipelines,
+        ),
+      ).pipe(Effect.provideService(CurrentPrincipal, options.principal)),
+      (outcome): DocumentOutcome<R> => {
+        if (outcome._tag === "Redirect") {
+          return outcome;
+        }
+        return {
+          _tag: "Rendered",
+          route: outcome.route,
+          mode: outcome.mode,
+          status: outcome.status,
+          body: outcome.body,
+        };
+      },
+    ),
   );
+
+/** The refused post's issues as the script `hydrate` reads, or nothing. */
+const refusalScript: Effect.Effect<string> = Effect.flatMap(
+  Effect.serviceOption(Form.FormContext),
+  Option.match({
+    onNone: () => Effect.succeed(""),
+    onSome: (found) =>
+      Effect.map(Form.encodeIssues(found), (json) => jsonScript(Form.issuesScriptId, json)),
+  }),
+);
 
 /** Prepare the body in the render's Scope, by the settled mode. */
 const prepareBody = <R, N>(
@@ -432,3 +454,45 @@ const respondWith = <A, R>(
       ),
     );
   });
+
+/**
+ * A redraw met a redirect: a check sent the page elsewhere, so there is no
+ * page to draw the refused post on. `location` is the path and search.
+ */
+export class DocumentRedirected extends Schema.TaggedError<DocumentRedirected>()(
+  "DocumentRedirected",
+  { location: Schema.String },
+) {}
+
+/**
+ * The `render` of `HttpServer.make`'s form route, from a document render:
+ * draw the page at `url` again for the principal that posted, in a Scope
+ * of its own, and answer the whole document as one string. The refusal's
+ * issues are in context, so `renderDocument` writes them. A redirect fails
+ * with `DocumentRedirected`.
+ *
+ * ```ts
+ * form: Option.some({
+ *   contracts: [Notes],
+ *   login: Option.none(),
+ *   render: redrawDocument((url, principal) => renderPage(url, principal)),
+ *   commitWithin: HttpServer.defaultCommitWithin,
+ * }),
+ * ```
+ */
+export const redrawDocument =
+  <A, E, R>(render: (url: URL, principal: Principal) => Effect.Effect<DocumentOutcome<A>, E, R>) =>
+  (url: URL): Effect.Effect<string, E | DocumentRedirected, Exclude<R, Scope.Scope>> =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const principal = yield* CurrentPrincipal;
+        const outcome = yield* render(url, principal);
+        if (outcome._tag === "Redirect") {
+          return yield* DocumentRedirected.make({
+            location: `${outcome.location.pathname}${outcome.location.search}`,
+          });
+        }
+        const chunks = yield* Stream.runCollect(outcome.body);
+        return Array.from(chunks).join("");
+      }),
+    );

@@ -359,7 +359,7 @@ export const serveHost = (makePrincipal: MakePrincipal) =>
       form: Option.some({
         contracts: [Ledger],
         login: Option.some(loginPath),
-        render: (path) => Effect.succeed(`<main>refused: ${path}</main>`),
+        render: (url) => Effect.succeed(`<main>refused: ${url.href}</main>`),
         commitWithin: HttpServer.defaultCommitWithin,
       }),
     }).pipe(Effect.provideService(ActorTransport, host));

@@ -1,10 +1,10 @@
 import { HttpServer } from "effect-frame/actor";
 import type { ActorTransport, Principal } from "effect-frame/actor/client";
-import { Anonymous, CurrentPrincipal } from "effect-frame/actor/client";
-import { renderDocument, respondDocument } from "effect-frame/router";
+import { Anonymous } from "effect-frame/actor/client";
+import { redrawDocument, renderDocument, respondDocument } from "effect-frame/router";
 import * as Prerender from "effect-frame/router/prerender";
 import type { Crypto, FileSystem, Path } from "effect";
-import { Config, Console, Effect, Exit, Layer, Option, Schema, Scope, Stream } from "effect";
+import { Config, Console, Effect, Exit, Layer, Option, Schema, Scope } from "effect";
 import {
   HttpEffect,
   HttpRouter,
@@ -60,24 +60,6 @@ const answerPage = respondDocument((url) => renderPage(url, nobody), {
     Effect.succeed(HttpServerResponse.text("the page took too long", { status: 504 })),
 });
 
-class PageRedirected extends Schema.TaggedError<PageRedirected>()("PageRedirected", {
-  location: Schema.String,
-}) {}
-
-/** The page a refused post draws again, as one string, for the principal that posted. */
-const drawAgain = (path: string) =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const principal = yield* CurrentPrincipal;
-      const outcome = yield* renderPage(new URL(path, "http://blog.invalid"), principal);
-      if (outcome._tag === "Redirect") {
-        return yield* PageRedirected.make({ location: outcome.location.pathname });
-      }
-      const chunks = yield* Stream.runCollect(outcome.body);
-      return Array.from(chunks).join("");
-    }),
-  );
-
 /** The server could not start listening, for example on a port already taken. */
 export class ServerNotStarted extends Schema.TaggedError<ServerNotStarted>()("ServerNotStarted", {
   port: Schema.Finite,
@@ -132,7 +114,7 @@ export const serve = Effect.fn("Blog.serve")(function* (options: ServeOptions) {
         form: Option.some({
           contracts: [Reactions],
           login: Option.none(),
-          render: drawAgain,
+          render: redrawDocument(renderPage),
           commitWithin: HttpServer.defaultCommitWithin,
         }),
       }),

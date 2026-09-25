@@ -1,10 +1,10 @@
 import { HttpServer } from "effect-frame/actor";
 import type { ActorTransport, Principal } from "effect-frame/actor/client";
-import { Anonymous, CurrentPrincipal, Form } from "effect-frame/actor/client";
-import { renderDocument, respondDocument } from "effect-frame/router";
-import { Html } from "effect-frame/view";
+import { Anonymous } from "effect-frame/actor/client";
+import { redrawDocument, renderDocument, respondDocument } from "effect-frame/router";
+import type { Html } from "effect-frame/view";
 import type { Scope } from "effect";
-import { Config, Console, Effect, Layer, Option, Schema, Stream } from "effect";
+import { Config, Console, Effect, Layer, Option, Schema } from "effect";
 import type { HttpServerRequest } from "effect/unstable/http";
 import { HttpEffect, HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { Notes } from "./contract.js";
@@ -50,14 +50,14 @@ const buildClient = Effect.fn("Notes.buildClient")(function* () {
   return parts.join("\n");
 });
 
-/** The document around the routed markup. A refused post adds its issues. */
-export const notesDocument = (issues = ""): Html.Document => ({
+/** The document around the routed markup. A refused post's issues follow its tail. */
+export const notesDocument: Html.Document = {
   head: '<!doctype html><html><head><meta charset="utf-8"><title>Notes</title></head><body>',
   rootId,
-  tail: issues,
+  tail: "",
   bootstrap: '<script type="module" src="/client.js"></script>',
   end: "</body></html>",
-});
+};
 
 /** How long a document may take to prepare, and a streamed one to finish. */
 export const pageLimit: Effect.Effect<void> = Effect.sleep("10 seconds");
@@ -72,18 +72,11 @@ export const renderPage = Effect.fn("Notes.renderPage")(function* (
   principal: Principal,
   closeWhen: Effect.Effect<void> = pageLimit,
 ) {
-  // A refused post's page carries its issues, so the client draws the same form.
-  const refusal = yield* Effect.serviceOption(Form.FormContext);
-  const issues = yield* Option.match(refusal, {
-    onNone: () => Effect.succeed(""),
-    onSome: (found) =>
-      Effect.map(Form.encodeIssues(found), (json) => Html.jsonScript(Form.issuesScriptId, json)),
-  });
   return yield* renderDocument({
     routes,
     notFound: NotFound,
     url,
-    document: notesDocument(issues),
+    document: notesDocument,
     closeWhen,
     principal,
   });
@@ -97,25 +90,6 @@ const answerPage = respondDocument((url) => renderPage(url, nobody), {
   onTimeout: () =>
     Effect.succeed(HttpServerResponse.text("the page took too long", { status: 504 })),
 });
-
-/** The page a refused post draws again, as one string. */
-class PageRedirected extends Schema.TaggedError<PageRedirected>()("PageRedirected", {
-  location: Schema.String,
-}) {}
-
-const drawAgain = (path: string) =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      // Drawn for the principal that posted, which the form route provides.
-      const principal = yield* CurrentPrincipal;
-      const outcome = yield* renderPage(new URL(path, "http://notes.invalid"), principal);
-      if (outcome._tag === "Redirect") {
-        return yield* PageRedirected.make({ location: outcome.location.pathname });
-      }
-      const chunks = yield* Stream.runCollect(outcome.body);
-      return Array.from(chunks).join("");
-    }),
-  );
 
 /** The server could not start listening, for example on a port already taken. */
 export class ServerNotStarted extends Schema.TaggedError<ServerNotStarted>()("ServerNotStarted", {
@@ -151,7 +125,7 @@ export const serve = Effect.fn("Notes.serve")(function* (port: number) {
         contracts: [Notes],
         // No sign-in route: `public` never refuses, and a refusal would be a 403.
         login: Option.none(),
-        render: drawAgain,
+        render: redrawDocument(renderPage),
         commitWithin: HttpServer.defaultCommitWithin,
       }),
     }),

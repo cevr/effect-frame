@@ -16,7 +16,9 @@ export {
   type RouterService,
 } from "./router.js";
 export {
+  DocumentRedirected,
   DocumentTimedOut,
+  redrawDocument,
   renderDocument,
   respondDocument,
   type DocumentOptions,

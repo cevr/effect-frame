@@ -614,7 +614,8 @@ describe("a refused navigation", () => {
       const refused = yield* postForm(served, "carol-session");
       expect(refused.status).toBe(403);
       expect(refused.location).toBe("");
-      expect(refused.text).toContain("refused: /ledger");
+      // The page is drawn at the posting request's own origin.
+      expect(refused.text).toContain(`refused: ${served.baseUrl}/ledger`);
     }),
   );
 });

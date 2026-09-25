@@ -317,17 +317,21 @@ The server document and the browser entry name the same root element.
 export const rootId = "app";
 ```
 
-The server renders a page for each request, and serves the actors.
+The server renders a page for each request, and serves the actors. Both
+are Effect HTTP apps: they answer the `HttpServerRequest` in context with
+an `HttpServerResponse` (`effect/unstable/http`), so an `HttpRouter` mounts
+them.
 
 <!-- example: examples/counter/page.server.ts#server -->
 
 ```ts
 import { HttpServer } from "effect-frame/actor";
-import type { ActorTransport, Principal } from "effect-frame/actor/client";
+import type { Principal } from "effect-frame/actor/client";
 import { Anonymous, CurrentPrincipal, Form } from "effect-frame/actor/client";
 import { renderDocument, respondDocument } from "effect-frame/router";
 import { Html } from "effect-frame/view";
 import { Effect, Option, Schema, Stream } from "effect";
+import { HttpServerResponse } from "effect/unstable/http";
 import { Counter } from "./contract.js";
 import { rootId } from "./document.js";
 import { NotFound, routes } from "./routes.js";
@@ -368,12 +372,13 @@ export const renderPage = Effect.fn("Counter.renderPage")(function* (
 // This app has no sessions: every page is drawn for nobody in particular.
 const nobody: Principal = Anonymous.make({});
 
-// One page request. `respondDocument` owns the render's Scope and answers a
-// redirect with 303, a document with its status, and a defect with 500.
-export const answerPage = (request: Request): Effect.Effect<Response, never, ActorTransport> =>
-  respondDocument(renderPage(new URL(request.url), nobody), {
-    onTimeout: () => Effect.succeed(new Response("the page took too long", { status: 504 })),
-  });
+// A page request. `respondDocument` reads the request's URL, owns the
+// render's Scope, and answers a redirect with 303, a document with its
+// status, and a defect with 500.
+export const answerPage = respondDocument((url) => renderPage(url, nobody), {
+  onTimeout: () =>
+    Effect.succeed(HttpServerResponse.text("the page took too long", { status: 504 })),
+});
 
 class PageRedirected extends Schema.TaggedError<PageRedirected>()("PageRedirected", {
   location: Schema.String,
@@ -392,9 +397,10 @@ const drawAgain = (path: string) =>
     }),
   );
 
-// The actor handler: the JSON verbs, the change streams, and the plain form
-// route, each at `prefix` + its path. Every edge decision is written here.
-export const actorHandler = HttpServer.make({
+// The actor routes: the JSON verbs, the change streams, and the plain form
+// route, each at `prefix` + its path, on the app's router. Every edge
+// decision is written here.
+export const actors = HttpServer.layer({
   prefix: "/actors",
   principal: HttpServer.anonymous,
   maxBodyBytes: HttpServer.defaultMaxBodyBytes,
@@ -460,36 +466,47 @@ Effect.runFork(Effect.scoped(Effect.provide(start, services)));
 ```
 
 The process edge builds the bundle and serves. It is the only file that
-names Bun.
+names Bun: `HttpRouter.toWebHandler` turns the router into the web `fetch`
+Bun serves, and a Durable Object's `fetch` is the same function.
 
 <!-- example: examples/counter/main.server.ts#main -->
 
 ```ts
-// oxlint-disable effect/noAsyncFunction, effect/noGlobals -- the process edge: Bun builds the bundle and serves, and each request enters the runtime through runPromise.
-import { ManagedRuntime } from "effect";
+// oxlint-disable effect/noGlobals -- the process edge: Bun builds the bundle and serves the router's web handler.
+import { Effect, Layer } from "effect";
+import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { host } from "./counter.server.js";
-import { actorHandler, answerPage } from "./page.server.js";
+import { actors, answerPage } from "./page.server.js";
 
-// The platform boundary: one runtime holds the actors, and both the pages
-// and the actor handler run in it.
-const runtime = ManagedRuntime.make(host);
-const actors = await runtime.runPromise(actorHandler);
-const client = await Bun.build({ entrypoints: ["./client.tsx"], target: "browser" });
-const bundle = await client.outputs[0]?.text();
+// The browser bundle, built once when the router is built.
+const bundle = Effect.promise(() =>
+  Bun.build({ entrypoints: ["./client.tsx"], target: "browser" }),
+).pipe(
+  Effect.flatMap((built) =>
+    Effect.forEach(built.outputs, (out) => Effect.promise(() => out.text())),
+  ),
+  Effect.map((parts) => parts.join("\n")),
+);
 
-Bun.serve({
-  port: 3000,
-  fetch: (request) => {
-    const url = new URL(request.url);
-    if (url.pathname.startsWith("/actors/")) {
-      return runtime.runPromise(actors(request));
-    }
-    if (url.pathname === "/client.js") {
-      return new Response(bundle, { headers: { "content-type": "text/javascript" } });
-    }
-    return runtime.runPromise(answerPage(request));
-  },
-});
+// One router serves the actor routes, the bundle, and every page.
+const app = Layer.mergeAll(
+  actors,
+  Layer.unwrap(
+    Effect.map(bundle, (text) =>
+      HttpRouter.add(
+        "GET",
+        "/client.js",
+        HttpServerResponse.text(text, { contentType: "text/javascript" }),
+      ),
+    ),
+  ),
+  HttpRouter.add("GET", "/*", answerPage),
+);
+
+// The platform boundary: the host layer under the router holds the actors,
+// and `toWebHandler` is the `fetch` Bun serves.
+const { handler } = HttpRouter.toWebHandler(Layer.provideMerge(app, host), { disableLogger: true });
+Bun.serve({ port: 3000, fetch: (request) => handler(request) });
 ```
 
 ## What a view calls
@@ -799,9 +816,10 @@ app's `page.server.ts` above is the whole of it.
 
 - `principal` is required: every check and query the render reads runs
   under it, and nothing falls back to a default caller.
-- `respondDocument` answers a redirect with `303 See Other`, a document
-  with its status and an HTML body, a `DocumentTimedOut` with `onTimeout`,
-  and a defect with 500.
+- `respondDocument(render, { onTimeout })` renders the request's URL and
+  answers a redirect with `303 See Other`, a document with its status and
+  a streamed HTML body, a `DocumentTimedOut` with `onTimeout`, and a
+  defect with 500.
 - A check that redirects is the answer, `{ _tag: "Redirect", location }`.
   The render does not follow it. A `Route.client` route runs its checks
   on the server too.
@@ -878,10 +896,17 @@ export const buildSite = Prerender.build({
 
 // The server: a built page answers before the router runs. `load` holds the
 // generation it read for the calling scope, so run it in the server's scope.
-export const handler = (routerHandler: Prerender.WebHandler) =>
+// Both the fallback and the answer are apps over the `HttpServerRequest`.
+export const pages = (
+  router: Effect.Effect<
+    HttpServerResponse.HttpServerResponse,
+    never,
+    HttpServerRequest.HttpServerRequest
+  >,
+) =>
   Effect.gen(function* () {
     const site = yield* Prerender.load("dist/prerender");
-    return yield* Prerender.serve(site, routerHandler);
+    return yield* Prerender.serve(site, router);
   });
 ```
 
@@ -1305,10 +1330,15 @@ export const handler = Effect.gen(function* () {
 - A host whose table lacks a declared name fails to build with
   `PolicyNamesMissing`, which lists every miss.
 - `HttpServer.make({ prefix, principal, maxBodyBytes, form })` is the
-  host's one handler. It answers each verb at exactly `prefix` plus
-  `/send`, `/call`, `/snapshot`, `/changes`, `/query`, `/query/batch` or
-  `/form`, so the app hands it every path under the prefix unchanged.
-  `principal` is a derivation `(request) => Effect<PrincipalSource>`, run
+  host's one app: an Effect that answers the `HttpServerRequest` in
+  context. It answers each verb at exactly `prefix` plus `/send`, `/call`,
+  `/snapshot`, `/changes`, `/query`, `/query/batch` or `/form`, so the app
+  hands it every path under the prefix unchanged. `HttpServer.layer` with
+  the same options mounts it on an `HttpRouter` at `prefix/*`.
+  `HttpEffect.toWebHandlerWith` serves it as a web `fetch`, and
+  `HttpTest.client(app)` is an `HttpClient` that calls it in process.
+  `principal` is a derivation `(request) => Effect<PrincipalSource>` over
+  the `HttpServerRequest` (its `headers` and parsed `cookies`), run
   once per request for the JSON verbs and the form route alike;
   `HttpServer.anonymous` is the derivation for a host with no sessions. A
   body over `maxBodyBytes` answers 413 before it is decoded
@@ -1321,7 +1351,7 @@ export const handler = Effect.gen(function* () {
   session key, shared by every connection on it and released when the last
   one closes.
 - `HttpServer.make` and celld's `defineFrameHost` run the derivation in
-  the context the handler was built in, so a derivation may need
+  the context the app was built in, so a derivation may need
   `ActorTransport` and any service that context provides.
 - `QueryCache` has `principalChanged`: every live entry drops its value and
   reads again. A reference whose change stream ends with `Unauthorized`

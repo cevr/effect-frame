@@ -12,6 +12,7 @@ import {
 } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { HttpTest } from "effect-frame/actor/testing";
+import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import {
   Actor,
   ActorHost,
@@ -401,12 +402,15 @@ const calls: Array<CallExchange> = [];
 const decodeCallBody = Schema.decodeUnknownEffect(Schema.fromJsonString(Wire.CallBody));
 const decodeApplied = Schema.decodeUnknownEffect(Schema.fromJsonString(Wire.WireApplied));
 
-const recordCall = (request: Request, response: Response) =>
+const recordCall = (
+  request: HttpServerRequest.HttpServerRequest,
+  response: HttpServerResponse.HttpServerResponse,
+) =>
   Effect.gen(function* () {
-    const body = yield* Effect.orDie(decodeCallBody(yield* Effect.promise(() => request.text())));
+    const body = yield* Effect.orDie(decodeCallBody(yield* Effect.orDie(request.text)));
     // A refused call has no refreshes to record.
     const reply = yield* Effect.option(
-      decodeApplied(yield* Effect.promise(() => response.clone().text())),
+      decodeApplied(yield* Effect.orDie(HttpServerResponse.toClientResponse(response).text)),
     );
     if (Option.isSome(reply)) {
       calls.push({
@@ -424,22 +428,22 @@ const inProcess = Layer.unwrap(
       maxBodyBytes: HttpServer.defaultMaxBodyBytes,
       form: Option.none(),
     });
-    const counted = (request: Request) => {
-      const url = new URL(request.url);
-      if (url.pathname.endsWith("/query/batch")) {
+    const counted = Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
+      const path = request.url.split("?")[0] ?? "";
+      if (path.endsWith("/query/batch")) {
         batchRequests += 1;
       }
-      if (url.pathname.endsWith("/snapshot")) {
+      if (path.endsWith("/snapshot")) {
         snapshotRequests += 1;
       }
-      if (url.pathname.endsWith("/changes")) {
+      if (path.endsWith("/changes")) {
         changeStreams += 1;
       }
-      if (url.pathname.endsWith("/call")) {
-        return Effect.tap(server(request.clone()), (response) => recordCall(request, response));
+      if (path.endsWith("/call")) {
+        return Effect.tap(server, (response) => recordCall(request, response));
       }
-      return server(request);
-    };
+      return server;
+    });
     return HttpTransport.layer({
       baseUrl: "http://actors.test/actors",
       reconnect: HttpTransport.defaultReconnect,

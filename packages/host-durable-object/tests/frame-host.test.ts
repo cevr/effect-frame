@@ -1,5 +1,6 @@
 import { Context, Duration, Effect, Hash, Layer, Option, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
+import { Headers as HttpHeaders } from "effect/unstable/http";
 import {
   Behavior,
   CommandId,
@@ -97,9 +98,7 @@ const memberPrincipal: HttpServer.DerivePrincipal<Members> = (request) =>
     const members = yield* Members;
     return Principal.constant(
       Option.match(
-        Option.filter(Option.fromNullishOr(request.headers.get("x-member")), (name) =>
-          members.has(name),
-        ),
+        Option.filter(HttpHeaders.get(request.headers, "x-member"), (name) => members.has(name)),
         {
           onNone: (): PrincipalValue => Anonymous.make({}),
           onSome: (subject) => Authenticated.make({ subject, claims: {} }),

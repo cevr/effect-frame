@@ -8,7 +8,8 @@ import { ActorTransport, Form, HttpTransport } from "effect-frame/actor/client";
 import type { DurableReceipt, IdentifiedCommandHandle } from "effect-frame/actor/client";
 import { Dom, Html, View } from "effect-frame/view";
 import { Context, Deferred, Effect, Fiber, Layer, Option, Ref, Stream } from "effect";
-import { FetchHttpClient } from "effect/unstable/http";
+import type { HttpServerRequest } from "effect/unstable/http";
+import { FetchHttpClient, HttpEffect } from "effect/unstable/http";
 import { describe, expect, it } from "effect-bun-test";
 import type { TasksSnapshot, Wire } from "../plain-form-fixture.js";
 import {
@@ -117,6 +118,9 @@ const serve = Effect.gen(function* () {
     Context.add(host, ActorTransport, formPosts(Context.get(host, ActorTransport))),
   );
   const run = Effect.runPromiseWith(host);
+  const web = HttpEffect.toWebHandlerWith<never, HttpServerRequest.HttpServerRequest>(host);
+  const formsWeb = web(forms);
+  const actorsWeb = web(actors);
   const server = yield* Effect.acquireRelease(
     Effect.sync(() =>
       Bun.serve({
@@ -124,10 +128,10 @@ const serve = Effect.gen(function* () {
         fetch: (request) => {
           const url = new URL(request.url);
           if (url.pathname === `${actorPrefix}/form`) {
-            return run(forms(request));
+            return formsWeb(request);
           }
           if (url.pathname.startsWith(actorPrefix)) {
-            return run(actors(request));
+            return actorsWeb(request);
           }
           return run(
             Effect.map(

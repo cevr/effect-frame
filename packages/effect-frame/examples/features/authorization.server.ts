@@ -11,6 +11,8 @@ import type { Subject } from "effect-frame/actor";
 import { Anonymous, Principal } from "effect-frame/actor/client";
 import type { Authenticated } from "effect-frame/actor/client";
 import { Effect, Layer, Option, Schema, Stream } from "effect";
+import type { HttpServerRequest } from "effect/unstable/http";
+import { Headers } from "effect/unstable/http";
 import { Ledger, Totals, ledgerBehavior } from "./ledger.js";
 
 const LedgerLive = implementTransparent(Ledger, { behavior: ledgerBehavior });
@@ -61,8 +63,8 @@ export const host = ActorHost.layer({
 const readSession = (_sessionId: string): Effect.Effect<Principal> =>
   Effect.succeed(Anonymous.make({}));
 const followSession = (sessionId: string) => Stream.fromEffect(readSession(sessionId));
-const sessionIdOf = (request: Request): Option.Option<string> =>
-  Option.fromNullishOr(request.headers.get("x-session"));
+const sessionIdOf = (request: HttpServerRequest.HttpServerRequest): Option.Option<string> =>
+  Headers.get(request.headers, "x-session");
 
 // #region principal
 // The principal is derived once per request, and followed on a connection:

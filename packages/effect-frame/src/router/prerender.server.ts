@@ -33,6 +33,7 @@ import {
   Stream,
 } from "effect";
 import type { PlatformError } from "effect/PlatformError";
+import { Headers, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import type { Document } from "../view/hosts/html.js";
 import { awaitAllPage, requestCache } from "../view/hosts/html.js";
 import type { AnyRoute } from "./codec.js";
@@ -758,12 +759,16 @@ const readSite = Effect.fnUntraced(function* (output: Output) {
 export const lookup = (site: Site, pathname: string): Option.Option<SitePage> =>
   Option.fromNullishOr(site.pages.get(pathname));
 
-/** A web-standard handler: `Request` in, `Response` out. */
-export type WebHandler = (request: Request) => Effect.Effect<Response>;
+/** An app that answers the `HttpServerRequest` in context. */
+type App = Effect.Effect<
+  HttpServerResponse.HttpServerResponse,
+  never,
+  HttpServerRequest.HttpServerRequest
+>;
 
 /** Whether `If-None-Match` names this validator, weakly compared as HTTP says. */
-const notModified = (request: Request, etag: string): boolean =>
-  Option.match(Option.fromNullishOr(request.headers.get("if-none-match")), {
+const notModified = (request: HttpServerRequest.HttpServerRequest, etag: string): boolean =>
+  Option.match(Headers.get(request.headers, "if-none-match"), {
     onNone: () => false,
     onSome: (header) =>
       header
@@ -779,55 +784,48 @@ const pageHeaders = (etag: string) => ({
   etag,
 });
 
-/** A GET answers with the body; a HEAD with the same status and headers, and none. */
-const answer = (request: Request, body: string, init: ResponseInit): Response => {
-  if (request.method === "HEAD") {
-    // oxlint-disable-next-line effect/noNullish -- a HEAD response has no body, and null is how the Response constructor says so.
-    return new Response(null, init);
-  }
-  return new Response(body, init);
-};
-
 /**
  * Serve a loaded generation before the router. A built page is read from
  * its file first; only then is `If-None-Match` compared with its `ETag`,
  * and a match answers 304. A page whose file is gone, and anything else,
  * goes to `fallback`, which renders through the router: a miss is a slower
- * answer, never a different one. A HEAD answers as its GET would, with no
- * body.
+ * answer, never a different one. A HEAD answers as its GET would; the web
+ * adapter (`HttpEffect.toWebHandlerWith`) sends it with no body.
  */
-export const serve = Effect.fn("Prerender.serve")(function* (site: Site, fallback: WebHandler) {
+export const serve = Effect.fn("Prerender.serve")(function* (site: Site, fallback: App) {
   const fs = yield* FileSystem.FileSystem;
-  const handler: WebHandler = (request) => {
+  const answer = (request: HttpServerRequest.HttpServerRequest): App => {
     if (request.method !== "GET" && request.method !== "HEAD") {
-      return fallback(request);
+      return fallback;
     }
-    const pathname = new URL(request.url).pathname;
+    const pathname = Option.match(HttpServerRequest.toURL(request), {
+      onNone: () => "",
+      onSome: (url) => url.pathname,
+    });
     if (pathname === `/${clientFile}` && Option.isSome(site.client)) {
       return fs.readFileString(site.client.value).pipe(
         Effect.map((text) =>
-          answer(request, text, {
-            headers: { "content-type": "text/javascript; charset=utf-8" },
-          }),
+          HttpServerResponse.text(text, { contentType: "text/javascript; charset=utf-8" }),
         ),
-        Effect.catch(() => fallback(request)),
+        Effect.catch(() => fallback),
       );
     }
     return Option.match(lookup(site, pathname), {
-      onNone: () => fallback(request),
+      onNone: () => fallback,
       onSome: (page) =>
         fs.readFileString(page.file).pipe(
           Effect.map((html) => {
             if (notModified(request, page.etag)) {
-              // oxlint-disable-next-line effect/noNullish -- a 304 has no body, and the Response constructor refuses any body but null for it.
-              return new Response(null, { status: 304, headers: pageHeaders(page.etag) });
+              return HttpServerResponse.empty({ status: 304, headers: pageHeaders(page.etag) });
             }
-            return answer(request, html, { headers: pageHeaders(page.etag) });
+            return HttpServerResponse.text(html, { headers: pageHeaders(page.etag) });
           }),
           // The file is gone: the page renders per request instead (#23 §4).
-          Effect.catch(() => fallback(request)),
+          Effect.catch(() => fallback),
         ),
     });
   };
-  return handler;
+  // The app is the value `serve` builds, not a step of it.
+  // @effect-diagnostics-next-line returnEffectInGen:off
+  return Effect.flatMap(HttpServerRequest.HttpServerRequest, answer);
 });

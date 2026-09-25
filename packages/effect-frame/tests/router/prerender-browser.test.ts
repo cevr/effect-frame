@@ -24,6 +24,7 @@ import { Html } from "effect-frame/view";
 import { BunServices } from "@effect/platform-bun";
 import type { Context } from "effect";
 import { Effect, Exit, FileSystem, Layer, Match, Option, Schema, Scope } from "effect";
+import { HttpEffect, HttpServerResponse } from "effect/unstable/http";
 import { describe, expect, it } from "bun:test";
 import * as H from "./browser/harness.js";
 import type { PrerenderWindow } from "./browser/prerender-app.js";
@@ -113,8 +114,9 @@ const serveBuilt = async (): Promise<Served> => {
         out,
         timeLimit: "5 seconds",
       }).pipe(Effect.provideContext(store));
-      return yield* Prerender.serve(yield* Prerender.load(out), () =>
-        Effect.succeed(new Response("not built", { status: 404 })),
+      return yield* Prerender.serve(
+        yield* Prerender.load(out),
+        Effect.succeed(HttpServerResponse.text("not built", { status: 404 })),
       );
       // The proof's own entry point: the build and the server read real files.
       // @effect-diagnostics-next-line strictEffectProvide:off
@@ -133,14 +135,16 @@ const serveBuilt = async (): Promise<Served> => {
       store,
     ),
   );
+  const actorsWeb = HttpEffect.toWebHandler(actors);
+  const pagesWeb = HttpEffect.toWebHandler(handler);
   const server = Bun.serve({
     port: 0,
     fetch: (request) => {
       const url = new URL(request.url);
       if (url.pathname.startsWith("/actors/")) {
-        return Effect.runPromise(actors(request));
+        return actorsWeb(request);
       }
-      return Effect.runPromise(handler(request));
+      return pagesWeb(request);
     },
   });
   return {

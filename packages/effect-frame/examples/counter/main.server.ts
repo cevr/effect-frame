@@ -1,27 +1,37 @@
 // #region main
-// oxlint-disable effect/noAsyncFunction, effect/noGlobals -- the process edge: Bun builds the bundle and serves, and each request enters the runtime through runPromise.
-import { ManagedRuntime } from "effect";
+// oxlint-disable effect/noGlobals -- the process edge: Bun builds the bundle and serves the router's web handler.
+import { Effect, Layer } from "effect";
+import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { host } from "./counter.server.js";
-import { actorHandler, answerPage } from "./page.server.js";
+import { actors, answerPage } from "./page.server.js";
 
-// The platform boundary: one runtime holds the actors, and both the pages
-// and the actor handler run in it.
-const runtime = ManagedRuntime.make(host);
-const actors = await runtime.runPromise(actorHandler);
-const client = await Bun.build({ entrypoints: ["./client.tsx"], target: "browser" });
-const bundle = await client.outputs[0]?.text();
+// The browser bundle, built once when the router is built.
+const bundle = Effect.promise(() =>
+  Bun.build({ entrypoints: ["./client.tsx"], target: "browser" }),
+).pipe(
+  Effect.flatMap((built) =>
+    Effect.forEach(built.outputs, (out) => Effect.promise(() => out.text())),
+  ),
+  Effect.map((parts) => parts.join("\n")),
+);
 
-Bun.serve({
-  port: 3000,
-  fetch: (request) => {
-    const url = new URL(request.url);
-    if (url.pathname.startsWith("/actors/")) {
-      return runtime.runPromise(actors(request));
-    }
-    if (url.pathname === "/client.js") {
-      return new Response(bundle, { headers: { "content-type": "text/javascript" } });
-    }
-    return runtime.runPromise(answerPage(request));
-  },
-});
+// One router serves the actor routes, the bundle, and every page.
+const app = Layer.mergeAll(
+  actors,
+  Layer.unwrap(
+    Effect.map(bundle, (text) =>
+      HttpRouter.add(
+        "GET",
+        "/client.js",
+        HttpServerResponse.text(text, { contentType: "text/javascript" }),
+      ),
+    ),
+  ),
+  HttpRouter.add("GET", "/*", answerPage),
+);
+
+// The platform boundary: the host layer under the router holds the actors,
+// and `toWebHandler` is the `fetch` Bun serves.
+const { handler } = HttpRouter.toWebHandler(Layer.provideMerge(app, host), { disableLogger: true });
+Bun.serve({ port: 3000, fetch: (request) => handler(request) });
 // #endregion main

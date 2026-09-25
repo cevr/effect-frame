@@ -20,6 +20,7 @@ import type { ActorTransport } from "effect-frame/actor";
 import { Html } from "effect-frame/view";
 import type { Context } from "effect";
 import { Deferred, Effect, Exit, Layer, Option, Scope, Stream } from "effect";
+import { HttpEffect } from "effect/unstable/http";
 import * as H from "../router/browser/harness.js";
 import { Label, Page, TallPage } from "./browser/streaming-page.js";
 
@@ -160,6 +161,7 @@ const servePage = async (mode: Mode): Promise<PageServer> => {
     "content-type": "text/html; charset=utf-8",
     "content-security-policy": "script-src 'self'",
   };
+  const actorsWeb = HttpEffect.toWebHandler(actors);
   const server = Bun.serve({
     port: 0,
     fetch: (request) => {
@@ -177,7 +179,7 @@ const servePage = async (mode: Mode): Promise<PageServer> => {
       }
       if (url.pathname.startsWith("/actors/")) {
         calls.push(url.pathname.slice("/actors".length));
-        return Effect.runPromise(actors(request));
+        return actorsWeb(request);
       }
       if (url.pathname !== "/") {
         return new Response("not found", { status: 404 });

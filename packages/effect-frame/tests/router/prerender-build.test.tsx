@@ -34,6 +34,7 @@ import {
   postSegment,
   readText,
   routerFallback,
+  serveWeb,
   seedIn,
   slugs,
   tempDirectory,
@@ -466,7 +467,7 @@ describe("serving a prerendered tree (#23 §5)", () => {
         const manifest = yield* buildInto(server, blogRoutes, out);
         const site = yield* Prerender.load(out);
         const routed: Array<string> = [];
-        const handler = yield* Prerender.serve(site, routerFallback(server, blogRoutes, routed));
+        const handler = yield* serveWeb(site, routerFallback(server, blogRoutes, routed));
         const page = manifest.pages.find((one) => one.href === "/blog/first");
         const etag = page?.etag ?? "";
 
@@ -510,7 +511,7 @@ describe("serving a prerendered tree (#23 §5)", () => {
         const fs = yield* FileSystem.FileSystem;
         yield* fs.remove(`${yield* generationOf(out)}/blog/first/index.html`);
         const routed: Array<string> = [];
-        const handler = yield* Prerender.serve(site, routerFallback(server, blogRoutes, routed));
+        const handler = yield* serveWeb(site, routerFallback(server, blogRoutes, routed));
 
         const answer = yield* handler(request("/blog/first"));
         expect([answer.status, answer.headers.get("x-mode")]).toEqual([200, "AwaitAll"]);
@@ -531,7 +532,7 @@ describe("serving a prerendered tree (#23 §5)", () => {
       expect(site.pages.size).toBe(0);
       const routed: Array<string> = [];
       const server = yield* sideOf(makeControl(blogLabels));
-      const handler = yield* Prerender.serve(site, routerFallback(server, blogRoutes, routed));
+      const handler = yield* serveWeb(site, routerFallback(server, blogRoutes, routed));
       yield* handler(request("/client.js"));
       expect(routed).toEqual(["/client.js"]);
     }),

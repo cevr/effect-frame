@@ -1,7 +1,8 @@
 /* oxlint-disable effect/noGlobals -- Bun.serve and fetch are the platform boundary of the wire tests that share this fixture: a real socket on a free port. */
 import { Clock, Duration, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
 import type { Scope } from "effect";
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
+import type { HttpServerRequest } from "effect/unstable/http";
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpEffect } from "effect/unstable/http";
 import { Event, Machine, State } from "effect-machine";
 import type { PolicyTable, Subject } from "effect-frame/actor";
 import {
@@ -189,18 +190,9 @@ export const policies: PolicyTable = {
 
 const sessionCookie = "session=";
 
-export const sessionIdOf = (request: Request): Option.Option<string> =>
-  Option.fromNullishOr(request.headers.get("cookie")).pipe(
-    Option.flatMap((header) =>
-      Option.fromNullishOr(
-        header
-          .split(";")
-          .map((part) => part.trim())
-          .find((part) => part.startsWith(sessionCookie)),
-      ),
-    ),
-    Option.map((part) => part.slice(sessionCookie.length)),
-  );
+/** The session a request's cookie names; the request parses its cookies. */
+export const sessionIdOf = (request: HttpServerRequest.HttpServerRequest): Option.Option<string> =>
+  Option.fromNullishOr(request.cookies["session"]);
 
 const decodeSession = Schema.decodeEffect(Session.snapshot);
 const encodeSessionKey = Schema.encodeEffect(Session.key);
@@ -372,9 +364,11 @@ export const serveHost = (makePrincipal: MakePrincipal) =>
       }),
     }).pipe(Effect.provideService(ActorTransport, host));
     const context = yield* Effect.context<never>();
-    const run = Effect.runPromiseWith(context);
+    const web = HttpEffect.toWebHandlerWith<never, HttpServerRequest.HttpServerRequest>(context)(
+      route,
+    );
     const server = yield* Effect.acquireRelease(
-      Effect.sync(() => Bun.serve({ port: 0, fetch: (request) => run(route(request)) })),
+      Effect.sync(() => Bun.serve({ port: 0, fetch: (request) => web(request) })),
       (running) => Effect.promise(() => running.stop(true)),
     );
     const port = Option.getOrElse(Option.fromNullishOr(server.port), () => 0);

@@ -1,10 +1,11 @@
 // #region server
 import { HttpServer } from "effect-frame/actor";
-import type { ActorTransport, Principal } from "effect-frame/actor/client";
+import type { Principal } from "effect-frame/actor/client";
 import { Anonymous, CurrentPrincipal, Form } from "effect-frame/actor/client";
 import { renderDocument, respondDocument } from "effect-frame/router";
 import { Html } from "effect-frame/view";
 import { Effect, Option, Schema, Stream } from "effect";
+import { HttpServerResponse } from "effect/unstable/http";
 import { Counter } from "./contract.js";
 import { rootId } from "./document.js";
 import { NotFound, routes } from "./routes.js";
@@ -45,12 +46,13 @@ export const renderPage = Effect.fn("Counter.renderPage")(function* (
 // This app has no sessions: every page is drawn for nobody in particular.
 const nobody: Principal = Anonymous.make({});
 
-// One page request. `respondDocument` owns the render's Scope and answers a
-// redirect with 303, a document with its status, and a defect with 500.
-export const answerPage = (request: Request): Effect.Effect<Response, never, ActorTransport> =>
-  respondDocument(renderPage(new URL(request.url), nobody), {
-    onTimeout: () => Effect.succeed(new Response("the page took too long", { status: 504 })),
-  });
+// A page request. `respondDocument` reads the request's URL, owns the
+// render's Scope, and answers a redirect with 303, a document with its
+// status, and a defect with 500.
+export const answerPage = respondDocument((url) => renderPage(url, nobody), {
+  onTimeout: () =>
+    Effect.succeed(HttpServerResponse.text("the page took too long", { status: 504 })),
+});
 
 class PageRedirected extends Schema.TaggedError<PageRedirected>()("PageRedirected", {
   location: Schema.String,
@@ -69,9 +71,10 @@ const drawAgain = (path: string) =>
     }),
   );
 
-// The actor handler: the JSON verbs, the change streams, and the plain form
-// route, each at `prefix` + its path. Every edge decision is written here.
-export const actorHandler = HttpServer.make({
+// The actor routes: the JSON verbs, the change streams, and the plain form
+// route, each at `prefix` + its path, on the app's router. Every edge
+// decision is written here.
+export const actors = HttpServer.layer({
   prefix: "/actors",
   principal: HttpServer.anonymous,
   maxBodyBytes: HttpServer.defaultMaxBodyBytes,

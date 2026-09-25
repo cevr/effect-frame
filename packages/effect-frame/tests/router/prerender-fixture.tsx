@@ -6,7 +6,9 @@ import * as Prerender from "effect-frame/router/prerender";
 import { View } from "effect-frame/view";
 import type { Context, Scope } from "effect";
 import { Effect, FileSystem, Option, Path, Schema } from "effect";
+import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { Label, collect, frame } from "../view/streaming-fixture.js";
+import { webOf } from "../web.js";
 
 /**
  * Shared by the prerender build, serve, and resume proofs (#23, #86): a
@@ -190,35 +192,48 @@ export const linksIn = (html: string): ReadonlyArray<string> =>
   );
 
 /**
- * The router as the fallback handler: render the request through
+ * The router as the fallback app: render the request through
  * `renderDocument`, over `side`, and count every call.
  */
 export const routerFallback = (
   side: Context.Context<QueryCache | ActorTransport>,
   routes: ReadonlyArray<Route.AnyRoute<QueryCache | ActorTransport | Scope.Scope>>,
   calls: Array<string>,
-): Prerender.WebHandler => {
-  const handler: Prerender.WebHandler = (request) =>
-    Effect.gen(function* () {
-      calls.push(new URL(request.url).pathname);
-      const outcome = yield* renderDocument({
-        routes,
-        notFound: NotFound,
-        url: new URL(request.url),
-        document: { ...frame, bootstrap: Prerender.clientScript },
-        closeWhen: Effect.sleep("5 seconds"),
-        principal: Anonymous.make({}),
-      });
-      if (outcome._tag === "Redirect") {
-        return new Response("", { status: 302 });
-      }
-      const html = (yield* collect(outcome.body)).join("");
-      return new Response(html, {
-        status: outcome.status,
-        headers: { "x-mode": outcome.mode },
-      });
-    }).pipe(Effect.scoped, Effect.provideContext(side), Effect.orDie);
-  return handler;
-};
+): Effect.Effect<
+  HttpServerResponse.HttpServerResponse,
+  never,
+  HttpServerRequest.HttpServerRequest
+> =>
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = yield* Effect.orDie(Effect.fromOption(HttpServerRequest.toURL(request)));
+    calls.push(url.pathname);
+    const outcome = yield* renderDocument({
+      routes,
+      notFound: NotFound,
+      url,
+      document: { ...frame, bootstrap: Prerender.clientScript },
+      closeWhen: Effect.sleep("5 seconds"),
+      principal: Anonymous.make({}),
+    });
+    if (outcome._tag === "Redirect") {
+      return HttpServerResponse.empty({ status: 302 });
+    }
+    const html = (yield* collect(outcome.body)).join("");
+    return HttpServerResponse.text(html, {
+      status: outcome.status,
+      headers: { "x-mode": outcome.mode },
+    });
+  }).pipe(Effect.scoped, Effect.provideContext(side), Effect.orDie);
+
+/** A loaded site served before `fallback`, as a web `fetch` through the server's adapter. */
+export const serveWeb = (
+  site: Prerender.Site,
+  fallback: Effect.Effect<
+    HttpServerResponse.HttpServerResponse,
+    never,
+    HttpServerRequest.HttpServerRequest
+  >,
+) => Effect.flatMap(Prerender.serve(site, fallback), webOf);
 
 export const textOfResponse = (response: Response) => Effect.promise(() => response.text());

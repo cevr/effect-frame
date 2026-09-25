@@ -4,6 +4,8 @@ import { ActorTransport, Form } from "effect-frame/actor/client";
 import { Context, Deferred, Effect, Latch, Layer, Option, Schema } from "effect";
 import type { Duration } from "effect";
 import { describe, expect, it } from "effect-bun-test";
+import type { HttpServerRequest } from "effect/unstable/http";
+import { HttpEffect } from "effect/unstable/http";
 import {
   Tasks,
   TasksDocument,
@@ -67,13 +69,16 @@ const serveHeld = (
       Context.add(context, ActorTransport, route(Context.get(context, ActorTransport))),
     );
     const run = Effect.runPromiseWith(context);
+    const formsWeb = HttpEffect.toWebHandlerWith<never, HttpServerRequest.HttpServerRequest>(
+      context,
+    )(forms);
     const server = yield* Effect.acquireRelease(
       Effect.sync(() =>
         Bun.serve({
           port: 0,
           fetch: (request) => {
             if (new URL(request.url).pathname === "/actors/form") {
-              return run(forms(request));
+              return formsWeb(request);
             }
             return run(
               Effect.map(

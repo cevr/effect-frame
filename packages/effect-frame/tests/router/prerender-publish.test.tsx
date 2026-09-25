@@ -36,6 +36,7 @@ import {
   origin,
   readText,
   routerFallback,
+  serveWeb,
   servedTree,
   tempDirectory,
   textOfResponse,
@@ -282,7 +283,7 @@ describe("serving a loaded generation (#86)", () => {
       yield* buildInto(server, blogRoutes, out);
       const loaded = yield* Prerender.load(out);
       const routed: Array<string> = [];
-      const before = yield* Prerender.serve(loaded, routerFallback(server, blogRoutes, routed));
+      const before = yield* serveWeb(loaded, routerFallback(server, blogRoutes, routed));
       yield* buildInto(yield* sideOf(makeControl(changedLabels)), blogRoutes, out);
 
       const stale = yield* before(request("/blog/first"));
@@ -290,7 +291,7 @@ describe("serving a loaded generation (#86)", () => {
       expect(body).toContain("body of first");
       expect(stale.headers.get("etag")).toBe(yield* etagOfText(body));
 
-      const after = yield* Prerender.serve(
+      const after = yield* serveWeb(
         yield* Prerender.load(out),
         routerFallback(server, blogRoutes, routed),
       );
@@ -314,7 +315,7 @@ describe("serving a loaded generation (#86)", () => {
         const routed: Array<string> = [];
         yield* Effect.scoped(
           Effect.gen(function* () {
-            const handler = yield* Prerender.serve(
+            const handler = yield* serveWeb(
               yield* Prerender.load(out),
               routerFallback(server, blogRoutes, routed),
             );
@@ -351,7 +352,7 @@ describe("serving a loaded generation (#86)", () => {
         yield* buildInto(server, blogRoutes, out);
         const loadedFrom = yield* generationOf(out);
         const routed: Array<string> = [];
-        const handler = yield* Prerender.serve(
+        const handler = yield* serveWeb(
           yield* Prerender.load(out),
           routerFallback(server, blogRoutes, routed),
         );
@@ -454,7 +455,7 @@ describe("serving a loaded generation (#86)", () => {
       ).etag;
       yield* fs.remove(`${yield* generationOf(out)}/blog/first/index.html`);
       const routed: Array<string> = [];
-      const handler = yield* Prerender.serve(site, routerFallback(server, blogRoutes, routed));
+      const handler = yield* serveWeb(site, routerFallback(server, blogRoutes, routed));
       const answer = yield* handler(request("/blog/first", { headers: { "if-none-match": etag } }));
       expect(answer.status).toBe(200);
       expect(routed).toEqual(["/blog/first"]);
@@ -469,7 +470,7 @@ describe("serving a loaded generation (#86)", () => {
       const server = yield* sideOf(makeControl(blogLabels));
       yield* buildInto(server, blogRoutes, out);
       const routed: Array<string> = [];
-      const handler = yield* Prerender.serve(
+      const handler = yield* serveWeb(
         yield* Prerender.load(out),
         routerFallback(server, blogRoutes, routed),
       );

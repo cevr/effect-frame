@@ -1,5 +1,7 @@
 import type { Context, Duration } from "effect";
 import { Effect, Match, Option, Schema } from "effect";
+import type { HttpServerRequest } from "effect/unstable/http";
+import { Headers, HttpServerResponse } from "effect/unstable/http";
 import type { Principal } from "../principal.js";
 import { CurrentPrincipal } from "../principal.js";
 import { freshCommandId } from "../command-id.js";
@@ -122,11 +124,11 @@ const isUtf8Parameter = (parameter: string): boolean => {
  * Read the body. Only urlencoded: multipart is not specified, so
  * it is refused rather than parsed by a rule nobody wrote down.
  */
-const readBody = (request: Request, maxBodyBytes: number): Effect.Effect<FormFields, Reply> => {
-  const header = Option.getOrElse(
-    Option.fromNullishOr(request.headers.get("content-type")),
-    () => "",
-  );
+const readBody = (
+  request: HttpServerRequest.HttpServerRequest,
+  maxBodyBytes: number,
+): Effect.Effect<FormFields, Reply> => {
+  const header = Option.getOrElse(Headers.get(request.headers, "content-type"), () => "");
   const [media = "", ...parameters] = header.split(";").map((part) => part.trim().toLowerCase());
   if (media === "multipart/form-data") {
     return Effect.fail(
@@ -333,7 +335,7 @@ const malformed = (error: FormMalformed): Reply => refused(400, error.reason);
 
 /** Decode, send, answer. Every branch ends in a reply; nothing fails. */
 const post = (
-  request: Request,
+  request: HttpServerRequest.HttpServerRequest,
   contracts: ReadonlyMap<string, AnyContract>,
   login: Option.Option<string>,
   commitWithin: Duration.Input,
@@ -377,8 +379,8 @@ const post = (
     );
   }).pipe(Effect.catch((reply) => Effect.succeed(reply)));
 
-const html = (status: number, body: string): Response =>
-  new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } });
+const html = (status: number, body: string): HttpServerResponse.HttpServerResponse =>
+  HttpServerResponse.text(body, { status, contentType: "text/html; charset=utf-8" });
 
 /**
  * The form route's handler, built once by `HttpServer.make`. It answers a
@@ -390,7 +392,9 @@ export const formPost = <E, R>(
   options: FormRoute<E, R>,
   maxBodyBytes: number,
 ): Effect.Effect<
-  (request: Request) => Effect.Effect<Response>,
+  (
+    request: HttpServerRequest.HttpServerRequest,
+  ) => Effect.Effect<HttpServerResponse.HttpServerResponse>,
   never,
   ActorTransport | Exclude<R, FormContext>
 > =>
@@ -398,7 +402,11 @@ export const formPost = <E, R>(
     const context: Context.Context<ActorTransport | Exclude<R, FormContext>> =
       yield* Effect.context<ActorTransport | Exclude<R, FormContext>>();
     const contracts = new Map(options.contracts.map((contract) => [contract.name, contract]));
-    const draw = (path: string, status: number, issues: FormIssues): Effect.Effect<Response> =>
+    const draw = (
+      path: string,
+      status: number,
+      issues: FormIssues,
+    ): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
       options.render(path).pipe(
         Effect.provideService(FormContext, issues),
         Effect.map((body) => html(status, body)),
@@ -410,18 +418,18 @@ export const formPost = <E, R>(
         ),
         Effect.provideContext(context),
       );
-    return (request: Request): Effect.Effect<Response> =>
+    return (
+      request: HttpServerRequest.HttpServerRequest,
+    ): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
       post(request, contracts, options.login, options.commitWithin, maxBodyBytes).pipe(
         Effect.provideContext(context),
         Effect.flatMap(
           Match.type<Reply>().pipe(
             Match.tagsExhaustive({
               SeeOther: (reply) =>
-                Effect.succeed(
-                  new Response("", { status: 303, headers: { location: reply.location } }),
-                ),
+                Effect.succeed(HttpServerResponse.redirect(reply.location, { status: 303 })),
               Refused: (reply) =>
-                Effect.succeed(new Response(reply.reason, { status: reply.status })),
+                Effect.succeed(HttpServerResponse.text(reply.reason, { status: reply.status })),
               Page: (reply) => draw(reply.path, reply.status, reply.issues),
             }),
           ),

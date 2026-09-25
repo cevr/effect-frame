@@ -1,5 +1,6 @@
-import type { Context, Scope } from "effect";
+import type { Context, Layer, Scope } from "effect";
 import { Duration, Effect, Option, RcMap, Schema, Sink, Stream } from "effect";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import type { FormContext } from "../form.js";
 import type { Address } from "../contract.js";
 import type { PrincipalRevision, PrincipalSource } from "../principal.js";
@@ -35,28 +36,20 @@ export type { FormRoute } from "./form-post.js";
 export { BodyTooLarge, BodyUnreadable, readText } from "./body.js";
 
 /**
- * A web-standard handler over the transport in context. `Request` in,
- * `Response` out: the shape Bun, Cloudflare Workers, and celld all serve.
- * It answers the paths under its `prefix`; give the client that prefix as
- * `baseUrl`.
- */
-export type WebHandler = (request: Request) => Effect.Effect<Response>;
-
-/**
  * The path a handler owns: `""` for the root, or a path that starts with
  * `/` and does not end with one, such as `"/actors"`.
  */
 export type Prefix = "" | `/${string}`;
 
 /**
- * Derives who is asking from the raw request. It is the
- * only place a cookie or an `Authorization` header is read. It returns
+ * Derives who is asking from the request. It is the only place a cookie
+ * (`request.cookies`) or an `Authorization` header is read. It returns
  * `Anonymous` rather than failing: refusal is a policy's job, not the
  * parser's. A request reads `get` once. A `changes` connection watches
  * `changes`, and ends with `Unauthorized` when the principal changes.
  */
 export type DerivePrincipal<R = never> = (
-  request: Request,
+  request: HttpServerRequest.HttpServerRequest,
 ) => Effect.Effect<PrincipalSource, never, R>;
 
 export interface ServerOptions<R = never, FE = never, FR = never> {
@@ -106,7 +99,10 @@ interface BodyRefusal {
 
 const decodeBody = <S extends Schema.Codec<unknown, unknown>>(schema: S) => {
   const decode = Schema.decodeEffect(Schema.fromJsonString(schema));
-  return (request: Request, maxBodyBytes: number): Effect.Effect<S["Type"], BodyRefusal> =>
+  return (
+    request: HttpServerRequest.HttpServerRequest,
+    maxBodyBytes: number,
+  ): Effect.Effect<S["Type"], BodyRefusal> =>
     readText(request, maxBodyBytes).pipe(
       Effect.catchTags({
         BodyTooLarge: (error) => Effect.fail<BodyRefusal>({ status: 413, reason: error.message }),
@@ -138,7 +134,7 @@ const decodeQuery = Schema.decodeEffect(
 );
 
 const json = (status: number, body: string) =>
-  new Response(body, { status, headers: { "content-type": "application/json" } });
+  HttpServerResponse.text(body, { status, contentType: "application/json" });
 
 const BadRequest = Schema.TaggedStruct("BadRequest", { reason: Schema.String });
 const encodeBadRequest = Schema.encodeSync(Schema.fromJsonString(BadRequest));
@@ -151,7 +147,7 @@ const refusedBody = (refusal: BodyRefusal) =>
 const respond = <A>(
   result: Effect.Effect<A, WireError>,
   encode: (value: A) => Effect.Effect<string, Schema.SchemaError>,
-): Effect.Effect<Response> =>
+): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
   result.pipe(
     Effect.flatMap((value) => Effect.map(Effect.orDie(encode(value)), (text) => json(200, text))),
     Effect.catch((error) =>
@@ -163,7 +159,7 @@ const respond = <A>(
 const respondQuery = <A>(
   result: Effect.Effect<A, WireQueryError>,
   encode: (value: A) => Effect.Effect<string, Schema.SchemaError>,
-): Effect.Effect<Response> =>
+): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
   result.pipe(
     Effect.flatMap((value) => Effect.map(Effect.orDie(encode(value)), (text) => json(200, text))),
     Effect.catch((error) =>
@@ -244,10 +240,12 @@ export const shareSessions = <K, R>(
   });
 
 /**
- * The actor host's one HTTP handler: the JSON verbs, the `changes` stream,
- * and the plain-form route, every one under `prefix`, every one under the
+ * The actor host's one HTTP app: the JSON verbs, the `changes` stream, and
+ * the plain-form route, every one under `prefix`, every one under the
  * principal derived once per request, and every body read under
- * `maxBodyBytes`.
+ * `maxBodyBytes`. It answers the `HttpServerRequest` in context, so an
+ * `HttpRouter` mounts it (`layer`) and `HttpEffect.toWebHandlerWith` serves
+ * it as a web `fetch`.
  *
  * ```ts
  * const actors = yield* HttpServer.make({
@@ -261,17 +259,20 @@ export const shareSessions = <K, R>(
  *     commitWithin: HttpServer.defaultCommitWithin,
  *   }),
  * });
- * // Every path under /actors goes to `actors` unchanged.
+ * // Mount it on an HttpRouter at every path under /actors, or use `layer`.
  * ```
  */
 export const make = <R = never, FE = never, FR = never>(
   options: ServerOptions<R, FE, FR>,
-): Effect.Effect<WebHandler, never, ActorTransport | R | Exclude<FR, FormContext>> =>
+): Effect.Effect<
+  Effect.Effect<HttpServerResponse.HttpServerResponse, never, HttpServerRequest.HttpServerRequest>,
+  never,
+  ActorTransport | R | Exclude<FR, FormContext>
+> =>
   Effect.gen(function* () {
     const transport = yield* ActorTransport;
-    const context = yield* Effect.context<never>();
     const derivation: Context.Context<R> = yield* Effect.context<R>();
-    const derive = (request: Request): Effect.Effect<PrincipalSource> =>
+    const derive = (request: HttpServerRequest.HttpServerRequest): Effect.Effect<PrincipalSource> =>
       // The host is the boundary: the derivation runs with the context `make` was built in.
       Effect.provideContext(options.principal(request), derivation);
     const at = (path: string) => `${options.prefix}${path}`;
@@ -280,8 +281,11 @@ export const make = <R = never, FE = never, FR = never>(
       Option.map(options.form, (route) => formPost(route, maxBodyBytes)),
     );
 
-    const changes = (request: Request, who: PrincipalSource): Effect.Effect<Response> =>
-      parseQuery(new URL(request.url)).pipe(
+    const changes = (
+      url: URL,
+      who: PrincipalSource,
+    ): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
+      parseQuery(url).pipe(
         Effect.map((query) => {
           const address = { contract: query.contract, version: query.version, key: query.key };
           // One subscription: its first value authorizes the connection, and
@@ -307,22 +311,24 @@ export const make = <R = never, FE = never, FR = never>(
               ),
             ),
           );
-          return new Response(Stream.toReadableStreamWith(body, context), {
-            status: 200,
-            headers: {
-              "content-type": "text/event-stream",
-              "cache-control": "no-cache",
-              connection: "keep-alive",
-            },
+          return HttpServerResponse.stream(body, {
+            contentType: "text/event-stream",
+            headers: { "cache-control": "no-cache", connection: "keep-alive" },
           });
         }),
         Effect.catch((error) => Effect.succeed(badRequest(error.message))),
       );
 
-    const notFound = Effect.succeed(new Response("not found", { status: 404 }));
+    const notFound = Effect.succeed(HttpServerResponse.text("not found", { status: 404 }));
+    const methodNotAllowed = Effect.succeed(
+      HttpServerResponse.text("method not allowed", { status: 405 }),
+    );
 
     /** Every POST verb: one request, one principal, one bounded body. */
-    const route = (request: Request, path: string): Effect.Effect<Response> => {
+    const route = (
+      request: HttpServerRequest.HttpServerRequest,
+      path: string,
+    ): Effect.Effect<HttpServerResponse.HttpServerResponse> => {
       if (path === at(paths.send)) {
         return decodeSend(request, maxBodyBytes).pipe(
           Effect.flatMap((body) =>
@@ -394,21 +400,54 @@ export const make = <R = never, FE = never, FR = never>(
      * under the one principal it read. A `changes` connection runs under the
      * principal it connected with and ends when that principal changes.
      */
-    const handler: WebHandler = (request) =>
+    const answer = (
+      request: HttpServerRequest.HttpServerRequest,
+      url: URL,
+    ): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
       Effect.flatMap(derive(request), (who) => {
-        const path = new URL(request.url).pathname;
-        if (path === at(paths.changes)) {
+        if (url.pathname === at(paths.changes)) {
           if (request.method !== "GET") {
-            return Effect.succeed(new Response("method not allowed", { status: 405 }));
+            return methodNotAllowed;
           }
-          return changes(request, who);
+          return changes(url, who);
         }
         if (request.method !== "POST") {
-          return Effect.succeed(new Response("method not allowed", { status: 405 }));
+          return methodNotAllowed;
         }
         return Effect.flatMap(who.get, (principal) =>
-          Effect.provideService(route(request, path), CurrentPrincipal, principal),
+          Effect.provideService(route(request, url.pathname), CurrentPrincipal, principal),
         );
       });
-    return handler;
+    // The app is the value `make` builds, not a step of it.
+    // @effect-diagnostics-next-line returnEffectInGen:off
+    return Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
+      Option.match(HttpServerRequest.toURL(request), {
+        onNone: () => Effect.succeed(badRequest("the request URL does not parse")),
+        onSome: (url) => answer(request, url),
+      }),
+    );
   });
+
+/**
+ * `make`, mounted on the app's `HttpRouter` at every path under `prefix`,
+ * for any method. The router hands the request over unchanged, so mount it
+ * on the router itself, not on a prefixed one.
+ *
+ * ```ts
+ * const app = Layer.mergeAll(
+ *   HttpServer.layer({ prefix: "/actors", principal, maxBodyBytes, form }),
+ *   HttpRouter.add("GET", "/*", answerPage),
+ * );
+ * const { handler } = HttpRouter.toWebHandler(Layer.provide(app, host));
+ * ```
+ */
+export const layer = <R = never, FE = never, FR = never>(
+  options: ServerOptions<R, FE, FR>,
+): Layer.Layer<
+  never,
+  never,
+  HttpRouter.HttpRouter | ActorTransport | R | Exclude<FR, FormContext>
+> =>
+  HttpRouter.use((router) =>
+    Effect.flatMap(make(options), (app) => router.add("*", `${options.prefix}/*`, app)),
+  );

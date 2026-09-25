@@ -16,6 +16,8 @@ import type { Scope } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "effect-bun-test";
 import { HttpTest } from "effect-frame/actor/testing";
+import type { HttpServerResponse } from "effect/unstable/http";
+import { Headers, HttpServerRequest } from "effect/unstable/http";
 import { Actor, ActorHost, HttpServer, Policies } from "effect-frame/actor";
 import type {
   Address,
@@ -1040,20 +1042,33 @@ describe("every refusal the client receives", () => {
   );
 });
 
-/** A client of one web handler, in process, carrying one session cookie or none. */
-const adapterClient = (web: HttpServer.WebHandler, cookie: Option.Option<string>) =>
+type App = Effect.Effect<
+  HttpServerResponse.HttpServerResponse,
+  never,
+  HttpServerRequest.HttpServerRequest
+>;
+
+/** A client of one app, in process, carrying one session cookie or none. */
+const adapterClient = (web: App, cookie: Option.Option<string>) =>
   HttpTransport.layer({ baseUrl: "http://adapter.test", reconnect: quickReconnect }).pipe(
     Layer.provide(
-      HttpTest.client((request) => {
-        Option.map(cookie, (value) => request.headers.set("cookie", `session=${value}`));
-        return web(request);
-      }),
+      HttpTest.client(
+        Effect.updateService(web, HttpServerRequest.HttpServerRequest, (request) =>
+          Option.match(cookie, {
+            onNone: () => request,
+            onSome: (value) =>
+              request.modify({
+                headers: Headers.set(request.headers, "cookie", `session=${value}`),
+              }),
+          }),
+        ),
+      ),
     ),
   );
 
 /** Runs `effect` as that client. */
 const throughAdapter =
-  (web: HttpServer.WebHandler, cookie: Option.Option<string>) =>
+  (web: App, cookie: Option.Option<string>) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(effect, adapterClient(web, cookie));

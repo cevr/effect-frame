@@ -5,6 +5,7 @@ import { renderDocument, respondDocument } from "effect-frame/router";
 import * as Prerender from "effect-frame/router/prerender";
 import type { Crypto, FileSystem, Layer, Path } from "effect";
 import { Effect, Exit, ManagedRuntime, Option, Schema, Scope, Stream } from "effect";
+import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { Reactions } from "./contract.js";
 import { blogDocument } from "./document.js";
 import { bundleClient, defaultOut, defaultPosts } from "./prerender.server.js";
@@ -54,10 +55,10 @@ export const renderPage = Effect.fn("Blog.renderPage")(function* (url: URL, prin
 const nobody: Principal = Anonymous.make({});
 
 /** Answer one page through the router. Its Scope lives until the body is written. */
-const answerPage = (request: Request): Effect.Effect<Response, never, ActorTransport> =>
-  respondDocument(renderPage(new URL(request.url), nobody), {
-    onTimeout: () => Effect.succeed(new Response("the page took too long", { status: 504 })),
-  });
+const answerPage = respondDocument((url) => renderPage(url, nobody), {
+  onTimeout: () =>
+    Effect.succeed(HttpServerResponse.text("the page took too long", { status: 504 })),
+});
 
 class PageRedirected extends Schema.TaggedError<PageRedirected>()("PageRedirected", {
   location: Schema.String,
@@ -124,22 +125,32 @@ export const makeServer = async (options: ServerOptions): Promise<RunningServer>
   const bundle = await runtime.runPromise(bundleClient);
   // The router runs in the runtime's context, captured once, so the handler needs nothing.
   const context = await runtime.runPromise(Effect.context<ActorTransport>());
-  const router: Prerender.WebHandler = (request) => {
-    if (new URL(request.url).pathname === "/client.js") {
+  const router = Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
+    if (request.url === "/client.js") {
       return Effect.succeed(
-        new Response(bundle, { headers: { "content-type": "text/javascript; charset=utf-8" } }),
+        HttpServerResponse.text(bundle, { contentType: "text/javascript; charset=utf-8" }),
       );
     }
-    return Effect.provideContext(answerPage(request), context);
-  };
+    return Effect.provideContext(answerPage, context);
+  });
+  const web = HttpEffect.toWebHandlerWith<ActorTransport, HttpServerRequest.HttpServerRequest>(
+    context,
+  );
+  const actorsWeb = web(actors);
   const fetch =
-    (pages: Prerender.WebHandler): ((request: Request) => Response | Promise<Response>) =>
+    (
+      pages: Effect.Effect<
+        HttpServerResponse.HttpServerResponse,
+        never,
+        HttpServerRequest.HttpServerRequest
+      >,
+    ): ((request: Request) => Response | Promise<Response>) =>
     (request) => {
       const url = new URL(request.url);
       if (url.pathname.startsWith(`${actorPrefix}/`)) {
-        return runtime.runPromise(actors(request));
+        return actorsWeb(request);
       }
-      return runtime.runPromise(pages(request));
+      return web(pages)(request);
     };
   // The loaded generation is held for as long as the server runs: a rebuild
   // meanwhile does not remove its files. A start that fails, such as a port

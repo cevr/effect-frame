@@ -10,6 +10,7 @@ import {
 } from "effect-frame/actor";
 import { contract } from "effect-frame/actor/client";
 import * as Wire from "../../src/actor/http/wire.js";
+import { routerWeb, webOf } from "../web.js";
 
 const Add = Schema.TaggedStruct("Add", { amount: Schema.Finite });
 type Add = Schema.Schema.Type<typeof Add>;
@@ -45,12 +46,14 @@ const post = (path: string, body: string) =>
   });
 
 /** A one-KiB limit, so a small padded body crosses it. */
-const mount = HttpServer.make({
+const options: HttpServer.ServerOptions = {
   prefix: "/actors",
   principal: HttpServer.anonymous,
   maxBodyBytes: 1024,
   form: Option.none(),
-});
+};
+
+const mount = Effect.flatMap(HttpServer.make(options), webOf);
 
 const withHost = it.effect.layer(host);
 
@@ -66,6 +69,20 @@ describe("the actor handler's mount", () => {
       const form = yield* actors(post(`/actors${Wire.paths.form}`, ""));
       expect(form.status).toBe(404);
     }),
+  );
+
+  withHost("mounts on an HttpRouter at every path under the prefix, and nowhere else", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const actors = yield* routerWeb(HttpServer.layer(options));
+        const served = yield* actors(post(`/actors${Wire.paths.snapshot}`, snapshotBody));
+        expect(served.status).toBe(200);
+        const other = yield* actors(post(`/actors/elsewhere`, snapshotBody));
+        expect(other.status).toBe(404);
+        const outside = yield* actors(post(`/elsewhere${Wire.paths.snapshot}`, snapshotBody));
+        expect(outside.status).toBe(404);
+      }),
+    ),
   );
 
   withHost("answers 413 to a body over the host's limit, declared or streamed", () =>

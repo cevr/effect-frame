@@ -20,6 +20,7 @@ import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import { HttpTest } from "effect-frame/actor/testing";
 import { Deferred, Effect, Layer, Option, Ref, Schema, Sink, Stream } from "effect";
+import { HttpServerRequest } from "effect/unstable/http";
 import { describe, expect, it } from "effect-bun-test";
 
 /** The one policy table: every contract and query here declares `public`. */
@@ -85,11 +86,11 @@ const inProcess = Layer.unwrap(
       form: Option.none(),
     });
     // An interrupted request interrupts the handler: that is the abort the rows count.
-    const counted = (request: Request) => {
-      const path = new URL(request.url).pathname;
+    const counted = Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
+      const path = request.url.split("?")[0] ?? "";
       if (path.endsWith("/query/batch")) {
         batchRequests += 1;
-        return Effect.onInterrupt(server(request), () =>
+        return Effect.onInterrupt(server, () =>
           Effect.sync(() => {
             batchAborts += 1;
           }),
@@ -98,8 +99,8 @@ const inProcess = Layer.unwrap(
       if (path.endsWith("/query")) {
         singleRequests += 1;
       }
-      return server(request);
-    };
+      return server;
+    });
     return HttpTransport.layer({
       baseUrl: "http://actors.test/actors",
       reconnect: HttpTransport.defaultReconnect,

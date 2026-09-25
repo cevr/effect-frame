@@ -1,5 +1,6 @@
 import type { ScopesClosed, View } from "effect-frame/view";
 import { Deferred, Duration, Effect, Exit, Option, Schema, Scope, Stream } from "effect";
+import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import type { ActorTransport, Principal, QueryCache } from "effect-frame/actor/client";
 import { CurrentPrincipal } from "effect-frame/actor/client";
 import type {
@@ -356,45 +357,63 @@ export interface RespondDocumentOptions {
    * The answer to `DocumentTimedOut`. Nothing was written and the render's
    * Scope is already closed: answer a status, or a client-only page.
    */
-  readonly onTimeout: (error: DocumentTimedOut) => Effect.Effect<Response>;
+  readonly onTimeout: (
+    error: DocumentTimedOut,
+  ) => Effect.Effect<HttpServerResponse.HttpServerResponse>;
 }
 
 /**
- * Answer one page request with the document `render` prepares, in a Scope
- * of its own. The Scope outlives this Effect only for a returned body and
- * closes when that body ends. Every other exit closes it before the answer
- * leaves: a redirect, a timeout, a failure or a defect in the drawing, and
- * an interruption. A redirect answers `303 See Other`. A defect is logged
- * and answers 500.
+ * Answer the `HttpServerRequest` in context with the document `render`
+ * prepares for its URL, in a Scope of its own. The Scope outlives this
+ * Effect only for a returned body and closes when that body ends. Every
+ * other exit closes it before the answer leaves: a redirect, a timeout, a
+ * failure or a defect in the drawing, and an interruption. A redirect
+ * answers `303 See Other`. A defect is logged and answers 500. A request
+ * URL that does not parse answers 400.
  *
  * ```ts
- * const answerPage = (request: Request) =>
- *   respondDocument(
- *     renderDocument({ routes, notFound, url: new URL(request.url), document, closeWhen, principal }),
- *     { onTimeout: () => Effect.succeed(new Response("the page took too long", { status: 504 })) },
- *   );
+ * const answerPage = respondDocument(
+ *   (url) => renderDocument({ routes, notFound, url, document, closeWhen, principal }),
+ *   { onTimeout: () => Effect.succeed(HttpServerResponse.text("too slow", { status: 504 })) },
+ * );
+ * // Mount it on an HttpRouter: HttpRouter.add("GET", "/*", answerPage).
  * ```
  */
 export const respondDocument = <A, R>(
+  render: (url: URL) => Effect.Effect<DocumentOutcome<A>, DocumentTimedOut, R>,
+  options: RespondDocumentOptions,
+): Effect.Effect<
+  HttpServerResponse.HttpServerResponse,
+  never,
+  HttpServerRequest.HttpServerRequest | Exclude<R, Scope.Scope>
+> =>
+  Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
+    Option.match(HttpServerRequest.toURL(request), {
+      onNone: () =>
+        Effect.succeed(HttpServerResponse.text("the request URL does not parse", { status: 400 })),
+      onSome: (url) => respondWith(render(url), options),
+    }),
+  );
+
+const respondWith = <A, R>(
   render: Effect.Effect<DocumentOutcome<A>, DocumentTimedOut, R>,
   options: RespondDocumentOptions,
-): Effect.Effect<Response, never, Exclude<R, Scope.Scope>> =>
+): Effect.Effect<HttpServerResponse.HttpServerResponse, never, Exclude<R, Scope.Scope>> =>
   Effect.gen(function* () {
     const scope = yield* Scope.make();
     const close = Scope.close(scope, Exit.void);
-    const context = yield* Effect.context<never>();
     return yield* Scope.provide(render, scope).pipe(
       Effect.flatMap((outcome) => {
         if (outcome._tag === "Redirect") {
           const location = `${outcome.location.pathname}${outcome.location.search}`;
-          return Effect.as(close, new Response("", { status: 303, headers: { location } }));
+          return Effect.as(close, HttpServerResponse.redirect(location, { status: 303 }));
         }
         // The Scope holds a streamed drawing: it closes when the body ends.
         const body = Stream.encodeText(outcome.body).pipe(Stream.ensuring(close));
         return Effect.succeed(
-          new Response(Stream.toReadableStreamWith(body, context), {
+          HttpServerResponse.stream(body, {
             status: outcome.status,
-            headers: { "content-type": "text/html; charset=utf-8" },
+            contentType: "text/html; charset=utf-8",
           }),
         );
       }),
@@ -408,7 +427,7 @@ export const respondDocument = <A, R>(
       Effect.catchCause((cause) =>
         Effect.as(
           Effect.logError("respondDocument: the page failed", cause),
-          new Response("the page failed", { status: 500 }),
+          HttpServerResponse.text("the page failed", { status: 500 }),
         ),
       ),
     );

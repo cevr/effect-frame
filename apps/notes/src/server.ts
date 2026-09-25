@@ -5,6 +5,8 @@ import { Anonymous, CurrentPrincipal, Form } from "effect-frame/actor/client";
 import { renderDocument, respondDocument } from "effect-frame/router";
 import { Html } from "effect-frame/view";
 import { Effect, ManagedRuntime, Option, Schema, Stream } from "effect";
+import type { HttpServerRequest } from "effect/unstable/http";
+import { HttpEffect, HttpServerResponse } from "effect/unstable/http";
 import { Notes } from "./contract.js";
 import { inProcess, upstream } from "./notes.server.js";
 import { rootId } from "./document.js";
@@ -91,10 +93,10 @@ export const renderPage = Effect.fn("Notes.renderPage")(function* (
 const nobody: Principal = Anonymous.make({});
 
 /** Answer one page request. Its Scope lives until the body is written. */
-const answerPage = (request: Request): Effect.Effect<Response, never, ActorTransport> =>
-  respondDocument(renderPage(new URL(request.url), nobody), {
-    onTimeout: () => Effect.succeed(new Response("the page took too long", { status: 504 })),
-  });
+const answerPage = respondDocument((url) => renderPage(url, nobody), {
+  onTimeout: () =>
+    Effect.succeed(HttpServerResponse.text("the page took too long", { status: 504 })),
+});
 
 /** The page a refused post draws again, as one string. */
 class PageRedirected extends Schema.TaggedError<PageRedirected>()("PageRedirected", {
@@ -160,20 +162,27 @@ export const makeServer = async (options: ServerOptions): Promise<RunningServer>
     }),
   );
   const client = await runtime.runPromise(buildClient());
+  const context = await runtime.context();
+  const web = HttpEffect.toWebHandlerWith<
+    ActorTransport,
+    ActorTransport | HttpServerRequest.HttpServerRequest
+  >(context);
+  const actorsWeb = web(actors);
+  const pagesWeb = web(answerPage);
 
   const server = Bun.serve({
     port: options.port,
     fetch: (request: Request): Response | Promise<Response> => {
       const url = new URL(request.url);
       if (url.pathname.startsWith(`${actorPrefix}/`)) {
-        return runtime.runPromise(actors(request));
+        return actorsWeb(request);
       }
       if (url.pathname === "/client.js") {
         return new Response(client, {
           headers: { "content-type": "text/javascript; charset=utf-8" },
         });
       }
-      return runtime.runPromise(answerPage(request));
+      return pagesWeb(request);
     },
   });
 

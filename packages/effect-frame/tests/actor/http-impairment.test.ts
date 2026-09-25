@@ -1,6 +1,11 @@
 import { Clock, Effect, Layer, Option, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
-import { FetchHttpClient } from "effect/unstable/http";
+import {
+  FetchHttpClient,
+  HttpEffect,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/unstable/http";
 import {
   Actor,
   ActorHost,
@@ -62,27 +67,25 @@ const reset = (next: Partial<Proxy>) =>
     Object.assign(proxy, { send: "pass", call: "pass", limit: 0, sends: 0, calls: 0 }, next);
   });
 
-const impair = (
-  mode: Impairment,
-  seen: number,
-  forward: Effect.Effect<Response>,
-  signal: AbortSignal,
-): Effect.Effect<Response> => {
+type App = Effect.Effect<
+  HttpServerResponse.HttpServerResponse,
+  never,
+  HttpServerRequest.HttpServerRequest
+>;
+
+const impair = (mode: Impairment, seen: number, forward: App): App => {
   if (mode === "pass" || seen > proxy.limit) {
     return forward;
   }
   if (mode === "refuse") {
-    return Effect.sync(() => new Response("impaired: refused", { status: 502 }));
+    return Effect.succeed(HttpServerResponse.text("impaired: refused", { status: 502 }));
   }
   if (mode === "hang") {
-    // The request is held until the client aborts it at its pass deadline.
-    return Effect.callback<Response>((resume) => {
-      signal.addEventListener("abort", () =>
-        resume(Effect.sync(() => new Response("impaired: aborted", { status: 502 }))),
-      );
-    });
+    // The request is held until the client aborts it at its pass deadline;
+    // the web adapter interrupts it then.
+    return Effect.never;
   }
-  return Effect.as(forward, new Response("impaired: reply lost", { status: 502 }));
+  return Effect.as(forward, HttpServerResponse.text("impaired: reply lost", { status: 502 }));
 };
 
 const policy = (settings: Partial<CommandPolicySettings>): CommandPolicySettings => ({
@@ -105,27 +108,24 @@ const serve = Effect.gen(function* () {
     maxBodyBytes: HttpServer.defaultMaxBodyBytes,
     form: Option.none(),
   }).pipe(Effect.provideContext(host));
-  const run = Effect.runPromiseWith(yield* Effect.context<never>());
+  const impaired: App = Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
+    if (request.url.endsWith("/send")) {
+      proxy.sends += 1;
+      return impair(proxy.send, proxy.sends, handler);
+    }
+    if (request.url.endsWith("/call")) {
+      proxy.calls += 1;
+      return impair(proxy.call, proxy.calls, handler);
+    }
+    return handler;
+  });
+  const web = HttpEffect.toWebHandlerWith<never, HttpServerRequest.HttpServerRequest>(
+    yield* Effect.context<never>(),
+  )(impaired);
   const server = yield* Effect.acquireRelease(
     Effect.sync(() =>
-      // Bun.serve is this test's platform boundary.
       // oxlint-disable-next-line effect/noGlobals -- Bun.serve is this test's platform boundary.
-      Bun.serve({
-        port: 0,
-        fetch: (request) => {
-          const path = new URL(request.url).pathname;
-          const forward = handler(request);
-          if (path.endsWith("/send")) {
-            proxy.sends += 1;
-            return run(impair(proxy.send, proxy.sends, forward, request.signal));
-          }
-          if (path.endsWith("/call")) {
-            proxy.calls += 1;
-            return run(impair(proxy.call, proxy.calls, forward, request.signal));
-          }
-          return run(handler(request));
-        },
-      }),
+      Bun.serve({ port: 0, fetch: (request) => web(request) }),
     ),
     (running) => Effect.promise(() => running.stop(true)),
   );

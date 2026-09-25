@@ -2,6 +2,7 @@ import { Route } from "effect-frame/router";
 import * as Prerender from "effect-frame/router/prerender";
 import { View } from "effect-frame/view";
 import { Effect, Schema } from "effect";
+import type { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 const org = Route.segment("org", {
   path: "/orgs/:org",
@@ -56,9 +57,16 @@ export const buildSite = Prerender.build({
 
 // The server: a built page answers before the router runs. `load` holds the
 // generation it read for the calling scope, so run it in the server's scope.
-export const handler = (routerHandler: Prerender.WebHandler) =>
+// Both the fallback and the answer are apps over the `HttpServerRequest`.
+export const pages = (
+  router: Effect.Effect<
+    HttpServerResponse.HttpServerResponse,
+    never,
+    HttpServerRequest.HttpServerRequest
+  >,
+) =>
   Effect.gen(function* () {
     const site = yield* Prerender.load("dist/prerender");
-    return yield* Prerender.serve(site, routerHandler);
+    return yield* Prerender.serve(site, router);
   });
 // #endregion build

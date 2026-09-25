@@ -1,7 +1,7 @@
 import { Effect, Exit, Layer, Option, Schema, Scope, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { HttpTest } from "effect-frame/actor/testing";
-import { FetchHttpClient } from "effect/unstable/http";
+import { FetchHttpClient, Headers, HttpEffect, HttpServerRequest } from "effect/unstable/http";
 import {
   Actor,
   ActorHost,
@@ -87,12 +87,13 @@ const inProcess = Layer.unwrap(
       maxBodyBytes: HttpServer.defaultMaxBodyBytes,
       form: Option.none(),
     });
-    const recorded = (request: Request) =>
-      Effect.tap(server(request), (response) =>
+    const recorded = Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
+      Effect.tap(server, (response) =>
         Effect.sync(() => {
-          answered.push({ path: new URL(request.url).pathname, status: response.status });
+          answered.push({ path: request.url.split("?")[0] ?? "", status: response.status });
         }),
-      );
+      ),
+    );
     return HttpTransport.layer({
       baseUrl: "http://actors.test/actors",
       reconnect: HttpTransport.defaultReconnect,
@@ -242,10 +243,12 @@ describe("http transport over a real socket", () => {
         maxBodyBytes: HttpServer.defaultMaxBodyBytes,
         form: Option.none(),
       }).pipe(Effect.provideContext(host));
-      const run = Effect.runPromiseWith(yield* Effect.context<never>());
-      const app = { fetch: (request: Request) => run(handler(request)) };
-      // Bun.serve is the platform boundary of this test; the handler under
-      // test is web-standard and does not know about it.
+      const web = HttpEffect.toWebHandlerWith<never, HttpServerRequest.HttpServerRequest>(
+        yield* Effect.context<never>(),
+      )(handler);
+      const app = { fetch: (request: Request) => web(request) };
+      // Bun.serve is the platform boundary of this test; the app under test
+      // answers an HttpServerRequest and does not know about it.
       const serve = (port: number) =>
         Effect.acquireRelease(
           // oxlint-disable-next-line effect/noGlobals -- Bun.serve is this test's platform boundary.
@@ -286,7 +289,7 @@ describe("http transport over a real socket", () => {
 /** The test's session: a header naming a subject and its tenant. No header is nobody. */
 const fromHeader: HttpServer.DerivePrincipal = (request) =>
   Effect.succeed(
-    Option.match(Option.fromNullishOr(request.headers.get("x-tenant")), {
+    Option.match(Headers.get(request.headers, "x-tenant"), {
       onNone: () => Principal.anonymous,
       onSome: (tenant) =>
         Principal.constant(Authenticated.make({ subject: "caller", claims: { tenant } })),
@@ -323,8 +326,10 @@ describe("the principal over a real socket", () => {
         maxBodyBytes: HttpServer.defaultMaxBodyBytes,
         form: Option.none(),
       }).pipe(Effect.provideContext(host));
-      const run = Effect.runPromiseWith(yield* Effect.context<never>());
-      const app = { fetch: (request: Request) => run(handler(request)) };
+      const web = HttpEffect.toWebHandlerWith<never, HttpServerRequest.HttpServerRequest>(
+        yield* Effect.context<never>(),
+      )(handler);
+      const app = { fetch: (request: Request) => web(request) };
       const server = yield* Effect.acquireRelease(
         // oxlint-disable-next-line effect/noGlobals -- Bun.serve is this test's platform boundary.
         Effect.sync(() => Bun.serve({ port: 0, fetch: app.fetch })),

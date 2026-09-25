@@ -1,4 +1,5 @@
 import { Duration, Effect, Layer, ManagedRuntime, Match, Option, Result, Schema } from "effect";
+import { HttpEffect, HttpServerRequest } from "effect/unstable/http";
 import type {
   ActorTransport,
   AnyImplementation,
@@ -184,7 +185,7 @@ export const defineFrameHost = <R>(options: FrameHostOptions<R>): FrameHostClass
       ActorTransport | ActorHost.Recovery | R | Policies,
       PolicyNamesMissing
     >;
-    #handler: Option.Option<Promise<HttpServer.WebHandler>> = Option.none();
+    #handler: Option.Option<Promise<(request: Request) => Promise<Response>>> = Option.none();
 
     constructor(context: DurableObjectContext, _env: unknown) {
       this.#storage = context.storage;
@@ -201,18 +202,29 @@ export const defineFrameHost = <R>(options: FrameHostOptions<R>): FrameHostClass
       );
     }
 
-    /** The one web handler this object serves. Concurrent requests share it. */
-    #ensureHandler(): Promise<HttpServer.WebHandler> {
+    /**
+     * The one web handler this object serves, the actor app under
+     * `HttpEffect.toWebHandlerWith` over the runtime's context. Concurrent
+     * requests share it.
+     */
+    #ensureHandler(): Promise<(request: Request) => Promise<Response>> {
       return Option.match(this.#handler, {
         onSome: (running) => running,
         onNone: () => {
           const starting = this.#runtime.runPromise(
-            HttpServer.make({
-              prefix: "",
-              principal: options.principal,
-              maxBodyBytes: options.maxBodyBytes,
-              // A Durable Object serves the JSON wire; a plain form posts to the worker's app.
-              form: Option.none(),
+            Effect.gen(function* () {
+              const app = yield* HttpServer.make({
+                prefix: "",
+                principal: options.principal,
+                maxBodyBytes: options.maxBodyBytes,
+                // A Durable Object serves the JSON wire; a plain form posts to the worker's app.
+                form: Option.none(),
+              });
+              const context = yield* Effect.context<never>();
+              const web = HttpEffect.toWebHandlerWith<never, HttpServerRequest.HttpServerRequest>(
+                context,
+              )(app);
+              return (request: Request) => web(request);
             }),
           );
           this.#handler = Option.some(starting);
@@ -239,7 +251,9 @@ export const defineFrameHost = <R>(options: FrameHostOptions<R>): FrameHostClass
     async fetch(request: Request): Promise<Response> {
       const url = new URL(request.url);
       const read = await this.#runtime.runPromise(
-        Effect.result(HttpServer.readText(request.clone(), options.maxBodyBytes)),
+        Effect.result(
+          HttpServer.readText(HttpServerRequest.fromWeb(request.clone()), options.maxBodyBytes),
+        ),
       );
       if (Result.isFailure(read)) {
         return Match.valueTags(read.failure, {
@@ -265,7 +279,7 @@ export const defineFrameHost = <R>(options: FrameHostOptions<R>): FrameHostClass
         writeAddress(this.#storage, address.value);
       }
       const handler = await this.#ensureHandler();
-      return await this.#runtime.runPromise(handler(request));
+      return await handler(request);
     }
   };
 };

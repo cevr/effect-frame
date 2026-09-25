@@ -5,6 +5,12 @@ import { Anonymous, Authenticated, Principal } from "effect-frame/actor/client";
 import { renderDocument, respondDocument } from "effect-frame/router";
 import type { Html } from "effect-frame/view";
 import { Effect, ManagedRuntime, Option } from "effect";
+import {
+  Headers as HttpHeaders,
+  HttpEffect,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/unstable/http";
 import { demoTenant } from "./contract.js";
 import { inProcess } from "./host.server.js";
 import { rootId } from "./document.js";
@@ -32,8 +38,8 @@ const actorPrefix = "/actors";
 export const memberHeader = "x-dashboard-member";
 
 /** The principal a request's fixture header names. */
-export const principalOf = (request: Request): Principal =>
-  Option.match(Option.fromNullishOr(request.headers.get(memberHeader)), {
+export const principalOf = (request: HttpServerRequest.HttpServerRequest): Principal =>
+  Option.match(HttpHeaders.get(request.headers, memberHeader), {
     onNone: (): Principal => Anonymous.make({}),
     onSome: (tenants): Principal =>
       Authenticated.make({
@@ -100,10 +106,16 @@ export const renderPage = Effect.fn("Dashboard.renderPage")(function* (
  * `respondDocument` owns the request Scope: it outlives the answer only for
  * a returned body, and a defect answers 500.
  */
-const answerPage = (request: Request): Effect.Effect<Response, never, ActorTransport> =>
-  respondDocument(renderPage(new URL(request.url), principalOf(request)), {
-    onTimeout: () => Effect.succeed(new Response("the page took too long", { status: 504 })),
-  });
+const answerPage = respondDocument(
+  (url) =>
+    Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
+      renderPage(url, principalOf(request)),
+    ),
+  {
+    onTimeout: () =>
+      Effect.succeed(HttpServerResponse.text("the page took too long", { status: 504 })),
+  },
+);
 
 /** A built transport. The page render and the actor routes share it. */
 export type DashboardRuntime = ManagedRuntime.ManagedRuntime<ActorTransport, never>;
@@ -156,6 +168,13 @@ export const makeServer = async (options: ServerOptions): Promise<RunningServer>
     }),
   );
   const client = await runtime.runPromise(buildClient());
+  const context = await runtime.context();
+  const web = HttpEffect.toWebHandlerWith<
+    ActorTransport,
+    ActorTransport | HttpServerRequest.HttpServerRequest
+  >(context);
+  const actorsWeb = web(actors);
+  const pagesWeb = web(answerPage);
 
   const server = Bun.serve({
     port: options.port,
@@ -163,14 +182,14 @@ export const makeServer = async (options: ServerOptions): Promise<RunningServer>
       const request = stamped(incoming, member);
       const url = new URL(request.url);
       if (url.pathname.startsWith(`${actorPrefix}/`)) {
-        return runtime.runPromise(actors(request));
+        return actorsWeb(request);
       }
       if (url.pathname === "/client.js") {
         return new Response(client, {
           headers: { "content-type": "text/javascript; charset=utf-8" },
         });
       }
-      return runtime.runPromise(answerPage(request));
+      return pagesWeb(request);
     },
   });
 

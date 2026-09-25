@@ -4,6 +4,8 @@ import { ActorTransport, Form, contract } from "effect-frame/actor/client";
 import type { AnyContract } from "effect-frame/actor/client";
 import { Context, Effect, Hash, Layer, Option, Ref, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
+import type { HttpServerRequest } from "effect/unstable/http";
+import { HttpEffect } from "effect/unstable/http";
 import type { Wire } from "../plain-form-fixture.js";
 import {
   Tasks,
@@ -70,6 +72,9 @@ const serveWith = <E,>(
       Context.add(context, ActorTransport, formPosts(Context.get(context, ActorTransport))),
     );
     const run = Effect.runPromiseWith(context);
+    const web = HttpEffect.toWebHandlerWith<never, HttpServerRequest.HttpServerRequest>(context);
+    const formsWeb = web(forms);
+    const actorsWeb = web(actors);
     const server = yield* Effect.acquireRelease(
       Effect.sync(() =>
         Bun.serve({
@@ -77,10 +82,10 @@ const serveWith = <E,>(
           fetch: (request) => {
             const url = new URL(request.url);
             if (url.pathname === `${actorPrefix}/form`) {
-              return run(forms(request));
+              return formsWeb(request);
             }
             if (url.pathname.startsWith(actorPrefix)) {
-              return run(actors(request));
+              return actorsWeb(request);
             }
             return run(
               Effect.map(

@@ -160,19 +160,10 @@ export const OverviewView = (props: OverviewProps) =>
       rangeLabel(Option.fromNullishOr(search.range)),
     );
 
-    // The funnel tab. Its card is a row that exists only once revealed, so
-    // its `ready` registers with the shell's scope after first paint.
+    // The funnel tab. Its card's setup runs only once revealed, so its
+    // `ready` registers with the shell's scope after first paint.
     const revealed = yield* Actor.local(Behavior.value(false));
-    const funnel = yield* View.list({
-      each: Source.select(revealed.state, (open): ReadonlyArray<string> => {
-        if (open) {
-          return ["funnel"];
-        }
-        return [];
-      }),
-      keyBy: (name: string) => name,
-      row: () => FunnelCard(props),
-    });
+    const funnel = yield* View.show({ when: revealed.state, content: FunnelCard(props) });
 
     const revenue = yield* RevenueCard(props);
     const orders = yield* OrdersCard(props);

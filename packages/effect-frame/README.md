@@ -497,6 +497,8 @@ Bun.serve({
 | `View.form({ ref, message, ... })`        | yielded Effect | a command form that posts with no script                                     |
 | `View.list({ each, keyBy, row })`         | yielded Effect | a keyed list whose rows run an Effect                                        |
 | `View.keyed(source, keyBy, row)`          | yielded Effect | one region built again for each new identity                                 |
+| `View.show({ when, content, fallback })`  | yielded Effect | a branch whose setup runs only while a boolean source is true                |
+| `View.match(on, cases)`                   | yielded Effect | one branch per tag of a union source, whose case runs a setup                |
 | `View.loading({ fallback, content })`     | yielded Effect | a boundary that shows `fallback` until every `View.ready` inside has a value |
 | `View.errored({ fallback, content })`     | yielded Effect | a boundary that shows `fallback` when `View.orErrored` inside fails          |
 | `View.ready(state, placeholder)`          | yielded Effect | a query's value, inside `View.loading`                                       |

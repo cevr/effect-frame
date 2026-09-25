@@ -7,9 +7,10 @@ import { Empty } from "./jsx-runtime.js";
  * Control flow in a view. The tags `For`, `Show` and `Match` each take an
  * explicit source, so a reader sees what makes the list or the branch move;
  * `Portal` takes the host node it draws under. A tag only builds a marker,
- * and the runtime interprets it. `View.list` and `View.keyed` are the
- * Effect forms of a keyed list and a keyed region: they run each row's
- * setup as an Effect, which a tag cannot.
+ * and the runtime interprets it. `View.list`, `View.keyed`, `View.show` and
+ * `View.match` are the Effect forms of a keyed list, a keyed region and a
+ * branch: they run each row's or branch's setup as an Effect, which a tag
+ * cannot.
  */
 
 export interface ForProps<Item> {
@@ -85,6 +86,117 @@ export const keyed = <Item, R>(
   row: (item: Source<Item>) => Effect.Effect<Node, never, R | Scope.Scope>,
 ): Effect.Effect<ForNode<Item>, never, Exclude<R, Scope.Scope>> =>
   list({ each: Source.select(source, (item): ReadonlyArray<Item> => [item]), keyBy, row });
+
+/** A region whose setup is an Effect, run in a scope its branch owns. */
+type Setup<Value, Needs> = (
+  value: Source<Value>,
+) => Effect.Effect<Node, never, Needs | Scope.Scope>;
+
+export interface ShowOptions<R> {
+  readonly when: Source<boolean>;
+  /** Run each time the branch is shown, in a scope that closes when it hides. */
+  readonly content: Effect.Effect<Node, never, R | Scope.Scope>;
+  /** Run each time the branch is hidden, in a scope of its own. Nothing is drawn without it. */
+  readonly fallback?: Effect.Effect<Node, never, R | Scope.Scope>;
+}
+
+const branchKey = (shown: boolean): string => {
+  if (shown) {
+    return "shown";
+  }
+  return "hidden";
+};
+
+/**
+ * The Effect form of `<Show>`: a branch whose content runs a setup. The
+ * setup runs when the source turns `true` and its scope closes when it
+ * turns `false`, so a hidden branch holds no actor, follows no query and
+ * observes no source. `fallback` runs the other way round. Built on
+ * `keyed`, keyed by whether the branch is shown.
+ *
+ * ```ts
+ * const results = yield* View.show({
+ *   when: Source.select(params, (p) => p.q.length > 0),
+ *   content: Results({ params }),
+ *   fallback: Effect.succeed(<p>type to search</p>),
+ * });
+ * return <section>{results}</section>;
+ * ```
+ */
+export const show = <R>(
+  options: ShowOptions<R>,
+): Effect.Effect<ForNode<boolean>, never, Exclude<R, Scope.Scope>> => {
+  const fallback = Option.getOrElse(
+    Option.fromNullishOr(options.fallback),
+    (): Effect.Effect<Node, never, R | Scope.Scope> => Effect.succeed(Empty),
+  );
+  return keyed(options.when, branchKey, (shown) =>
+    Effect.flatMap(shown.get, (value) => {
+      if (value) {
+        return options.content;
+      }
+      return fallback;
+    }),
+  );
+};
+
+const tagOf = (value: Tagged): string => value._tag;
+
+/**
+ * One setup per tag, and every tag present, as `MatchCases` is for `<Match>`.
+ * `Needs` bounds what a case may need; `View.match` reads what each one does.
+ */
+export type MatchSetups<Union extends Tagged, Needs> = {
+  readonly [K in Union["_tag"]]: Setup<Extract<Union, { readonly _tag: K }>, Needs>;
+};
+
+/** What a table of setups needs: the union of each case's services. */
+type SetupServices<Cases> = {
+  readonly [K in keyof Cases]: Cases[K] extends (
+    value: never,
+  ) => Effect.Effect<Node, never, infer R>
+    ? R
+    : never;
+}[keyof Cases];
+
+/**
+ * The Effect form of `<Match>`: one branch per tag of a union source, whose
+ * case runs a setup. A new tag closes the old branch's scope and runs the
+ * new case; a new value under the same tag reaches the case through its
+ * source, and the setup does not run again. The table is exhaustive, as
+ * `<Match>`'s is, and what its cases need is what the view that yields it
+ * needs. Built on `keyed`, keyed by the tag.
+ *
+ * ```ts
+ * const body = yield* View.match(pane, {
+ *   Idle: () => Effect.succeed(<p>no query yet</p>),
+ *   Asked: (asked) => Effect.flatMap(asked.get, (a) => Results({ q: a.q })),
+ * });
+ * ```
+ */
+export function match<A extends Tagged, Cases extends MatchSetups<A, unknown>>(
+  on: Source<A>,
+  cases: Cases,
+): Effect.Effect<ForNode<A>, never, Exclude<SetupServices<Cases>, Scope.Scope>>;
+export function match<A extends Tagged, R>(
+  on: Source<A>,
+  cases: MatchSetups<A, R>,
+): Effect.Effect<ForNode<A>, never, Exclude<R, Scope.Scope>> {
+  // A case is written for its own member; the key it runs under says which
+  // member the row's source holds while it is shown, as `Match`'s table does.
+  const table: Record<
+    string,
+    { bivariant(value: Source<A>): Effect.Effect<Node, never, R | Scope.Scope> }["bivariant"]
+  > = cases;
+  return keyed(on, tagOf, (item) =>
+    Effect.flatMap(item.get, (value) =>
+      Option.match(Option.fromNullishOr(table[value._tag]), {
+        onNone: (): Effect.Effect<Node, never, R | Scope.Scope> => Effect.succeed(Empty),
+        onSome: (run) => run(item),
+      }),
+    ),
+  );
+}
 
 /** The plain form: a boolean source, shown while it is `true`. */
 export interface ShowProps {

@@ -11,7 +11,7 @@
  */
 export { attach, bind, event, submit, type View } from "./view.js";
 export { form } from "./form.js";
-export { keyed, list } from "./control.js";
+export { keyed, list, match, show } from "./control.js";
 export { attempt } from "./attempt.js";
 export { LazyImportFailed, lazy } from "./lazy.js";
 export { flush, mount } from "./runtime.js";

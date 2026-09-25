@@ -7,7 +7,9 @@ export {
   type ForProps,
   type ListOptions,
   type MatchProps,
+  type MatchSetups,
   type PortalProps,
+  type ShowOptions,
   type ShowProps,
   type Tagged,
 } from "./control.js";

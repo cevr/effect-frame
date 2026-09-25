@@ -235,6 +235,7 @@ _Avoid_: Cached data, frozen state, baked payload.
 
 **Shown branch**:
 A conditional region of a view while its condition holds. A shown branch owns every node it and its descendants created, and owns its own subscriptions; hiding it ends both. A hidden branch does not exist: it holds no node and observes no source.
+_Code_: `<Show>` and `<Match>`; `View.show` and `View.match` when the branch runs a setup, which runs each time the branch is shown and whose scope closes when it hides.
 _Avoid_: Hidden branch, cached branch.
 
 **Proving example**:

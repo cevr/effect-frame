@@ -314,3 +314,41 @@ describe("handler forms", () => {
     expect(true).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// View.match and View.show: a branch whose setup runs an Effect
+// ---------------------------------------------------------------------------
+
+/** A case's services reach the view that yields the match; `Scope` does not. */
+const matchNeedsClock = () =>
+  View.match(light, {
+    Red: () => Effect.succeed(<p>stop</p>),
+    Green: (green) => Effect.map(Clock, () => <p>{View.bind(green, (g) => g.seconds)}</p>),
+  });
+const matchCarriesItsServices: Equals<
+  Effect.Services<ReturnType<typeof matchNeedsClock>>,
+  Clock
+> = true;
+
+/** A missing case is a compile error, as it is for `<Match>`. */
+const matchIncomplete = () =>
+  // @ts-expect-error `Green` is not handled
+  // @effect-diagnostics-next-line anyUnknownInErrorContext:off
+  View.match(light, { Red: () => Effect.succeed(<p>stop</p>) });
+
+const showNeedsNothing = () =>
+  View.show({
+    when: Source.select(light, (l) => l._tag === "Red"),
+    content: Effect.succeed(<p />),
+  });
+const showCarriesNothing: Equals<
+  Effect.Services<ReturnType<typeof showNeedsNothing>>,
+  never
+> = true;
+
+describe("effect branches", () => {
+  test("a case's services stay visible and the table is exhaustive", () => {
+    expect([matchCarriesItsServices, showCarriesNothing]).toEqual([true, true]);
+    void matchIncomplete;
+  });
+});

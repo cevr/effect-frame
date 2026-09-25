@@ -2,6 +2,7 @@ import { Duration, Effect, Layer, ManagedRuntime, Option, Result, Schema } from 
 import type {
   ActorTransport,
   AnyImplementation,
+  MailboxStore,
   Policies,
   PolicyNamesMissing,
 } from "effect-frame/actor";
@@ -233,22 +234,19 @@ export const defineFrameHost = <R>(options: FrameHostOptions<R>): FrameHostClass
 /**
  * What still needs the object awake: a pending command, or a committed wake
  * (`Behavior.wakeAt`) at or before now. `Some` is the time to wake again.
+ * It reads through the object's `MailboxStore`, which owns the tables.
  */
-const due = (storage: DurableStorage, now: number): Option.Option<number> => {
-  const pending = Interop.exec(
-    storage.sql,
-    "SELECT 1 FROM commands WHERE revision IS NULL LIMIT 1",
-  );
-  if (pending.length > 0) {
-    return Option.some(now);
-  }
-  return Option.flatMap(
-    Interop.firstRow(Interop.exec(storage.sql, "SELECT wake_at FROM committed WHERE id = 1")),
-    (row) => Interop.numberColumn(row, "wake_at"),
-  );
-};
+const due = (store: MailboxStore["Service"], now: number): Effect.Effect<Option.Option<number>> =>
+  Effect.gen(function* () {
+    const pending = yield* store.pending;
+    if (pending.length > 0) {
+      return Option.some(now);
+    }
+    const latest = yield* store.latest;
+    return Option.flatMap(latest, (committed) => committed.wake);
+  });
 
-/** How often the hold reads the tables. */
+/** How often the hold reads the store. */
 const holdStep = Duration.millis(20);
 
 /** The longest hold, with margin below Cloudflare's 15-minute alarm limit. */
@@ -265,13 +263,6 @@ export const holdOf = (alarmHold: Option.Option<Duration.Input>): Duration.Durat
       Option.getOrElse<Duration.Input, Duration.Input>(alarmHold, () => "30 seconds"),
     ),
     { minimum: holdStep, maximum: holdLimit },
-  );
-
-/** The committed revision, for the log line that closes a wake. */
-const committedRevision = (storage: DurableStorage): Option.Option<number> =>
-  Option.flatMap(
-    Interop.firstRow(Interop.exec(storage.sql, "SELECT revision FROM committed WHERE id = 1")),
-    (row) => Interop.numberColumn(row, "revision"),
   );
 
 /**
@@ -309,10 +300,11 @@ const wakeAndDrain = Effect.fn("FrameHost.wake")(function* (
       Effect.annotateLogs({ contract: address.contract, reason: woken.failure._tag }),
     );
   }
+  const store = yield* StorageStore.make(storage);
   const now = Effect.clockWith((clock) => clock.currentTimeMillis);
   const step = Effect.fn("FrameHost.wake.step")(function* () {
     const at = yield* now;
-    const settled = Option.match(due(storage, at), {
+    const settled = Option.match(yield* due(store, at), {
       onNone: () => true,
       onSome: (wake) => wake > at,
     });
@@ -324,8 +316,12 @@ const wakeAndDrain = Effect.fn("FrameHost.wake")(function* (
   const steps = Math.ceil(Duration.toMillis(hold) / Duration.toMillis(holdStep));
   yield* Effect.repeat(step(), { until: (settled) => settled, times: steps });
   const at = yield* now;
-  const stillDue = Option.filter(due(storage, at), (wake) => wake <= at);
-  const revision = Option.getOrElse(committedRevision(storage), () => 0);
+  const stillDue = Option.filter(yield* due(store, at), (wake) => wake <= at);
+  const latest = yield* store.latest;
+  const revision = Option.match(latest, {
+    onNone: () => 0,
+    onSome: (committed) => committed.revision,
+  });
   if (Option.isSome(stillDue)) {
     yield* Interop.setAlarm(storage, at);
     return yield* Effect.logInfo(

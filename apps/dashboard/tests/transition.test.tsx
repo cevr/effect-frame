@@ -3,7 +3,8 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import { QueryCache } from "effect-frame/actor/client";
-import { Effect, Fiber } from "effect";
+import { followLinks } from "effect-frame/router";
+import { Deferred, Effect, Fiber, Option } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { routes } from "../src/routes.js";
 import { keyText, member, mountApp, settle, tappedHost, textOf } from "./fixture.js";
@@ -160,6 +161,58 @@ describe("active follows the mounted branch (#28)", () => {
           'TenantInfo{"tenant":"globex"}',
         ]);
         expect(wire.readsOf(tenantInfo)).toBe(1);
+      }),
+  );
+});
+
+/** Click the link `selector` names with the primary button, as a reader does. */
+const follow = (root: ParentNode, selector: string) =>
+  Effect.sync(() => {
+    const found = Option.getOrThrowWith(
+      Option.fromNullishOr(root.querySelector(selector)),
+      () => `no ${selector}`,
+    );
+    found.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+  });
+
+describe("the banner links move between the branches", () => {
+  it.scopedLive(
+    "overview to orders: the orders layout enters while its read is in flight, and draws",
+    () =>
+      Effect.gen(function* () {
+        const { handlers, wire } = yield* tappedHost();
+        const app = yield* mountApp({
+          transport: wire.transport,
+          href: `${origin}/d/acme`,
+          routes,
+        });
+        yield* followLinks(app.root, app.router);
+        yield* settle(
+          Effect.sync(() => textOf(app.root, "#revenue") === "460"),
+          "the overview",
+        );
+
+        // The orders layout's read of every order is still in flight when it
+        // enters, so its `ready` registers unsettled under the shell's `Loading`.
+        const orders = yield* handlers.hold("Orders");
+        yield* follow(app.root, 'nav a[href="/d/acme/orders"]');
+        yield* settle(
+          Effect.map(app.current, (url) => url.pathname === "/d/acme/orders"),
+          "the orders URL",
+        );
+        yield* Deferred.succeed(orders, void 0);
+
+        yield* settle(
+          Effect.sync(() => textOf(app.root, "#detail").includes("o6")),
+          "the orders page",
+        );
+        expect(textOf(app.root, "#orders-of")).toBe("Acme Co");
+        // Every order, the range "all" the layout declares.
+        const rows = Array.from(app.root.querySelectorAll("#rows li"), (row) =>
+          row.getAttribute("data-order"),
+        );
+        expect(rows).toEqual(["o1", "o2", "o3", "o4", "o5", "o6", "o7", "o8"]);
+        expect(textOf(app.root, "#revenue")).toBe("");
       }),
   );
 });

@@ -241,6 +241,10 @@ interface Tracker {
    * and interrupt it when `scope` closes. The fiber starts at once: an
    * effect with no suspension completes before this returns. The scope owns
    * the fiber before the fiber starts, so a closed scope cannot start it.
+   * The fiber runs outside every reactive owner, even the part that runs
+   * before this returns: an Effect is not a computation, so a signal it
+   * writes (a readiness hold, a binding's value) is a write from outside
+   * the graph. A build it lands re-enters its own owner by name.
    */
   readonly run: (effect: Effect.Effect<unknown>, scope: Scope.Scope) => void;
   /**
@@ -856,10 +860,16 @@ const makeTracker = Effect.fn("View.makeTracker")(function* (
   const runOwned = (effect: Effect.Effect<unknown>, scope: Scope.Scope): void => {
     // `runSync` supplies a temporary synchronous scheduler to its parent
     // fiber. Restore the mount scheduler in the child before its work yields.
-    void runSync(
-      Effect.forkIn(
-        Effect.provideService(counted(effect, scope), Scheduler.Scheduler, mountScheduler),
-        scope,
+    // The child's synchronous part runs here, on the caller's stack: under
+    // no owner, or Solid refuses the signal writes it makes (a row's setup
+    // registering unsettled holds its boundary, #16).
+    // oxlint-disable-next-line effect/noNullish -- the Solid edge: `runWithOwner` names no owner `null`.
+    runWithOwner(null, () =>
+      runSync(
+        Effect.forkIn(
+          Effect.provideService(counted(effect, scope), Scheduler.Scheduler, mountScheduler),
+          scope,
+        ),
       ),
     );
   };
@@ -1221,6 +1231,9 @@ const planRetained = <HostNode>(
     // A registration that arrives unsettled while the content is on screen
     // (#16): leave the document now, before the registering row writes a
     // node, and let the fallback follow. `when` brings the content back.
+    // The hold arrives from a setup, which runs under no owner; the mark
+    // is the boundary's node, so it is made under the boundary's owner.
+    const boundaryOwner = getOwner();
     Option.map(Option.fromNullishOr(node.hold), (subscribe) =>
       renderer.tracker.register(() =>
         subscribe(() => {
@@ -1229,7 +1242,7 @@ const planRetained = <HostNode>(
           }
           // An empty text node keeps the content's place for the fallback,
           // which is drawn at the next flush, after the row has been built.
-          const mark = renderer.host.createText("");
+          const mark = runWithOwner(boundaryOwner, () => renderer.host.createText(""));
           renderer.host.insert(parent, mark, Option.fromNullishOr(contentSlot.nodes[0]));
           held = Option.some(mark);
           presentation.hide();

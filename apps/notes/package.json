@@ -6,7 +6,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "bun build --conditions=source src/client.tsx --target browser --format esm --outdir dist",
-    "test": "bun test --conditions=source tests/",
+    "test": "bun test --conditions=source --conditions=development tests/",
     "dev": "bun run --conditions=source src/server.ts",
     "terminal": "bun run --conditions=source src/terminal.tsx"
   },

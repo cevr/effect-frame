@@ -19,7 +19,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "bun --bun tsdown",
-    "test": "bun test --conditions=source tests/"
+    "test": "bun test --conditions=source --conditions=development tests/"
   },
   "dependencies": {
     "effect-frame": "workspace:*"

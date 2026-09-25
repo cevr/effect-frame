@@ -9,7 +9,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "bun build --conditions=source src/index.ts --target browser --outdir dist --external effect --external effect-machine",
-    "test": "bun test --conditions=source tests/",
+    "test": "bun test --conditions=source --conditions=development tests/",
     "fixture": "bun build --conditions=source fixture/index.ts --target browser --format esm --outfile fixture/worker.js",
     "proof:celld": "bun --conditions=source scripts/crash-harness.ts",
     "proof:workerd": "bun --conditions=source scripts/crash-harness.ts --runtime=workerd",

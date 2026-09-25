@@ -51,3 +51,11 @@ export interface DurableStorage {
   readonly getAlarm: () => Promise<unknown>;
   readonly deleteAlarm: () => Promise<void>;
 }
+
+/**
+ * What a Durable Object hands its class. celld and Cloudflare both supply a
+ * wider object; the host uses only the storage.
+ */
+export interface DurableObjectContext {
+  readonly storage: DurableStorage;
+}

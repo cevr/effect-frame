@@ -13,8 +13,8 @@ import {
 import type { Behavior, HostedInstance } from "effect-frame/actor";
 import { CommandId, MailboxStore, implementTransparent } from "effect-frame/actor";
 import { contract } from "effect-frame/actor/client";
-import type { DurableStorage } from "./storage.js";
-import * as StorageStore from "./storage-store.js";
+import type { DurableStorage } from "../src/storage.js";
+import * as StorageStore from "../src/storage-store.js";
 
 // ---------------------------------------------------------------------------
 // The hosted actor: a counter reducer

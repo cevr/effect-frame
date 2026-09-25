@@ -1,4 +1,4 @@
-import { FrameActor } from "../src/durable-object.js";
+import { FrameActor } from "./durable-object.js";
 
 /**
  * The crash-proof fixture worker. It routes `/actor/:key/...` to one Durable

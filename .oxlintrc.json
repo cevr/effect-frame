@@ -146,7 +146,7 @@
       }
     },
     {
-      "files": ["packages/host-durable-object/src/durable-object.ts"],
+      "files": ["packages/host-durable-object/fixture/durable-object.ts"],
       "rules": {
         "effect/noAsyncFunction": "off",
         "effect/noUnknownParameters": "off"

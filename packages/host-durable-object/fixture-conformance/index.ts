@@ -2,9 +2,8 @@ import { Effect, Option, Schema } from "effect";
 import { CommandId } from "effect-frame/actor";
 import type { ConformanceCase, StoreFactory } from "effect-frame/actor/testing";
 import { mailboxStoreConformance } from "effect-frame/actor/testing";
-import type { DurableObjectContext } from "../src/durable-object.js";
 import * as Interop from "../src/interop.js";
-import type { DurableStorage } from "../src/storage.js";
+import type { DurableObjectContext, DurableStorage } from "../src/storage.js";
 import * as StorageStore from "../src/storage-store.js";
 
 /**

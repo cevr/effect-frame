@@ -1,4 +1,5 @@
 export {
+  type DurableObjectContext,
   type DurableStorage,
   type SqlBinding,
   type SqlCursor,
@@ -7,20 +8,7 @@ export {
   type StorageTransaction,
 } from "./storage.js";
 export * as Interop from "./interop.js";
-export { factory, layer, make, schema } from "./storage-store.js";
-export {
-  Add,
-  CounterState,
-  counter,
-  handle,
-  host,
-  readBody,
-  toCommand,
-  type Command,
-  type HostedActor,
-  type Reply,
-} from "./frame-actor.js";
-export { FrameActor, type DurableObjectContext } from "./durable-object.js";
+export { layer, make, schema } from "./storage-store.js";
 export { route, type DurableObjectNamespace, type DurableObjectStub } from "./route.js";
 export {
   defineFrameHost,

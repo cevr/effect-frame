@@ -2,15 +2,7 @@ import { Effect, Exit, Layer, ManagedRuntime, Option, Scope } from "effect";
 import { DurableHostConfig } from "effect-frame/actor";
 import type { HostedActor, Reply } from "./frame-actor.js";
 import { emptyBody, handle, host, readBody, toCommand } from "./frame-actor.js";
-import type { DurableStorage } from "./storage.js";
-
-/**
- * What a Durable Object hands its class. celld and Cloudflare both supply a
- * wider object; the host uses only the storage.
- */
-export interface DurableObjectContext {
-  readonly storage: DurableStorage;
-}
+import type { DurableObjectContext } from "../src/storage.js";
 
 /** The host's tuning. A durable store reads from disk, so it polls faster. */
 const hostLayer = Layer.succeed(

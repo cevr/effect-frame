@@ -7,7 +7,6 @@ import type {
   StoredReceipt,
 } from "effect-frame/actor";
 import { CommandConflict, CommandId, MailboxStore } from "effect-frame/actor";
-import type { StoreFactory } from "effect-frame/actor/testing";
 import * as Interop from "./interop.js";
 import type { DurableStorage, SqlBinding, SqlRow, SqlStorage } from "./storage.js";
 
@@ -304,6 +303,3 @@ const writeAdvance = (sql: SqlStorage, state: string, wake: Option.Option<number
 /** The layer a Durable Object builds once and gives to the durable actor. */
 export const layer = (storage: DurableStorage): Layer.Layer<MailboxStore> =>
   Layer.effect(MailboxStore, make(storage));
-
-/** The store as a scoped factory, which the conformance suite takes. */
-export const factory = (storage: DurableStorage): StoreFactory => make(storage);

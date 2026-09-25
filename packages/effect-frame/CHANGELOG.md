@@ -1,5 +1,292 @@
 # effect-frame
 
+## 0.27.0
+
+### Minor Changes
+
+- [`5abcc5a`](https://github.com/cevr/effect-frame/commit/5abcc5ae5f22550563e74e42813eb41e5e428e7d) Thanks [@cevr](https://github.com/cevr)! - Exports with no caller, or with a second path to a used name, are removed:
+
+  - `effect-frame/actor/client`: `isQueryFailure`, and the flat `FormContext`, `FormFields`, `FormIssue` and `FormIssues`. Write `Form.FormContext` and the other `Form.*` names.
+  - `effect-frame/actor`: the flat `batched` (write `batchedQuery`), `queryServerOnly`, `MissingPolicy` (read it from `PolicyNamesMissing.missing`), and the types `QueryHostOptions` and `QueryServing`, whose producer is not public.
+  - `Behavior.wakeOf` and `Behavior.refusalOf` are internal. `Behavior` holds what an author writes: `value`, `reducer`, `machine` and the types.
+
+- [`2dc0c06`](https://github.com/cevr/effect-frame/commit/2dc0c0624e8b4b089383002e83589976d7060b44) Thanks [@cevr](https://github.com/cevr)! - `ActorHost.layer` and `ActorHost.make` require `store`. Omitted, the host used to give every actor a fresh in-memory store, so a production host that forgot it lost durability with no error. Pass `store: ActorHost.memoryStore` for a test, or for a host that keeps nothing across a restart. `ActorHost.layerMemory(implementations, queries)` is removed: write `ActorHost.layer({ implementations, queries, store: ActorHost.memoryStore })`.
+
+- [`85e3518`](https://github.com/cevr/effect-frame/commit/85e35184badadc8666f31d3b37340e41336a2fd7) Thanks [@cevr](https://github.com/cevr)! - Placement is named at the call, after the `kind` the reference carries: `Actor.local`, `Actor.remote`, `Actor.remoteCommands`, and, on the server entry, `Actor.durable`.
+
+  - `spawn(behavior)` is `Actor.local(behavior)`. A view's own state is `Actor.local(Behavior.value(initial))`.
+  - `ref(contract, key, options)` is `Actor.remote(contract, key, options)`.
+  - `commandRef(contract, key)` is `Actor.remoteCommands(contract, key)`.
+  - `durable(options)` is `Actor.durable(options)`, from `effect-frame/actor` only: the browser entry's `Actor` has no `durable`, because a browser bundle never carries a store.
+
+  The span names follow: `Actor.local`, `Actor.remote`, `Actor.remoteCommands`, `Actor.durable`.
+
+- [`e7f503a`](https://github.com/cevr/effect-frame/commit/e7f503ae56b6d9a5ecf13a57807af8267829a55f) Thanks [@cevr](https://github.com/cevr)! - `attachGateway` returns `{ status }`, a `Stream` of `AttachStatus`, in place of the `onStatus` callback. It takes a required `retry: Schedule` and `openTimeout: Duration.Input` in place of `initialRetryMillis`, `maxRetryMillis` and `openTimeoutMillis`; `defaultRetry` (250 ms doubling to 5 s) and `defaultOpenTimeout` (2 s) name the old defaults. A schedule that ends stops the attachment with a new `Stopped` status.
+
+- [`3246027`](https://github.com/cevr/effect-frame/commit/32460271c337cc84481b2c9e717a8b90333592ef) Thanks [@cevr](https://github.com/cevr)! - `Cell` is removed. A view's own state is a local actor: `Actor.local(Behavior.value(initial))`. Read it with `ref.state`, write it with `ref.send(Value.Set(next))` or `modify(ref, (value) => next)`. Unlike a cell, a write after the actor's scope closed fails with `ActorStopped`; a handler that can outlive its view catches it by name.
+
+- [`b4bdbea`](https://github.com/cevr/effect-frame/commit/b4bdbeaa5083e4b106b0612082bbe86825d5c3ea) Thanks [@cevr](https://github.com/cevr)! - Delete `QueryTest`, `QueryCache.layerTest` and `ActorTransport.layerLocal`. A test writes the production wiring: `Layer.merge(QueryCache.layer, ActorHost.layer({ implementations, queries, store: ActorHost.memoryStore }))`, or `Layer.effect(ActorTransport, host)` for a hand-built transport.
+
+- [`0277d0c`](https://github.com/cevr/effect-frame/commit/0277d0c691c1c334e5a76b7374a635bbdaeade5a) Thanks [@cevr](https://github.com/cevr)! - `Html.Document` takes a required `rootId`, and the renderer writes the mount element (`<div id="…">`) around the drawing; `head` now ends before it and `tail` starts after it. `Dom.root(id)` finds that element in the browser or fails with the new `Dom.RootNotFound`. A server document and a browser entry name the id once and import it.
+
+- [`b785156`](https://github.com/cevr/effect-frame/commit/b7851566423c57245f25a2308c9c2bbada048f7c) Thanks [@cevr](https://github.com/cevr)! - `Route.drivenView` returns a `Route.DrivenView`: a view tagged
+  `"DrivenView"` that carries its drive and view. `Route.driven` reads the
+  drive off the value a leaf was given instead of looking the function up in
+  a hidden module-level WeakMap. A view wrapped around a `DrivenView` is a
+  plain view, and `Route.driven` refuses its leaf with `BranchRejected`, as
+  before.
+
+- [`5b4c991`](https://github.com/cevr/effect-frame/commit/5b4c99198c71f918e063a5182d19bdfe15dab181) Thanks [@cevr](https://github.com/cevr)! - A `Loading` with no registration now shows its content. It has nothing to wait for. Before, it showed its fallback until a first read registered, so a `Loading` around content that reads no query never drew that content, and the router registered a settled read on behalf of a failed or still-preparing segment to work around it. That workaround is gone. A read that registers later, unsettled, still puts the boundary back in its fallback before the registering view writes: a keyed row that sets up after mount may show the rest of the content first.
+
+- [`b897620`](https://github.com/cevr/effect-frame/commit/b897620d5a17629cfc6e00b29d6e02a370591439) Thanks [@cevr](https://github.com/cevr)! - A form body has one decode, and `View.form` proves at compile time that the post can decode.
+
+  - `Form.decode(schema)(fields)` strips the framework fields, nests the rest and decodes the message. `HttpServer.form` and a scripted `View.form` submit both run it. A body that cannot nest fails with `FormMalformed` (the route answers 400, as before); one that does not decode fails with the schema's error (the route redraws the page with its issues, as before).
+  - `View.form`'s `message` must be one of the contract's own members (one schema of its union, or one variant of its machine event schema), not a copy with the same type: the post decodes with the contract's schema. A copy whose `Type` matches but whose encoding differs (`Finite` where the member has `FiniteFromString`) no longer compiles.
+  - `View.form`'s `message` must have a form encoding (`Form.Codable`): a member with a field that does not encode to strings, or a boolean with no decoding default, no longer compiles. It used to compile and refuse every post at run time.
+
+- [`b5a889a`](https://github.com/cevr/effect-frame/commit/b5a889a09ac7e159fb8f8f585d6d20db62422a38) Thanks [@cevr](https://github.com/cevr)! - `HttpTransport.layer` reads through the `HttpClient` in context
+  (`effect/unstable/http`) instead of a Promise `fetch` that defaulted to
+  `globalThis.fetch`. Its type is now
+  `Layer<ActorTransport, never, HttpClient>`: a browser or server writes
+  `.pipe(Layer.provide(FetchHttpClient.layer))`. An interrupted call aborts
+  its request, and a `changes` stream aborts its connection when it ends.
+  `HttpTransport.Fetch` and `HttpTransport.FetchLike` are removed.
+
+  New: `HttpTest.client(handler)` from `effect-frame/actor/testing`, an
+  `HttpClient` whose requests go straight into a web handler such as the one
+  `HttpServer.make` builds, so a test crosses the real wire with no socket.
+
+- [`0b64f8d`](https://github.com/cevr/effect-frame/commit/0b64f8d2923e43500033c5b82bf4fc9d22f998be) Thanks [@cevr](https://github.com/cevr)! - `hydrate` reads the issues of a refused plain post that the document carries (`Form.issuesScriptId`) and provides them to the first render. A routed app calls `hydrate({ routes, notFound, root, landing, traversalReadLimit })` and writes no page-load sequence of its own.
+
+- [`d03dbe0`](https://github.com/cevr/effect-frame/commit/d03dbe0af34bd38375cafb3380a6b68bc43a2dd2) Thanks [@cevr](https://github.com/cevr)! - `Protocol.maxDeadlineMillis` and `Protocol.loopbackHosts` name the deadline bound and the loopback hosts. `Protocol.DeadlineMillis` is built from the bound; the attachment and the inspect reader read the hosts from it.
+
+- [`e57471d`](https://github.com/cevr/effect-frame/commit/e57471d876516635d7fc64b757833de7104cc4f3) Thanks [@cevr](https://github.com/cevr)! - `View.lazy` returns a `LazyView<P, E, R>`: a View tagged `"LazyView"` that
+  carries its import definition. A route reads the definition off the value
+  it was given instead of looking the function up in a hidden module-level
+  WeakMap. The `LazyView` type is exported from `effect-frame/view`. Hand a
+  route the `LazyView` itself: a view wrapped around it is a plain View,
+  and imports at setup.
+
+- [`4e5c9fb`](https://github.com/cevr/effect-frame/commit/4e5c9fb0599b61b5bd1662b4539494173bad85f9) Thanks [@cevr](https://github.com/cevr)! - `link(to, params, search)` accepts a `Source` of params as well as fixed
+  params (`LinkParams<Params>`). A layout that outlives a param move passes
+  `props.params`, so its links print and move with the params it holds now.
+  Before, a layout's links kept the tenant they were drawn with after a
+  tenant switch. The dashboard's header and range links now follow
+  `props.params`.
+
+- [`91bd13a`](https://github.com/cevr/effect-frame/commit/91bd13afcc4b6e124d86970ba640587996276a91) Thanks [@cevr](https://github.com/cevr)! - `mount` and `hydrate` require `landing` and `traversalReadLimit`. The router no longer defaults to `NavigationBehavior.Restore` and 3 seconds behind the caller's back: `mount({ routes, notFound, host, root, landing: NavigationBehavior.Restore, traversalReadLimit: "3 seconds" })`.
+
+- [`30a2261`](https://github.com/cevr/effect-frame/commit/30a2261e89269a4892ebf3b5cd6884ca946afa87) Thanks [@cevr](https://github.com/cevr)! - The actor host has one HTTP handler, and every edge decision is written at
+  its call.
+
+  - `HttpServer.make({ prefix, principal, maxBodyBytes, form })` serves the
+    JSON verbs, `changes`, and the plain-form route. Each verb answers at
+    exactly `prefix + Wire.paths.*` (a path that only ends in a verb is a
+    404), so an app hands it every path under the prefix unchanged instead
+    of stripping the prefix. The principal is derived once per request for
+    every route.
+  - `maxBodyBytes` is required. A body over it answers 413 before it is
+    decoded, whether its length is declared or streamed.
+    `HttpServer.defaultMaxBodyBytes` is one MiB. `HttpServer.readText`,
+    `HttpServer.BodyTooLarge` and `HttpServer.BodyUnreadable` are the
+    bounded reader, for a host that reads a body itself.
+  - `form` is `Option.some({ contracts, login, render, commitWithin })` or
+    `Option.none()`. `commitWithin` is required;
+    `HttpServer.defaultCommitWithin` is ten seconds.
+  - Removed: `HttpServer.form` and `HttpServer.FormPostOptions` (the `form`
+    option replaces them; its type is `HttpServer.FormRoute`), and
+    `HttpServer.toWebHandler` (build the handler with `HttpServer.make` in
+    the runtime that holds the host).
+  - `renderDocument` requires `principal`: every check and query the render
+    reads runs under it, where it used to read an ambient `CurrentPrincipal`
+    that defaulted to `Anonymous`.
+  - New: `respondDocument(render, { onTimeout })` answers one page request.
+    It owns the render's Scope, answers a redirect with 303 (path and
+    search), a document with its status, a timeout with `onTimeout`, and a
+    defect with 500, and closes the Scope on every exit but a returned body.
+
+- [`3081ad0`](https://github.com/cevr/effect-frame/commit/3081ad013830f6d5cd4d940e687ce079074f30d2) Thanks [@cevr](https://github.com/cevr)! - `Link` and `followLinks` share one plain-click policy, so a `Link` click
+  leaves the same cases to the browser as a plain anchor does: a modified or
+  middle click, `target="_blank"`, a download, another origin, and a link
+  that only changes the current page's fragment. `Link` no longer writes
+  `data-frame-replace`, and `followLinks` no longer reads it: a plain anchor
+  always pushes, and a move that replaces is a `Link` with `replace`.
+
+- [`6beeebd`](https://github.com/cevr/effect-frame/commit/6beeebd9469c8ff00054bdf80132209f61a0e802) Thanks [@cevr](https://github.com/cevr)! - Each exported value has one path. `bun run declarations` now also fails when one value is exported flat and as a namespace member, or under two names.
+
+  - `Value` (and the `SetValue` type) is a flat export of `effect-frame/actor/client` only; `Behavior.Value` is removed. `Behavior` holds what builds a behavior: `value`, `reducer`, `machine`, and their types.
+  - `UrlStateConflict` and `UrlStateSchemaRejected` are `UrlState.UrlStateConflict` and `UrlState.UrlStateSchemaRejected` only; the flat exports of `effect-frame/router` are removed.
+
+- [`6f61bf2`](https://github.com/cevr/effect-frame/commit/6f61bf233198a939ac8c821d59a1de2ee8ffb5dc) Thanks [@cevr](https://github.com/cevr)! - `QueryCache.layer` provides its command ownership and streamed-document access as a second, private service in Context instead of module-global WeakMaps. A custom or wrapped `QueryCache` owns no command's dependents: it is no longer invalidated when a command starts.
+
+- [`de8c041`](https://github.com/cevr/effect-frame/commit/de8c0418cead37579a36d8a99c6c072249b54f8c) Thanks [@cevr](https://github.com/cevr)! - `query` and `batchedQuery` require `version` and `depends`, as `contract` requires its `version`. `version` used to default to 1 and `depends` to none, so a forgotten `depends` compiled and no commit ever marked the query stale. Write `version: 1` and `depends: []` where you meant the old defaults.
+
+- [`7221d25`](https://github.com/cevr/effect-frame/commit/7221d25638871d3c770c6a910afa1856110becdb) Thanks [@cevr](https://github.com/cevr)! - One path to read a query from each place. A view reads a query through its route (`Route.query`); other code follows one with `followQuery` or reads it once with `runQuery`.
+
+  - `useQuery` is removed. It was a pass-through to the cache's `open` under a React hook name. Code that needs the raw entry writes `QueryCache.use((cache) => cache.open(contract, args))`.
+  - The flat `queryCacheLayer` is `QueryCache.layer`.
+
+- [`9950cbf`](https://github.com/cevr/effect-frame/commit/9950cbf96b16cef16dfbffbfd9d7df8f61633949) Thanks [@cevr](https://github.com/cevr)! - `QueryState` has one owner, `effect-frame/actor/client`, and one path: `QueryState.Loading()`, `QueryState.Ready(value, stale)`, `QueryState.Failed(error)`, `QueryState.isLoading/isReady/isFailed` and `QueryState.match`.
+
+  - The flat `Loading`, `Ready`, `Failed`, `isLoading`, `isReady`, `isFailed`, `match` and `markStale` exports of `effect-frame/actor` are removed. Write `QueryState.Ready(value, false)`.
+  - The `QueryState` namespace of `effect-frame/view` is removed: its schemas, `loading`/`ready`/`failed` constructors (with the hidden `stale = false`), `hasValue` and `held` had no caller. Its test fake is `ViewTest.fakeQuery(initial)`, and it takes its initial state explicitly: `ViewTest.fakeQuery(QueryState.Loading<string, never>())`.
+
+- [`0fa9509`](https://github.com/cevr/effect-frame/commit/0fa9509589aa6c0eb598169f020d1e3c34322af1) Thanks [@cevr](https://github.com/cevr)! - A remote reference carries its address. `RemoteActorRef` and `RemoteCommandRef` have `contract` and `key`, the ones they were opened for.
+
+  - `View.form` takes `ref` and no `contract` or `key`: the plain post's `$contract`, `$version` and `$key` come from the reference, so the post and the scripted send can never name two actors. A command-only reference (`Actor.remoteCommands`) is enough.
+  - `Generated.send(ref, contract, input)` is `Generated.send(ref, input)`.
+
+- [`c3d9917`](https://github.com/cevr/effect-frame/commit/c3d9917d684d9431a5cbe675e5d0933dde65295e) Thanks [@cevr](https://github.com/cevr)! - A `Route.actor` binding has the query binding's shape: `props.data.x` is `Route.FollowedActor<C>`, `{ ref, state }`. `ref` is the `Source<RemoteActorRef<C>>` the binding used to be, and `state` follows the reference the route holds now, across key moves. Sends still name the reference: `props.data.x.get` becomes `props.data.x.ref.get`, and `Source.switchMap(props.data.x, (r) => r.state)` becomes `props.data.x.state`.
+
+- [`f4164cd`](https://github.com/cevr/effect-frame/commit/f4164cdfcc70d79300267e2a39a07428084fe6d4) Thanks [@cevr](https://github.com/cevr)! - Add `Route.commandRef(contract, key)`: a send-only route declaration. The transition opens it with `Actor.remoteCommands`, moves it with the segment's params, and releases it like a `Route.actor`, but it reads no snapshot and follows no stream. The binding is `Route.FollowedCommands<C>`, `{ ref: Source<RemoteCommandRef<C>> }`: `Effect.flatMap(props.data.book.ref.get, (book) => book.send(message))`.
+
+- [`8fe53eb`](https://github.com/cevr/effect-frame/commit/8fe53eb8f2ba2f60c1b797b9cbde155789a8c06c) Thanks [@cevr](https://github.com/cevr)! - `Route.Entered` carries `inspection`, the deepest mounted segment's decoded
+  params and search (`Route.EnteredValues`). The router reads it off the
+  mounted route instead of a module-level WeakMap, and the "inspection
+  unavailable" fallback is gone: every route a mode constructor makes has one.
+
+- [`8ccecb8`](https://github.com/cevr/effect-frame/commit/8ccecb8ebe122b6558499aabb9c5b384c7fab7b8) Thanks [@cevr](https://github.com/cevr)! - The navigation option is `landing`, not `behavior`: `Route.leaf(segment, view, { landing: NavigationBehavior.Preserve })` and `mount({ ..., landing })`. `behavior` on the route surface now means only an actor's reducer (`Route.actor(contract, key, { behavior })`).
+
+- [`90368a2`](https://github.com/cevr/effect-frame/commit/90368a25a0a87004060ee5edbb1272b779f0bb84) Thanks [@cevr](https://github.com/cevr)! - The router's `Match` type (which route the document is on, and its URL) is renamed `RouteMatch`, so it never meets the view's `Match` tag in one file. `bun run declarations` now also fails when two published subpaths export one value name, apart from the declared re-exports (`actor` over `actor/client`, and the two JSX runtimes).
+
+- [`d46866c`](https://github.com/cevr/effect-frame/commit/d46866c2d17e3a0f0d7441ccf2b9f90c261983ef) Thanks [@cevr](https://github.com/cevr)! - A route is a branded value only the mode constructors make, and it carries its own rendering mode; a hand-written `AnyRoute` no longer type-checks. `mount` and the server document die with `Route.RouteNameRejected` when two routes share a name or one is named `"not-found"`, the router's own route (a user route named `"not-found"` used to be served). `isActive` is deleted: `link(to, params, search).active` says whether the document is on a destination.
+
+- [`fb695a0`](https://github.com/cevr/effect-frame/commit/fb695a07885a3d0857953991531c769c6945d1f5) Thanks [@cevr](https://github.com/cevr)! - The router's types have one export path, under `Route`: import `Route.AnyRoute`, `Route.PathRecord`, `Route.SearchRecord`, `Route.Entered`, and the rest from the namespace; the flat duplicates on `effect-frame/router` are gone, with `searchKeysOf`, `UrlStateOptions`, `UrlStateState`, and `RouteLink` (use `UrlState.Options`, `UrlState.State`, and `Link`). `Route.printPath`, `Route.mergeSearchRecord`, `Route.searchKeysOf`, `Route.SearchSchemaRejected`, `Route.SegmentProps`, and `Route.LayoutProps` are no longer exported: type a view's props with `Route.PropsOf<typeof segment>` or `Route.LayoutPropsOf<typeof segment, ChildR>`. `Route.printSearch` stays, as `Route.readSearch`'s inverse for an opaque search codec.
+
+- [`4e766f9`](https://github.com/cevr/effect-frame/commit/4e766f937052dd2abbed09771927c807b3873bc8) Thanks [@cevr](https://github.com/cevr)! - The flat route form is removed. Every rendering-mode constructor (`Route.client`, `Route.ssr`, `Route.streamed`, `Route.awaitAll`, `Route.prerender`, `Route.driven`) takes a root segment's branch only. A one-page route is a tree of one leaf:
+
+  ```ts
+  const login = Route.segment("login", { path: "/login" });
+  const Login = Route.client("login", Route.leaf(login, LoginView));
+  ```
+
+  Link and print through the segment (`link(login, …)`, `login.href(…)`), not the route. `Route.Route`, `Route.RouteDefinition`, `Route.DrivenDefinition`, `Route.PrerenderDefinition`, `Route.DrivenConstructor`, and the flat `RouteOf` and `RouteDefinition` exports are gone. A flat `behavior` field is the leaf's `landing` option; a flat prerender's `inputs` is `{ inputs: [Route.inputs(segment, enumerate)] }`.
+
+- [`6b32f4c`](https://github.com/cevr/effect-frame/commit/6b32f4cf1f208e86eb7889e83f0201b23dbf8b3c) Thanks [@cevr](https://github.com/cevr)! - A segment's params follow its template. The `params` codec must encode exactly the names the segment's own template declares (`Route.ParamNames<Path>`); a misnamed, missing, or extra param does not compile. A child declares only its own params and inherits its ancestors': `Route.child(tenant, "post", { path: "posts/:postId", params: Schema.Struct({ postId: Schema.String }) })` sees `{ tenant, postId }`. `params` is optional when the template declares none. Migrate by dropping every ancestor param a child restates, and `params: Schema.Struct({})` where the template has no param.
+
+- [`7908e9b`](https://github.com/cevr/effect-frame/commit/7908e9b2de7aee1604f870bc3647299de14ce1f3) Thanks [@cevr](https://github.com/cevr)! - Every router move is named `push` or `replace`. `RouterService.navigate` and
+  `Receipts.navigate` are now `push`. A `Link`'s `go` is now `push`. A view's
+  `updateSearch` is now `pushSearch`, beside `replaceSearch`. `UrlState`
+  drops `set`, `update`, `push.set`, and `push.update` for `push(change)` and
+  `replace(change)`, where a change is a value or an updater of the latest
+  value (`UrlState.Change<A>`). `UrlState.make(codec, { keys })` is now
+  `{ searchKeys }`.
+
+- [`d4c6651`](https://github.com/cevr/effect-frame/commit/d4c6651493ad68f7d22aa9108e3598b009ee15dc) Thanks [@cevr](https://github.com/cevr)! - `Route.redirect` takes its destination directly, as `link` does: `Route.redirect(segment, params, search)`. `Route.target`, `Route.Target`, and `Route.Printable` are removed, and `Route.Redirect` carries the printed `href`. `Route.Linkable`, the one destination type, gains `href`.
+
+  Add `Route.redirecting(name, segment, to)`: a route that only redirects. It has no view and no rendering mode; `to` receives the candidate's params, search, URL, and kind, and answers the `Route.redirect`. The segment's own `before` runs first.
+
+  ```ts
+  const home = Route.segment("home", { path: "/", params: Schema.Struct({}) });
+  export const Home = Route.redirecting("home", home, () =>
+    Effect.succeed(Route.redirect(lists, {}, {})),
+  );
+  ```
+
+- [`3ced983`](https://github.com/cevr/effect-frame/commit/3ced9830216eea87919d1a79f58208bd9a95dc8d) Thanks [@cevr](https://github.com/cevr)! - An open readiness scope is a compile error where a view's services are
+  final, named by its fix. `View.mount`, `Html.renderToString`,
+  `Html.renderToStream`, `Html.renderAwaitAll`, `Remote.draw`,
+  `Remote.client`, `Driven.session`, a router's `notFound` view, and every
+  `Route` mode constructor (`client`, `ssr`, `streamed`, `awaitAll`,
+  `prerender`, `driven`) take `View<P, E, R> & ScopesClosed<R>`. A
+  `View.ready` with no `View.loading` above it reports
+  `Property '"View.ready needs a View.loading above it"' is missing`, and a
+  `View.orErrored` with no `View.errored` above it names that pair, at the
+  call, instead of surfacing as `LoadingScope` where the application provides
+  its layers. The `ScopesClosed<R>` type is exported from
+  `effect-frame/view`; a generic helper that forwards a view to `View.mount`
+  states it on its own parameter.
+
+- [`5e870eb`](https://github.com/cevr/effect-frame/commit/5e870eb1b37d8fd7dea624166c121ec6153616b9) Thanks [@cevr](https://github.com/cevr)! - `Source.select`, `Source.debounce` and `Source.throttle` take the source first and have one signature. The data-last forms (`select(project)(source)`) are gone. With two overloads, an inline `select` in a JSX prop that was still being inferred resolved against `Source<readonly unknown[]>`, so `<For each={select(state, (s) => s.items)} keyBy={(item) => item.id}>` read `item` as `unknown`. It now infers the item, and `keyBy` needs no annotation.
+
+- [`b3fa068`](https://github.com/cevr/effect-frame/commit/b3fa0681f0830ceeb69582208d1bdf9fba365ce1) Thanks [@cevr](https://github.com/cevr)! - The server half of an actor or a query takes one shape: the contract, then an options object.
+
+  - `implementTransparent(contract, behavior)` is `implementTransparent(contract, { behavior })`.
+  - `implementQuery(contract, handler)` is `implementQuery(contract, { run })`.
+  - `Query.batched(contract, { resolve })` is `implementBatchedQuery(contract, { resolve })`. The one-member `Query` namespace is removed.
+  - `query.batched(name, options)` is `batchedQuery(name, options)`: a plain function, not a namespace merged onto `query`.
+
+- [`45b131b`](https://github.com/cevr/effect-frame/commit/45b131b02c777d4ee1525a36b68691ec8cc13b7b) Thanks [@cevr](https://github.com/cevr)! - `HttpServer.sessionBuffer` and `HttpServer.SessionBuffer` are removed. The
+  shared session subscription still keeps the latest revision only
+  (capacity 1, sliding, replay 1); the buffer is written at the one
+  `Stream.share` that uses it.
+
+- [`7925794`](https://github.com/cevr/effect-frame/commit/7925794f60a5e337916cb1008533ecec7a1b7eda) Thanks [@cevr](https://github.com/cevr)! - `Frame.CommandLifecycle` and `Frame.QueryValue` are exported schemas, and the internal records use them. In `Frame.Snapshot`, an `Uncertain` command's `admitted` is now `Option<number>` in the Type (it was `number | null`); the encoded JSON is unchanged (`null` when no pass was admitted).
+
+- [`eee0604`](https://github.com/cevr/effect-frame/commit/eee060472338db2b3a902f232e9be55d75519355) Thanks [@cevr](https://github.com/cevr)! - Each `Source` combinator has one path: `Source.select`, `Source.zip`, `Source.all`, `Source.on`, `Source.debounce`, `Source.throttle`, `Source.mapEffect` and the rest, imported as `Source` from `effect-frame/actor/client` (or `effect-frame/actor`). The flat `select`, `zip`, `all`, `on`, `debounce`, `throttle` and `mapEffect` exports are removed, and so is `View.select`. Replace `import { select } from "effect-frame/actor/client"` and `select(source, f)` with `import { Source } from "effect-frame/actor/client"` and `Source.select(source, f)`. The `Source<A>` type is the same name.
+
+- [`a496bf2`](https://github.com/cevr/effect-frame/commit/a496bf2fc45a299de81fd0bcc0830f4dc9603c0d) Thanks [@cevr](https://github.com/cevr)! - `Source` gains `switchMap`, `flatten`, `succeed`, `fromSubscriptionRef`, `dedupe` and a `mapEffect` with the `Stream.mapEffect` meaning, so an app no longer writes a `{ get, changes }` pair by hand.
+
+  - `Source.switchMap(source, (value) => inner)` follows the source the latest value names; `Source.flatten` is the same with no projection.
+  - `Source.succeed(value)` is a source that never changes. `Source.fromSubscriptionRef(ref)` reads a `SubscriptionRef`.
+  - `Source.dedupe(source, equivalence)` drops a change equal to the one before it.
+  - `Source.mapEffect(source, f)` runs `f` on a read and on each change, in order.
+  - The old `Source.mapEffect`, which loads into a `QueryState` and switches on a new input, is renamed `Source.load`. Migrate `Source.mapEffect(s, f)` that expects a `QueryState` to `Source.load(s, f)`.
+
+- [`61f807d`](https://github.com/cevr/effect-frame/commit/61f807d0e8dabfbe7b5c958273739194e561a074) Thanks [@cevr](https://github.com/cevr)! - JSX tags are a closed, typed map. `effect-frame/view` checks every HTML tag
+  against `HtmlElements`: a prop is the attribute as HTML spells it (`class`,
+  `for`, `tabindex`), a value is written once or bound with `View.bind`, and
+  an `on*` prop takes a prepared handler. An unknown tag, an unknown or
+  misspelled prop (`className`, `onClik`, `tabIndex`), and a child of a void
+  element do not compile. A raw `Source` where a value goes reports
+  `"wrap the source with View.bind(source)"`, and a plain function where a
+  handler goes reports `"wrap the handler with View.event(handler)"`.
+
+  `Prepared` carries a `kind` (`PreparedKind`, `"event" | "submit"`) in place
+  of `preventDefault`: `View.event` gives `Prepared<"event">`, and
+  `View.submit` and a `View.form` binding's `submit` give `Prepared<"submit">`,
+  whose default action the host suppresses. A form's `onSubmit` takes only
+  `Prepared<"submit">`, and a form takes no `method` or `action`: the runtime
+  writes a command form's plain post.
+
+  A terminal file names its runtime with `@jsxImportSource
+effect-frame/view/opentui` (new subpaths `view/opentui/jsx-runtime` and
+  `view/opentui/jsx-dev-runtime`) and gets `box`, `text`, and `input`, whose
+  props are the OpenTUI renderables' own options.
+
+  The HTML host no longer renames `className` and `htmlFor`, and a leaf root
+  reads `tabindex` and `contenteditable` in their HTML spelling only. `Attr`,
+  `HtmlElements`, and `PreparedKind` are exported types.
+
+- [`1f3eafb`](https://github.com/cevr/effect-frame/commit/1f3eafbe183f466fb985bed6cd3f1db56d5e3ef9) Thanks [@cevr](https://github.com/cevr)! - Add `View.keyed(source, keyBy, row)`, a keyed region with one row. The row's setup runs again only when the key changes. It replaces a `View.list` over a one-item array.
+
+- [`5fba240`](https://github.com/cevr/effect-frame/commit/5fba240e36d9f0690fb08fca3d64380227c3b80d) Thanks [@cevr](https://github.com/cevr)! - `effect-frame/view` follows one kind rule: a flat PascalCase value is a JSX tag (`For`, `Show`, `Match`, `Portal`, `Await`) or a namespace (`View`, `Dom`, `Html`, `Remote`), and every function and Effect is a lowercase member of `View`. A type test guards it.
+
+  | Before                                 | After                                                 |
+  | -------------------------------------- | ----------------------------------------------------- |
+  | `Loading({ fallback, children })`      | `View.loading({ fallback, content })`                 |
+  | `Errored({ fallback, children })`      | `View.errored({ fallback, content })`                 |
+  | `ready`, `orErrored`, `readyWithStale` | `View.ready`, `View.orErrored`, `View.readyWithStale` |
+  | `LoadingScope`, `ErroredScope`         | `View.LoadingScope`, `View.ErroredScope`              |
+  | `mount(view, props, host, root)`       | `View.mount(view, props, host, root)`                 |
+  | `render` (it only flushes)             | `View.flush`                                          |
+  | `<Query state loading failed ready>`   | `<Await state loading failed ready>`                  |
+  | `Await({ query, ... })`, an Effect     | removed: use the `<Await>` tag, whose prop is `state` |
+  | `QueryProps`                           | `AwaitProps`                                          |
+
+  The boundaries stay Effects: they run their content's setup with the scope provided and remove it from `R`, which a synchronous tag cannot do. `content` replaces `children` so the call does not read as a tag.
+
+- [`2a9ecbf`](https://github.com/cevr/effect-frame/commit/2a9ecbf3b252a33e174672a2747a1cc8ec350f92) Thanks [@cevr](https://github.com/cevr)! - `effect-frame/view` no longer exports the interpreter's node model: `ControlNode`, `ElementNode`, `ElementProps`, `ForNode`, `MatchNode`, `PortalNode`, `ShowNode`, `PropValue`, `BoundaryKind`, `Component`, `Tag`, `MatchCases`, `ShowIfProps` and `ShowWhenProps`. None had a caller outside the package. An author needs `Node`, `Child`, and the props types of the tags it wraps (`ForProps`, `ShowProps`, `MatchProps`, `PortalProps`), which stay.
+
+- [`865f393`](https://github.com/cevr/effect-frame/commit/865f393ea69b6689c19f258f26bda6d4c3eafd55) Thanks [@cevr](https://github.com/cevr)! - Each `effect-frame/view` export has one path.
+
+  - `bind`, `event`, `submit` and `attach` are `View.bind`, `View.event`, `View.submit` and `View.attach` only; the flat function exports are removed.
+  - The `View` namespace holds functions, Effects and the `View` type. Every other type is a flat export: `Bound`, `Prepared`, `Attached`, `Handler`, `Bind`, `PlainPost`, `CommandForm`, `FormBinding`, `ListOptions` and `LazyModule` (was `View.LazyModule`).
+  - `ViewTest` moves off `effect-frame/view` to its own subpath: `import { ViewTest } from "effect-frame/view/testing"`. A browser entry that imports `effect-frame/view` no longer carries the test harness.
+
+### Patch Changes
+
+- [`e8da6b0`](https://github.com/cevr/effect-frame/commit/e8da6b09a22ad1ea3af4096e74b93663e24be9e2) Thanks [@cevr](https://github.com/cevr)! - `link` compares its own params with the current URL: `aria-current="page"` now marks only the link whose printed path is the current path, and `aria-current="true"` only a link whose printed path the current path continues below. Before, every link to the same segment was current whatever its params, so a list of `/counters/:name` links all carried `aria-current="page"`. The search never counts. `Linkable.currentAt` takes the link's params.
+
+- [`5bd87f9`](https://github.com/cevr/effect-frame/commit/5bd87f9ec4d47dff4dd709c656cbfeaa3d410fba) Thanks [@cevr](https://github.com/cevr)! - A multi-word event prop now fires. `onKeyDown` listened for `keyDown` and `onPointerDown` for `pointerDown`, which no DOM event is called, so neither handler ever ran. The runtime now lowercases the whole name after `on`: `onKeyDown` listens for `keydown`.
+
+- [`ed1e0ef`](https://github.com/cevr/effect-frame/commit/ed1e0ef067f3f0fab1fd3f033a71f9e3acdf560b) Thanks [@cevr](https://github.com/cevr)! - The package ships a README: a first app and one section per feature, each code block a region of an example the repository compiles and tests.
+
+- [`b9626a8`](https://github.com/cevr/effect-frame/commit/b9626a8cbb3bcf1386cfcef700a93227e4230a17) Thanks [@cevr](https://github.com/cevr)! - The spans of `runQuery` and `followQuery` are named `Query.run` and `Query.follow`, in the `Area.operation` form every other span has (the new `frame/span-name` lint rule). They were `runQuery` and `followQuery`.
+
+- [`fa52a41`](https://github.com/cevr/effect-frame/commit/fa52a41a291556fede7c8b601d1aff983bf6690a) Thanks [@cevr](https://github.com/cevr)! - The DOM host hands a `select`'s chosen value to an event handler as
+  `HostEvent.value`, as it does an input's text. It handed `""` before.
+
 ## 0.26.2
 
 ### Patch Changes

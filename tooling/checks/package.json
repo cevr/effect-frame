@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test tests/",
     "boundary": "bun run src/boundary-cli.ts",
+    "paths": "bun run src/paths-cli.ts",
     "declarations": "bun run src/declarations-cli.ts && tsc -p consumer"
   },
   "devDependencies": {

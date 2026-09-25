@@ -23,20 +23,20 @@ const child = Route.child(shell, "child", { path: "child", params: Nothing });
 const ChildView = () => Effect.succeed(<article>child</article>);
 
 // A leaf takes a behavior value.
-const preserved = Route.leaf(child, ChildView, { behavior: NavigationBehavior.Preserve });
+const preserved = Route.leaf(child, ChildView, { landing: NavigationBehavior.Preserve });
 
 Route.layout(
   shell,
   [preserved],
   (props) => Effect.map(props.outlet, (outlet) => <main>{outlet}</main>),
   {
-    // @ts-expect-error a layout names no behavior: the destination leaf does.
-    behavior: NavigationBehavior.Preserve,
+    // @ts-expect-error a layout names no landing: the destination leaf does.
+    landing: NavigationBehavior.Preserve,
   },
 );
 
 // @ts-expect-error behavior is a value, not a boolean flag.
-Route.leaf(child, ChildView, { behavior: true });
+Route.leaf(child, ChildView, { landing: true });
 
 // Each value has its own variant's type, not the union.
 const restoreExact: NavigationBehavior.Restore = NavigationBehavior.Restore;
@@ -48,12 +48,12 @@ const withDefault: MountOptions<never, globalThis.Node> = {
   notFound: NotFound,
   host: Dom.host,
   root: document.createElement("main"),
-  behavior: NavigationBehavior.Restore,
+  landing: NavigationBehavior.Restore,
 };
 const withFlag: MountOptions<never, globalThis.Node> = {
   ...withDefault,
   // @ts-expect-error the router default is a value too.
-  behavior: "preserve",
+  landing: "preserve",
 };
 
 /** A scroll position, stored or read, or a store to keep one in. */

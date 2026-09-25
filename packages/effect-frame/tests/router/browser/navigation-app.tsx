@@ -308,7 +308,7 @@ const start = (): void => {
       [
         Route.leaf(page, PageView),
         Route.leaf(titled, TitledView),
-        Route.leaf(tabs, TabsView, { behavior: NavigationBehavior.Preserve }),
+        Route.leaf(tabs, TabsView, { landing: NavigationBehavior.Preserve }),
         Route.leaf(slow, SlowView),
         Route.leaf(late, LateView),
         Route.leaf(formPage, FormView),

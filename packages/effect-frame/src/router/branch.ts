@@ -765,10 +765,16 @@ export type RecoveryFor<E> = [E] extends [never]
 /**
  * What only a leaf may say (#31): how a navigation to it lands. Absent, the
  * router's default applies. A layout has no such option, so
- * `Route.layout(..., { behavior })` does not compile.
+ * `Route.layout(..., { landing })` does not compile. The name is not
+ * `behavior`: that word is an actor's reducer (`Route.actor(c, k, { behavior })`).
+ *
+ * @example
+ * ```ts
+ * Route.leaf(tabs, TabsView, { landing: NavigationBehavior.Preserve });
+ * ```
  */
 export interface LeafOptions {
-  readonly behavior?: NavigationBehavior;
+  readonly landing?: NavigationBehavior;
 }
 
 /** A leaf's options argument: `RecoveryFor<E>` plus `LeafOptions`. */
@@ -776,9 +782,9 @@ export type LeafOptionsFor<E> = [E] extends [never]
   ? readonly [] | readonly [options: Presentation & LeafOptions]
   : readonly [options: Recovery<E> & LeafOptions];
 
-/** The leaf's own behavior, when its options name one. */
-const behaviorOf = (options: ReadonlyArray<LeafOptions>): Option.Option<NavigationBehavior> =>
-  Option.flatMap(Option.fromNullishOr(options[0]), (one) => Option.fromNullishOr(one.behavior));
+/** The leaf's own landing, when its options name one. */
+const landingOf = (options: ReadonlyArray<LeafOptions>): Option.Option<NavigationBehavior> =>
+  Option.flatMap(Option.fromNullishOr(options[0]), (one) => Option.fromNullishOr(one.landing));
 
 /** Which branch made an instance. Compared by reference. */
 interface BranchIdentity {
@@ -1037,7 +1043,7 @@ export const buildLeaf = <
       }),
     },
     lazyDefinitionOf(view),
-    behaviorOf(options),
+    landingOf(options),
   );
   leafViews.set(made, view);
   return made;

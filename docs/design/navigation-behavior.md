@@ -41,8 +41,8 @@ import {
   mount,
 } from "effect-frame/router";
 
-Route.leaf(tabs, TabsView, { behavior: NavigationBehavior.Preserve }); // per leaf
-mount({ routes, notFound, host, root, behavior: NavigationBehavior.Restore }); // default: Restore
+Route.leaf(tabs, TabsView, { landing: NavigationBehavior.Preserve }); // per leaf
+mount({ routes, notFound, host, root, landing: NavigationBehavior.Restore }); // default: Restore
 mount({ routes, notFound, host, root, traversalReadLimit: "3 seconds" }); // default: 3 seconds
 
 const location = browserNavigation; // Effect<Location, never, Scope>: Navigation API, History fallback
@@ -50,7 +50,9 @@ const location = browserNavigation; // Effect<Location, never, Scope>: Navigatio
 
 - `NavigationBehavior` is a namespace with the type and two values,
   `Restore` and `Preserve`. It is a value, not a flag.
-- `Route.layout` takes no `behavior`: its options type has no such field.
+- `Route.layout` takes no `landing`: its options type has no such field.
+  The option is named `landing`, not `behavior`, because `behavior` is an
+  actor's reducer on the same surface (`Route.actor(c, k, { behavior })`).
   A destination leaf decides for its navigation.
 - `browserNavigation` is the browser `Location` for #31 and for leave checks
   on Back and Forward. It is `browserLocation` where the Navigation API is
@@ -270,7 +272,7 @@ Non-browser proofs (`packages/effect-frame/tests/router/navigation-behavior.test
 
 | Test                                                                       | What it shows                                                                                            |
 | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| type assertions at the top of the file                                     | `@ts-expect-error` on a layout `behavior`, a boolean leaf `behavior`, a string default.                  |
+| type assertions at the top of the file                                     | `@ts-expect-error` on a layout `landing`, a boolean leaf `landing`, a string default.                    |
 | "no router module reads or writes a scroll position or a storage"          | No `src/router` file names a scroll offset, a storage, or `scrollRestoration`, outside comments.         |
 | "a server render of a branch installs no navigation listener"              | A recording `navigation` global sees no `addEventListener`; the HTML is the branch with `tabindex="-1"`. |
 | "a server bundle of a routed tree excludes the browser navigation modules" | `Bun.build` of `tests/router/fixtures/server-entry.tsx` has none of the browser module markers.          |

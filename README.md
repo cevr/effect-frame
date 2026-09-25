@@ -234,7 +234,7 @@ const program = Effect.gen(function* () {
 });
 
 // A tab strip that keeps the reader where they are.
-Route.leaf(tab, TabView, { behavior: NavigationBehavior.Preserve });
+Route.leaf(tab, TabView, { landing: NavigationBehavior.Preserve });
 ```
 
 - At shell commit (the new branch is in the document, fallbacks included),
@@ -243,9 +243,10 @@ Route.leaf(tab, TabView, { behavior: NavigationBehavior.Preserve });
   It then focuses the entering leaf's root, or the first `autofocus` element
   inside that leaf. It does not wait for queries.
 - `NavigationBehavior.Preserve` leaves scroll and focus alone. Set it on a
-  leaf (`Route.leaf(..., { behavior })`), or for the whole router
-  (`mount({ ..., behavior })`). A layout takes no `behavior`: the destination
-  leaf decides.
+  leaf (`Route.leaf(..., { landing })`), or for the whole router
+  (`mount({ ..., landing })`). A layout takes no `landing`: the destination
+  leaf decides. The option is `landing`, not `behavior`: `behavior` is an
+  actor's reducer.
 - A leaf's root element gets `tabindex="-1"`, unless the view wrote a tab
   index (either spelling) or the element is focusable already, such as a
   `<button>`.

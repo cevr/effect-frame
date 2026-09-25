@@ -116,9 +116,9 @@ export interface MountOptions<R, HostNode, N = R> {
   readonly root: HostNode;
   /**
    * What a navigation does to scroll and focus at shell commit (#31), unless
-   * the destination leaf names its own. Absent: `NavigationBehavior.Restore`.
+   * the destination leaf names its own `landing`. Absent: `NavigationBehavior.Restore`.
    */
-  readonly behavior?: NavigationBehavior;
+  readonly landing?: NavigationBehavior;
   /**
    * How long a traversal (Back, Forward, a history jump) waits for the
    * reads its page declared before it places the saved position. At the
@@ -287,7 +287,7 @@ export const mount: <R, HostNode, N = R>(
   });
   const requests = yield* Queue.unbounded<Request>();
   const surface = readSurface(location);
-  const defaultBehavior = Option.getOrElse(Option.fromNullishOr(options.behavior), () => Restore);
+  const defaultBehavior = Option.getOrElse(Option.fromNullishOr(options.landing), () => Restore);
   const traversalReadLimit = Option.getOrElse(
     Option.fromNullishOr(options.traversalReadLimit),
     () => defaultTraversalReadLimit,

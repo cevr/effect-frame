@@ -23,7 +23,7 @@ export const app = Route.client(
         page,
         (props) =>
           Effect.succeed(<article>{View.bind(props.params, (params) => params.id)}</article>),
-        { behavior: NavigationBehavior.Preserve },
+        { landing: NavigationBehavior.Preserve },
       ),
     ],
     (props) => Effect.map(props.outlet, (outlet) => <main>{outlet}</main>),

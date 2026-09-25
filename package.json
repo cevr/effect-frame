@@ -23,7 +23,7 @@
     "gate": "concurrently -n type,style,build -c blue,yellow,cyan \"bun run typecheck\" \"bun run lint && bun run fmt:check\" \"bun run build && bun run boundary && bun run declarations\" && bun run test",
     "prepare": "lefthook install && effect-tsgo patch",
     "version": "changeset version && bun install --lockfile-only --ignore-scripts",
-    "release": "bun run build && changeset publish"
+    "release": "bun run gate && changeset publish"
   },
   "devDependencies": {
     "@changesets/changelog-github": "1.0.1",

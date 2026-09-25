@@ -7,8 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  check:
-    name: Check
+  gate:
+    name: Gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,19 +17,12 @@ jobs:
         with:
           bun-version: latest
 
-      - run: bun install
+      - run: bun install --frozen-lockfile
 
-      - name: Typecheck
-        run: bun run typecheck
-
-      - name: Lint
-        run: bun run lint
-
-      - name: Format
-        run: bun run fmt
-
-      - name: Test
-        run: bun run test
+      # The same gate lefthook runs before a commit: typecheck, lint,
+      # format check, build, boundary, declarations, then the tests.
+      - name: Gate
+        run: bun run gate
 
       # The deploy build prerenders, which reads content; the gate and
       # `bun run test` never run it (#23 §2.1).

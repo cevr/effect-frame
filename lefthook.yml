@@ -4,16 +4,8 @@ pre-commit:
     - name: lint+fmt
       run: bun run lint:fix && bun run fmt
       stage_fixed: true
-    - name: typecheck
-      run: bun run typecheck
-    - name: build
-      run: bun run build
-    - name: boundary
-      run: bun run boundary
-    - name: declarations
-      run: bun run declarations
-    - name: test
-      run: bun run test
+    - name: gate
+      run: bun run gate
 pre-push:
   jobs:
     - name: format

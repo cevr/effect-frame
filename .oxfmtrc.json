@@ -12,6 +12,7 @@
     "packages/host-durable-object/fixture/worker.js",
     "packages/host-durable-object/fixture-contract/worker.js",
     "packages/host-durable-object/fixture-conformance/worker.js",
-    "tooling/dom-bench/.generated/**"
+    "tooling/dom-bench/.generated/**",
+    "plans/**"
   ]
 }

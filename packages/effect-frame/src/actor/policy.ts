@@ -1,4 +1,4 @@
-import { Context, Effect, Option, Schema } from "effect";
+import { Array as Arr, Context, Effect, Option, Result, Schema } from "effect";
 import type { Address } from "./contract.js";
 import type { Authenticated, Principal } from "./principal.js";
 import type { QueryKey } from "./query.js";
@@ -150,33 +150,60 @@ export const Policy = {
   byAction,
 };
 
-/** One declaration a host validates: who declared which name. */
+/** One declaration a host resolves: who declared which name. */
 export interface Declared {
   readonly subject: "actor" | "query";
   readonly name: string;
   readonly policy: string;
 }
 
+/** A declaration with the rule its policy name resolved to. */
+export interface Resolved<A> {
+  readonly entry: A;
+  readonly policy: Policy;
+}
+
+/** The entries whose names the table holds, and every declaration it does not. */
+export interface Resolution<A> {
+  readonly resolved: ReadonlyArray<Resolved<A>>;
+  readonly missing: ReadonlyArray<MissingPolicy>;
+}
+
 /**
- * Every declared name the table does not hold, or nothing. It runs before a
- * host serves anything and reports every miss at once.
+ * Resolves each entry's policy name against the table once, before a host
+ * serves anything. A resolved entry carries its rule, so a later check never
+ * looks a name up and has no miss to handle.
  */
-export const validate = (
-  declared: ReadonlyArray<Declared>,
+export const resolve = <A>(
   table: PolicyTable,
+  entries: ReadonlyArray<A>,
+  declare: (entry: A) => Declared,
+): Resolution<A> => {
+  const [missing, resolved] = Arr.partition(entries, (entry) => {
+    const declared = declare(entry);
+    return Option.match(
+      Option.filter(Option.some(declared.policy), (name) => Object.hasOwn(table, name)).pipe(
+        Option.flatMap((name) => Option.fromNullishOr(table[name])),
+      ),
+      {
+        onNone: () => Result.fail(declared),
+        onSome: (policy) => Result.succeed({ entry, policy }),
+      },
+    );
+  });
+  return { resolved, missing };
+};
+
+/**
+ * Fails with every miss of every resolution at once, so one wiring pass
+ * fixes all. Nothing missing: it succeeds.
+ */
+export const refuseMissing = (
+  resolutions: ReadonlyArray<Resolution<unknown>>,
 ): Effect.Effect<void, PolicyNamesMissing> => {
-  const missing = declared.filter((entry) => !Object.hasOwn(table, entry.policy));
+  const missing = resolutions.flatMap((resolution) => resolution.missing);
   if (missing.length === 0) {
     return Effect.void;
   }
   return Effect.fail(PolicyNamesMissing.make({ missing }));
 };
-
-/**
- * The rule a validated name resolves to. The host validated every name at
- * construction, so a miss here means a table assembled some other way.
- */
-export const lookup = (table: PolicyTable, name: string): Option.Option<Policy> =>
-  Option.filter(Option.some(name), (key) => Object.hasOwn(table, key)).pipe(
-    Option.flatMap((key) => Option.fromNullishOr(table[key])),
-  );

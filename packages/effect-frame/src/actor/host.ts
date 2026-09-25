@@ -3,8 +3,8 @@ import { Context, Effect, Layer, Option, Semaphore, Stream } from "effect";
 import type { Address } from "./contract.js";
 import type { AnyImplementation, HostedInstance } from "./implement.js";
 import { MailboxStore } from "./mailbox-store.js";
-import type { Action, Declared, PolicyNamesMissing } from "./policy.js";
-import { Policies, lookup, validate } from "./policy.js";
+import type { Action, Policy, PolicyNamesMissing, Resolved } from "./policy.js";
+import { Policies, refuseMissing, resolve as resolvePolicies } from "./policy.js";
 import { CurrentPrincipal } from "./principal.js";
 import type { QueryKey } from "./query.js";
 import { UnknownQuery } from "./query.js";
@@ -13,7 +13,7 @@ import { make as makeQueryServing } from "./query-host.js";
 import type { Refreshed, TransportService } from "./transport.js";
 import { ActorTransport } from "./transport.js";
 import type { RemoteFailure } from "./vocabulary.js";
-import { ContractMismatch, Unauthorized, UnknownContract } from "./vocabulary.js";
+import { ContractMismatch, UnknownContract } from "./vocabulary.js";
 
 export interface HostOptions<R> {
   readonly implementations: ReadonlyArray<AnyImplementation<R>>;
@@ -39,26 +39,6 @@ const unknownQueryRefresh = (key: QueryKey): Refreshed => ({
   key,
   error: UnknownQuery.make({ query: key.query }),
 });
-
-/**
- * Every policy name this host's contracts and queries declare. The host
- * validates them all before it becomes a transport.
- */
-const declaredBy = <R>(
-  implementations: ReadonlyArray<AnyImplementation<R>>,
-  queries: ReadonlyArray<AnyQueryImplementation<R>>,
-): ReadonlyArray<Declared> => [
-  ...implementations.map((implementation): Declared => ({
-    subject: "actor",
-    name: implementation.contract.name,
-    policy: implementation.contract.policy,
-  })),
-  ...queries.map((implementation): Declared => ({
-    subject: "query",
-    name: implementation.contract.name,
-    policy: implementation.contract.policy,
-  })),
-];
 
 /** What `Recovery` does. */
 export interface RecoveryService {
@@ -108,23 +88,33 @@ const build = <R>(
       Option.fromNullishOr(options.queries),
       (): ReadonlyArray<AnyQueryImplementation<R>> => [],
     );
-    yield* validate(declaredBy(options.implementations, queries), policies);
+    // Every policy name resolves once, before the host serves anything, and
+    // every miss is reported at once so one wiring pass fixes all.
+    const actors = resolvePolicies(policies, options.implementations, (implementation) => ({
+      subject: "actor",
+      name: implementation.contract.name,
+      policy: implementation.contract.policy,
+    }));
+    const served = resolvePolicies(policies, queries, (implementation) => ({
+      subject: "query",
+      name: implementation.contract.name,
+      policy: implementation.contract.policy,
+    }));
+    yield* refuseMissing([actors, served]);
     const lock = yield* Semaphore.make(1);
     const byName = new Map(
-      options.implementations.map((implementation) => [
-        implementation.contract.name,
-        implementation,
-      ]),
+      actors.resolved.map((resolved) => [resolved.entry.contract.name, resolved]),
     );
     const instances = new Map<string, HostedInstance>();
     const store = options.store ?? (() => MailboxStore.layerMemory);
 
     const find = (
       address: Address,
-    ): Effect.Effect<AnyImplementation<R>, UnknownContract | ContractMismatch> =>
+    ): Effect.Effect<Resolved<AnyImplementation<R>>, UnknownContract | ContractMismatch> =>
       Option.match(Option.fromNullishOr(byName.get(address.contract)), {
         onNone: () => Effect.fail(UnknownContract.make({ contract: address.contract })),
-        onSome: (implementation) => {
+        onSome: (resolved) => {
+          const implementation = resolved.entry;
           if (implementation.contract.version !== address.version) {
             return Effect.fail(
               ContractMismatch.make({
@@ -134,7 +124,7 @@ const build = <R>(
               }),
             );
           }
-          return Effect.succeed(implementation);
+          return Effect.succeed(resolved);
         },
       });
 
@@ -164,25 +154,19 @@ const build = <R>(
      * Look up, then authorize, then open. A refused caller never causes an
      * instance to be created, so a read cannot be used to spin up actors.
      */
-    const authorize = (implementation: AnyImplementation<R>, address: Address, action: Action) =>
-      Effect.gen(function* () {
-        const principal = yield* CurrentPrincipal;
-        const policy = lookup(policies, implementation.contract.policy);
-        if (Option.isNone(policy)) {
-          // Unreachable: every name was validated above.
-          return yield* Unauthorized.make({ contract: address.contract });
-        }
-        return yield* policy.value.check(principal, { _tag: "Actor", address }, action);
-      });
+    const authorize = (policy: Policy, address: Address, action: Action) =>
+      Effect.flatMap(CurrentPrincipal, (principal) =>
+        policy.check(principal, { _tag: "Actor", address }, action),
+      );
 
     const resolve = (
       address: Address,
       action: Action,
     ): Effect.Effect<HostedInstance, RemoteFailure> =>
       Effect.gen(function* () {
-        const implementation = yield* find(address);
-        yield* authorize(implementation, address, action);
-        return yield* open(address, implementation);
+        const resolved = yield* find(address);
+        yield* authorize(resolved.policy, address, action);
+        return yield* open(address, resolved.entry);
       });
 
     /**
@@ -255,13 +239,11 @@ const build = <R>(
 
     // Tie the knot: the handlers read actors through the transport above.
     if (queries.length > 0) {
-      serving = Option.some(yield* makeQueryServing({ queries, policies }, transport));
+      serving = Option.some(yield* makeQueryServing({ queries: served.resolved }, transport));
     }
     const recovery: RecoveryService = {
       wake: (address) =>
-        Effect.asVoid(
-          Effect.flatMap(find(address), (implementation) => open(address, implementation)),
-        ),
+        Effect.asVoid(Effect.flatMap(find(address), (resolved) => open(address, resolved.entry))),
     };
     const built: Built = { transport, recovery };
     return built;

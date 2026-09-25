@@ -1,6 +1,5 @@
 import { Context, Effect, Option, Result, Schema, Scope } from "effect";
-import type { PolicyTable } from "./policy.js";
-import { lookup } from "./policy.js";
+import type { Policy, Resolved } from "./policy.js";
 import { CurrentPrincipal } from "./principal.js";
 import type {
   AnyQuery,
@@ -13,7 +12,6 @@ import type {
 } from "./query.js";
 import {
   InvalidQueryArgs,
-  PolicyMissing,
   QueryFailed,
   QueryVersionMismatch,
   UnknownQuery,
@@ -228,9 +226,8 @@ export interface QueryServing {
 }
 
 export interface QueryHostOptions<R> {
-  readonly queries: ReadonlyArray<AnyQueryImplementation<R>>;
-  /** The actor host's table, already validated against every query name. */
-  readonly policies: PolicyTable;
+  /** Each query with the rule its policy name resolved to in the actor host. */
+  readonly queries: ReadonlyArray<Resolved<AnyQueryImplementation<R>>>;
 }
 
 /**
@@ -244,12 +241,13 @@ export interface QueryHostOptions<R> {
  */
 
 const resolve = <R>(
-  byName: Map<string, AnyQueryImplementation<R>>,
+  byName: Map<string, Resolved<AnyQueryImplementation<R>>>,
   key: QueryKey,
-): Effect.Effect<AnyQueryImplementation<R>, UnknownQuery | QueryVersionMismatch> =>
+): Effect.Effect<Resolved<AnyQueryImplementation<R>>, UnknownQuery | QueryVersionMismatch> =>
   Option.match(Option.fromNullishOr(byName.get(key.query)), {
     onNone: () => Effect.fail(UnknownQuery.make({ query: key.query })),
-    onSome: (implementation) => {
+    onSome: (resolved) => {
+      const implementation = resolved.entry;
       if (implementation.contract.version !== key.version) {
         return Effect.fail(
           QueryVersionMismatch.make({
@@ -259,7 +257,7 @@ const resolve = <R>(
           }),
         );
       }
-      return Effect.succeed(implementation);
+      return Effect.succeed(resolved);
     },
   });
 
@@ -285,24 +283,14 @@ export const make = <R>(
     const context = captured.pipe(Context.omit(Scope.Scope), Context.omit(ActorTransport));
     // oxlint-disable-next-line effect/noAs -- host keys were removed at this boundary.
     const applicationContext = context as Context.Context<R>;
-    const policies = options.policies;
     const byName = new Map(
-      options.queries.map((implementation) => [implementation.contract.name, implementation]),
+      options.queries.map((resolved) => [resolved.entry.contract.name, resolved]),
     );
 
-    const authorize = (
-      implementation: AnyQueryImplementation<R>,
-      key: QueryKey,
-    ): Effect.Effect<void, PolicyMissing | Unauthorized> =>
-      Effect.gen(function* () {
-        const named = implementation.contract.policy;
-        const policy = lookup(policies, named);
-        if (Option.isNone(policy)) {
-          return yield* PolicyMissing.make({ query: key.query, policy: named });
-        }
-        const principal = yield* CurrentPrincipal;
-        return yield* policy.value.check(principal, { _tag: "Query", key }, "read");
-      });
+    const authorize = (policy: Policy, key: QueryKey): Effect.Effect<void, Unauthorized> =>
+      Effect.flatMap(CurrentPrincipal, (principal) =>
+        policy.check(principal, { _tag: "Query", key }, "read"),
+      );
 
     const provide = <A, E extends QueryFailure>(
       effect: Effect.Effect<A, E, R | ActorTransport | Scope.Scope>,
@@ -335,9 +323,9 @@ export const make = <R>(
           Effect.map(
             Effect.result(
               Effect.gen(function* () {
-                const implementation = yield* resolve(byName, key);
-                yield* authorize(implementation, key);
-                return { implementation, prepared: { index, key } };
+                const resolved = yield* resolve(byName, key);
+                yield* authorize(resolved.policy, key);
+                return { implementation: resolved.entry, prepared: { index, key } };
               }),
             ),
             (result) => ({ index, key, result }),
@@ -456,7 +444,7 @@ export const make = <R>(
       active.filter((key) =>
         Option.match(Option.fromNullishOr(byName.get(key.query)), {
           onNone: () => false,
-          onSome: (implementation) => implementation.contract.depends.includes(contractName),
+          onSome: (resolved) => resolved.entry.contract.depends.includes(contractName),
         }),
       );
 

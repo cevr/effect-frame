@@ -3,9 +3,7 @@ import { Link, link } from "effect-frame/router";
 import type { Route } from "effect-frame/router";
 import { For, View } from "effect-frame/view";
 import { Effect, Option } from "effect";
-import { ack, fulfil, sender } from "./commands.js";
-import type { OrdersCommands } from "./commands.js";
-import { Orders } from "./contract.js";
+import { ack } from "./commands.js";
 import type { Point } from "./queries.js";
 import { rangeLabel } from "./queries.js";
 import { overview } from "./segments.js";
@@ -48,7 +46,7 @@ const RevenueCard = (props: OverviewProps) =>
   });
 
 /** The orders in the window, and how many of them are open. An open one can be fulfilled here. */
-const OrdersCard = (props: OverviewProps, book: OrdersCommands) =>
+const OrdersCard = (props: OverviewProps) =>
   Effect.gen(function* () {
     const shown = yield* View.ready(yield* View.orErrored(props.data.orders.state), { rows: [] });
     const rows = Source.select(shown, (result) => result.rows);
@@ -64,7 +62,11 @@ const OrdersCard = (props: OverviewProps, book: OrdersCommands) =>
                   type="button"
                   class="fulfil"
                   onClick={View.event(() =>
-                    Effect.flatMap(order.get, (value) => Effect.asVoid(fulfil(book, value.id))),
+                    Effect.flatMap(order.get, (value) =>
+                      Effect.flatMap(props.data.book.ref.get, (book) =>
+                        Effect.asVoid(book.send({ _tag: "Fulfil", id: value.id })),
+                      ),
+                    ),
                   )}
                 >
                   fulfil
@@ -174,9 +176,7 @@ export const OverviewView = (props: OverviewProps) =>
     });
 
     const revenue = yield* RevenueCard(props);
-    // The order book is commanded, not drawn: a send-only reference.
-    const book = yield* sender(Orders, props.params, (now) => ({ tenant: now.tenant }));
-    const orders = yield* OrdersCard(props, book);
+    const orders = yield* OrdersCard(props);
     const slowest = yield* SlowestCard(props);
     const alerts = yield* AlertsCard(props);
     return (

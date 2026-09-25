@@ -210,6 +210,10 @@ const program = Effect.gen(function* () {
   `refresh` and `override`. A `Route.actor` binding is `{ ref, state }`:
   `state` follows the reference the route holds now, and a send names it,
   `Effect.flatMap(props.data.notes.ref.get, (ref) => ref.send(message, options))`.
+- `Route.commandRef(contract, key)` declares an actor the page only
+  commands. Its binding is `{ ref }`, a `Source<RemoteCommandRef<C>>` the
+  route opens, moves with its params, and releases; it reads no snapshot
+  and follows no stream.
 - A view written apart from its segment types its props from the segment:
   `Route.PropsOf<typeof post>` for a leaf, and
   `Route.LayoutPropsOf<typeof tenant, ChildR>` for a layout. A layout view

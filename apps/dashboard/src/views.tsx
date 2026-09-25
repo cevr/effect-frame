@@ -1,12 +1,11 @@
-import { Actor, Behavior, Form, Value, Source } from "effect-frame/actor/client";
+import { Actor, Behavior, Form, Source, Value } from "effect-frame/actor/client";
+import type { RemoteCommandRef } from "effect-frame/actor/client";
 import { Link, link } from "effect-frame/router";
 import type { NotFoundProps, Route } from "effect-frame/router";
 import { View } from "effect-frame/view";
 import type { Node } from "effect-frame/view";
 import { Effect, Option, Predicate } from "effect";
-import { sender, writeMemo } from "./commands.js";
-import type { MemoCommands } from "./commands.js";
-import { Memo } from "./contract.js";
+import type { Memo } from "./contract.js";
 import type { dash } from "./segments.js";
 import { ordersIndex, overview } from "./segments.js";
 
@@ -44,12 +43,13 @@ export const failure = (first: Source<Option.Option<unknown>>): Node => (
  * query. The form's own field is the draft: a submit reads it from the
  * event.
  */
-const MemoCard = (memo: MemoCommands) =>
+const MemoCard = (memo: Source<RemoteCommandRef<typeof Memo>>) =>
   Effect.gen(function* () {
     const saved = yield* Actor.local(Behavior.value(""));
     const write = (next: string) =>
       Effect.gen(function* () {
-        const handle = yield* writeMemo(memo, next);
+        const current = yield* memo.get;
+        const handle = yield* current.send({ _tag: "Write", text: next });
         const settled = yield* handle.settled;
         if (settled._tag === "Applied") {
           yield* saved.send(Value.Set(settled.state.text));
@@ -97,9 +97,7 @@ export const DashShell = <ChildR,>(props: Route.LayoutPropsOf<typeof dash, Child
         const params = yield* props.params.get;
         const home = yield* link(overview, params, {});
         const book = yield* link(ordersIndex, params, {});
-        const memo = yield* MemoCard(
-          yield* sender(Memo, props.params, (now) => ({ tenant: now.tenant })),
-        );
+        const memo = yield* MemoCard(props.data.memo.ref);
         const outlet = yield* props.outlet;
         return (
           <div id="shell">

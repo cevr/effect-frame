@@ -21,6 +21,7 @@ import type {
   QueryCache,
   QueryFailure,
   RemoteActorRef,
+  RemoteCommandRef,
   Source,
   TransportService,
 } from "effect-frame/actor";
@@ -307,6 +308,8 @@ const postSegment = Route.child(tenantSegment, "post", {
   // The actor comes first: a sequential acquisition would hold both queries behind it.
   data: ({ params }) => ({
     draft: Route.actor(Draft, { tenant: params.tenant, postId: params.postId }),
+    // Send-only: an address the transition moves, with no snapshot and no stream.
+    notes: Route.commandRef(Draft, { tenant: params.tenant, postId: `${params.postId}-notes` }),
     post: Route.query(PostBody, { tenant: params.tenant, postId: params.postId }),
     comments: Route.query(Comments, { tenant: params.tenant, postId: params.postId }),
   }),
@@ -373,7 +376,7 @@ const nextCommandId = () => {
   return Schema.decodeSync(CommandId)(`nested-${String(commandCounter)}`);
 };
 
-const sendText = (target: RemoteActorRef<typeof Draft>, text: string) =>
+const sendText = (target: RemoteCommandRef<typeof Draft>, text: string) =>
   Effect.orDie(target.send(SetText.make({ text }), { commandId: nextCommandId() }));
 
 const makeTree = (probes: Probes) => {
@@ -418,6 +421,14 @@ const makeTree = (probes: Probes) => {
             )}
           >
             stale
+          </button>
+          <button
+            id="note"
+            onClick={View.event(() =>
+              Effect.flatMap(props.data.notes.ref.get, (current) => sendText(current, "note")),
+            )}
+          >
+            note
           </button>
           <button
             id="current"
@@ -647,6 +658,10 @@ const actorBinding: Equals<
   PostData["draft"],
   { readonly ref: Source<RemoteActorRef<typeof Draft>>; readonly state: Source<string> }
 > = true;
+const commandsBinding: Equals<
+  PostData["notes"],
+  { readonly ref: Source<RemoteCommandRef<typeof Draft>> }
+> = true;
 const postParams: Equals<
   Effect.Success<Route.PropsOf<typeof postSegment>["params"]["get"]>,
   { readonly tenant: string; readonly postId: string }
@@ -697,6 +712,7 @@ const typeFixtures = [
   inheritedTenant,
   ownPost,
   actorBinding,
+  commandsBinding,
   postParams,
   leakyServices,
   leakyWithoutScope,
@@ -905,6 +921,8 @@ describe("private nested transition", () => {
           label: "the draft binding shows post 1's actor",
           until: (actual) => textAt(actual, "#post-draft") === "current",
         });
+        yield* click(root, "#note");
+        expect(yield* Queue.take(wire.commands)).toBe(draftKey("t1", "1-notes"));
 
         yield* Deferred.succeed(snapshot2.gate, void 0);
         yield* Fiber.join(moving);
@@ -960,6 +978,10 @@ describe("private nested transition", () => {
           label: "the send reached post 2's actor, which the binding shows",
           until: (actual) => textAt(actual, "#post-draft") === "current",
         });
+        // The send-only binding moved with the key, and opened no stream.
+        yield* click(root, "#note");
+        expect(yield* Queue.take(wire.commands)).toBe(draftKey("t1", "2-notes"));
+        expect(yield* subscriptionsOf("t1", "2-notes")).toBe(0);
 
         // A search-only change moves no key, yet publishes the new search
         // and keeps every declaration and every entry.

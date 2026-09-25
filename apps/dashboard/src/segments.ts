@@ -1,6 +1,6 @@
 import { Route } from "effect-frame/router";
 import { Schema } from "effect";
-import { Alerts, TenantId } from "./contract.js";
+import { Alerts, Memo, Orders, TenantId } from "./contract.js";
 import { Funnel, OrderDetail, OrderList, Range, Revenue, Slowest, TenantInfo } from "./queries.js";
 
 /**
@@ -34,6 +34,8 @@ export const dash = Route.segment("dash", {
   params: DashParams,
   data: ({ params }) => ({
     tenant: Route.query(TenantInfo, { tenant: params.tenant }),
+    // The memo is only written: a send-only reference, no live stream.
+    memo: Route.commandRef(Memo, { tenant: params.tenant }),
   }),
 });
 
@@ -42,8 +44,9 @@ export type OverviewSearch = Schema.Schema.Type<typeof OverviewSearch>;
 
 /**
  * The overview: five cards over four queries and one actor. The alerts are
- * the page's one live stream. The order book is not route data: the page
- * only commands it, through an `Actor.remoteCommands` reference its view holds (`commands.ts`).
+ * the page's one live stream. The order book is only commanded: a
+ * `Route.commandRef`, which the transition moves with the tenant and which
+ * reads no snapshot.
  */
 export const overview = Route.child(dash, "overview", {
   path: "",
@@ -55,6 +58,7 @@ export const overview = Route.child(dash, "overview", {
     funnel: Route.query(Funnel, { tenant: params.tenant, ...search }),
     slowest: Route.query(Slowest, { tenant: params.tenant }),
     alerts: Route.actor(Alerts, { tenant: params.tenant }),
+    book: Route.commandRef(Orders, { tenant: params.tenant }),
   }),
 });
 
@@ -67,6 +71,7 @@ export const orders = Route.child(dash, "orders", {
   params: DashParams,
   data: ({ params }) => ({
     orders: Route.query(OrderList, { tenant: params.tenant, range: "all" }),
+    book: Route.commandRef(Orders, { tenant: params.tenant }),
   }),
 });
 

@@ -42,6 +42,7 @@ export type {
 export {
   BranchRejected,
   actor,
+  commandRef,
   awaitAll,
   child,
   client,
@@ -69,7 +70,9 @@ export type {
   DrivenAt,
   LayoutPropsOf,
   LeafOptions,
+  CommandRefDeclaration,
   FollowedActor,
+  FollowedCommands,
   ModeConstructor,
   NoParams,
   Pending,

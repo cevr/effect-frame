@@ -134,11 +134,16 @@ Route.actor: <C extends AnyContract>(
 ) => Route.ActorDeclaration<C>;
 type Route.ActorOptions<C> = { readonly behavior?: Route.ActorBehavior<C> };
 type Route.ActorBehavior<C> = Behavior<SnapshotOf<C>, MessageOf<C>, unknown, Refused>;
+// Send-only: opened and moved like an actor, with no snapshot and no stream.
+Route.commandRef: <C extends AnyContract>(contract: C, key: KeyOf<C>) => Route.CommandRefDeclaration<C>;
 
-type Route.Declaration = QueryDeclaration<AnyQuery> | ActorDeclaration<AnyContract>;
+type Route.Declaration =
+  | QueryDeclaration<AnyQuery>
+  | ActorDeclaration<AnyContract>
+  | CommandRefDeclaration<AnyContract>;
 type Route.Declarations = Readonly<Record<string, Declaration>>;
 type Route.RouteData<Data extends Declarations> = {
-  readonly [K in keyof Data]: /* Query: FollowedQuery<ResultOf<Q>, QueryFailure>; Actor: FollowedActor<C>, { ref, state } */;
+  readonly [K in keyof Data]: /* Query: FollowedQuery<ResultOf<Q>, QueryFailure>; Actor: FollowedActor<C>, { ref, state }; CommandRef: FollowedCommands<C>, { ref } */;
 };
 ```
 

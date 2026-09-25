@@ -3,10 +3,8 @@ import type { QueryState } from "effect-frame/actor/client";
 import type { Route } from "effect-frame/router";
 import { For, View } from "effect-frame/view";
 import { Effect, Option } from "effect";
-import { cancel, fulfil, sender } from "./commands.js";
 import type { TenantInfoValue } from "./commands.js";
-import { Orders } from "./contract.js";
-import type { Order } from "./contract.js";
+import type { Order, OrdersMessage } from "./contract.js";
 import type { order, orders, ordersIndex } from "./segments.js";
 
 /**
@@ -34,7 +32,9 @@ const statusOf = (id: string, rows: ReadonlyArray<Order>): string =>
 /** Every order, which both leaves sit under. Each can be fulfilled or cancelled here. */
 export const OrdersLayout = <ChildR,>(props: Route.LayoutPropsOf<typeof orders, ChildR>) =>
   Effect.gen(function* () {
-    const book = yield* sender(Orders, props.params, (now) => ({ tenant: now.tenant }));
+    // The order book is commanded, not drawn: a send-only route binding.
+    const send = (message: OrdersMessage) =>
+      Effect.flatMap(props.data.book.ref.get, (book) => Effect.asVoid(book.send(message)));
     const all = yield* View.ready(yield* View.orErrored(props.data.orders.state), { rows: [] });
     const outlet = yield* props.outlet;
     return (
@@ -49,7 +49,7 @@ export const OrdersLayout = <ChildR,>(props: Route.LayoutPropsOf<typeof orders, 
                   type="button"
                   class="fulfil"
                   onClick={View.event(() =>
-                    Effect.flatMap(row.get, (value) => Effect.asVoid(fulfil(book, value.id))),
+                    Effect.flatMap(row.get, (value) => send({ _tag: "Fulfil", id: value.id })),
                   )}
                 >
                   fulfil
@@ -58,7 +58,7 @@ export const OrdersLayout = <ChildR,>(props: Route.LayoutPropsOf<typeof orders, 
                   type="button"
                   class="cancel"
                   onClick={View.event(() =>
-                    Effect.flatMap(row.get, (value) => Effect.asVoid(cancel(book, value.id))),
+                    Effect.flatMap(row.get, (value) => send({ _tag: "Cancel", id: value.id })),
                   )}
                 >
                   cancel

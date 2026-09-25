@@ -13,6 +13,7 @@ import type {
   QueryFailure,
   Refused,
   RemoteActorRef,
+  RemoteCommandRef,
   ResultOf,
   SnapshotOf,
   TransportReadError,
@@ -206,6 +207,13 @@ export interface ActorDeclaration<C extends AnyContract> {
   ) => Effect.Effect<OpenedActor, TransportReadError, ActorTransport | Scope.Scope>;
 }
 
+/** One send-only actor address a segment needs, as data: no snapshot, no stream. */
+export interface CommandRefDeclaration<C extends AnyContract> {
+  readonly _tag: "CommandRefDeclaration";
+  readonly contract: C;
+  readonly key: KeyOf<C>;
+}
+
 /** A route actor's reference, and its committed projection as a document carries it. */
 export interface OpenedActor {
   readonly ref: RemoteActorRef<AnyContract>;
@@ -230,7 +238,10 @@ export interface ActorOptions<C extends AnyContract> {
   readonly behavior?: ActorBehavior<C>;
 }
 
-export type Declaration = QueryDeclaration<AnyQuery> | ActorDeclaration<AnyContract>;
+export type Declaration =
+  | QueryDeclaration<AnyQuery>
+  | ActorDeclaration<AnyContract>
+  | CommandRefDeclaration<AnyContract>;
 
 /** A segment's declarations by name. */
 export type Declarations = Readonly<Record<string, Declaration>>;
@@ -283,6 +294,36 @@ export const actor = <C extends AnyContract>(
 };
 
 /**
+ * Declare a send-only reference to an actor: the address follows the
+ * segment's params, and the transition opens, moves, and releases it as it
+ * does a `Route.actor`, but it reads no snapshot and follows no stream. Use
+ * it for an actor the page only commands.
+ *
+ * ```tsx
+ * const orders = Route.segment("orders", {
+ *   path: "/:tenant/orders",
+ *   params: Schema.Struct({ tenant: TenantId }),
+ *   data: ({ params }) => ({ book: Route.commandRef(Orders, { tenant: params.tenant }) }),
+ * });
+ * const fulfil = (props: Route.PropsOf<typeof orders>, id: string) =>
+ *   Effect.flatMap(props.data.book.ref.get, (book) => book.send({ _tag: "Fulfil", id }));
+ * ```
+ */
+export const commandRef = <C extends AnyContract>(
+  contract: C,
+  key: KeyOf<C>,
+): CommandRefDeclaration<C> => ({ _tag: "CommandRefDeclaration", contract, key });
+
+/**
+ * What a view receives for a `Route.commandRef` declaration: the send-only
+ * reference the transition holds now. It has `ref`, as an actor binding
+ * does, and no `state`.
+ */
+export interface FollowedCommands<C extends AnyContract> {
+  readonly ref: Source<RemoteCommandRef<C>>;
+}
+
+/**
  * What a view receives for a `Route.actor` declaration: the reference the
  * transition holds now, and the state that reference shows. A move to a new
  * key swaps the reference, and `state` follows the new one. There is no
@@ -308,7 +349,9 @@ export type BindingOf<D> =
     ? FollowedQuery<ResultOf<Q>, QueryFailure>
     : D extends ActorDeclaration<infer C extends AnyContract>
       ? FollowedActor<C>
-      : never;
+      : D extends CommandRefDeclaration<infer C extends AnyContract>
+        ? FollowedCommands<C>
+        : never;
 
 /** Every binding a segment's view receives, inherited ones included. */
 export type RouteData<Data extends Declarations> = {
@@ -319,7 +362,7 @@ export type RouteData<Data extends Declarations> = {
 export type ServicesOf<D> =
   D extends QueryDeclaration<AnyQuery>
     ? QueryCache | ActorTransport
-    : D extends ActorDeclaration<AnyContract>
+    : D extends ActorDeclaration<AnyContract> | CommandRefDeclaration<AnyContract>
       ? ActorTransport
       : never;
 
@@ -1295,7 +1338,12 @@ type DataRecord = ReadonlyMap<string, unknown>;
 
 type Resource =
   | { readonly _tag: "Query"; readonly entry: QueryEntry<unknown, QueryFailure> }
-  | { readonly _tag: "Actor"; readonly ref: RemoteActorRef<AnyContract> };
+  | Addressed;
+
+/** An actor address a binding holds: a full reference, or a send-only one. */
+type Addressed =
+  | { readonly _tag: "Actor"; readonly ref: RemoteActorRef<AnyContract> }
+  | { readonly _tag: "Commands"; readonly ref: RemoteCommandRef<AnyContract> };
 
 /** One declaration interest the transition holds. */
 interface Acquired {
@@ -1312,6 +1360,14 @@ interface Binding {
   readonly install: (next: Acquired) => Effect.Effect<Acquired>;
 }
 
+/** The prefix of an address declaration's key: a full reference and a send-only one never share an interest. */
+const declarationKinds = {
+  ActorDeclaration: "actor",
+  CommandRefDeclaration: "commands",
+} satisfies Readonly<
+  Record<ActorDeclaration<AnyContract>["_tag"] | CommandRefDeclaration<AnyContract>["_tag"], string>
+>;
+
 const declarationKey = (declaration: Declaration): Effect.Effect<string> => {
   if (declaration._tag === "QueryDeclaration") {
     return Effect.map(
@@ -1324,10 +1380,11 @@ const declarationKey = (declaration: Declaration): Effect.Effect<string> => {
         })}`,
     );
   }
+  const kind = declarationKinds[declaration._tag];
   return Effect.map(
     Effect.orDie(Schema.encodeUnknownEffect(declaration.contract.key)(declaration.key)),
     (encoded) =>
-      `actor:${declaration.contract.name}@${String(declaration.contract.version)}/${canonicalize(encoded)}`,
+      `${kind}:${declaration.contract.name}@${String(declaration.contract.version)}/${canonicalize(encoded)}`,
   );
 };
 
@@ -1413,6 +1470,14 @@ const open = (
               (entry): Resource => ({ _tag: "Query", entry }),
             ),
         });
+      }
+      if (declaration._tag === "CommandRefDeclaration") {
+        return Effect.map(
+          Actor.remoteCommands(declaration.contract, declaration.key).pipe(
+            Effect.provideService(ActorTransport, transport),
+          ),
+          (opened): Resource => ({ _tag: "Commands", ref: opened }),
+        );
       }
       return Effect.map(openActor(tree, id, declaration, transport), (opened): Resource => ({
         _tag: "Actor",
@@ -1532,11 +1597,11 @@ const queryOf = (acquired: Acquired): Effect.Effect<QueryEntry<unknown, QueryFai
   return Effect.die(`declaration ${acquired.key} changed from a query to an actor`);
 };
 
-const actorOf = (acquired: Acquired): Effect.Effect<RemoteActorRef<AnyContract>> => {
-  if (acquired.resource._tag === "Actor") {
-    return Effect.succeed(acquired.resource.ref);
+const addressOf = (acquired: Acquired): Option.Option<Addressed> => {
+  if (acquired.resource._tag === "Query") {
+    return Option.none();
   }
-  return Effect.die(`declaration ${acquired.key} changed from an actor to a query`);
+  return Option.some(acquired.resource);
 };
 
 /**
@@ -1604,7 +1669,12 @@ const actorBinding = (
 ): Binding => {
   let current = first;
   const ref: Source<RemoteActorRef<AnyContract>> = Source.mapEffect(state, (value) =>
-    refIn(value, name),
+    Effect.flatMap(addressIn(value, name), (held) => {
+      if (held._tag === "Actor") {
+        return Effect.succeed(held.ref);
+      }
+      return Effect.die(`actor binding ${name} holds a send-only reference`);
+    }),
   );
   const exposed: FollowedActor<AnyContract> = {
     ref,
@@ -1622,34 +1692,54 @@ const actorBinding = (
   };
 };
 
-/** Values and actor refs, published together so a control sees a consistent pair. */
+/**
+ * A send-only binding: like an actor binding, its reference lives in the
+ * instance state beside its params, so a control reads a consistent pair.
+ */
+const commandsBinding = (
+  name: string,
+  first: Acquired,
+  state: Source<InstanceState<unknown, unknown>>,
+): Binding => {
+  let current = first;
+  const exposed: FollowedCommands<AnyContract> = {
+    ref: Source.mapEffect(state, (value) => Effect.map(addressIn(value, name), (held) => held.ref)),
+  };
+  return {
+    current: () => current,
+    exposed,
+    install: (next) =>
+      Effect.sync(() => {
+        const replaced = current;
+        current = next;
+        return replaced;
+      }),
+  };
+};
+
+/** Values and actor addresses, published together so a control sees a consistent pair. */
 interface InstanceState<Params, Search> {
   readonly values: Values<Params, Search>;
-  readonly refs: ReadonlyMap<string, RemoteActorRef<AnyContract>>;
+  readonly refs: ReadonlyMap<string, Addressed>;
 }
 
-const refIn = (
+const addressIn = (
   state: InstanceState<unknown, unknown>,
   name: string,
-): Effect.Effect<RemoteActorRef<AnyContract>> =>
+): Effect.Effect<Addressed> =>
   Option.match(Option.fromNullishOr(state.refs.get(name)), {
     onNone: () => Effect.die(`actor binding ${name} has no ref`),
     onSome: Effect.succeed,
   });
 
-const refsOf = (
-  bindings: ReadonlyMap<string, Binding>,
-): Effect.Effect<ReadonlyMap<string, RemoteActorRef<AnyContract>>> =>
-  Effect.map(
-    Effect.forEach(
-      Array.from(bindings).filter(([, binding]) => binding.current().resource._tag === "Actor"),
-      ([name, binding]) =>
-        Effect.map(
-          actorOf(binding.current()),
-          (opened): readonly [string, RemoteActorRef<AnyContract>] => [name, opened],
-        ),
+const refsOf = (bindings: ReadonlyMap<string, Binding>): ReadonlyMap<string, Addressed> =>
+  new Map(
+    Array.from(bindings).flatMap(([name, binding]) =>
+      Option.match(addressOf(binding.current()), {
+        onNone: () => [],
+        onSome: (held): ReadonlyArray<readonly [string, Addressed]> => [[name, held]],
+      }),
     ),
-    (entries) => new Map(entries),
   );
 
 // ---------------------------------------------------------------------------
@@ -2093,11 +2183,13 @@ const makeBranch = <
     for (const one of acquired) {
       if (one.acquired.resource._tag === "Query") {
         bindings.set(one.name, yield* queryBinding(one.acquired, bindingsScope));
+      } else if (one.acquired.resource._tag === "Commands") {
+        bindings.set(one.name, commandsBinding(one.name, one.acquired, stateSource));
       } else {
         bindings.set(one.name, actorBinding(one.name, one.acquired, stateSource));
       }
     }
-    yield* SubscriptionRef.set(state, { values, refs: yield* refsOf(bindings) });
+    yield* SubscriptionRef.set(state, { values, refs: refsOf(bindings) });
     const data = assemble(inherited, bindings);
     const childInstance = yield* Option.match(childEntering, {
       onNone: () => Effect.succeed(Option.none<Instance<ChildR>>()),
@@ -2372,7 +2464,7 @@ const makeBranch = <
           internals.signature = signature;
           yield* SubscriptionRef.set(internals.state, {
             values,
-            refs: yield* refsOf(internals.bindings),
+            refs: refsOf(internals.bindings),
           });
         }
         yield* commitSlot(internals, childPlan);

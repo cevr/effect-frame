@@ -1,0 +1,63 @@
+import { Effect, Schema } from "effect";
+import { Generated } from "effect-frame/actor/client";
+import { Route } from "effect-frame/router";
+import { For, Loading, Show, View, bind, event, ready } from "effect-frame/view";
+import { Counter, CounterSummary, Increment, Reset, counterBehavior } from "./counter.js";
+
+
+const key = { id: "main" };
+
+const counterSegment = Route.segment("counter", {
+  path: "/counter",
+  params: Schema.Struct({}),
+  data: () => ({
+    counter: Route.actor(Counter, key, { behavior: counterBehavior }),
+    summary: Route.query(CounterSummary, key),
+  }),
+});
+
+const CounterView = Effect.fn("CounterView")(function* (props: Route.PropsOf<typeof counterSegment>) {
+  // data.counter is a Source of the reference, not the reference.
+  const counter = yield* props.data.counter.get;
+  const count = counter.state;
+  const summary = yield* ready(props.data.summary.state, { parity: "even", recent: 0 });
+
+  const changes = View.select(count, (s) => s.changes);
+
+  const add = yield* View.form({
+    ref: counter,
+    contract: Counter,
+    key,
+    message: Increment,
+    typed: ["amount"],
+    endpoint: "/actors",
+    returnTo: "/counter",
+  });
+
+  return (
+    <section>
+      <h1>Count: {bind(count, (state) => state.count)}</h1>
+      <p>Parity: {bind(summary, (s) => s.parity)}</p>
+      <Show when={count} is={(state) => state.count === 0}>
+        <p>zero</p>
+      </Show>
+      <ul>
+        <For each={changes} keyBy={(change) => String(change.seq)}>
+          {(change) => <li>{bind(change, (c) => `${c.delta > 0 ? "+" : ""}${c.delta}`)}</li>}
+        </For>
+      </ul>
+      <form onSubmit={add.submit}>
+        <input name="amount" type="number" />
+        <button type="submit">Add</button>
+      </form>
+      <button onClick={event(() => counter.send(Reset.make({})))}>Reset</button>
+    </section>
+  );
+});
+
+export const CounterRoute = Route.client(
+  "counter",
+  Route.leaf(counterSegment, (props) =>
+    Loading({ fallback: <p>loading</p>, children: CounterView(props) }),
+  ),
+);

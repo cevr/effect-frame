@@ -1,0 +1,25 @@
+import { Effect, Schema } from "effect";
+import { Route, mount } from "effect-frame/router";
+import { View, ready } from "effect-frame/view";
+import { CounterSummary } from "./counter.js";
+
+const seg = Route.segment("p", {
+  path: "/p",
+  params: Schema.Struct({}),
+  data: () => ({ summary: Route.query(CounterSummary, { id: "x" }) }),
+});
+// No Loading around `ready`.
+export const P = Route.client(
+  "p",
+  Route.leaf(seg, (props) =>
+    Effect.gen(function* () {
+      const s = yield* ready(props.data.summary.state, { parity: "even", recent: 0 });
+      return <p class="x" className="y" onClik={View.event(() => Effect.void)}>{View.bind(s, (v) => v.parity)}</p>;
+    }),
+  ),
+);
+declare const host: never; declare const root: never; declare const notFound: never;
+export const program = mount({ routes: [P], notFound, host, root });
+type RofP = typeof P extends { readonly __r?: infer R } ? R : "no-phantom";
+export const checkR: Effect.Effect<unknown, unknown, never> = program;
+export const tree: number = P;

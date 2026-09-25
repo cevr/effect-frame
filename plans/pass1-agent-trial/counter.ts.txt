@@ -1,0 +1,51 @@
+// Shared, browser-safe: contract, behavior, query contract.
+import { Match, Schema } from "effect";
+import { Behavior, contract, query } from "effect-frame/actor/client";
+
+export const Increment = Schema.TaggedStruct("Increment", { amount: Schema.FiniteFromString });
+export const Reset = Schema.TaggedStruct("Reset", {});
+export const CounterMessage = Schema.Union([Increment, Reset]);
+
+export const Change = Schema.Struct({ seq: Schema.Finite, delta: Schema.Finite });
+export const CounterState = Schema.Struct({
+  count: Schema.Finite,
+  seq: Schema.Finite,
+  changes: Schema.Array(Change),
+});
+export type Change = typeof Change.Type;
+export type CounterState = typeof CounterState.Type;
+export type CounterMessage = typeof CounterMessage.Type;
+
+export const Counter = contract("Counter", {
+  version: 1,
+  policy: "public",
+  key: Schema.Struct({ id: Schema.String }),
+  snapshot: CounterState,
+  message: CounterMessage,
+});
+
+const reduce = (state: CounterState, message: CounterMessage): CounterState =>
+  Match.type<CounterMessage>().pipe(
+    Match.tagsExhaustive({
+      Increment: (inc) => record(state, state.count + inc.amount, inc.amount),
+      Reset: () => record(state, 0, -state.count),
+    }),
+  )(message);
+
+const record = (state: CounterState, count: number, delta: number): CounterState => {
+  const seq = state.seq + 1;
+  return { count, seq, changes: [...state.changes, { seq, delta }].slice(-5) };
+};
+
+export const counterBehavior = Behavior.reducer({
+  initial: { count: 0, seq: 0, changes: [] },
+  reduce,
+});
+
+// A derived read: parity and total of the last changes.
+export const CounterSummary = query("CounterSummary", {
+  args: Schema.Struct({ id: Schema.String }),
+  result: Schema.Struct({ parity: Schema.Literals(["even", "odd"]), recent: Schema.Finite }),
+  policy: "public",
+  depends: [Counter],
+});

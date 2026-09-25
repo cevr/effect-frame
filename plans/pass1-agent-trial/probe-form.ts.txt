@@ -1,0 +1,9 @@
+import { Schema } from "effect";
+import { Form } from "effect-frame/actor/client";
+const A = Schema.Union([Schema.TaggedStruct("Increment", { amount: Schema.Finite }), Schema.TaggedStruct("Reset", {})]);
+const B = Schema.Union([Schema.TaggedStruct("Increment", { amount: Schema.FiniteFromString }), Schema.TaggedStruct("Reset", {})]);
+const fields = Form.fromEntries([["_tag", "Increment"], ["amount", "5"]]);
+for (const [n, s] of [["Finite", A], ["FiniteFromString", B]] as const) {
+  const r = Schema.decodeUnknownExit(Form.codec(s))(fields);
+  console.log(n, JSON.stringify(r).slice(0, 300));
+}

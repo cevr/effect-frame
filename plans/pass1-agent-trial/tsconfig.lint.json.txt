@@ -1,0 +1,5 @@
+{
+  "extends": "/Users/cvr/Developer/personal/.rifts/effect-frame/arch-pass1/tsconfig.json",
+  "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "effect-frame/view", "types": [], "lib": ["ESNext","DOM","DOM.Iterable"] },
+  "include": ["./*.ts", "./*.tsx"]
+}

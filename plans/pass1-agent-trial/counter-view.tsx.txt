@@ -1,0 +1,92 @@
+import { Effect, Schema, Stream } from "effect";
+import type { RemoteActorRef, Source } from "effect-frame/actor/client";
+import { select } from "effect-frame/actor/client";
+import { Route } from "effect-frame/router";
+import { For, Loading, Show, View, ready } from "effect-frame/view";
+import type { Change, CounterState } from "./counter.js";
+import { Counter, CounterSummary, Increment, counterBehavior } from "./counter.js";
+
+const key = { id: "main" };
+
+export const counterSegment = Route.segment("counter", {
+  path: "/counter",
+  params: Schema.Struct({}),
+  data: () => ({
+    counter: Route.actor(Counter, key, { behavior: counterBehavior }),
+    summary: Route.query(CounterSummary, key),
+  }),
+});
+
+type CounterProps = Route.PropsOf<typeof counterSegment>;
+type CounterRef = RemoteActorRef<typeof Counter>;
+
+// Route data hands a Source of the reference. There is no Source.flatMap /
+// switch, so every app writes this (dashboard: `snapshotOf`).
+const stateOf = (refs: Source<CounterRef>): Source<CounterState> => ({
+  get: Effect.flatMap(refs.get, (ref) => ref.state.get),
+  changes: Stream.switchMap(refs.changes, (ref) => ref.state.changes),
+});
+
+const signed = (delta: number): string => {
+  if (delta > 0) {
+    return `+${delta}`;
+  }
+  return String(delta);
+};
+
+const CounterView = (props: CounterProps) =>
+  Effect.gen(function* () {
+    const count = stateOf(props.data.counter);
+    const changes = select(count, (state) => state.changes);
+    const summary = yield* ready(props.data.summary.state, { parity: "even", recent: 0 });
+    // View.form wants the reference itself, not the Source the route gives.
+    const counter = yield* props.data.counter.get;
+    const add = yield* View.form({
+      ref: counter,
+      contract: Counter,
+      key,
+      message: Increment,
+      typed: ["amount"],
+      endpoint: "/actors",
+      returnTo: "/counter",
+    });
+    const reset = View.event(() =>
+      Effect.flatMap(props.data.counter.get, (ref) => ref.send({ _tag: "Reset" })),
+    );
+
+    return (
+      <section>
+        <h1>Count: {View.bind(count, (state) => state.count)}</h1>
+        <p>
+          Parity: {View.bind(summary, (s) => s.parity)}, recent: {View.bind(summary, (s) => s.recent)}
+        </p>
+        <Show when={count} is={(state) => state.count === 0}>
+          <p>zero</p>
+        </Show>
+        <ul>
+          <For each={changes} keyBy={(change: Change) => String(change.seq)}>
+            {(change) => <li>{View.bind(change, (c) => signed(c.delta))}</li>}
+          </For>
+        </ul>
+        <form onSubmit={add.submit}>
+          <input name="amount" type="number" />
+          <button type="submit">Add</button>
+        </form>
+        <ul>
+          {add.issues.map((issue) => (
+            <li>{issue.message}</li>
+          ))}
+        </ul>
+        <button type="button" onClick={reset}>
+          Reset
+        </button>
+      </section>
+    );
+  });
+
+export const CounterRoute = Route.client(
+  "counter",
+  Route.leaf(counterSegment, (props) =>
+    Loading({ fallback: <p>loading</p>, children: CounterView(props) }),
+  ),
+);

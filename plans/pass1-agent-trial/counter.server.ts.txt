@@ -1,0 +1,24 @@
+import { Effect } from "effect";
+import { implementQuery, implementTransparent } from "effect-frame/actor";
+import { ref } from "effect-frame/actor/client";
+import { Counter, CounterSummary, counterBehavior } from "./counter.js";
+
+export const CounterLive = implementTransparent(Counter, counterBehavior);
+
+const parityOf = (count: number): "even" | "odd" => {
+  if (count % 2 === 0) {
+    return "even";
+  }
+  return "odd";
+};
+
+export const CounterSummaryLive = implementQuery(CounterSummary, (args) =>
+  Effect.gen(function* () {
+    const counter = yield* ref(Counter, args);
+    const state = yield* counter.state.get;
+    return {
+      parity: parityOf(state.count),
+      recent: state.changes.reduce((sum, change) => sum + change.delta, 0),
+    };
+  }),
+);

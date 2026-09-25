@@ -1,0 +1,46 @@
+// Deliberate first-guess mistakes, one per line group, to record compiler output.
+import { Effect } from "effect";
+import type { Source } from "effect-frame/actor/client";
+import { Loading, View, ready, Show, Query } from "effect-frame/view";
+import type { Node } from "effect-frame/view";
+
+declare const count: Source<number>;
+declare const counter: { send: (m: { _tag: "Reset" }) => Effect.Effect<unknown> };
+const Child = (_: { n: number }) => Effect.succeed(<p>child</p>);
+
+// M1: Loading as a JSX tag (Show/For/Match/Query are tags).
+export const m1 = <Loading fallback={<p>...</p>}>{Child({ n: 1 })}</Loading>;
+// M2: a view (Effect-returning) used as a JSX tag.
+export const m2 = <div><Child n={1} /></div>;
+// M3: a raw Source as a JSX child without bind.
+export const m3 = <p>{count}</p>;
+// M4: a plain arrow as onClick (React habit).
+export const m4 = <button onClick={() => counter.send({ _tag: "Reset" })}>r</button>;
+// M5: yield* a Show (treating control flow like Loading).
+export const m5 = Effect.gen(function* () {
+  const node = yield* Show({ when: View.select(count, (n) => n === 0), children: <p>zero</p> });
+  return node;
+});
+// M6: ready outside Loading.
+export const m6 = Effect.gen(function* () {
+  const v = yield* ready(null as never as Source<never>, 0);
+  return <p>{View.bind(v)}</p>;
+});
+// M7: bind a Source into a Show's `when` instead of a Source.
+export const m7 = <Show when={View.bind(count, (n) => n === 0)}><p>zero</p></Show>;
+// M8: onClick with an Effect directly, not a function.
+export const m8 = <button onClick={View.event(counter.send({ _tag: "Reset" }) as never)}>r</button>;
+// M9: Query as an Effect (Loading is one).
+export const m9 = Effect.gen(function* () {
+  const q = yield* Query({ state: null as never, loading: <p />, failed: () => <p />, ready: () => <p /> });
+  return q;
+});
+// M10: return an Effect<Node> where Node expected (forgot yield*).
+export const m10 = Effect.gen(function* () {
+  const child = Child({ n: 1 });
+  return <div>{child}</div>;
+});
+// M11: `class` vs `className`.
+export const m11 = <div className="x" />;
+// M12: For children returns a view Effect.
+export const m12: Node = <ul>{null}</ul>;

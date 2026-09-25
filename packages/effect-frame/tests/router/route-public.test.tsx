@@ -847,4 +847,49 @@ describe("public nested routes", () => {
         expect(location.history.at(-1)).toBe("push /space/s2/rooms/lobby");
       }),
   );
+
+  it.scoped.layer(frameLayer("public-current-params"))(
+    "4. a link is the page only when its own params print the current path; search does not count",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* makeRoot;
+        const { page, router } = yield* mountApp(Spaces, root, "/space/s1/rooms/a");
+        const provided = <A,>(effect: Effect.Effect<A, never, Router>) =>
+          Effect.provideService(effect, Router, router);
+        const roomA = yield* provided(link(room, { space: "s1", room: "a" }, {}));
+        const roomB = yield* provided(link(room, { space: "s1", room: "b" }, {}));
+        const spaceS1 = yield* provided(link(space, { space: "s1" }, {}));
+        const spaceS2 = yield* provided(link(space, { space: "s2" }, {}));
+        const where = Effect.all([
+          roomA.current.get,
+          roomB.current.get,
+          spaceS1.current.get,
+          spaceS2.current.get,
+        ]);
+        yield* page.waitFor({
+          label: "room a",
+          until: (actual) => textAt(actual, "#room") === "a",
+        });
+        // Same segment, other params: neither the page nor an ancestor.
+        expect(yield* where).toEqual(["page", "none", "ancestor", "none"]);
+        expect(hasAt(root, "a.lobby[aria-current]")).toBe(false);
+
+        // A search on the URL leaves the page the page.
+        yield* router.push("/space/s1/rooms/a?unrelated=1");
+        yield* page.waitFor({
+          label: "room a with a search",
+          until: (actual) => textAt(actual, "#room") === "a",
+        });
+        expect(yield* where).toEqual(["page", "none", "ancestor", "none"]);
+
+        // The params Source link is the page once its params print the URL.
+        yield* router.push("/space/s1/rooms/lobby");
+        yield* page.waitFor({
+          label: "the lobby",
+          until: (actual) => textAt(actual, "#room") === "lobby",
+        });
+        expect(attributeAt(root, "a.lobby", "aria-current")).toBe("page");
+        expect(yield* where).toEqual(["none", "none", "ancestor", "none"]);
+      }),
+  );
 });

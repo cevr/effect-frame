@@ -51,6 +51,9 @@ describe("the README's first app", () => {
       expect(page.text).toContain("<h1>home</h1>");
       expect(countOf(page.text)).toBe("0");
       expect(page.text).toContain('href="/counters/work"');
+      // Only the link to the page shown is the current page.
+      expect(page.text).toMatch(/<a [^>]*href="\/counters\/home"[^>]*aria-current="page"/);
+      expect(page.text).not.toMatch(/<a [^>]*href="\/counters\/work"[^>]*aria-current/);
     }),
   );
 

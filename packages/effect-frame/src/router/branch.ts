@@ -84,12 +84,14 @@ import type {
   SearchRecord,
   SearchUpdater,
   Current,
+  Decoded,
 } from "./codec.js";
 import { matchPrefix, segmentsOf } from "./path.js";
 import {
   RouteBrand,
   address,
   parseTemplate,
+  printPath,
   printSearch,
   readSearch,
   search as searchCodec,
@@ -420,12 +422,14 @@ export interface Segment<
   /** The current URL's decoded search for this segment, or its empty value. */
   searchAt(current: URL): Search;
   /**
-   * How the current match relates to this segment: `"page"` when a tree
-   * that holds this segment matched and the URL ends at this segment,
-   * `"ancestor"` when the URL continues below it, and `"none"` otherwise,
-   * including not-found and another route.
+   * How the current match relates to this segment printed with `params`:
+   * `"page"` when a tree that holds this segment matched and the URL's path
+   * is this segment's path printed with `params`, `"ancestor"` when the URL's
+   * path starts with that printed path and continues below it, and `"none"`
+   * otherwise, including other params, not-found, and another route. The
+   * search never counts: a sort or a filter does not move the page.
    */
-  currentAt(current: RouteMatch): Current;
+  currentAt(current: RouteMatch, params: Params): Current;
   /** Phantom: this segment's own declarations. */
   readonly "~own": (_: never) => Own;
   /** Phantom: the declarations the view sees. */
@@ -748,15 +752,19 @@ const makeSegment = <
     href: printer.href,
     hrefAt: printer.hrefAt,
     searchAt: printer.searchAt,
-    currentAt: (current: RouteMatch): Current => {
+    currentAt: (current: RouteMatch, linked: Params): Current => {
       const trees = Option.fromNullishOr(treesOf.get(made));
       if (!Option.exists(trees, (names) => names.has(current.name))) {
         return "none";
       }
-      if (Option.isSome(printer.parse(current.url))) {
+      // Both sides print through the same codec, so equal params print one path.
+      const path = printPath(full, typed.encode(linked));
+      const printed = (decoded: Decoded<Params, SearchCodec["Type"]>): boolean =>
+        printPath(full, typed.encode(decoded.params)) === path;
+      if (Option.exists(printer.parse(current.url), printed)) {
         return "page";
       }
-      if (Option.isSome(printer.parsePrefix(current.url))) {
+      if (Option.exists(printer.parsePrefix(current.url), printed)) {
         return "ancestor";
       }
       return "none";

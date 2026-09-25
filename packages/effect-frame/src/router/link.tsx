@@ -36,9 +36,12 @@ export type LinkSearch<Search> = Search | SearchUpdater<Search>;
 export type LinkParams<Params> = Params | Source<Params>;
 
 /**
- * A segment is the page while a tree that holds it matched and the URL ends
- * at it, and an ancestor while the URL continues below it. Not-found and
- * another route are neither.
+ * A link is the page while a tree that holds its segment matched and the
+ * URL's path is the segment's path printed with the link's params, and an
+ * ancestor while the URL's path continues below that printed path. The same
+ * segment with other params, not-found, and another route are neither. The
+ * search never counts: `/lists/inbox?sort=date` is still the `inbox` page,
+ * so a link to it is `"page"` whatever search either side carries.
  *
  * ```ts
  * // Fixed params: a list page's link to one list.
@@ -60,7 +63,7 @@ export const link = <Params, Search>(
       (url: URL): string =>
         to.hrefAt(url, fixed, searchAt(to, url, search));
     const href = Source.zip(router.current, held, (match, fixed) => hrefAt(fixed)(match.url));
-    const current = Source.select(router.current, (match) => to.currentAt(match));
+    const current = Source.zip(router.current, held, (match, fixed) => to.currentAt(match, fixed));
     return {
       href,
       current,

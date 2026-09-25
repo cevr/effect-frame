@@ -556,10 +556,12 @@ export interface Linkable<Params, Search> {
   /** The current URL's decoded search, or the codec's empty value. */
   readonly searchAt: (current: URL) => Search;
   /**
-   * Where the current match is relative to this destination: on it
-   * (`"page"`), below it (`"ancestor"`), or elsewhere.
+   * Where the current match is relative to this destination printed with
+   * `params`: on it (`"page"`), below it (`"ancestor"`), or elsewhere. Only
+   * the path counts: the params must print the current path (or its prefix,
+   * for `"ancestor"`), and the search is ignored.
    */
-  readonly currentAt: (current: RouteMatch) => Current;
+  readonly currentAt: (current: RouteMatch, params: Params) => Current;
 }
 
 /**

@@ -671,9 +671,12 @@ export const App = Route.client(
   fails at the mode constructor with `View.ready needs a View.loading above
 it`). In a `.tsx` file the generic needs its trailing comma. Do not type
   props by hand: the props interfaces are not exported.
-- `link` takes a segment. `Link` draws `aria-current="page"`
-  on the destination, and `aria-current="true"` on a segment the current URL
-  continues below. Neither holds on not-found or on another route.
+- `link` takes a segment. `Link` draws `aria-current="page"` when the
+  current path is the segment's path printed with the link's params, and
+  `aria-current="true"` when the current path continues below that printed
+  path. The same segment with other params gets neither, nor does any link
+  on not-found or on another route. The search never counts: a link to a
+  list is the page under any sort or filter.
 - `link(to, params, search)` takes fixed params or a `Source` of them. A
   layout that outlives a param move passes `props.params`, so its links
   follow the params it holds now instead of the ones it was drawn with.

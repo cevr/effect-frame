@@ -13,7 +13,7 @@ import type { ActorTransport, QueryCache } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import { Html } from "effect-frame/view";
 import type { Context } from "effect";
-import { Deferred, Effect, Exit, Layer, Scope, Stream } from "effect";
+import { Deferred, Effect, Exit, Layer, Option, Scope, Stream } from "effect";
 import * as H from "../router/browser/harness.js";
 import { Label, Page, TallPage } from "./browser/streaming-page.js";
 
@@ -88,7 +88,15 @@ const servePage = async (mode: Mode): Promise<PageServer> => {
     ),
   );
   const actors = await Effect.runPromise(
-    Effect.provideContext(HttpServer.make({ principal: HttpServer.anonymous }), context),
+    Effect.provideContext(
+      HttpServer.make({
+        prefix: "/actors",
+        principal: HttpServer.anonymous,
+        maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+        form: Option.none(),
+      }),
+      context,
+    ),
   );
   let bootstrap = '<script type="module" src="/client.js"></script>';
   if (mode === "async" || mode === "split" || mode === "tall") {
@@ -156,10 +164,8 @@ const servePage = async (mode: Mode): Promise<PageServer> => {
         return new Response("ok");
       }
       if (url.pathname.startsWith("/actors/")) {
-        const stripped = new URL(request.url);
-        stripped.pathname = url.pathname.slice("/actors".length);
-        calls.push(stripped.pathname);
-        return Effect.runPromise(actors(new Request(stripped, request)));
+        calls.push(url.pathname.slice("/actors".length));
+        return Effect.runPromise(actors(request));
       }
       if (url.pathname !== "/") {
         return new Response("not found", { status: 404 });

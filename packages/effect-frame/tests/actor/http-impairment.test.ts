@@ -93,13 +93,17 @@ const policy = (settings: Partial<CommandPolicySettings>): CommandPolicySettings
 });
 
 const serve = Effect.gen(function* () {
-  const app = HttpServer.toWebHandler(
+  const host = yield* Layer.build(
     ActorHost.layer({ implementations: [CounterLive], store: ActorHost.memoryStore }).pipe(
       Layer.provide(Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }))),
     ),
-    { principal: HttpServer.anonymous },
   );
-  yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
+  const handler = yield* HttpServer.make({
+    prefix: "",
+    principal: HttpServer.anonymous,
+    maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+    form: Option.none(),
+  }).pipe(Effect.provideContext(host));
   const run = Effect.runPromiseWith(yield* Effect.context<never>());
   const server = yield* Effect.acquireRelease(
     Effect.sync(() =>
@@ -109,7 +113,7 @@ const serve = Effect.gen(function* () {
         port: 0,
         fetch: (request) => {
           const path = new URL(request.url).pathname;
-          const forward = Effect.promise(() => app.fetch(request));
+          const forward = handler(request);
           if (path.endsWith("/send")) {
             proxy.sends += 1;
             return run(impair(proxy.send, proxy.sends, forward, request.signal));
@@ -118,7 +122,7 @@ const serve = Effect.gen(function* () {
             proxy.calls += 1;
             return run(impair(proxy.call, proxy.calls, forward, request.signal));
           }
-          return app.fetch(request);
+          return run(handler(request));
         },
       }),
     ),

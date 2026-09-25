@@ -1,5 +1,6 @@
-import type { Context, Layer, Scope } from "effect";
-import { Duration, Effect, ManagedRuntime, Option, RcMap, Schema, Sink, Stream } from "effect";
+import type { Context, Scope } from "effect";
+import { Duration, Effect, Option, RcMap, Schema, Sink, Stream } from "effect";
+import type { FormContext } from "../form.js";
 import type { Address } from "../contract.js";
 import type { PrincipalRevision, PrincipalSource } from "../principal.js";
 import { Anonymous, CurrentPrincipal, Principal } from "../principal.js";
@@ -26,15 +27,26 @@ import {
   queryStatusOf,
   statusOf,
 } from "./wire.js";
+import { readText } from "./body.js";
+import type { FormRoute } from "./form-post.js";
+import { formPost } from "./form-post.js";
 
-export { form, type FormPostOptions } from "./form-post.js";
+export type { FormRoute } from "./form-post.js";
+export { BodyTooLarge, BodyUnreadable, readText } from "./body.js";
 
 /**
  * A web-standard handler over the transport in context. `Request` in,
  * `Response` out: the shape Bun, Cloudflare Workers, and celld all serve.
- * Mount it under one prefix and give the client that prefix as `baseUrl`.
+ * It answers the paths under its `prefix`; give the client that prefix as
+ * `baseUrl`.
  */
 export type WebHandler = (request: Request) => Effect.Effect<Response>;
+
+/**
+ * The path a handler owns: `""` for the root, or a path that starts with
+ * `/` and does not end with one, such as `"/actors"`.
+ */
+export type Prefix = "" | `/${string}`;
 
 /**
  * Derives who is asking from the raw request. It is the
@@ -47,13 +59,36 @@ export type DerivePrincipal<R = never> = (
   request: Request,
 ) => Effect.Effect<PrincipalSource, never, R>;
 
-export interface ServerOptions<R = never> {
+export interface ServerOptions<R = never, FE = never, FR = never> {
+  /**
+   * Where the handler is mounted. Each verb answers at exactly
+   * `prefix + Wire.paths.*`, so the app routes every path under the prefix
+   * here unchanged, and any other path under it answers 404.
+   */
+  readonly prefix: Prefix;
   /**
    * Required: a host that serves authenticated traffic cannot forget it.
-   * A host with no sessions writes `principal: HttpServer.anonymous`.
+   * A host with no sessions writes `principal: HttpServer.anonymous`. It is
+   * derived once per request, for the JSON verbs and the form route alike.
    */
   readonly principal: DerivePrincipal<R>;
+  /**
+   * The largest request body read, in bytes. A larger body answers 413
+   * before it is decoded. `HttpServer.defaultMaxBodyBytes` is one MiB.
+   */
+  readonly maxBodyBytes: number;
+  /**
+   * The plain-form route at `prefix + /form`, for pages with no script.
+   * `Option.none()` for a host whose pages post nothing without script.
+   */
+  readonly form: Option.Option<FormRoute<FE, FR>>;
 }
+
+/** One MiB: a named limit for `maxBodyBytes`, larger than any message the example apps send. */
+export const defaultMaxBodyBytes = 1024 * 1024;
+
+/** Ten seconds: a named limit for a form route's `commitWithin`. */
+export const defaultCommitWithin: Duration.Duration = Duration.seconds(10);
 
 /**
  * The explicit opt-out: every request is `Anonymous`, and every connection
@@ -62,12 +97,26 @@ export interface ServerOptions<R = never> {
  */
 export const anonymous: DerivePrincipal = () => Effect.succeed(Principal.anonymous);
 
+/** The body read under the host's limit, then decoded. A refusal carries its status. */
+interface BodyRefusal {
+  readonly status: 400 | 413;
+  readonly reason: string;
+}
+
 const decodeBody = <S extends Schema.Codec<unknown, unknown>>(schema: S) => {
   const decode = Schema.decodeEffect(Schema.fromJsonString(schema));
-  return (request: Request) =>
-    Effect.flatMap(
-      Effect.tryPromise({ try: () => request.text(), catch: (cause) => String(cause) }),
-      (text) => Effect.mapError(decode(text), (error) => error.message),
+  return (request: Request, maxBodyBytes: number): Effect.Effect<S["Type"], BodyRefusal> =>
+    readText(request, maxBodyBytes).pipe(
+      Effect.catchTags({
+        BodyTooLarge: (error) => Effect.fail<BodyRefusal>({ status: 413, reason: error.message }),
+        BodyUnreadable: (error) => Effect.fail<BodyRefusal>({ status: 400, reason: error.reason }),
+      }),
+      Effect.flatMap((text) =>
+        Effect.mapError(decode(text), (error): BodyRefusal => ({
+          status: 400,
+          reason: error.message,
+        })),
+      ),
     );
 };
 
@@ -93,6 +142,10 @@ const json = (status: number, body: string) =>
 const BadRequest = Schema.TaggedStruct("BadRequest", { reason: Schema.String });
 const encodeBadRequest = Schema.encodeSync(Schema.fromJsonString(BadRequest));
 const badRequest = (reason: string) => json(400, encodeBadRequest({ _tag: "BadRequest", reason }));
+
+/** A body the host would not read or could not decode: 413 over the limit, else 400. */
+const refusedBody = (refusal: BodyRefusal) =>
+  json(refusal.status, encodeBadRequest({ _tag: "BadRequest", reason: refusal.reason }));
 
 const respond = <A>(
   result: Effect.Effect<A, WireError>,
@@ -189,9 +242,30 @@ export const shareSessions = <K, R>(
     });
   });
 
-export const make = <R = never>(
-  options: ServerOptions<R>,
-): Effect.Effect<WebHandler, never, ActorTransport | R> =>
+/**
+ * The actor host's one HTTP handler: the JSON verbs, the `changes` stream,
+ * and the plain-form route, every one under `prefix`, every one under the
+ * principal derived once per request, and every body read under
+ * `maxBodyBytes`.
+ *
+ * ```ts
+ * const actors = yield* HttpServer.make({
+ *   prefix: "/actors",
+ *   principal: HttpServer.anonymous,
+ *   maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+ *   form: Option.some({
+ *     contracts: [Notes],
+ *     login: Option.none(),
+ *     render: drawAgain,
+ *     commitWithin: HttpServer.defaultCommitWithin,
+ *   }),
+ * });
+ * // Every path under /actors goes to `actors` unchanged.
+ * ```
+ */
+export const make = <R = never, FE = never, FR = never>(
+  options: ServerOptions<R, FE, FR>,
+): Effect.Effect<WebHandler, never, ActorTransport | R | Exclude<FR, FormContext>> =>
   Effect.gen(function* () {
     const transport = yield* ActorTransport;
     const context = yield* Effect.context<never>();
@@ -199,6 +273,11 @@ export const make = <R = never>(
     const derive = (request: Request): Effect.Effect<PrincipalSource> =>
       // The host is the boundary: the derivation runs with the context `make` was built in.
       Effect.provideContext(options.principal(request), derivation);
+    const at = (path: string) => `${options.prefix}${path}`;
+    const maxBodyBytes = options.maxBodyBytes;
+    const form = yield* Effect.transposeOption(
+      Option.map(options.form, (route) => formPost(route, maxBodyBytes)),
+    );
 
     const changes = (request: Request, who: PrincipalSource): Effect.Effect<Response> =>
       parseQuery(new URL(request.url)).pipe(
@@ -239,14 +318,12 @@ export const make = <R = never>(
         Effect.catch((error) => Effect.succeed(badRequest(error.message))),
       );
 
-    /** Every verb but `changes`: one request, one principal. */
-    const route = (request: Request): Effect.Effect<Response> => {
-      const path = new URL(request.url).pathname;
-      if (request.method !== "POST") {
-        return Effect.succeed(new Response("method not allowed", { status: 405 }));
-      }
-      if (path.endsWith(paths.send)) {
-        return decodeSend(request).pipe(
+    const notFound = Effect.succeed(new Response("not found", { status: 404 }));
+
+    /** Every POST verb: one request, one principal, one bounded body. */
+    const route = (request: Request, path: string): Effect.Effect<Response> => {
+      if (path === at(paths.send)) {
+        return decodeSend(request, maxBodyBytes).pipe(
           Effect.flatMap((body) =>
             respond(
               Effect.map(
@@ -256,11 +333,11 @@ export const make = <R = never>(
               encodeReceipt,
             ),
           ),
-          Effect.catch((reason) => Effect.succeed(badRequest(reason))),
+          Effect.catch((refusal) => Effect.succeed(refusedBody(refusal))),
         );
       }
-      if (path.endsWith(paths.call)) {
-        return decodeCall(request).pipe(
+      if (path === at(paths.call)) {
+        return decodeCall(request, maxBodyBytes).pipe(
           Effect.flatMap((body) =>
             respond(
               Effect.map(
@@ -276,33 +353,39 @@ export const make = <R = never>(
               encodeApplied,
             ),
           ),
-          Effect.catch((reason) => Effect.succeed(badRequest(reason))),
+          Effect.catch((refusal) => Effect.succeed(refusedBody(refusal))),
         );
       }
-      if (path.endsWith(paths.query)) {
-        return decodeQueryBody(request).pipe(
+      if (path === at(paths.query)) {
+        return decodeQueryBody(request, maxBodyBytes).pipe(
           Effect.flatMap((body) =>
             respondQuery(
               Effect.map(transport.query(body.key), (result) => ({ key: body.key, result })),
               encodeQueryValue,
             ),
           ),
-          Effect.catch((reason) => Effect.succeed(badRequest(reason))),
+          Effect.catch((refusal) => Effect.succeed(refusedBody(refusal))),
         );
       }
-      if (path.endsWith(paths.queryBatch)) {
-        return decodeQueryBatchBody(request).pipe(
+      if (path === at(paths.queryBatch)) {
+        return decodeQueryBatchBody(request, maxBodyBytes).pipe(
           Effect.flatMap((body) => respondQuery(transport.queryBatch(body.keys), encodeQueryBatch)),
-          Effect.catch((reason) => Effect.succeed(badRequest(reason))),
+          Effect.catch((refusal) => Effect.succeed(refusedBody(refusal))),
         );
       }
-      if (path.endsWith(paths.snapshot)) {
-        return decodeAddress(request).pipe(
+      if (path === at(paths.snapshot)) {
+        return decodeAddress(request, maxBodyBytes).pipe(
           Effect.flatMap((body) => respond(transport.snapshot(body.address), encodeProjection)),
-          Effect.catch((reason) => Effect.succeed(badRequest(reason))),
+          Effect.catch((refusal) => Effect.succeed(refusedBody(refusal))),
         );
       }
-      return Effect.succeed(new Response("not found", { status: 404 }));
+      if (path === at(paths.form)) {
+        return Option.match(form, {
+          onNone: () => notFound,
+          onSome: (post) => post(request),
+        });
+      }
+      return notFound;
     };
 
     /**
@@ -313,31 +396,18 @@ export const make = <R = never>(
     const handler: WebHandler = (request) =>
       Effect.flatMap(derive(request), (who) => {
         const path = new URL(request.url).pathname;
-        if (request.method === "GET" && path.endsWith(paths.changes)) {
+        if (path === at(paths.changes)) {
+          if (request.method !== "GET") {
+            return Effect.succeed(new Response("method not allowed", { status: 405 }));
+          }
           return changes(request, who);
         }
+        if (request.method !== "POST") {
+          return Effect.succeed(new Response("method not allowed", { status: 405 }));
+        }
         return Effect.flatMap(who.get, (principal) =>
-          Effect.provideService(route(request), CurrentPrincipal, principal),
+          Effect.provideService(route(request, path), CurrentPrincipal, principal),
         );
       });
     return handler;
   });
-
-/**
- * A promise-returning handler for `Bun.serve` or a Worker `fetch`. The
- * runtime owns the transport layer; dispose it when the server stops. The
- * layer also supplies what the principal derivation needs: a derivation
- * that reads sessions through `ActorTransport` gets the same host.
- */
-export const toWebHandler = <E, R = never>(
-  layer: Layer.Layer<ActorTransport | NoInfer<R>, E>,
-  options: ServerOptions<R>,
-) => {
-  const runtime = ManagedRuntime.make(layer);
-  const handler = runtime.runPromise(make(options));
-  return {
-    fetch: (request: Request): Promise<Response> =>
-      handler.then((run) => runtime.runPromise(run(request))),
-    dispose: (): Promise<void> => runtime.dispose(),
-  };
-};

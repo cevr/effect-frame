@@ -1,5 +1,5 @@
-import type { Context } from "effect";
-import { Duration, Effect, Match, Option, Schema } from "effect";
+import type { Context, Duration } from "effect";
+import { Effect, Match, Option, Schema } from "effect";
 import type { Principal } from "../principal.js";
 import { CurrentPrincipal } from "../principal.js";
 import { freshCommandId } from "../command-id.js";
@@ -21,30 +21,25 @@ import { membersOf } from "../generated.js";
 import { ActorTransport } from "../transport.js";
 import type { TransportCallError } from "../transport.js";
 import { CommandId, Uncertain } from "../vocabulary.js";
-import type { DerivePrincipal, WebHandler } from "./server.js";
+import { readText } from "./body.js";
 
 /**
- * `POST {base}/form`: the plain-form route. Its client is the
- * browser, its body is `application/x-www-form-urlencoded`, its success is
- * a 303, and its failure is the page the user asked for, drawn again with
- * the issues. It reaches `transport.call` exactly as `/call` does, with the
- * same command id and the same JSON payload, so there is no second send
- * path and no second idempotency rule.
+ * `POST {prefix}/form`: the plain-form route of `HttpServer.make`. Its client
+ * is the browser, its body is `application/x-www-form-urlencoded`, its
+ * success is a 303, and its failure is the page the user asked for, drawn
+ * again with the issues. It reaches `transport.call` exactly as `/call`
+ * does, with the same command id, the same JSON payload, and the same
+ * principal, so there is no second send path, no second idempotency rule,
+ * and no second authorization path.
  *
  * The 303 follows the commit, not the admission: the commit is readable
  * before the 303, so a `$return` page rendered on request draws it. A commit that does not
  * come within `commitWithin` answers 504 with the same command id, because
  * the command may be in the mailbox.
  */
-export interface FormPostOptions<E, R, P = never> {
+export interface FormRoute<E, R> {
   /** The contracts a form may post to, found by `$contract`. */
   readonly contracts: ReadonlyArray<AnyContract>;
-  /**
-   * Derives who is posting, exactly as the JSON handler does: the
-   * same cookie, the same derivation, the same policy check at
-   * `transport.call`. There is no second authorization path.
-   */
-  readonly principal: DerivePrincipal<P>;
   /**
    * Where an anonymous caller goes when a policy refuses the post: a
    * root-relative path, answered as 303 with the form's `$return` as the
@@ -61,13 +56,10 @@ export interface FormPostOptions<E, R, P = never> {
   readonly render: (path: string) => Effect.Effect<string, E, R>;
   /**
    * How long a post waits for its command to commit before it answers 504
-   * with the same command id. Ten seconds when omitted.
+   * with the same command id. `HttpServer.defaultCommitWithin` is ten seconds.
    */
-  readonly commitWithin?: Duration.Input;
+  readonly commitWithin: Duration.Input;
 }
-
-/** How long a post waits for its commit when the app names no limit. */
-const defaultCommitWithin = Duration.seconds(10);
 
 /** Where a refused anonymous post goes: the login path, with `next` set to `$return`. */
 const loginLocation = (login: string, returnTo: string): string => {
@@ -130,7 +122,7 @@ const isUtf8Parameter = (parameter: string): boolean => {
  * Read the body. Only urlencoded: multipart is not specified, so
  * it is refused rather than parsed by a rule nobody wrote down.
  */
-const readBody = (request: Request): Effect.Effect<FormFields, Reply> => {
+const readBody = (request: Request, maxBodyBytes: number): Effect.Effect<FormFields, Reply> => {
   const header = Option.getOrElse(
     Option.fromNullishOr(request.headers.get("content-type")),
     () => "",
@@ -147,9 +139,12 @@ const readBody = (request: Request): Effect.Effect<FormFields, Reply> => {
   if (!parameters.every(isUtf8Parameter)) {
     return Effect.fail(refused(415, `expected ${urlencoded} in UTF-8`));
   }
-  return Effect.map(
-    Effect.tryPromise({ try: () => request.text(), catch: (cause) => refused(400, String(cause)) }),
-    fromBody,
+  return readText(request, maxBodyBytes).pipe(
+    Effect.catchTags({
+      BodyTooLarge: (error) => Effect.fail(refused(413, error.message)),
+      BodyUnreadable: (error) => Effect.fail(refused(400, error.reason)),
+    }),
+    Effect.map(fromBody),
   );
 };
 
@@ -275,7 +270,7 @@ const encodeOnce = (
       return;
     }
     yield* Effect.logError(
-      `HttpServer.form: ${posted.contract.name} does not decode repeatably; the same fields gave two payloads. Mint the value at render with Generated, not at decode.`,
+      `HttpServer.make: ${posted.contract.name} does not decode repeatably; the same fields gave two payloads. Mint the value at render with Generated, not at decode.`,
     );
     return yield* Effect.fail(
       refused(500, `${posted.contract.name}: the form message does not decode repeatably`),
@@ -348,9 +343,10 @@ const post = (
   contracts: ReadonlyMap<string, AnyContract>,
   login: Option.Option<string>,
   commitWithin: Duration.Input,
+  maxBodyBytes: number,
 ): Effect.Effect<Reply, never, ActorTransport> =>
   Effect.gen(function* () {
-    const fields = yield* readBody(request);
+    const fields = yield* readBody(request, maxBodyBytes);
     const posted = yield* readFramework(fields, contracts);
     const wireKey = yield* Effect.mapError(decodeKey(posted.contract, posted.key), malformed);
     const decoded = yield* Effect.result(decode(posted.contract.raw.message)(fields));
@@ -391,41 +387,37 @@ const html = (status: number, body: string): Response =>
   new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } });
 
 /**
- * The form route's handler. Mount it at `{base}/form`, beside the JSON
- * handler at `{base}`. `render` runs with the context this Effect was
- * built in, plus `FormContext` and the posting principal.
+ * The form route's handler, built once by `HttpServer.make`. It answers a
+ * POST that already passed the server's method check, under the
+ * `CurrentPrincipal` the server derived. `render` runs with the context
+ * this Effect was built in, plus `FormContext` and the posting principal.
  */
-export const form = <E, R, P = never>(
-  options: FormPostOptions<E, R, P>,
-): Effect.Effect<WebHandler, never, ActorTransport | P | Exclude<R, FormContext>> =>
+export const formPost = <E, R>(
+  options: FormRoute<E, R>,
+  maxBodyBytes: number,
+): Effect.Effect<
+  (request: Request) => Effect.Effect<Response>,
+  never,
+  ActorTransport | Exclude<R, FormContext>
+> =>
   Effect.gen(function* () {
     const context: Context.Context<ActorTransport | Exclude<R, FormContext>> =
       yield* Effect.context<ActorTransport | Exclude<R, FormContext>>();
-    const derivation: Context.Context<P> = yield* Effect.context<P>();
     const contracts = new Map(options.contracts.map((contract) => [contract.name, contract]));
-    const commitWithin = Option.getOrElse(
-      Option.fromNullishOr(options.commitWithin),
-      () => defaultCommitWithin,
-    );
     const draw = (path: string, status: number, issues: FormIssues): Effect.Effect<Response> =>
       options.render(path).pipe(
         Effect.provideService(FormContext, issues),
         Effect.map((body) => html(status, body)),
         Effect.catch((error) =>
           Effect.as(
-            Effect.logError("HttpServer.form: the page could not be drawn", error),
+            Effect.logError("HttpServer.make: the form's page could not be drawn", error),
             html(500, "the page could not be drawn"),
           ),
         ),
         Effect.provideContext(context),
       );
-    const handler: WebHandler = (request) => {
-      if (request.method !== "POST") {
-        return Effect.succeed(new Response("method not allowed", { status: 405 }));
-      }
-      // The route is the boundary: the derivation runs with the context `form` was built in.
-      const derived = Effect.provideContext(options.principal(request), derivation);
-      const answer = post(request, contracts, options.login, commitWithin).pipe(
+    return (request: Request): Effect.Effect<Response> =>
+      post(request, contracts, options.login, options.commitWithin, maxBodyBytes).pipe(
         Effect.provideContext(context),
         Effect.flatMap(
           Match.type<Reply>().pipe(
@@ -441,11 +433,4 @@ export const form = <E, R, P = never>(
           ),
         ),
       );
-      // A post is one request: it runs under the one principal it read.
-      return Effect.flatMap(
-        Effect.flatMap(derived, (who) => who.get),
-        (principal) => Effect.provideService(answer, CurrentPrincipal, principal),
-      );
-    };
-    return handler;
   });

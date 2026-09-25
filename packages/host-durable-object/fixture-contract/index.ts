@@ -9,7 +9,7 @@ import {
   implementTransparent,
 } from "effect-frame/actor";
 import { contract } from "effect-frame/actor/client";
-import { defineFrameHost } from "../src/frame-host.js";
+import { defaultPollInterval, defineFrameHost } from "../src/frame-host.js";
 import type { DurableObjectNamespace } from "../src/route.js";
 import { route } from "../src/route.js";
 
@@ -250,9 +250,10 @@ export const FrameHost = defineFrameHost({
   implementations: [CounterLive, UploadLive, JobLive, ReminderLive],
   layer: Layer.succeed(Policies, Policies.of({ public: Policy.allowAll })),
   principal: HttpServer.anonymous,
-  pollInterval: Option.some("20 millis"),
+  maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+  pollInterval: defaultPollInterval,
   // Short, so the proof job runs across several holds and their re-arms.
-  alarmHold: Option.some("2 seconds"),
+  alarmHold: "2 seconds",
 });
 
 interface Env {

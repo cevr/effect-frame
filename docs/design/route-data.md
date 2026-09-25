@@ -18,7 +18,7 @@ const App = Route.ssr("app", Route.layout(tenant, [Route.leaf(post, PostView)], 
 
 // In the request's Scope:
 const outcome =
-  yield * renderDocument({ routes: [App, Login], notFound, url, document, closeWhen });
+  yield * renderDocument({ routes: [App, Login], notFound, url, document, closeWhen, principal });
 // outcome: { _tag: "Redirect", location }                      -> answer 303
 //        | { _tag: "Rendered", route, mode, status, body }     -> answer status, stream body
 // route:  { _tag: "Matched", route: App } | { _tag: "NotFound" }

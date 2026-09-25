@@ -2,7 +2,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { ActorTransport, QueryCache } from "effect-frame/actor/client";
+import { ActorTransport, Anonymous, QueryCache } from "effect-frame/actor/client";
 import { Location, Route, hydrate, renderDocument, NavigationBehavior } from "effect-frame/router";
 import type { RenderedDocument, Router } from "effect-frame/router";
 import { Context, Effect, Layer, Stream } from "effect";
@@ -133,6 +133,7 @@ const renderAt = (tree: ListTree, host: Context.Context<ActorTransport>) =>
       url: new URL(inbox),
       document: notesDocument(),
       closeWhen: Effect.sleep("5 seconds"),
+      principal: Anonymous.make({}),
     }).pipe(Effect.provideContext(host));
     if (outcome._tag === "Redirect") {
       return yield* Effect.die(`redirected to ${outcome.location.href}`);
@@ -185,7 +186,7 @@ describe("one ListView in every rendering mode", () => {
       const host = yield* sharedHost;
       const modeAt = (path: string) =>
         Effect.scoped(
-          Effect.map(renderPage(new URL(path, origin)), (outcome) => {
+          Effect.map(renderPage(new URL(path, origin), Anonymous.make({})), (outcome) => {
             if (outcome._tag === "Redirect") {
               return `Redirect ${outcome.location.pathname}`;
             }

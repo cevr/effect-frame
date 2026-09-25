@@ -12,6 +12,7 @@ import {
   contract,
   implementTransparent,
   QueryCache,
+  Anonymous,
 } from "effect-frame/actor";
 import type { TransportService } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
@@ -195,7 +196,14 @@ const actorSeedsIn = (html: string): ReadonlyArray<Streaming.ActorSeed> => {
 
 const render = <R,>(routes: ReadonlyArray<Route.AnyRoute<R>>, url: URL) =>
   Effect.flatMap(
-    renderDocument({ routes, notFound: NotFound, url, document: frame, closeWhen: Effect.never }),
+    renderDocument({
+      routes,
+      notFound: NotFound,
+      url,
+      document: frame,
+      closeWhen: Effect.never,
+      principal: Anonymous.make({}),
+    }),
     (outcome) => {
       if (outcome._tag === "Rendered") {
         return Effect.map(collect(outcome.body), (chunks) => chunks.join(""));

@@ -2,7 +2,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Source } from "effect-frame/actor/client";
+import { Anonymous, Source } from "effect-frame/actor/client";
 import { getOwner } from "@solidjs/signals";
 import { Route, renderDocument } from "effect-frame/router";
 import { View } from "effect-frame/view";
@@ -94,6 +94,7 @@ const renderOnce = Effect.gen(function* () {
     url: new URL("http://site.test/posts/a"),
     document: frame,
     closeWhen: Effect.sleep("5 seconds"),
+    principal: Anonymous.make({}),
   }).pipe(Effect.provideContext(server));
   if (outcome._tag === "Redirect") {
     return yield* Effect.die("the post redirected");

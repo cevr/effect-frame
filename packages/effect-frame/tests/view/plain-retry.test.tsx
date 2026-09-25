@@ -92,15 +92,26 @@ const serve = Effect.gen(function* () {
   const host = yield* Layer.build(recordedTransport(wire));
   const page = documentOf({ sent });
   const actors = yield* Effect.provideContext(
-    HttpServer.make({ principal: HttpServer.anonymous }),
+    HttpServer.make({
+      prefix: actorPrefix,
+      principal: HttpServer.anonymous,
+      maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+      form: Option.none(),
+    }),
     host,
   );
+  // The form route's posts go through `formPosts`, so the wire records them.
   const forms = yield* Effect.provideContext(
-    HttpServer.form({
-      contracts: [Tasks],
+    HttpServer.make({
+      prefix: actorPrefix,
       principal: HttpServer.anonymous,
-      login: Option.none(),
-      render: () => page,
+      maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+      form: Option.some({
+        contracts: [Tasks],
+        login: Option.none(),
+        render: () => page,
+        commitWithin: HttpServer.defaultCommitWithin,
+      }),
     }),
     Context.add(host, ActorTransport, formPosts(Context.get(host, ActorTransport))),
   );
@@ -115,9 +126,7 @@ const serve = Effect.gen(function* () {
             return run(forms(request));
           }
           if (url.pathname.startsWith(actorPrefix)) {
-            const stripped = new URL(request.url);
-            stripped.pathname = url.pathname.slice(actorPrefix.length);
-            return run(actors(new Request(stripped, request)));
+            return run(actors(request));
           }
           return run(
             Effect.map(

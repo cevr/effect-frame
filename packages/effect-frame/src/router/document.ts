@@ -1,7 +1,7 @@
 import type { ScopesClosed, View } from "effect-frame/view";
 import { Deferred, Duration, Effect, Exit, Option, Schema, Scope, Stream } from "effect";
-import type { ActorTransport } from "effect-frame/actor/client";
-import { QueryCache } from "effect-frame/actor/client";
+import type { ActorTransport, Principal } from "effect-frame/actor/client";
+import { CurrentPrincipal, QueryCache } from "effect-frame/actor/client";
 import type {
   CacheSource,
   Document,
@@ -33,8 +33,8 @@ import type { Runtime as UrlStateRuntime } from "./url-state-runtime.js";
  * Every pipeline but `ClientOnly` mounts the same router the client mounts,
  * on the HTML host, over its own query cache (#28), with a `Location` that
  * stays at the request URL. Every query it reads goes through
- * `ActorTransport` under the `CurrentPrincipal` the caller provides (#85),
- * so the query's own named policy checks it.
+ * `ActorTransport` under the `principal` the caller names (#85), so the
+ * query's own named policy checks it.
  */
 
 export interface DocumentOptions<R, N = R> {
@@ -256,13 +256,35 @@ export const settleAndPrepare = <R, N, A>(
     );
   });
 
+/** What `renderDocument` takes: the document, and who is asking. */
+export interface RenderDocumentOptions<R, N = R> extends DocumentOptions<R, N> {
+  /**
+   * Who is asking. Every check and query the render reads runs under this
+   * principal, so its policy judges the request's caller. A site with no
+   * sessions writes `principal: Anonymous.make({})`.
+   */
+  readonly principal: Principal;
+}
+
 /**
  * Answer one request. It runs in the request's Scope: the time limit runs
  * there once, and a `Streamed` body keeps its drawing there until the body
  * ends. On `DocumentTimedOut`, what the render opened is already closed.
+ * `respondDocument` turns the outcome into a `Response` and owns that Scope.
+ *
+ * ```ts
+ * const outcome = yield* renderDocument({
+ *   routes,
+ *   notFound: NotFound,
+ *   url,
+ *   document,
+ *   closeWhen: Effect.sleep("10 seconds"),
+ *   principal: Anonymous.make({}),
+ * });
+ * ```
  */
 export const renderDocument = <R, N = R>(
-  options: DocumentOptions<R, N>,
+  options: RenderDocumentOptions<R, N>,
 ): Effect.Effect<
   DocumentOutcome<R>,
   DocumentTimedOut,
@@ -271,7 +293,7 @@ export const renderDocument = <R, N = R>(
   Effect.map(
     settleAndPrepare(options, requestCache, (mode, pipelines) =>
       prepareBody(options.document, mode, pipelines),
-    ),
+    ).pipe(Effect.provideService(CurrentPrincipal, options.principal)),
     (outcome): DocumentOutcome<R> => {
       if (outcome._tag === "Redirect") {
         return outcome;
@@ -313,3 +335,67 @@ const prepareBody = <R, N>(
   }
   return agreedInTime(streamPrepared(routed, document, { closeWhen }, shared));
 };
+
+/** What `respondDocument` answers when the document is not prepared in time. */
+export interface RespondDocumentOptions {
+  /**
+   * The answer to `DocumentTimedOut`. Nothing was written and the render's
+   * Scope is already closed: answer a status, or a client-only page.
+   */
+  readonly onTimeout: (error: DocumentTimedOut) => Effect.Effect<Response>;
+}
+
+/**
+ * Answer one page request with the document `render` prepares, in a Scope
+ * of its own. The Scope outlives this Effect only for a returned body and
+ * closes when that body ends. Every other exit closes it before the answer
+ * leaves: a redirect, a timeout, a failure or a defect in the drawing, and
+ * an interruption. A redirect answers `303 See Other`. A defect is logged
+ * and answers 500.
+ *
+ * ```ts
+ * const answerPage = (request: Request) =>
+ *   respondDocument(
+ *     renderDocument({ routes, notFound, url: new URL(request.url), document, closeWhen, principal }),
+ *     { onTimeout: () => Effect.succeed(new Response("the page took too long", { status: 504 })) },
+ *   );
+ * ```
+ */
+export const respondDocument = <A, R>(
+  render: Effect.Effect<DocumentOutcome<A>, DocumentTimedOut, R>,
+  options: RespondDocumentOptions,
+): Effect.Effect<Response, never, Exclude<R, Scope.Scope>> =>
+  Effect.gen(function* () {
+    const scope = yield* Scope.make();
+    const close = Scope.close(scope, Exit.void);
+    const context = yield* Effect.context<never>();
+    return yield* Scope.provide(render, scope).pipe(
+      Effect.flatMap((outcome) => {
+        if (outcome._tag === "Redirect") {
+          const location = `${outcome.location.pathname}${outcome.location.search}`;
+          return Effect.as(close, new Response("", { status: 303, headers: { location } }));
+        }
+        // The Scope holds a streamed drawing: it closes when the body ends.
+        const body = Stream.encodeText(outcome.body).pipe(Stream.ensuring(close));
+        return Effect.succeed(
+          new Response(Stream.toReadableStreamWith(body, context), {
+            status: outcome.status,
+            headers: { "content-type": "text/html; charset=utf-8" },
+          }),
+        );
+      }),
+      Effect.onExit((exit) => {
+        if (Exit.isSuccess(exit)) {
+          return Effect.void;
+        }
+        return close;
+      }),
+      Effect.catchTag("DocumentTimedOut", options.onTimeout),
+      Effect.catchCause((cause) =>
+        Effect.as(
+          Effect.logError("respondDocument: the page failed", cause),
+          new Response("the page failed", { status: 500 }),
+        ),
+      ),
+    );
+  });

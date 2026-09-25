@@ -1,4 +1,4 @@
-import { Duration, Effect, Layer, ManagedRuntime, Option, Result, Schema } from "effect";
+import { Duration, Effect, Layer, ManagedRuntime, Match, Option, Result, Schema } from "effect";
 import type {
   ActorTransport,
   AnyImplementation,
@@ -82,9 +82,9 @@ const Envelope = Schema.Struct({
   }),
 });
 
-const decodeEnvelope = Schema.decodeUnknownOption(Envelope);
+const decodeEnvelope = Schema.decodeUnknownOption(Schema.fromJsonString(Envelope));
 
-const addressFromBody = (body: unknown): Option.Option<Address> =>
+const addressFromBody = (body: string): Option.Option<Address> =>
   Option.map(decodeEnvelope(body), (envelope) => envelope.address);
 
 const addressFromQuery = (url: URL): Option.Option<Address> =>
@@ -105,7 +105,7 @@ const addressFromQuery = (url: URL): Option.Option<Address> =>
 /** The wire sends the version as a decimal string; `Finite` rejects a NaN. */
 const decodeVersion = Schema.decodeUnknownOption(Schema.Finite);
 
-const addressOf = (body: unknown, url: URL): Option.Option<Address> =>
+const addressOf = (body: string, url: URL): Option.Option<Address> =>
   Option.orElse(addressFromBody(body), () => addressFromQuery(url));
 
 export interface FrameHostOptions<R> {
@@ -125,17 +125,33 @@ export interface FrameHostOptions<R> {
    * `ActorTransport` and any service `layer` provides.
    */
   readonly principal: HttpServer.DerivePrincipal<ActorTransport | R | Policies>;
-  /** How long `call` sleeps between receipt polls. A durable store polls fast. */
-  readonly pollInterval: Option.Option<Duration.Input>;
+  /**
+   * The largest request body the object reads, in bytes, as
+   * `HttpServer.make` takes it. A larger body answers 413 before anything
+   * is decoded or recorded.
+   */
+  readonly maxBodyBytes: number;
+  /**
+   * How long `call` sleeps between receipt polls. A durable store polls
+   * fast: `defaultPollInterval` is 20 milliseconds.
+   */
+  readonly pollInterval: Duration.Input;
   /**
    * How long one alarm holds the object while work is due (#101 §5). Work
-   * still due at the end arms the next alarm at once. `None` is 30 seconds,
-   * well inside the runtime's limit for one alarm. A value outside one poll
-   * step to ten minutes is clamped to that range, so one alarm always ends
-   * inside Cloudflare's 15-minute limit for an alarm handler.
+   * still due at the end arms the next alarm at once. `defaultAlarmHold`
+   * is 30 seconds, well inside the runtime's limit for one alarm. A value
+   * outside one poll step to ten minutes is clamped to that range, so one
+   * alarm always ends inside Cloudflare's 15-minute limit for an alarm
+   * handler.
    */
-  readonly alarmHold: Option.Option<Duration.Input>;
+  readonly alarmHold: Duration.Input;
 }
+
+/** Twenty milliseconds: a named value for `FrameHostOptions.pollInterval`. */
+export const defaultPollInterval: Duration.Duration = Duration.millis(20);
+
+/** Thirty seconds: a named value for `FrameHostOptions.alarmHold`. */
+export const defaultAlarmHold: Duration.Duration = Duration.seconds(30);
 
 /** What a Durable Object class must expose to celld and Cloudflare. */
 export interface FrameHostInstance {
@@ -157,12 +173,7 @@ export interface FrameHostClass {
 export const defineFrameHost = <R>(options: FrameHostOptions<R>): FrameHostClass => {
   const settings = Layer.succeed(
     DurableHostConfig,
-    DurableHostConfig.of({
-      pollInterval: Option.getOrElse<Duration.Input, Duration.Input>(
-        options.pollInterval,
-        () => "20 millis",
-      ),
-    }),
+    DurableHostConfig.of({ pollInterval: options.pollInterval }),
   );
   const requirements = options.layer;
   const hold = holdOf(options.alarmHold);
@@ -196,7 +207,13 @@ export const defineFrameHost = <R>(options: FrameHostOptions<R>): FrameHostClass
         onSome: (running) => running,
         onNone: () => {
           const starting = this.#runtime.runPromise(
-            HttpServer.make({ principal: options.principal }),
+            HttpServer.make({
+              prefix: "",
+              principal: options.principal,
+              maxBodyBytes: options.maxBodyBytes,
+              // A Durable Object serves the JSON wire; a plain form posts to the worker's app.
+              form: Option.none(),
+            }),
           );
           this.#handler = Option.some(starting);
           return starting;
@@ -221,11 +238,16 @@ export const defineFrameHost = <R>(options: FrameHostOptions<R>): FrameHostClass
 
     async fetch(request: Request): Promise<Response> {
       const url = new URL(request.url);
-      const body: unknown = await request
-        .clone()
-        .json()
-        .catch(() => ({}));
-      const address = addressOf(body, url);
+      const read = await this.#runtime.runPromise(
+        Effect.result(HttpServer.readText(request.clone(), options.maxBodyBytes)),
+      );
+      if (Result.isFailure(read)) {
+        return Match.valueTags(read.failure, {
+          BodyTooLarge: (error) => new Response(error.message, { status: 413 }),
+          BodyUnreadable: (error) => new Response(error.reason, { status: 400 }),
+        });
+      }
+      const address = addressOf(read.success, url);
       if (Option.isSome(address)) {
         // One object hosts one actor. A request that names another address
         // was routed here by mistake: serving it would open that actor over
@@ -270,17 +292,11 @@ const holdStep = Duration.millis(20);
 const holdLimit = Duration.minutes(10);
 
 /**
- * The hold one alarm runs for: `None` is 30 seconds, and any value is
- * clamped between one poll step and `holdLimit`, so an infinite hold still
- * ends and re-arms.
+ * The hold one alarm runs for: any value is clamped between one poll step
+ * and `holdLimit`, so an infinite hold still ends and re-arms.
  */
-export const holdOf = (alarmHold: Option.Option<Duration.Input>): Duration.Duration =>
-  Duration.clamp(
-    Duration.fromInputUnsafe(
-      Option.getOrElse<Duration.Input, Duration.Input>(alarmHold, () => "30 seconds"),
-    ),
-    { minimum: holdStep, maximum: holdLimit },
-  );
+export const holdOf = (alarmHold: Duration.Input): Duration.Duration =>
+  Duration.clamp(Duration.fromInputUnsafe(alarmHold), { minimum: holdStep, maximum: holdLimit });
 
 /**
  * Opens the instance and holds the alarm until nothing is due.

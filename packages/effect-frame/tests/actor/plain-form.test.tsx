@@ -45,15 +45,26 @@ const serveWith = <E,>(
     const wire = yield* makeWire;
     const context = yield* Layer.build(recordedTransport(wire));
     const actors = yield* Effect.provideContext(
-      HttpServer.make({ principal: HttpServer.anonymous }),
+      HttpServer.make({
+        prefix: actorPrefix,
+        principal: HttpServer.anonymous,
+        maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+        form: Option.none(),
+      }),
       context,
     );
+    // The form route's posts go through `formPosts`, so the wire records them.
     const forms = yield* Effect.provideContext(
-      HttpServer.form({
-        contracts,
+      HttpServer.make({
+        prefix: actorPrefix,
         principal: HttpServer.anonymous,
-        login: Option.none(),
-        render: () => document,
+        maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+        form: Option.some({
+          contracts,
+          login: Option.none(),
+          render: () => document,
+          commitWithin: HttpServer.defaultCommitWithin,
+        }),
       }),
       Context.add(context, ActorTransport, formPosts(Context.get(context, ActorTransport))),
     );
@@ -68,9 +79,7 @@ const serveWith = <E,>(
               return run(forms(request));
             }
             if (url.pathname.startsWith(actorPrefix)) {
-              const stripped = new URL(request.url);
-              stripped.pathname = url.pathname.slice(actorPrefix.length);
-              return run(actors(new Request(stripped, request)));
+              return run(actors(request));
             }
             return run(
               Effect.map(

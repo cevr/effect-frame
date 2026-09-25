@@ -77,9 +77,11 @@ from those designs, and why.
 
 ### Derivation and revocation (#30)
 
-- `HttpServer.make({ principal })` requires a derivation:
-  `(request) => Effect<PrincipalSource, never, R>`. `HttpServer.anonymous`
-  is the named derivation for a host with no sessions.
+- `HttpServer.make({ prefix, principal, maxBodyBytes, form })` requires a
+  derivation: `(request) => Effect<PrincipalSource, never, R>`.
+  `HttpServer.anonymous` is the named derivation for a host with no
+  sessions. It runs once per request, for the JSON verbs and the form
+  route alike.
 - A `PrincipalSource` has `get` for one request and `changes` for a
   connection. `changes` emits `PrincipalRevision { principal, revision }`:
   the current principal first, then each change with a larger number.
@@ -147,8 +149,9 @@ from those designs, and why.
   generation is shown as it is, and a state from an earlier one is
   dropped. `QueryState` does not change: the generation is a stamp inside
   the cache that only `followQuery` reads.
-- `HttpServer.toWebHandler` and celld's `defineFrameHost` keep the
-  derivation's requirements `R` and supply them from their own runtime.
+- `HttpServer.make` and celld's `defineFrameHost` keep the derivation's
+  requirements `R` and supply them from the context the handler was
+  built in.
 
 ### Streamed documents (#22 with #85)
 
@@ -191,8 +194,8 @@ from those designs, and why.
 
 ### Navigation and command refusals (#20 §5)
 
-- The plain-form route (`HttpServer.form`) now requires `principal` and
-  `login: Option<string>`.
+- The plain-form route (the `form` option of `HttpServer.make`) runs under
+  the handler's one `principal` and requires `login: Option<string>`.
 - An anonymous caller that is refused gets a 303 to the login path with
   `next` set to the posted `$return`. The submitted body is not kept.
 - An authenticated caller that is refused gets 403 with the rendered page.

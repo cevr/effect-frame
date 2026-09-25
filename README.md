@@ -350,27 +350,28 @@ Then it renders with the settled tree's mode. It mounts the same router on
 the HTML host, over its own query cache, at the request URL.
 
 ```ts
-import { DocumentTimedOut, renderDocument } from "effect-frame/router";
+import { renderDocument, respondDocument } from "effect-frame/router";
 
-// Run it in the request's Scope, and stream the body before that Scope closes.
-const answer = renderDocument({
-  routes: [App, Login],
-  notFound,
-  url: new URL(request.url),
-  document: page, // an Html.Document
-  closeWhen: Effect.sleep("10 seconds"),
-}).pipe(
-  Effect.provideService(CurrentPrincipal, principal),
-  Effect.map((outcome) => {
-    if (outcome._tag === "Redirect") {
-      return seeOther(outcome.location); // 303
-    }
-    return respond(outcome.status, outcome.body); // 200, or 404 for not-found
+// `respondDocument` owns the render's Scope: a streamed body keeps it open
+// until the body ends, and every other exit closes it before the answer.
+const answer = respondDocument(
+  renderDocument({
+    routes: [App, Login],
+    notFound,
+    url: new URL(request.url),
+    document: page, // an Html.Document
+    closeWhen: Effect.sleep("10 seconds"),
+    principal, // who is asking; a site with no sessions writes Anonymous.make({})
   }),
-  Effect.catchTag("DocumentTimedOut", () => Effect.succeed(gatewayTimeout())),
+  { onTimeout: () => Effect.succeed(new Response("the page took too long", { status: 504 })) },
 );
 ```
 
+- `principal` is required: every check and query the render reads runs
+  under it, and nothing falls back to a default caller.
+- `respondDocument` answers a redirect with `303 See Other`, a document
+  with its status and an HTML body, a `DocumentTimedOut` with `onTimeout`,
+  and a defect with 500.
 - A check that redirects is the answer, `{ _tag: "Redirect", location }`.
   The render does not follow it. A `Route.client` route runs its checks
   on the server too.
@@ -524,12 +525,17 @@ const Compose = (props: { readonly notes: RemoteActorRef<typeof Notes> }) =>
     );
   });
 
-// Server: mount beside the JSON handler, at `/actors/form`.
-const forms = HttpServer.form({
-  contracts: [Notes],
+// Server: the actor handler serves the form route at `/actors/form`.
+const actors = HttpServer.make({
+  prefix: "/actors",
   principal: HttpServer.anonymous,
-  login: Option.none(),
-  render: (path) => renderPage(path),
+  maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+  form: Option.some({
+    contracts: [Notes],
+    login: Option.none(),
+    render: (path) => renderPage(path),
+    commitWithin: HttpServer.defaultCommitWithin,
+  }),
 });
 ```
 
@@ -540,7 +546,7 @@ const forms = HttpServer.form({
 - `View.form` returns `{ submit, issues, commandId }`. The runtime draws
   `method`, `action`, and the hidden `$command`, `$contract`, `$version`,
   `$key`, `$return`, `$form`, `_tag`, and generated inputs in every host.
-- `HttpServer.form` answers 303 to `$return` on success, 200 with the page
+- The form route answers 303 to `$return` on success, 200 with the page
   and its `FormIssues` on a validation failure, 504 with the same id on a
   lost reply, and 400 or 415 before any send. An `Unauthorized` anonymous
   post answers 303 to `login` with `next`; every other refusal is a 403
@@ -758,7 +764,14 @@ const principal = Effect.map(
         Option.match(sessionIdOf(request), { onNone: () => Principal.anonymous, onSome: sessions }),
       ),
 );
-const handler = Effect.flatMap(principal, (derive) => HttpServer.make({ principal: derive }));
+const handler = Effect.flatMap(principal, (derive) =>
+  HttpServer.make({
+    prefix: "/actors",
+    principal: derive,
+    maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+    form: Option.none(),
+  }),
+);
 ```
 
 - `effect-frame/actor` exports `Policy` (`allowAll`, `authenticated`,
@@ -770,9 +783,14 @@ const handler = Effect.flatMap(principal, (derive) => HttpServer.make({ principa
   entry holds no policy table.
 - A host whose table lacks a declared name fails to build with
   `PolicyNamesMissing`, which lists every miss.
-- `HttpServer.make({ principal })` takes a derivation
-  `(request) => Effect<PrincipalSource>`. `HttpServer.anonymous` is the
-  derivation for a host with no sessions.
+- `HttpServer.make({ prefix, principal, maxBodyBytes, form })` is the
+  host's one handler. It answers each verb at exactly `prefix +
+Wire.paths.*`, so the app hands it every path under the prefix unchanged.
+  `principal` is a derivation `(request) => Effect<PrincipalSource>`, run
+  once per request for the JSON verbs and the form route alike;
+  `HttpServer.anonymous` is the derivation for a host with no sessions. A
+  body over `maxBodyBytes` answers 413 before it is decoded
+  (`HttpServer.defaultMaxBodyBytes` is one MiB).
 - A changes stream reads its principal from the first value of one
   subscription to the source, and watches the rest of that same
   subscription. It ends with `Unauthorized` on the first value that is not
@@ -780,9 +798,9 @@ const handler = Effect.flatMap(principal, (derive) => HttpServer.make({ principa
 - `HttpServer.shareSessions({ read, follow })` keeps one subscription per
   session key, shared by every connection on it and released when the last
   one closes.
-- `HttpServer.toWebHandler(layer, { principal })` and celld's
-  `defineFrameHost` run the derivation in their own runtime, so a
-  derivation may need `ActorTransport` and any service the layer provides.
+- `HttpServer.make` and celld's `defineFrameHost` run the derivation in
+  the context the handler was built in, so a derivation may need
+  `ActorTransport` and any service that context provides.
 - `QueryCache` has `principalChanged`: every live entry drops its value and
   reads again. A reference whose change stream ends with `Unauthorized`
   calls it, so a client never shows a value read under a principal that is

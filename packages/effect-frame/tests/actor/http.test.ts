@@ -79,7 +79,12 @@ const answered: Array<{ readonly path: string; readonly status: number }> = [];
  */
 const inProcess = Layer.unwrap(
   Effect.gen(function* () {
-    const server = yield* HttpServer.make({ principal: HttpServer.anonymous });
+    const server = yield* HttpServer.make({
+      prefix: "/actors",
+      principal: HttpServer.anonymous,
+      maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+      form: Option.none(),
+    });
     const context = yield* Effect.context<never>();
     const run = Effect.runPromiseWith(context);
     const fetch: HttpTransport.FetchLike = (input, init) => {
@@ -229,8 +234,15 @@ const asClientOf =
 describe("http transport over a real socket", () => {
   it.scopedLive("a dropped connection reconnects from the last revision", () =>
     Effect.gen(function* () {
-      const app = HttpServer.toWebHandler(hostLayer, { principal: HttpServer.anonymous });
-      yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
+      const host = yield* Layer.build(hostLayer);
+      const handler = yield* HttpServer.make({
+        prefix: "",
+        principal: HttpServer.anonymous,
+        maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+        form: Option.none(),
+      }).pipe(Effect.provideContext(host));
+      const run = Effect.runPromiseWith(yield* Effect.context<never>());
+      const app = { fetch: (request: Request) => run(handler(request)) };
       // Bun.serve is the platform boundary of this test; the handler under
       // test is web-standard and does not know about it.
       const serve = (port: number) =>
@@ -298,14 +310,20 @@ const decodeReadError = Schema.decodeEffect(Schema.fromJsonString(Wire.ReadWireE
 describe("the principal over a real socket", () => {
   it.scopedLive("an anonymous request to a protected actor is 403", () =>
     Effect.gen(function* () {
-      const app = HttpServer.toWebHandler(
+      const host = yield* Layer.build(
         Layer.provide(
           ActorHost.layer({ implementations: [CounterLive], store: ActorHost.memoryStore }),
           Layer.succeed(Policies, Policies.of({ counter: tenantMember })),
         ),
-        { principal: fromHeader },
       );
-      yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
+      const handler = yield* HttpServer.make({
+        prefix: "",
+        principal: fromHeader,
+        maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+        form: Option.none(),
+      }).pipe(Effect.provideContext(host));
+      const run = Effect.runPromiseWith(yield* Effect.context<never>());
+      const app = { fetch: (request: Request) => run(handler(request)) };
       const server = yield* Effect.acquireRelease(
         // oxlint-disable-next-line effect/noGlobals -- Bun.serve is this test's platform boundary.
         Effect.sync(() => Bun.serve({ port: 0, fetch: app.fetch })),

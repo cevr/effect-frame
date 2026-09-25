@@ -106,7 +106,7 @@ the state. The storage store arms the alarm in that transaction: now while a
 command is pending, otherwise the wake, never earlier than now (workerd
 refuses a past alarm, and the commit with it). The alarm opens the actor and
 holds until no command is pending and the wake is absent or later than now;
-work still in flight at the hold's bound (`alarmHold`, 30 seconds by default, clamped to at most ten minutes so one alarm ends inside the 15-minute handler limit)
+work still in flight at the hold's bound (`alarmHold`, required; `defaultAlarmHold` is 30 seconds; clamped to at most ten minutes so one alarm ends inside the 15-minute handler limit)
 arms the next alarm at once. The handler never writes a wake that is still
 ahead: that write would sit outside a transaction, and a command admitted in
 between would have its "now" alarm pushed back. A fresh actor whose initial

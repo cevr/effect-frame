@@ -2,10 +2,11 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
+import type { Principal, QueryFailure, QueryState } from "effect-frame/actor";
 import {
   ActorTransport,
+  Anonymous,
   Authenticated,
-  CurrentPrincipal,
   Policies,
   Policy,
   QueryCache,
@@ -14,7 +15,6 @@ import {
   implementQuery,
   query,
 } from "effect-frame/actor";
-import type { QueryFailure, QueryState } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import {
   DocumentTimedOut,
@@ -188,11 +188,14 @@ const clientApp = Route.client("client-app", branch);
 
 const postUrl = new URL(`${origin}/app/t1/posts/1`);
 
+const nobody: Principal = Anonymous.make({});
+
 const documentOf = <R,>(
   routes: ReadonlyArray<Route.AnyRoute<R>>,
   url = postUrl,
   closeWhen: Effect.Effect<void> = Effect.never,
-) => renderDocument({ routes, notFound: NotFound, url, document: frame, closeWhen });
+  principal: Principal = nobody,
+) => renderDocument({ routes, notFound: NotFound, url, document: frame, closeWhen, principal });
 
 /** The outcome is a document, not a redirect. */
 const renderedOf = <R,>(outcome: DocumentOutcome<R>): Effect.Effect<RenderedDocument<R>> => {
@@ -208,16 +211,21 @@ const renderIn = <R, S>(
   routes: ReadonlyArray<Route.AnyRoute<R>>,
   url = postUrl,
   closeWhen: Effect.Effect<void> = Effect.never,
+  principal: Principal = nobody,
 ) =>
-  Effect.flatMap(documentOf(routes, url, closeWhen).pipe(Effect.provideContext(side)), renderedOf);
+  Effect.flatMap(
+    documentOf(routes, url, closeWhen, principal).pipe(Effect.provideContext(side)),
+    renderedOf,
+  );
 
 /** The whole document of one render. */
 const htmlIn = <R, S>(
   side: Context.Context<S>,
   routes: ReadonlyArray<Route.AnyRoute<R>>,
   url = postUrl,
+  principal: Principal = nobody,
 ) =>
-  Effect.flatMap(renderIn(side, routes, url), (rendered) =>
+  Effect.flatMap(renderIn(side, routes, url, Effect.never, principal), (rendered) =>
     Effect.map(collect(rendered.body), (chunks) => chunks.join("")),
   );
 
@@ -1153,11 +1161,11 @@ describe("declared data is read under the request's principal (#85)", () => {
   it.scoped("the same render under a signed-in principal seeds the value", () =>
     Effect.gen(function* () {
       const server = yield* guarded;
-      const html = yield* htmlIn(server, [secretApp], new URL(`${origin}/secret`)).pipe(
-        Effect.provideService(
-          CurrentPrincipal,
-          Authenticated.make({ subject: "alice", claims: {} }),
-        ),
+      const html = yield* htmlIn(
+        server,
+        [secretApp],
+        new URL(`${origin}/secret`),
+        Authenticated.make({ subject: "alice", claims: {} }),
       );
       expect(secretOutcomes(html)).toEqual([`Value {"label":"${secretLabel}"}`]);
       expect(html).toContain(`<p id="secret" tabindex="-1">${secretLabel}</p>`);

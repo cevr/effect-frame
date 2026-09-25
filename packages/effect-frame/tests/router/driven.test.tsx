@@ -13,6 +13,7 @@ import {
   implementQuery,
   implementTransparent,
   Source,
+  Anonymous,
 } from "effect-frame/actor";
 import type { TransportService } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
@@ -307,7 +308,14 @@ const settle = Effect.gen(function* () {
 
 const firstChunk = <R,>(routes: ReadonlyArray<Route.AnyRoute<R>>, url: URL) =>
   Effect.flatMap(
-    renderDocument({ routes, notFound: NotFound, url, document: frame, closeWhen: Effect.never }),
+    renderDocument({
+      routes,
+      notFound: NotFound,
+      url,
+      document: frame,
+      closeWhen: Effect.never,
+      principal: Anonymous.make({}),
+    }),
     (outcome) => {
       if (outcome._tag === "Rendered") {
         return Effect.map(Stream.runHead(outcome.body), Option.getOrThrow);
@@ -318,7 +326,14 @@ const firstChunk = <R,>(routes: ReadonlyArray<Route.AnyRoute<R>>, url: URL) =>
 
 const wholeDocument = <R,>(routes: ReadonlyArray<Route.AnyRoute<R>>, url: URL) =>
   Effect.flatMap(
-    renderDocument({ routes, notFound: NotFound, url, document: frame, closeWhen: Effect.never }),
+    renderDocument({
+      routes,
+      notFound: NotFound,
+      url,
+      document: frame,
+      closeWhen: Effect.never,
+      principal: Anonymous.make({}),
+    }),
     (outcome) => {
       if (outcome._tag === "Rendered") {
         return Effect.map(Stream.runCollect(outcome.body), (chunks) => Array.from(chunks).join(""));

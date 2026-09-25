@@ -1,8 +1,7 @@
 import { HttpServer } from "effect-frame/actor";
-import type { ActorTransport } from "effect-frame/actor/client";
-import { Wire } from "effect-frame/actor/client";
-import { renderDocument } from "effect-frame/router";
-import type { DocumentOutcome } from "effect-frame/router";
+import type { ActorTransport, Principal } from "effect-frame/actor/client";
+import { Anonymous, CurrentPrincipal } from "effect-frame/actor/client";
+import { renderDocument, respondDocument } from "effect-frame/router";
 import * as Prerender from "effect-frame/router/prerender";
 import type { Crypto, FileSystem, Layer, Path } from "effect";
 import { Effect, Exit, ManagedRuntime, Option, Schema, Scope, Stream } from "effect";
@@ -39,55 +38,37 @@ export type BlogRuntime = ManagedRuntime.ManagedRuntime<BlogServices, never>;
 export const makeRuntime = (layer: Layer.Layer<BlogServices>): BlogRuntime =>
   ManagedRuntime.make(layer);
 
-/** Render one URL through the route tree, in the caller's Scope. */
-export const renderPage = Effect.fn("Blog.renderPage")(function* (url: URL) {
+/** Render one URL through the route tree, in the caller's Scope, under the caller's principal. */
+export const renderPage = Effect.fn("Blog.renderPage")(function* (url: URL, principal: Principal) {
   return yield* renderDocument({
     routes,
     notFound: NotFound,
     url,
     document: { ...blogDocument, bootstrap: Prerender.clientScript },
     closeWhen: pageLimit,
+    principal,
   });
 });
 
-const respond = (outcome: DocumentOutcome<unknown>, close: Effect.Effect<void>) =>
-  Effect.gen(function* () {
-    if (outcome._tag === "Redirect") {
-      yield* close;
-      return new Response("", { status: 303, headers: { location: outcome.location.pathname } });
-    }
-    const context = yield* Effect.context<never>();
-    const body = Stream.encodeText(outcome.body).pipe(Stream.ensuring(close));
-    return new Response(Stream.toReadableStreamWith(body, context), {
-      status: outcome.status,
-      headers: { "content-type": "text/html; charset=utf-8" },
-    });
-  });
+/** Blog has no sessions: every page is drawn for nobody in particular, and that is a written line. */
+const nobody: Principal = Anonymous.make({});
 
 /** Answer one page through the router. Its Scope lives until the body is written. */
 const answerPage = (request: Request): Effect.Effect<Response, never, ActorTransport> =>
-  Effect.gen(function* () {
-    const scope = yield* Scope.make();
-    const close = Scope.close(scope, Exit.void);
-    return yield* renderPage(new URL(request.url)).pipe(
-      Scope.provide(scope),
-      Effect.flatMap((outcome) => respond(outcome, close)),
-      Effect.catchTag("DocumentTimedOut", () =>
-        Effect.as(close, new Response("the page took too long", { status: 504 })),
-      ),
-      Effect.onInterrupt(() => close),
-    );
+  respondDocument(renderPage(new URL(request.url), nobody), {
+    onTimeout: () => Effect.succeed(new Response("the page took too long", { status: 504 })),
   });
 
 class PageRedirected extends Schema.TaggedError<PageRedirected>()("PageRedirected", {
   location: Schema.String,
 }) {}
 
-/** The page a refused post draws again, as one string. */
+/** The page a refused post draws again, as one string, for the principal that posted. */
 const drawAgain = (path: string) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const outcome = yield* renderPage(new URL(path, "http://blog.invalid"));
+      const principal = yield* CurrentPrincipal;
+      const outcome = yield* renderPage(new URL(path, "http://blog.invalid"), principal);
       if (outcome._tag === "Redirect") {
         return yield* PageRedirected.make({ location: outcome.location.pathname });
       }
@@ -127,13 +108,17 @@ export interface RunningServer {
 export const makeServer = async (options: ServerOptions): Promise<RunningServer> => {
   const runtime = options.runtime;
   // Blog has no sessions: every request is anonymous, and that is a written line.
-  const actors = await runtime.runPromise(HttpServer.make({ principal: HttpServer.anonymous }));
-  const forms = await runtime.runPromise(
-    HttpServer.form({
-      contracts: [Reactions],
+  const actors = await runtime.runPromise(
+    HttpServer.make({
+      prefix: actorPrefix,
       principal: HttpServer.anonymous,
-      login: Option.none(),
-      render: drawAgain,
+      maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+      form: Option.some({
+        contracts: [Reactions],
+        login: Option.none(),
+        render: drawAgain,
+        commitWithin: HttpServer.defaultCommitWithin,
+      }),
     }),
   );
   const bundle = await runtime.runPromise(bundleClient);
@@ -151,13 +136,8 @@ export const makeServer = async (options: ServerOptions): Promise<RunningServer>
     (pages: Prerender.WebHandler): ((request: Request) => Response | Promise<Response>) =>
     (request) => {
       const url = new URL(request.url);
-      if (url.pathname === `${actorPrefix}${Wire.paths.form}`) {
-        return runtime.runPromise(forms(request));
-      }
-      if (url.pathname.startsWith(actorPrefix)) {
-        const stripped = new URL(request.url);
-        stripped.pathname = url.pathname.slice(actorPrefix.length);
-        return runtime.runPromise(actors(new Request(stripped, request)));
+      if (url.pathname.startsWith(`${actorPrefix}/`)) {
+        return runtime.runPromise(actors(request));
       }
       return runtime.runPromise(pages(request));
     };

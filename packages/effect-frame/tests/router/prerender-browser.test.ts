@@ -23,7 +23,7 @@ import * as Prerender from "effect-frame/router/prerender";
 import { Html } from "effect-frame/view";
 import { BunServices } from "@effect/platform-bun";
 import type { Context } from "effect";
-import { Effect, Exit, FileSystem, Layer, Match, Schema, Scope } from "effect";
+import { Effect, Exit, FileSystem, Layer, Match, Option, Schema, Scope } from "effect";
 import { describe, expect, it } from "bun:test";
 import * as H from "./browser/harness.js";
 import type { PrerenderWindow } from "./browser/prerender-app.js";
@@ -122,16 +122,22 @@ const serveBuilt = async (): Promise<Served> => {
   // A commit after the build: the page must resume past its baked revision.
   await run(Effect.provideContext(add("after-build"), store));
   const actors = await run(
-    Effect.provideContext(HttpServer.make({ principal: HttpServer.anonymous }), store),
+    Effect.provideContext(
+      HttpServer.make({
+        prefix: "/actors",
+        principal: HttpServer.anonymous,
+        maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+        form: Option.none(),
+      }),
+      store,
+    ),
   );
   const server = Bun.serve({
     port: 0,
     fetch: (request) => {
       const url = new URL(request.url);
       if (url.pathname.startsWith("/actors/")) {
-        const stripped = new URL(request.url);
-        stripped.pathname = url.pathname.slice("/actors".length);
-        return Effect.runPromise(actors(new Request(stripped, request)));
+        return Effect.runPromise(actors(request));
       }
       return Effect.runPromise(handler(request));
     },

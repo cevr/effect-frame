@@ -10,7 +10,7 @@ Sources:
 
 - `packages/effect-frame/src/actor/generated.ts` — `Generated`.
 - `packages/effect-frame/src/actor/form.ts` — `Form` (browser safe).
-- `packages/effect-frame/src/actor/http/form-post.ts` — `HttpServer.form` (server only).
+- `packages/effect-frame/src/actor/http/form-post.ts` — the form route of `HttpServer.make` (server only).
 - `packages/effect-frame/src/view/form.ts` — `View.form` and repopulation.
 
 Proofs: the #21 and #32 rows in [the acceptance matrix](acceptance.md).
@@ -100,8 +100,9 @@ refused post never writes it back into the page.
 
 ## The route
 
-`HttpServer.form({ contracts, principal, login, render })` answers `POST {base}/form`
-(`Wire.paths.form`). The checks run in this order, and each refusal happens
+`HttpServer.make({ prefix, principal, maxBodyBytes, form: Option.some({ contracts, login, render, commitWithin }) })`
+answers `POST {prefix}/form` (`Wire.paths.form`), under the one principal
+the handler derives. The checks run in this order, and each refusal happens
 before a send.
 
 The media type is compared without case. A `charset` parameter other than
@@ -120,6 +121,7 @@ accepted.
 | Case                                                        | Answer                                                                                      |
 | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | A multipart body, or a type that is not urlencoded          | 415, plain text                                                                             |
+| A body over `maxBodyBytes`                                  | 413, plain text                                                                             |
 | `$return` is absent or leaves the origin                    | 400, plain text                                                                             |
 | `$command`, `$version`, `$key`, or `$form` is bad or absent | 400, plain text                                                                             |
 | `$contract` names no served contract                        | 404, plain text                                                                             |
@@ -140,7 +142,7 @@ accepted.
 `FormContext` to it. A render failure is a 500, and it is logged.
 
 The 303 follows the commit, not the admission. The route calls the host
-with a wait of `commitWithin` (ten seconds when the app names none), and
+with a wait of `commitWithin` (`HttpServer.defaultCommitWithin` is ten seconds), and
 the host answers once a read sees the commit. So a `$return` page that is
 rendered on request draws the committed state (#21 §5). A prerendered
 `$return` page, such as a Blog post, is a file: it shows the commit only

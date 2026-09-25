@@ -53,12 +53,16 @@ const serveHeld = (
       ).pipe(Layer.provide(policies), Layer.orDie),
     );
     const forms = yield* Effect.provideContext(
-      HttpServer.form({
-        contracts: [Tasks],
+      HttpServer.make({
+        prefix: "/actors",
         principal: HttpServer.anonymous,
-        login: Option.none(),
-        render: () => TasksDocument,
-        commitWithin,
+        maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+        form: Option.some({
+          contracts: [Tasks],
+          login: Option.none(),
+          render: () => TasksDocument,
+          commitWithin,
+        }),
       }),
       Context.add(context, ActorTransport, route(Context.get(context, ActorTransport))),
     );

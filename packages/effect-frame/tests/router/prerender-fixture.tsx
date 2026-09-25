@@ -1,4 +1,4 @@
-import { Streaming, runQuery, QueryCache } from "effect-frame/actor";
+import { Anonymous, Streaming, runQuery, QueryCache } from "effect-frame/actor";
 import type { ActorTransport, QueryFailure, QueryState } from "effect-frame/actor";
 import { Route, renderDocument } from "effect-frame/router";
 import type { NotFoundProps } from "effect-frame/router";
@@ -207,6 +207,7 @@ export const routerFallback = (
         url: new URL(request.url),
         document: { ...frame, bootstrap: Prerender.clientScript },
         closeWhen: Effect.sleep("5 seconds"),
+        principal: Anonymous.make({}),
       });
       if (outcome._tag === "Redirect") {
         return new Response("", { status: 302 });

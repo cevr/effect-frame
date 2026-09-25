@@ -10,7 +10,7 @@ import {
 } from "effect-frame/actor";
 import type { Principal as PrincipalValue } from "effect-frame/actor/client";
 import { Anonymous, Authenticated, Principal, contract } from "effect-frame/actor/client";
-import { defineFrameHost, holdOf } from "../src/frame-host.js";
+import { defaultAlarmHold, defineFrameHost, holdOf } from "../src/frame-host.js";
 import * as StorageStore from "../src/storage-store.js";
 import { scopedFake } from "./sqlite-storage.js";
 
@@ -43,8 +43,9 @@ const FrameHost = defineFrameHost({
   implementations: [CounterLive],
   layer: Layer.succeed(Policies, Policies.of({ public: Policy.allowAll })),
   principal: HttpServer.anonymous,
-  pollInterval: Option.some("5 millis"),
-  alarmHold: Option.none(),
+  maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+  pollInterval: "5 millis",
+  alarmHold: defaultAlarmHold,
 });
 
 const address = { contract: "Counter", version: 1, key: JSON.stringify("alice") };
@@ -114,8 +115,9 @@ const GuardedHost = defineFrameHost({
     Layer.succeed(Members, new Set(["alice"])),
   ),
   principal: memberPrincipal,
-  pollInterval: Option.some("5 millis"),
-  alarmHold: Option.none(),
+  maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+  pollInterval: "5 millis",
+  alarmHold: defaultAlarmHold,
 });
 
 const guardedAddress = { contract: "Guarded", version: 1, key: JSON.stringify("vault") };
@@ -159,8 +161,9 @@ const TimedHost = defineFrameHost({
   implementations: [TimedLive],
   layer: Layer.succeed(Policies, Policies.of({ public: Policy.allowAll })),
   principal: HttpServer.anonymous,
-  pollInterval: Option.some("5 millis"),
-  alarmHold: Option.none(),
+  maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+  pollInterval: "5 millis",
+  alarmHold: defaultAlarmHold,
 });
 
 const timedAddress = { contract: "Timed", version: 1, key: JSON.stringify("t") };
@@ -242,6 +245,26 @@ describe("the generic frame host over durable-object storage", () => {
         ),
       );
       expect(watch.status).toBe(409);
+    }),
+  );
+
+  it.scoped("an object answers 413 to a body over its limit and records nothing", () =>
+    Effect.gen(function* () {
+      const storage = yield* scopedFake;
+      const Small = defineFrameHost({
+        implementations: [CounterLive],
+        layer: Layer.succeed(Policies, Policies.of({ public: Policy.allowAll })),
+        principal: HttpServer.anonymous,
+        maxBodyBytes: 256,
+        pollInterval: "5 millis",
+        alarmHold: defaultAlarmHold,
+      });
+      const host = new Small({ storage }, {});
+      const refused = yield* Effect.promise(() =>
+        host.fetch(post("/snapshot", { address, pad: "x".repeat(512) })),
+      );
+      expect(refused.status).toBe(413);
+      expect(storage.sql.exec("SELECT contract FROM hosted_address").toArray()).toEqual([]);
     }),
   );
 
@@ -337,11 +360,11 @@ describe("the generic frame host over durable-object storage", () => {
 
   it.effect("one alarm's hold stays finite and inside the runtime's limit", () =>
     Effect.sync(() => {
-      expect(Duration.toMillis(holdOf(Option.none()))).toBe(30_000);
-      expect(Duration.toMillis(holdOf(Option.some("2 seconds")))).toBe(2000);
-      expect(Duration.toMillis(holdOf(Option.some("Infinity")))).toBe(600_000);
-      expect(Duration.toMillis(holdOf(Option.some("1 hour")))).toBe(600_000);
-      expect(Duration.toMillis(holdOf(Option.some(0)))).toBe(20);
+      expect(Duration.toMillis(holdOf(defaultAlarmHold))).toBe(30_000);
+      expect(Duration.toMillis(holdOf("2 seconds"))).toBe(2000);
+      expect(Duration.toMillis(holdOf("Infinity"))).toBe(600_000);
+      expect(Duration.toMillis(holdOf("1 hour"))).toBe(600_000);
+      expect(Duration.toMillis(holdOf(0))).toBe(20);
     }),
   );
 });

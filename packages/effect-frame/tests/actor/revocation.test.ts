@@ -1063,36 +1063,47 @@ const throughAdapter =
     Effect.provide(effect, adapterClient(web, cookie));
 
 describe("an adapter keeps its derivation's requirements", () => {
-  it.scopedLive("toWebHandler serves a derivation that reads sessions through its own host", () =>
-    Effect.gen(function* () {
-      const opened = yield* Ref.make(0);
-      const host = ActorHost.layer({
-        implementations: [sessionLive(opened), LedgerLive],
-        store: ActorHost.memoryStore,
-      }).pipe(Layer.provide(Layer.succeed(Policies, Policies.of(policies))));
-      // The derivation needs `ActorTransport`; the adapter supplies it from its own layer.
-      const web = yield* Effect.acquireRelease(
-        Effect.sync(() => HttpServer.toWebHandler(host, { principal: snapshotPrincipal })),
-        (running) => Effect.promise(() => running.dispose()),
-      );
-      const session = yield* Actor.remote(Session, { sessionId: "s1" }).pipe(
-        throughAdapter(web, Option.none()),
-      );
-      yield* session.call(
-        SessionEvent.SignIn({ subject: "alice", claims: { tenants: ["acme"] }, expiresAt: never }),
-        {
-          timeout: "1 second",
-        },
-      );
+  it.scopedLive(
+    "a handler built over its host serves a derivation that reads sessions through it",
+    () =>
+      Effect.gen(function* () {
+        const opened = yield* Ref.make(0);
+        const host = ActorHost.layer({
+          implementations: [sessionLive(opened), LedgerLive],
+          store: ActorHost.memoryStore,
+        }).pipe(Layer.provide(Layer.succeed(Policies, Policies.of(policies))));
+        // The derivation needs `ActorTransport`; the handler is built where the host is.
+        const built = yield* Layer.build(host);
+        const handler = yield* HttpServer.make({
+          prefix: "",
+          principal: snapshotPrincipal,
+          maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+          form: Option.none(),
+        }).pipe(Effect.provideContext(built));
+        const run = Effect.runPromiseWith(yield* Effect.context<never>());
+        const web: WebAdapter = { fetch: (request) => run(handler(request)) };
+        const session = yield* Actor.remote(Session, { sessionId: "s1" }).pipe(
+          throughAdapter(web, Option.none()),
+        );
+        yield* session.call(
+          SessionEvent.SignIn({
+            subject: "alice",
+            claims: { tenants: ["acme"] },
+            expiresAt: never,
+          }),
+          {
+            timeout: "1 second",
+          },
+        );
 
-      const member = yield* Effect.result(
-        Actor.remote(Ledger, book).pipe(throughAdapter(web, Option.some("s1"))),
-      );
-      const stranger = yield* Effect.flip(
-        Actor.remote(Ledger, book).pipe(throughAdapter(web, Option.none())),
-      );
-      expect(member._tag).toBe("Success");
-      expect(stranger._tag).toBe("Unauthorized");
-    }),
+        const member = yield* Effect.result(
+          Actor.remote(Ledger, book).pipe(throughAdapter(web, Option.some("s1"))),
+        );
+        const stranger = yield* Effect.flip(
+          Actor.remote(Ledger, book).pipe(throughAdapter(web, Option.none())),
+        );
+        expect(member._tag).toBe("Success");
+        expect(stranger._tag).toBe("Unauthorized");
+      }),
   );
 });

@@ -357,25 +357,21 @@ export const serveHost = (makePrincipal: MakePrincipal) =>
     const principal = yield* makePrincipal(follows).pipe(
       Effect.provideService(ActorTransport, host),
     );
-    const handler = yield* HttpServer.make({ principal }).pipe(
-      Effect.provideService(ActorTransport, host),
-    );
     // The plain-form route derives the same principal from the same cookie.
     // A refused anonymous post goes to `/login`; a refused member gets the page.
-    const forms = yield* HttpServer.form({
-      contracts: [Ledger],
-      principal,
-      login: Option.some(loginPath),
-      render: (path) => Effect.succeed(`<main>refused: ${path}</main>`),
+    const route = yield* HttpServer.make({
+      prefix: "",
+      principal: principal,
+      maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+      form: Option.some({
+        contracts: [Ledger],
+        login: Option.some(loginPath),
+        render: (path) => Effect.succeed(`<main>refused: ${path}</main>`),
+        commitWithin: HttpServer.defaultCommitWithin,
+      }),
     }).pipe(Effect.provideService(ActorTransport, host));
     const context = yield* Effect.context<never>();
     const run = Effect.runPromiseWith(context);
-    const route = (request: Request) => {
-      if (new URL(request.url).pathname === formPath) {
-        return forms(request);
-      }
-      return handler(request);
-    };
     const server = yield* Effect.acquireRelease(
       Effect.sync(() => Bun.serve({ port: 0, fetch: (request) => run(route(request)) })),
       (running) => Effect.promise(() => running.stop(true)),

@@ -19,7 +19,10 @@ export {
 export {
   DocumentTimedOut,
   renderDocument,
+  respondDocument,
   type DocumentOptions,
+  type RenderDocumentOptions,
+  type RespondDocumentOptions,
   type DocumentOutcome,
   type DocumentRedirect,
   type DocumentRoute,

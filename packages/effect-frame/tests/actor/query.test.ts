@@ -417,7 +417,12 @@ const recordCall = (request: Request, response: Response) =>
 
 const inProcess = Layer.unwrap(
   Effect.gen(function* () {
-    const server = yield* HttpServer.make({ principal: HttpServer.anonymous });
+    const server = yield* HttpServer.make({
+      prefix: "/actors",
+      principal: HttpServer.anonymous,
+      maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+      form: Option.none(),
+    });
     const context = yield* Effect.context<never>();
     const run = Effect.runPromiseWith(context);
     const fetch: HttpTransport.FetchLike = (input, init) => {

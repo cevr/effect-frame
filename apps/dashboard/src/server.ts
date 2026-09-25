@@ -1,11 +1,10 @@
 import type { Layer } from "effect";
 import { HttpServer } from "effect-frame/actor";
 import type { ActorTransport } from "effect-frame/actor/client";
-import { Anonymous, Authenticated, CurrentPrincipal, Principal } from "effect-frame/actor/client";
-import { renderDocument } from "effect-frame/router";
-import type { DocumentOutcome, DocumentTimedOut } from "effect-frame/router";
+import { Anonymous, Authenticated, Principal } from "effect-frame/actor/client";
+import { renderDocument, respondDocument } from "effect-frame/router";
 import type { Html } from "effect-frame/view";
-import { Effect, Exit, ManagedRuntime, Option, Scope, Stream } from "effect";
+import { Effect, ManagedRuntime, Option } from "effect";
 import { demoTenant } from "./contract.js";
 import { inProcess } from "./host.server.js";
 import { routes } from "./routes.js";
@@ -77,10 +76,11 @@ export const pageLimit: Effect.Effect<void> = Effect.sleep("10 seconds");
 
 /**
  * Render one URL through the route tree, in the caller's request Scope and
- * under the caller's principal. The tree's constructor picks the mode.
+ * under the principal the caller names. The tree's constructor picks the mode.
  */
 export const renderPage = Effect.fn("Dashboard.renderPage")(function* (
   url: URL,
+  principal: Principal,
   closeWhen: Effect.Effect<void> = pageLimit,
 ) {
   return yield* renderDocument({
@@ -89,67 +89,19 @@ export const renderPage = Effect.fn("Dashboard.renderPage")(function* (
     url,
     document: dashboardDocument,
     closeWhen,
+    principal,
   });
 });
 
-/** A document answer: 303 for a redirect, else the body in the status the tree chose. */
-const respond = (outcome: DocumentOutcome<unknown>, close: Effect.Effect<void>) =>
-  Effect.gen(function* () {
-    if (outcome._tag === "Redirect") {
-      yield* close;
-      return new Response("", { status: 303, headers: { location: outcome.location.pathname } });
-    }
-    const context = yield* Effect.context<never>();
-    // The request Scope holds a streamed drawing: it closes when the body ends.
-    const body = Stream.encodeText(outcome.body).pipe(Stream.ensuring(close));
-    return new Response(Stream.toReadableStreamWith(body, context), {
-      status: outcome.status,
-      headers: { "content-type": "text/html; charset=utf-8" },
-    });
-  });
-
-/** How a page is drawn for one URL, in the request Scope it is given. */
-export type PageRenderer<R> = (
-  url: URL,
-) => Effect.Effect<DocumentOutcome<unknown>, DocumentTimedOut, R | Scope.Scope>;
-
 /**
- * Answer one page request through `render`, in a request Scope of its own.
- * The Scope outlives this Effect only for a returned body, and closes when
- * that body ends. Every other exit closes it before the answer leaves: a
- * redirect, a timeout, a failure or a defect in the drawing or in making
- * the response, and an interruption. A defect answers 500.
+ * Answer one page request under the principal its fixture header names.
+ * `respondDocument` owns the request Scope: it outlives the answer only for
+ * a returned body, and a defect answers 500.
  */
-export const answerWith =
-  <R>(render: PageRenderer<R>) =>
-  (request: Request): Effect.Effect<Response, never, Exclude<R, Scope.Scope>> =>
-    Effect.gen(function* () {
-      const scope = yield* Scope.make();
-      const close = Scope.close(scope, Exit.void);
-      return yield* render(new URL(request.url)).pipe(
-        Scope.provide(scope),
-        Effect.flatMap((outcome) => respond(outcome, close)),
-        Effect.onExit((exit) => {
-          if (Exit.isSuccess(exit)) {
-            return Effect.void;
-          }
-          return close;
-        }),
-        Effect.catchTag("DocumentTimedOut", () =>
-          Effect.succeed(new Response("the page took too long", { status: 504 })),
-        ),
-        Effect.catchCause((cause) =>
-          Effect.as(
-            Effect.logError("[dashboard] page failed", cause),
-            new Response("the page failed", { status: 500 }),
-          ),
-        ),
-        Effect.provideService(CurrentPrincipal, principalOf(request)),
-      );
-    });
-
-/** Answer one page request through the route tree. */
-const answerPage = answerWith((url) => renderPage(url));
+const answerPage = (request: Request): Effect.Effect<Response, never, ActorTransport> =>
+  respondDocument(renderPage(new URL(request.url), principalOf(request)), {
+    onTimeout: () => Effect.succeed(new Response("the page took too long", { status: 504 })),
+  });
 
 /** A built transport. The page render and the actor routes share it. */
 export type DashboardRuntime = ManagedRuntime.ManagedRuntime<ActorTransport, never>;
@@ -194,7 +146,11 @@ export const makeServer = async (options: ServerOptions): Promise<RunningServer>
   const member = Option.fromNullishOr(options.member);
   const actors = await runtime.runPromise(
     HttpServer.make({
+      prefix: actorPrefix,
       principal: (request) => Effect.succeed(Principal.constant(principalOf(request))),
+      maxBodyBytes: HttpServer.defaultMaxBodyBytes,
+      // The dashboard's forms post through the hydrated client only.
+      form: Option.none(),
     }),
   );
   const client = await runtime.runPromise(buildClient());
@@ -204,10 +160,8 @@ export const makeServer = async (options: ServerOptions): Promise<RunningServer>
     fetch: (incoming: Request): Response | Promise<Response> => {
       const request = stamped(incoming, member);
       const url = new URL(request.url);
-      if (url.pathname.startsWith(actorPrefix)) {
-        const stripped = new URL(request.url);
-        stripped.pathname = url.pathname.slice(actorPrefix.length);
-        return runtime.runPromise(actors(new Request(stripped, request)));
+      if (url.pathname.startsWith(`${actorPrefix}/`)) {
+        return runtime.runPromise(actors(request));
       }
       if (url.pathname === "/client.js") {
         return new Response(client, {

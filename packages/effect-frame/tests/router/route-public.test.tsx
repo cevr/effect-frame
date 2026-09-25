@@ -819,6 +819,28 @@ describe("public nested routes", () => {
       }),
   );
 
+  it.scoped.layer(frameLayer("public-current-name"))(
+    "2b. a segment of a tree this router did not mount is not current, though the names match",
+    () =>
+      Effect.gen(function* () {
+        // Another tree named "site", at the same path: built, never mounted here.
+        const elsewhere = Route.segment("elsewhere", { path: "/", params: Schema.Struct({}) });
+        Route.client(
+          "site",
+          Route.leaf(elsewhere, () => Effect.succeed(<p>elsewhere</p>)),
+        );
+
+        const root = yield* makeRoot;
+        const { page, router } = yield* mountApp(Site, root, "/");
+        yield* page.waitFor({
+          label: "the home layout",
+          until: (actual) => hasAt(actual, "#site"),
+        });
+        const elsewhereLink = yield* Effect.provideService(link(elsewhere, {}, {}), Router, router);
+        expect(yield* elsewhereLink.current.get).toBe("none");
+      }),
+  );
+
   it.scoped.layer(frameLayer("public-link-params"))(
     "3. a link given a params Source prints and moves with the params it holds now",
     () =>

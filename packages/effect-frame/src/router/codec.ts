@@ -8,6 +8,7 @@ import type { RouteMatch } from "./router.js";
 import type { Shell } from "./landing.js";
 import type { Asker } from "./leave-registry.js";
 import type { Checker } from "./check.js";
+import type { AnySegment } from "./branch.js";
 import type { RenderingMode } from "./rendering-mode.js";
 
 /**
@@ -564,6 +565,8 @@ export interface AnyRoute<R> {
   /** The route's checks, parent first. None: it always continues. */
   readonly [RouteChecks]: Option.Option<Checker<R>>;
   readonly name: string;
+  /** Every segment of the route's tree. A segment is current only while its route is matched. */
+  readonly segments: ReadonlyArray<AnySegment>;
   /** Encoded search ownership. Unknown means an opaque codec needs a declaration. */
   readonly searchKeys: SearchKeyInfo;
   readonly enter: (

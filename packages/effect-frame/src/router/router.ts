@@ -19,6 +19,7 @@ import {
   SubscriptionRef,
 } from "effect";
 import type { AnyRoute, Entered, RouteInstance, RouteNavigation, UrlUpdater } from "./codec.js";
+import type { AnySegment } from "./branch.js";
 import { RouteBrand, RouteChecks } from "./codec.js";
 import { notFoundMode } from "./rendering-mode.js";
 import {
@@ -60,6 +61,7 @@ export interface Navigation {
 /** The resolved name retained with one published navigation. */
 interface NavigationSample extends Navigation {
   readonly routeName: string;
+  readonly routeSegments: ReadonlyArray<AnySegment>;
 }
 
 /**
@@ -69,6 +71,8 @@ interface NavigationSample extends Navigation {
 export interface RouteMatch {
   readonly name: string;
   readonly url: URL;
+  /** The matched route's segments. Empty on not-found. A segment link reads it. */
+  readonly segments: ReadonlyArray<AnySegment>;
 }
 
 export interface RouterService {
@@ -208,6 +212,7 @@ const notFoundRoute = <R>(view: View.View<NotFoundProps, never, R>): AnyRoute<R>
   [RouteBrand]: notFoundMode,
   [RouteChecks]: Option.none(),
   name: notFoundName,
+  segments: [],
   searchKeys: { known: true, keys: [] },
   enter: (url) =>
     Option.some(
@@ -347,6 +352,7 @@ export const mount: <R, HostNode, N = R>(
     url: initial,
     kind: "initial",
     routeName: fallback.name,
+    routeSegments: fallback.segments,
   });
   const requests = yield* Queue.unbounded<Request>();
   const surface = surfaceOf(location);
@@ -498,14 +504,8 @@ export const mount: <R, HostNode, N = R>(
       changes: Stream.map(SubscriptionRef.changes(navigations), navigationOf),
     },
     current: {
-      get: Effect.map(SubscriptionRef.get(navigations), (moved) => ({
-        name: moved.routeName,
-        url: moved.url,
-      })),
-      changes: Stream.map(SubscriptionRef.changes(navigations), (moved) => ({
-        name: moved.routeName,
-        url: moved.url,
-      })),
+      get: Effect.map(SubscriptionRef.get(navigations), matchOf),
+      changes: Stream.map(SubscriptionRef.changes(navigations), matchOf),
     },
   };
 
@@ -709,6 +709,7 @@ export const mount: <R, HostNode, N = R>(
         url: settled.url,
         kind,
         routeName: settled.target.route.name,
+        routeSegments: settled.target.route.segments,
       });
       return yield* show(settled.url, settled.target);
     });
@@ -1064,6 +1065,7 @@ export const mount: <R, HostNode, N = R>(
     url: initialSettled.url,
     kind: "initial",
     routeName: initialSettled.target.route.name,
+    routeSegments: initialSettled.target.route.segments,
   };
   yield* SubscriptionRef.set(navigations, initialNavigation);
   yield* show(initialSettled.url, initialSettled.target).pipe(
@@ -1143,7 +1145,7 @@ const serverRouter = (url: URL): RouterService => {
       }),
     );
   const navigation: Navigation = { url, kind: "initial" };
-  const match: RouteMatch = { name: notFoundName, url };
+  const match: RouteMatch = { name: notFoundName, url, segments: [] };
   return {
     push: refuse,
     replace: refuse,
@@ -1274,3 +1276,9 @@ const unplaced: Written = { land: () => Effect.void };
 const isUrlUpdater = (href: string | UrlUpdater): href is UrlUpdater => Predicate.isFunction(href);
 
 const navigationOf = ({ url, kind }: NavigationSample): Navigation => ({ url, kind });
+
+const matchOf = (moved: NavigationSample): RouteMatch => ({
+  name: moved.routeName,
+  url: moved.url,
+  segments: moved.routeSegments,
+});

@@ -548,12 +548,6 @@ const segmentRuntimeOf = <Params, Search, Own extends Declarations>(
 const partsOf = (seg: AnySegment): ReadonlyArray<Part> => seg[SegmentBrand].parts;
 
 /**
- * Trees that hold each segment, by name. A segment is current only while
- * one of them is the router's match.
- */
-const treesOf = new WeakMap<AnySegment, Set<string>>();
-
-/**
  * One check, ready to run. Its services move from the Effect to the
  * segment's phantom `CheckR`, which every branch above it carries in
  * `DataR`; `route` widens them back where it registers the tree's checks.
@@ -764,8 +758,7 @@ const makeSegment = <
     hrefAt: printer.hrefAt,
     searchAt: printer.searchAt,
     currentAt: (current: RouteMatch, linked: Params): Current => {
-      const trees = Option.fromNullishOr(treesOf.get(made));
-      if (!Option.exists(trees, (names) => names.has(current.name))) {
+      if (!current.segments.includes(made)) {
         return "none";
       }
       // Both sides print through the same codec, so equal params print one path.
@@ -2929,20 +2922,13 @@ const mountTree = <Name extends string, ViewR, DataR, Extra extends object>(
     );
   }
   const root = runtimeOf(branch);
-  for (const held of root.segments) {
-    const names = Option.getOrElse(
-      Option.fromNullishOr(treesOf.get(held)),
-      () => new Set<string>(),
-    );
-    names.add(name);
-    treesOf.set(held, names);
-  }
   const outline = (url: URL) => Option.map(matchUrl(root, url), (matched) => matched.outline);
   const mountable: Extra & Tree<Name, ViewR | DataR> = {
     ...extra,
     [RouteBrand]: mode,
     [RouteChecks]: Option.some(checks),
     name,
+    segments: root.segments,
     searchKeys: treeSearchKeys(root.searchKeys),
     enter: (url, navigation = unavailable) =>
       Option.map(matchUrl(root, url), (first) =>

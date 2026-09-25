@@ -6,7 +6,7 @@ import { Unauthorized, Unreachable } from "./vocabulary.js";
 export { canonicalize } from "./canonical-json.js";
 
 /**
- * The client-safe half of the Query primitive (#17): the
+ * The client-safe half of the Query primitive: the
  * contract, the cache key, and the wire vocabulary a command reply needs.
  * This module must stay safe to ship to a browser. It never imports a host,
  * a store, or an implementation. `tests/boundary.test.ts` proves that.
@@ -58,7 +58,7 @@ export interface QueryOptions<Args extends Pure, Result extends Pure, Policy ext
   /**
    * Named, never inline: the host owns the rule, the contract owns the name.
    * Required: a query with no policy cannot be declared, and allow-all is a
-   * name written on purpose (#20).
+   * name written on purpose.
    */
   readonly policy: Policy;
   /**
@@ -158,8 +158,8 @@ export const keyOf = (key: QueryKey): string => `${key.query}@${key.version}/${k
 
 /**
  * What a client can observe about a query at one moment. Never two of these
- * at once. Ticket #16 builds readiness over this same union; the tags and
- * the field names are the coordination point and must not drift.
+ * at once. Readiness (`view/readiness.tsx`) reads this same union; the tags
+ * and the field names are the coordination point and must not drift.
  */
 export type QueryState<A, E> = QueryLoading | QueryReady<A> | QueryFailedState<E>;
 
@@ -289,7 +289,7 @@ export class InvalidQueryArgs extends Schema.TaggedError<InvalidQueryArgs>()("In
 }) {}
 
 /**
- * A streamed document ended before it settled this query (#22). The client
+ * A streamed document ended before it settled this query. The client
  * writes it, never a server: the record channel closed, or the response was
  * cut, while the query's placeholder was still open. The entry is refreshed
  * over the ordinary query path at once, so it is a moment, not a verdict.

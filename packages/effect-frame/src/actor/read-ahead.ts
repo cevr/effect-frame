@@ -4,7 +4,7 @@ import { mapEffect } from "./source.js";
 import type { Source } from "./source.js";
 
 /**
- * Streamed documents (#22), client side: a patch the server wrote after its
+ * Streamed documents, client side: a patch the server wrote after its
  * shell (`Patch.late`) and that the client read before hydration is done.
  * The shell drew the entry open, so the cache holds the patch until
  * `Resumed.hydrated`: until then each node the client claims shows what the

@@ -19,7 +19,7 @@ export const freshCommandId: Effect.Effect<CommandId> = Effect.sync(() =>
 );
 
 /**
- * Fresh-ID ownership (#67 §3, #37). Some framework sends must know their
+ * Fresh-ID ownership. Some framework sends must know their
  * command ID before the send: a message with a field generated from it
  * (`Generated.send`), and a form whose own ID was drawn into its markup
  * (`View.form`). The framework minted that ID for this one send, so nothing

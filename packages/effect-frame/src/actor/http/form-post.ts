@@ -25,7 +25,7 @@ import { CommandId, Uncertain } from "../vocabulary.js";
 import type { DerivePrincipal, WebHandler } from "./server.js";
 
 /**
- * `POST {base}/form`: the plain-form route (#21 §2). Its client is the
+ * `POST {base}/form`: the plain-form route. Its client is the
  * browser, its body is `application/x-www-form-urlencoded`, its success is
  * a 303, and its failure is the page the user asked for, drawn again with
  * the issues. It reaches `transport.call` exactly as `/call` does, with the
@@ -33,15 +33,15 @@ import type { DerivePrincipal, WebHandler } from "./server.js";
  * path and no second idempotency rule.
  *
  * The 303 follows the commit, not the admission: the commit is readable
- * before the 303, so a `$return` page rendered on request draws it (#21 §5). A commit that does not
+ * before the 303, so a `$return` page rendered on request draws it. A commit that does not
  * come within `commitWithin` answers 504 with the same command id, because
- * the command may be in the mailbox (#21 §2).
+ * the command may be in the mailbox.
  */
 export interface FormPostOptions<E, R, P = never> {
   /** The contracts a form may post to, found by `$contract`. */
   readonly contracts: ReadonlyArray<AnyContract>;
   /**
-   * Derives who is posting, exactly as the JSON handler does (#20 §5): the
+   * Derives who is posting, exactly as the JSON handler does: the
    * same cookie, the same derivation, the same policy check at
    * `transport.call`. There is no second authorization path.
    */
@@ -128,7 +128,7 @@ const isUtf8Parameter = (parameter: string): boolean => {
 };
 
 /**
- * Read the body. Only urlencoded: multipart is not specified (#21 §6), so
+ * Read the body. Only urlencoded: multipart is not specified, so
  * it is refused rather than parsed by a rule nobody wrote down.
  */
 const readBody = (request: Request): Effect.Effect<FormFields, Reply> => {
@@ -139,7 +139,7 @@ const readBody = (request: Request): Effect.Effect<FormFields, Reply> => {
   const [media = "", ...parameters] = header.split(";").map((part) => part.trim().toLowerCase());
   if (media === "multipart/form-data") {
     return Effect.fail(
-      refused(415, "multipart/form-data is not accepted: file uploads are not specified (#21 §6)"),
+      refused(415, "multipart/form-data is not accepted: file uploads are not specified"),
     );
   }
   if (media !== urlencoded) {
@@ -241,7 +241,7 @@ const page = (
  * redrawn after a lost reply keeps its id: that id may be in a mailbox, and
  * a fresh one would let the corrected post apply the message a second time.
  * A redacted field is never written back, so a required one is the common
- * way to reach this. Any other refused decode mints a fresh id (#21 §4).
+ * way to reach this. Any other refused decode mints a fresh id.
  */
 const decodeRetry = (posted: Posted): "fresh" | "same" => {
   if (posted.uncertain) {
@@ -255,7 +255,7 @@ const decodeRetry = (posted: Posted): "fresh" | "same" => {
  * must send the same bytes, or the store answers `CommandConflict`. That
  * holds only when the message codec is repeatable: the same fields decode
  * and encode to the same payload every time. A value that needs entropy or
- * a clock is minted at render as a generated field (#32), never at decode.
+ * a clock is minted at render as a generated field, never at decode.
  * The route decodes a second time and compares, and refuses the post
  * before any send when the two payloads differ. The cost is one decode and
  * one encode of a small body per plain post.
@@ -293,7 +293,7 @@ const failureIssue = (error: TransportCallError): FormIssue => {
 
 /**
  * A refusal redirects only when authenticating would change the answer:
- * the caller is anonymous and the app named a login route (#20 §5).
+ * the caller is anonymous and the app named a login route.
  */
 const unauthorized = (
   posted: Posted,

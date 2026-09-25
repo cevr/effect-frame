@@ -92,7 +92,7 @@ export const openLocal = Effect.fn("Actor.local.open")(function* <
       return;
     }
     const message = envelope.derive(current.state);
-    // A refused message is never applied: no turn, no revision (#37).
+    // A refused message is never applied: no turn, no revision.
     const refusal = refusalOf(behavior, message);
     if (Option.isSome(refusal)) {
       yield* Deferred.fail(envelope.reply, refusal.value);

@@ -24,7 +24,7 @@ import { ActorTransport } from "./transport.js";
 import type { Unauthorized } from "./vocabulary.js";
 
 /**
- * The server half of the Query primitive (#17). This module is server-only:
+ * The server half of the Query primitive. This module is server-only:
  * it holds handlers and reads the policy table. It never reaches the client
  * entry.
  */

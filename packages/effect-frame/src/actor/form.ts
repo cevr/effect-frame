@@ -15,7 +15,7 @@ import { CommandId } from "./vocabulary.js";
 export { freshCommandId } from "./command-id.js";
 
 /**
- * Plain-form posts (#21). A form body is one more encoding of a message: a
+ * Plain-form posts. A form body is one more encoding of a message: a
  * flat map of strings. This module holds the parts both halves share: the
  * framework field names, the structural step from a flat map to a nested
  * tree, the codec over a message schema, and the issues a refused post
@@ -51,7 +51,7 @@ export const frameworkFields = {
    */
   form: "$form",
   /**
-   * Present only on a form redrawn after a lost reply (#21 §2): its
+   * Present only on a form redrawn after a lost reply: its
    * `$command` may already be in a mailbox. A refusal of this post keeps
    * that id, so the next post can reach the stored receipt and cannot apply
    * the message a second time under a new id.
@@ -499,7 +499,7 @@ export class FormContext extends Context.Service<FormContext, FormIssues>()(
 /**
  * `FormIssues` as JSON, for the page. A hydrating client must draw what the
  * server drew, so a refused page carries its issues to the client the way
- * it carries a snapshot (#21 §5).
+ * it carries a snapshot.
  */
 export const IssuesJson = Schema.fromJsonString(
   Schema.Struct({

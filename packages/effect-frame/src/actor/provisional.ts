@@ -6,7 +6,7 @@ import type { CommandId, Displayed } from "./vocabulary.js";
 import { committedRevision } from "./vocabulary.js";
 
 // ---------------------------------------------------------------------------
-// The pending log (#19, #67)
+// The pending log
 // ---------------------------------------------------------------------------
 
 /**

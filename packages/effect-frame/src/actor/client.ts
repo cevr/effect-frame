@@ -28,7 +28,7 @@ export {
   type RemoteActorRef,
   type RemoteCommandRef,
 } from "./ref.js";
-// The Query primitive's client half (#17, #28).
+// The Query primitive's client half.
 export {
   InvalidQueryArgs,
   PolicyMissing,
@@ -55,7 +55,7 @@ export {
   type QueryStateCases,
   type ResultOf,
 } from "./query.js";
-// Streamed documents: the record channel and the cache's resume (#22).
+// Streamed documents: the record channel and the cache's resume.
 export * as Streaming from "./streaming.js";
 export {
   QueryCache,
@@ -84,10 +84,10 @@ export * as Wire from "./http/wire.js";
 // One path per combinator: `Source.select`, `Source.zip`, and the rest.
 export { Source, type AllValues, type ValueOf } from "./source.js";
 export * as Cell from "./cell.js";
-// Plain-form posts (#21) and generated fields (#32).
+// Plain-form posts and generated fields.
 export * as Form from "./form.js";
 export * as Generated from "./generated.js";
-// Authorization (#20, #30): who is asking. The rules that judge a principal
+// Authorization: who is asking. The rules that judge a principal
 // are server-only (`policy.ts`) and never reach this entry.
 export {
   Anonymous,

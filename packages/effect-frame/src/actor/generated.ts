@@ -5,7 +5,7 @@ import type { RemoteActorRef } from "./ref.js";
 import type { CommandId, IdentifiedCommandHandle } from "./vocabulary.js";
 
 /**
- * A value a message needs that no one types (#32). The render that offers
+ * A value a message needs that no one types. The render that offers
  * the command chooses it, from the command's own identity or beside it, so
  * every submission of one rendered form carries the same value and the
  * command applies once. Nothing generates it when a submission arrives:
@@ -185,7 +185,7 @@ const TaggedInput = Schema.Struct({ _tag: Schema.String });
 const readTag = Schema.decodeUnknownEffect(TaggedInput);
 
 /**
- * Send a message whose generated fields the send supplies (#32 §4, the
+ * Send a message whose generated fields the send supplies (the
  * scripted case). The send mints the command id, derives every generated
  * value from it or beside it, and sends both together, so the author never
  * writes the id a note is created under.

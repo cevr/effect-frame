@@ -48,7 +48,7 @@ export interface Behavior<State, Message, R = never, Refusal extends Refused = n
    */
   readonly predict?: (state: State, message: Message) => State;
   /**
-   * The messages this behavior refuses (#37, #25 §1). It reads the message
+   * The messages this behavior refuses. It reads the message
    * alone, never the state, so the same bytes are refused every time and a
    * refusal is conclusive for its command ID. A durable or hosted actor asks
    * it before it admits a new command; a local actor asks it before the
@@ -59,7 +59,7 @@ export interface Behavior<State, Message, R = never, Refusal extends Refused = n
   readonly refuse?: (message: Message) => Option.Option<Refusal>;
   /**
    * When this state next needs the actor running with no request, as epoch
-   * milliseconds (#101 §5). A durable host stores it in the same step as
+   * milliseconds. A durable host stores it in the same step as
    * the state and wakes the actor at that time, so a deadline survives a
    * restart or an eviction. A time at or before now means work is in
    * flight: the host keeps the actor running until the state changes.

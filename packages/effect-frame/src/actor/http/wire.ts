@@ -29,7 +29,7 @@ import {
  *   POST {base}/snapshot  AddressBody  -> WireProjection | WireError
  *   GET  {base}/changes?contract&version&key&after -> text/event-stream
  *
- * The Query primitive (#17) adds the query verbs and the single-flight field:
+ * The Query primitive adds the query verbs and the single-flight field:
  *
  *   POST {base}/query     QueryBody    -> WireQueryValue | WireQueryError
  *   POST {base}/query/batch QueryBatchBody -> WireQueryBatch | WireQueryError
@@ -39,7 +39,7 @@ import {
  * `active` and `refreshed` are additive: a client that sends no `active`
  * gets an empty `refreshed` and the old behavior exactly.
  *
- * Plain-form posts (#21) add one route whose client is the browser:
+ * Plain-form posts add one route whose client is the browser:
  *
  *   POST {base}/form  application/x-www-form-urlencoded -> 303 | 200 page | 4xx
  */
@@ -81,7 +81,7 @@ export const WireQueryError = Schema.Union([
   QueryFailed,
   Unauthorized,
   Unreachable,
-  // Client-written (#22). A host never sends it; the union matches `QueryFailure`.
+  // Client-written. A host never sends it; the union matches `QueryFailure`.
   StreamEnded,
 ]);
 export type WireQueryError = Schema.Schema.Type<typeof WireQueryError>;
@@ -104,7 +104,7 @@ export type WireQueryBatch = Schema.Schema.Type<typeof WireQueryBatch>;
 /**
  * `active` is optional on the wire and defaults to empty. A client built
  * before the Query primitive keeps working unchanged, and a plain form post
- * (ticket #21) can omit it too.
+ * can omit it too.
  */
 const activeKeys = Schema.Array(WireQueryKey).pipe(
   Schema.withDecodingDefaultKey(Effect.succeed([])),

@@ -222,7 +222,7 @@ export const openDurable = Effect.fn("Actor.durable.engine")(function* <
     });
 
   /**
-   * Admission refusal (#37, #25 §1). The behavior's rule reads the message
+   * Admission refusal. The behavior's rule reads the message
    * alone, so the same bytes are refused every time and nothing is appended:
    * no admission, no revision. A command the store already holds is answered
    * from its record instead, so a same-ID retry never turns an admitted

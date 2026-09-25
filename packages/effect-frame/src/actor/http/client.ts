@@ -46,7 +46,7 @@ export interface HttpClientOptions {
   readonly baseUrl: string;
   /**
    * Delay between reconnect attempts of a `changes` stream. It is never
-   * entered on `Unauthorized`: a refusal is not a network failure (#30 §7).
+   * entered on `Unauthorized`: a refusal is not a network failure.
    */
   readonly reconnect: Schedule.Schedule<unknown>;
 }

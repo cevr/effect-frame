@@ -96,7 +96,7 @@ const makeBatchedQueryResolver = (transport: ActorTransport["Service"]): Batched
   );
 
 /**
- * The client half of the Query primitive (#17, lifetime per #28): a cache
+ * The client half of the Query primitive: a cache
  * keyed by encoded arguments, a `QueryState` source per entry, and the
  * declaration of which entries are active so a command reply can refresh
  * them. Client-safe: it holds the contract and a transport, never a handler.
@@ -164,14 +164,14 @@ interface CacheSlot {
   readonly released: Effect.Effect<void>;
   /**
    * Begin a read that arrives by another path: a document seed still open
-   * when the slot opened (#22). The returned function publishes its result
+   * when the slot opened. The returned function publishes its result
    * only when no read has started and no value has landed since, so a late
    * seed never replaces a newer read's value.
    */
   readonly outsideRead: () => OutsideRead;
   /**
    * The settle a seed this slot took holds back until hydration is done
-   * (#22, `read-ahead.ts`). `None` once it landed, once a read superseded
+   * (`read-ahead.ts`). `None` once it landed, once a read superseded
    * it, and once the slot closed: a readiness boundary never reads a value
    * the slot could no longer show.
    */
@@ -214,14 +214,14 @@ interface CacheSlot {
   readonly accept: (encoded: string) => Effect.Effect<void>;
   /**
    * Shows a value this client has not confirmed: a prerendered page's baked
-   * value (#23 §3.2). It lands `Ready{stale: true}`; the next read confirms it.
+   * value. It lands `Ready{stale: true}`; the next read confirms it.
    */
   readonly acceptStale: (encoded: string) => Effect.Effect<void>;
   /** Records a refresh that the server could not serve. */
   readonly reject: (error: QueryFailure) => Effect.Effect<void>;
 }
 
-/** A read that arrives by another path (#22): see `CacheSlot.outsideRead`. */
+/** A read that arrives by another path: see `CacheSlot.outsideRead`. */
 interface OutsideRead {
   /** Publishes only while `current` holds. */
   readonly commit: (publish: Effect.Effect<void>) => Effect.Effect<void>;
@@ -296,7 +296,7 @@ export interface QueryCacheService {
    */
   readonly invalidate: (contractName: string) => Effect.Effect<void>;
   /**
-   * The principal every held value was read under is gone (#20, #30): a
+   * The principal every held value was read under is gone: a
    * sign-out, a sign-in as someone else, or a revoked session. Every live
    * entry drops its value and any read in flight, shows `Loading`, and reads
    * again under the new principal. No entry keeps a value the new principal
@@ -747,7 +747,7 @@ const landSeed = (
   );
   // A prerendered page's value, or one the server showed stale: shown at
   // once, marked unconfirmed, and read again once hydration is done. The
-  // reply lands `Ready{stale: false}` in its place (#23 §3.2).
+  // reply lands `Ready{stale: false}` in its place.
   if (state._tag === "Ready" && state.stale) {
     return Effect.andThen(slot.acceptStale(state.value), readAfterHydration);
   }
@@ -771,7 +771,7 @@ const landSeed = (
 const isFinalSeed = (error: QueryFailure): boolean => error._tag === "QueryFailed";
 
 // ---------------------------------------------------------------------------
-// Streamed documents (#22)
+// Streamed documents
 // ---------------------------------------------------------------------------
 
 type SeedState = QueryState<string, QueryFailure>;
@@ -1344,7 +1344,7 @@ export const useQuery = Effect.fn("useQuery")(function* <Q extends AnyQuery>(
 });
 
 /**
- * Read one query once, as a value (#23 §1.1). It declares the key for the
+ * Read one query once, as a value. It declares the key for the
  * length of the read, waits for the entry's first value or failure, and
  * lets go. A failed read fails with its `QueryFailure`. A prerender route's
  * `inputs` read the list its pages come from this way: in a build, the

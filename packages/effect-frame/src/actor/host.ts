@@ -24,7 +24,7 @@ export interface HostOptions<R> {
    */
   readonly store?: (address: Address) => LayerType.Layer<MailboxStore>;
   /**
-   * The queries this host serves (#17). They are built here and not in a
+   * The queries this host serves. They are built here and not in a
    * layer beside this one, because a query handler reads actors through
    * this host's own transport: a second host would open a second set of
    * instances. Omit it and the host serves actors alone.
@@ -42,7 +42,7 @@ const unknownQueryRefresh = (key: QueryKey): Refreshed => ({
 
 /**
  * Every policy name this host's contracts and queries declare. The host
- * validates them all before it becomes a transport (#20 §3).
+ * validates them all before it becomes a transport.
  */
 const declaredBy = <R>(
   implementations: ReadonlyArray<AnyImplementation<R>>,
@@ -71,7 +71,7 @@ export interface RecoveryService {
 }
 
 /**
- * The host's own wake, with no caller (#85). A durable host that restarts
+ * The host's own wake, with no caller. A durable host that restarts
  * must drain what it already admitted, and no principal is present to ask.
  * It checks no policy, because it serves nothing: every command it drains
  * was authorized when it was admitted, and it returns no state. It is

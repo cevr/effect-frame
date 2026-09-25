@@ -24,7 +24,7 @@ export {
 } from "./implement.js";
 export * as ActorHost from "./host.js";
 export * as HttpServer from "./http/server.js";
-// The Query primitive's server half (#17).
+// The Query primitive's server half.
 export {
   Query,
   implementQuery,
@@ -34,7 +34,7 @@ export {
   type QueryBatchResult,
   type QueryImplementation,
 } from "./query-host.js";
-// Authorization (#20): one policy model for actors and queries, one table.
+// Authorization: one policy model for actors and queries, one table.
 export {
   Policies,
   Policy,

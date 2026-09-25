@@ -6,7 +6,7 @@ import type { DocumentAccess, DocumentEntry } from "./query-client.js";
 import { QueryCache, documentOf } from "./query-client.js";
 
 /**
- * Streamed documents (#22). A streamed response writes the shell, then one
+ * Streamed documents. A streamed response writes the shell, then one
  * JSON record per event, in the order the events happen. No record runs as
  * script: the client reads the records the parser has appended and watches
  * for the rest. See `docs/design/streaming.md`.
@@ -59,7 +59,7 @@ export const Patch = Schema.TaggedStruct("Patch", {
   id: Schema.String,
   outcome: Schema.Union([ValueOutcome, ErrorOutcome]),
   /**
-   * Present only on a prerendered page (#23 §3.2): when the build read this
+   * Present only on a prerendered page: when the build read this
    * value, in milliseconds since the epoch. Its presence is what seeds the
    * entry `Ready{stale: true}`, so the client reads it again once hydration
    * is done (`Resumed.hydrated`). Nothing branches on its value.
@@ -85,7 +85,7 @@ export const Patch = Schema.TaggedStruct("Patch", {
 export type Patch = Schema.Schema.Type<typeof Patch>;
 
 /**
- * A route actor's committed snapshot, as the document carries it (#37): the
+ * A route actor's committed snapshot, as the document carries it: the
  * reference the route opened on the server, at the instant the drawing
  * shows. `id` is the route's key for that actor address; `revision` and
  * `snapshot` are the projection the wire carries, the snapshot still

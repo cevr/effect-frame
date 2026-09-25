@@ -1,7 +1,7 @@
 import { Effect, Equal, Option, Stream, SubscriptionRef } from "effect";
 
 /**
- * PRIVATE (#22, review round 1). One state of a stateful derivation: a
+ * Internal: no entry exports it. One state of a stateful derivation: a
  * value it carries forward, such as the last value `followQuery` shows or
  * the last value `ready` holds.
  *

@@ -5,7 +5,7 @@ import type { QueryKey } from "./query.js";
 import { Unauthorized } from "./vocabulary.js";
 
 /**
- * Authorization (#20 §2). One policy model for actors and queries: a policy
+ * Authorization. One policy model for actors and queries: a policy
  * is a function over a principal, a subject, and an action, registered by
  * name in one table that the root host requires. There is no default table
  * and no default rule. Allow-all exists only where it is written by name.

@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE (ticket #17). Canonical JSON for query cache keys.
+ * Canonical JSON for query cache keys.
  *
  * This is the one place the prototype touches `JSON` directly, and it is a
  * boundary by construction: the input is a JSON string a Schema codec has

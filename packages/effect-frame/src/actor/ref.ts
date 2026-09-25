@@ -101,7 +101,7 @@ interface SurfaceHooks<C extends AnyContract> {
 }
 
 /**
- * An `Unauthorized` tells the cache the principal may be gone (#30), and
+ * An `Unauthorized` tells the cache the principal may be gone, and
  * every query value this client read under it goes.
  */
 const principalMayBeGone =
@@ -134,7 +134,7 @@ const commandSurface = Effect.fn("Actor.commandSurface")(function* <C extends An
     use: (found: Provisional.Display<SnapshotOf<C>, MessageOf<C>>) => Effect.Effect<void>,
   ): Effect.Effect<void> => Option.match(display, { onNone: () => Effect.void, onSome: use });
   // Every `Unauthorized` this reference receives tells the cache that the
-  // principal may be gone (#30), and every query value this client read
+  // principal may be gone, and every query value this client read
   // under it goes. The snapshot above was authorized, so a change stream
   // that ends with `Unauthorized` means the principal changed under it. A
   // refused send or call cannot tell a changed principal from one that may

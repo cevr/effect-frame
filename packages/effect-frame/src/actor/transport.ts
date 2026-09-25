@@ -19,7 +19,7 @@ export interface Projection {
 }
 
 /**
- * One refreshed query value in a command reply (#17).
+ * One refreshed query value in a command reply.
  * A refresh that failed carries its error: the command already committed,
  * so a bad read must not undo it.
  */

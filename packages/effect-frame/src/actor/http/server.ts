@@ -37,7 +37,7 @@ export { form, type FormPostOptions } from "./form-post.js";
 export type WebHandler = (request: Request) => Effect.Effect<Response>;
 
 /**
- * Derives who is asking from the raw request (#20 §1, #30 §4). It is the
+ * Derives who is asking from the raw request. It is the
  * only place a cookie or an `Authorization` header is read. It returns
  * `Anonymous` rather than failing: refusal is a policy's job, not the
  * parser's. A request reads `get` once. A `changes` connection watches
@@ -130,7 +130,7 @@ const parseQuery = (url: URL) =>
 
 /**
  * Ends when the principal is no longer the one the connection was
- * authorized under: any change, not only a revocation (#30 §6). The source
+ * authorized under: any change, not only a revocation. The source
  * numbers only real changes, so a session revision that leaves the
  * principal equal ends nothing. `rest` is the same subscription the
  * connected value was read from, so no change between the read and the
@@ -172,8 +172,8 @@ export interface SessionBuffer {
 export const sessionBuffer: SessionBuffer = { capacity: 1, strategy: "sliding", replay: 1 };
 
 /**
- * One subscription per session, shared by every connection that follows it
- * (#30 §8). The first connection on a key opens the subscription; the rest
+ * One subscription per session, shared by every connection that follows
+ * it. The first connection on a key opens the subscription; the rest
  * join it and see its latest revision first; the last one to close
  * releases it. Revisions are numbered once, before the share, so every
  * connection compares the same numbers. `K` must compare by value, as a

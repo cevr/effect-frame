@@ -262,7 +262,7 @@ const drainsPendingOnReopen = Effect.fn("Conformance.drainsPendingOnReopen")(fun
 });
 
 /**
- * The command owner's bound (#19): eight passes, each one admission request
+ * The command owner's bound: eight passes, each one admission request
  * and one same-ID call. A store takes no clock, so the bound it sees is
  * counted in the requests those passes make, not in time.
  */
@@ -339,7 +339,7 @@ const receiptOutlivesRetryBound = Effect.fn("Conformance.receiptOutlivesRetryBou
 });
 
 /**
- * The wake is part of the committed state (#101 §5): it is stored in the
+ * The wake is part of the committed state: it is stored in the
  * same step, read back with `latest`, and replaced by the next commit, so a
  * later state that waits for nothing clears an earlier deadline.
  */

@@ -2,7 +2,7 @@ import { Context, Effect, Equal, Schema, Stream } from "effect";
 import type { Source } from "./source.js";
 
 /**
- * Who is asking (#20 §1). This module is client-safe: a value, a schema,
+ * Who is asking. This module is client-safe: a value, a schema,
  * and a comparison, with no I/O. A browser may know what a principal is. It
  * never holds the rules that judge one: those are in `policy.ts`.
  */
@@ -47,7 +47,7 @@ export interface PrincipalRevision {
 }
 
 /**
- * Who is asking, over time (#30 §4). A request reads `get` once and is
+ * Who is asking, over time. A request reads `get` once and is
  * done. A live connection watches `changes` and ends at the first revision
  * after the one it connected under. `changes` emits the current principal
  * first. A consumer that falls behind may skip revisions, but a later

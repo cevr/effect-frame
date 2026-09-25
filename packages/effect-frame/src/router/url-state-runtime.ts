@@ -10,7 +10,7 @@ import { mergeSearchRecord, readSearch, printSearch, searchKeysOf } from "./code
 import type { RouterService } from "./router.js";
 import type { Scope } from "effect";
 import { Context, Effect, Option, Predicate, Schema } from "effect";
-import * as Inspection from "../inspection.js";
+import * as Inspection from "../inspection/registry.js";
 
 /** Explicit wire keys for an opaque SearchRecord codec: the same name a segment uses. */
 export interface Options {

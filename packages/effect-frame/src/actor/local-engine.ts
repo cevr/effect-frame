@@ -1,5 +1,5 @@
 import { Deferred, Effect, Equal, Option, Queue, Ref, Stream, SubscriptionRef } from "effect";
-import * as Inspection from "../inspection.js";
+import * as Inspection from "../inspection/registry.js";
 import { refusalOf } from "./behavior-rules.js";
 import type { Behavior } from "./behavior.js";
 import type { Committed } from "./engine-types.js";

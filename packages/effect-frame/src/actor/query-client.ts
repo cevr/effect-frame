@@ -18,7 +18,7 @@ import {
   Stream,
   SubscriptionRef,
 } from "effect";
-import * as Inspection from "../inspection.js";
+import * as Inspection from "../inspection/registry.js";
 import type {
   AnyQuery,
   ArgsOf,

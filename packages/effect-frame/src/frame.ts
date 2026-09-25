@@ -1,11 +1,6 @@
-import { Context, Effect, Layer, Match, Option, Schema } from "effect";
-import type {
-  CommandLifecycle as InspectionCommandLifecycle,
-  QueryValue as InspectionQueryValue,
-  Record as InspectionRecord,
-  Sample,
-} from "./inspection.js";
-import * as Inspection from "./inspection.js";
+import { Context, Effect, Layer, Option, Schema } from "effect";
+import type { Record as InspectionRecord, Sample } from "./inspection/registry.js";
+import * as Inspection from "./inspection/registry.js";
 
 // ---------------------------------------------------------------------------
 // Public snapshot schema
@@ -62,7 +57,8 @@ const Actor = Schema.TaggedStruct("Actor", {
   revision: Schema.Finite,
 });
 
-const QueryValueSchema = Schema.Union([
+/** A query's current value as the snapshot shows it: absent, encoded, or not encodable. */
+export const QueryValue = Schema.Union([
   Schema.TaggedStruct("Absent", {}),
   Schema.TaggedStruct("Encoded", {
     encoding: Schema.Literal("json"),
@@ -70,6 +66,7 @@ const QueryValueSchema = Schema.Union([
   }),
   Schema.TaggedStruct("Unsupported", { reason: Schema.String }),
 ]);
+export type QueryValue = Schema.Schema.Type<typeof QueryValue>;
 
 const Query = Schema.TaggedStruct("Query", {
   ...RecordFields,
@@ -78,7 +75,7 @@ const Query = Schema.TaggedStruct("Query", {
   state: Schema.Literals(["Loading", "Ready", "Failed"]),
   stale: Schema.NullOr(Schema.Boolean),
   ageMs: Schema.Finite,
-  value: QueryValueSchema,
+  value: QueryValue,
   failure: Schema.NullOr(DiagnosticValue),
 });
 
@@ -101,15 +98,20 @@ const UrlState = Schema.TaggedStruct("UrlState", {
   value: DiagnosticValue,
 });
 
-/** The open lifecycle of one retained command. */
-const CommandLifecycle = Schema.Union([
+/**
+ * The open lifecycle of one retained command. Terminal commands are not
+ * retained. An `Uncertain` command's `admitted` is `None` when no pass was
+ * admitted; on the wire it is `null`.
+ */
+export const CommandLifecycle = Schema.Union([
   Schema.TaggedStruct("Sent", {}),
   Schema.TaggedStruct("Admitted", { admitted: Schema.Finite }),
   Schema.TaggedStruct("Uncertain", {
     attempt: Schema.Finite,
-    admitted: Schema.NullOr(Schema.Finite),
+    admitted: Schema.OptionFromNullOr(Schema.Finite),
   }),
 ]);
+export type CommandLifecycle = Schema.Schema.Type<typeof CommandLifecycle>;
 
 /**
  * One command a durable or remote reference retains now: unresolved, or
@@ -412,34 +414,6 @@ const base = (record: InspectionRecord) => ({
   parentOwnerId: Option.getOrNull(Option.map(record.parentOwnerId, identity)),
 });
 
-export type QueryValue = Schema.Schema.Type<typeof QueryValueSchema>;
-
-const toQueryValue = (value: InspectionQueryValue): QueryValue =>
-  Match.type<InspectionQueryValue>().pipe(
-    Match.withReturnType<QueryValue>(),
-    Match.tagsExhaustive({
-      Absent: () => ({ _tag: "Absent" }),
-      Encoded: (encoded) => ({ _tag: "Encoded", encoding: "json", value: encoded.value }),
-      Unsupported: (unsupported) => ({ _tag: "Unsupported", reason: unsupported.reason }),
-    }),
-  )(value);
-
-type SnapshotCommandLifecycle = Snapshot["commands"]["records"][number]["lifecycle"];
-
-const toCommandLifecycle = (lifecycle: InspectionCommandLifecycle): SnapshotCommandLifecycle =>
-  Match.valueTags(lifecycle, {
-    Sent: (): SnapshotCommandLifecycle => ({ _tag: "Sent" }),
-    Admitted: (admitted): SnapshotCommandLifecycle => ({
-      _tag: "Admitted",
-      admitted: admitted.admitted,
-    }),
-    Uncertain: (uncertain): SnapshotCommandLifecycle => ({
-      _tag: "Uncertain",
-      attempt: uncertain.attempt,
-      admitted: Option.getOrNull(uncertain.admitted),
-    }),
-  });
-
 const toSnapshot = (sample: Sample): Snapshot => {
   const mounts: Array<Snapshot["mounts"][number]> = [];
   const routes: Array<Snapshot["routes"][number]> = [];
@@ -484,7 +458,7 @@ const toSnapshot = (sample: Sample): Snapshot => {
           state: record.state,
           stale: Option.getOrNull(record.stale),
           ageMs: record.ageMs,
-          value: toQueryValue(record.value),
+          value: record.value,
           failure: Option.getOrNull(Option.map(record.failure, toDiagnostic)),
         });
         break;
@@ -497,7 +471,7 @@ const toSnapshot = (sample: Sample): Snapshot => {
           identity: record.identity,
           attempt: record.attempt,
           running: record.running,
-          lifecycle: toCommandLifecycle(record.lifecycle),
+          lifecycle: record.lifecycle,
         });
         break;
       case "UrlState":

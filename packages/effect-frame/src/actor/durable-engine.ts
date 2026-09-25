@@ -13,7 +13,7 @@ import {
   Stream,
   SubscriptionRef,
 } from "effect";
-import * as Inspection from "../inspection.js";
+import * as Inspection from "../inspection/registry.js";
 import type { Behavior } from "./behavior.js";
 import { refusalOf, wakeOf } from "./behavior-rules.js";
 import type { Committed } from "./engine-types.js";

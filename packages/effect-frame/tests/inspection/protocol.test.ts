@@ -71,6 +71,28 @@ describe("effect-frame/inspection protocol", () => {
       }),
   );
 
+  it.effect("keeps an uncertain command's unadmitted pass as null on the wire", () =>
+    Effect.gen(function* () {
+      const wire = Schema.fromJsonString(Frame.CommandLifecycle);
+      const encode = Schema.encodeEffect(wire);
+      const decode = Schema.decodeUnknownEffect(wire);
+      const none: Frame.CommandLifecycle = {
+        _tag: "Uncertain",
+        attempt: 2,
+        admitted: Option.none(),
+      };
+      const some: Frame.CommandLifecycle = {
+        _tag: "Uncertain",
+        attempt: 2,
+        admitted: Option.some(5),
+      };
+      const noneText = '{"_tag":"Uncertain","attempt":2,"admitted":null}';
+      expect(yield* encode(none)).toBe(noneText);
+      expect(yield* encode(some)).toBe('{"_tag":"Uncertain","attempt":2,"admitted":5}');
+      expect(yield* decode(noneText)).toEqual(none);
+    }),
+  );
+
   it.effect("refuses a document of another version", () =>
     Effect.sync(() => {
       const decode = Schema.decodeUnknownExit(Protocol.ReaderResponse);

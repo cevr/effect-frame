@@ -21,7 +21,7 @@ import type {
 } from "effect-frame/actor/client";
 import { CommandPolicy } from "../../src/actor/command-owner.js";
 import * as Frame from "../../src/frame.js";
-import * as Inspection from "../../src/inspection.js";
+import * as Inspection from "../../src/inspection/registry.js";
 
 const Counter = contract("CommandCacheCounter", {
   version: 1,
@@ -448,7 +448,7 @@ describe("cache command ownership", () => {
             identity: "fresh",
             attempt: 1,
             running: false,
-            lifecycle: { _tag: "Uncertain", attempt: 1, admitted: 1 },
+            lifecycle: { _tag: "Uncertain", attempt: 1, admitted: Option.some(1) },
           }),
         ],
       });

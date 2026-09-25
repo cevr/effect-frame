@@ -1,5 +1,8 @@
 import { Clock, Context, Effect, Option } from "effect";
 import type { Scope } from "effect";
+import type { CommandLifecycle, QueryValue } from "../frame.js";
+
+export type { CommandLifecycle, QueryValue } from "../frame.js";
 
 /**
  * The records in this module are deliberately smaller than the public
@@ -22,11 +25,6 @@ export interface ActorRecord {
 }
 
 export type QueryStateTag = "Loading" | "Ready" | "Failed";
-
-export type QueryValue =
-  | { readonly _tag: "Absent" }
-  | { readonly _tag: "Encoded"; readonly encoding: "json"; readonly value: string }
-  | { readonly _tag: "Unsupported"; readonly reason: string };
 
 export interface QueryRecord {
   readonly _tag: "Query";
@@ -75,16 +73,6 @@ export interface UrlStateRecord {
   readonly value: unknown;
 }
 
-/** The open lifecycle of one retained command. Terminal commands are not retained. */
-export type CommandLifecycle =
-  | { readonly _tag: "Sent" }
-  | { readonly _tag: "Admitted"; readonly admitted: number }
-  | {
-      readonly _tag: "Uncertain";
-      readonly attempt: number;
-      readonly admitted: Option.Option<number>;
-    };
-
 /**
  * One command record the owner retains now. It is read from the owner's own
  * record; no payload or message is part of it.
@@ -130,7 +118,7 @@ export interface RegistryService {
   readonly rootId: string;
   readonly rootName: Option.Option<string>;
   readonly rootOwner: OwnerToken;
-  readonly makeOwner: (parent: Option.Option<OwnerToken>) => OwnerToken;
+  readonly makeOwner: (parent: Option.Option<OwnerToken>) => Effect.Effect<OwnerToken>;
   readonly register: (
     owner: OwnerToken,
     read: (id: string) => Effect.Effect<Record>,
@@ -139,20 +127,16 @@ export interface RegistryService {
 }
 
 export class Registry extends Context.Service<Registry, RegistryService>()(
-  "effect-frame/src/inspection/Registry",
+  "effect-frame/src/inspection/registry",
 ) {}
 
 export class Owner extends Context.Service<Owner, OwnerToken>()(
-  "effect-frame/src/inspection/Owner",
+  "effect-frame/src/inspection/registry/Owner",
 ) {}
 
+/** A new owner under the `Owner` in context, or under none. */
 export const ownerFor = (registry: RegistryService): Effect.Effect<OwnerToken> =>
-  Effect.map(Effect.serviceOption(Owner), (parent) =>
-    Option.match(parent, {
-      onNone: () => registry.makeOwner(Option.none()),
-      onSome: (value) => registry.makeOwner(Option.some(value)),
-    }),
-  );
+  Effect.flatMap(Effect.serviceOption(Owner), registry.makeOwner);
 
 export const makeRegistry = (
   name: Option.Option<string>,
@@ -168,15 +152,16 @@ export const makeRegistry = (
     let ownerSequence = 0;
     let recordSequence = 0;
 
-    const makeOwner = (parent: Option.Option<OwnerToken>): OwnerToken => {
-      ownerSequence += 1;
-      return {
-        id: `${rootId}-owner-${ownerSequence}`,
-        parentId: Option.map(parent, (value) => value.id),
-      };
-    };
+    const makeOwner = (parent: Option.Option<OwnerToken>): Effect.Effect<OwnerToken> =>
+      Effect.sync(() => {
+        ownerSequence += 1;
+        return {
+          id: `${rootId}-owner-${ownerSequence}`,
+          parentId: Option.map(parent, (value) => value.id),
+        };
+      });
 
-    const rootOwner = makeOwner(Option.none());
+    const rootOwner = yield* makeOwner(Option.none());
 
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {

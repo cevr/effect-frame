@@ -12,7 +12,7 @@ import {
   Scope,
   SubscriptionRef,
 } from "effect";
-import * as Inspection from "../inspection.js";
+import * as Inspection from "../inspection/registry.js";
 import { freshCommandId } from "./command-id.js";
 import type { Committed } from "./engine-types.js";
 import type { QueryKey } from "./query.js";

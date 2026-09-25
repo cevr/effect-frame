@@ -37,7 +37,7 @@ import type {
 import { repopulate } from "./form.js";
 import type { ScopesClosed } from "./readiness.js";
 import type { Attached, Bound, Handler, PlainPost, Prepared, View } from "./view.js";
-import * as Inspection from "../inspection.js";
+import * as Inspection from "../inspection/registry.js";
 
 /**
  * The mount runtime. It walks one JSX tree, resolves every explicitly bound

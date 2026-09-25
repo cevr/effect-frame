@@ -25,7 +25,7 @@ import {
   Runtime as UrlStateRuntime,
   makeRuntime as makeUrlStateRuntime,
 } from "./url-state-runtime.js";
-import * as Inspection from "../inspection.js";
+import * as Inspection from "../inspection/registry.js";
 import type { NavigationKind } from "./check.js";
 import { CheckNavigation, RedirectCycle, read as readChecks, redirectLimit } from "./check.js";
 import type { NavigationResult } from "./receipt.js";
@@ -615,7 +615,7 @@ export const mount: <R, HostNode, N = R>(
             const phase = yield* Ref.make<"entering" | "mounted">("entering");
             let routeOwner = Option.none<Inspection.OwnerToken>();
             if (Option.isSome(registry)) {
-              routeOwner = Option.some(registry.value.makeOwner(routerOwner));
+              routeOwner = Option.some(yield* registry.value.makeOwner(routerOwner));
             }
             let routeInstanceId = Option.none<string>();
             if (Option.isSome(registry) && Option.isSome(routeOwner)) {

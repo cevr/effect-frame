@@ -320,9 +320,9 @@ three dependency classes:
   no other source for them.
   It depends only on `effect` core (`unstable/rpc`, `unstable/socket`,
   `unstable/net`) and `effect-frame/frame`. The build proof shows it stays out
-  of a production entry that does not import it. Its source sits in a
-  directory because `src/inspection.ts` is the internal record registry that
-  the router and actors import.
+  of a production entry that does not import it. The directory also holds
+  `registry.ts`, the internal record registry that the router and actors
+  import; `index.ts` does not import it, and the subpath does not export it.
 - `@effect-frame/inspect` (`packages/inspect`, `bin: effect-frame`, built by
   tsdown to `dist/bin.js` with a `bun` shebang): the gateway and the reader.
   It is the only piece that imports Bun. Keeping it out of `effect-frame`
@@ -369,7 +369,7 @@ effect-frame inspect --url <gateway> --root <id|prefix|name> [--json]
   (`Reader.ClientError`, `Reader.Document`) live in `packages/inspect`. The
   deadline bound and the loopback hosts are `Protocol` constants. They
   describe the executable's output, not the wire between browser and gateway.
-- The internal record registry `packages/effect-frame/src/inspection.ts`
+- The internal record registry `packages/effect-frame/src/inspection/registry.ts`
   stays internal; only `src/inspection/index.ts` is exported.
 
 ### Choices made while promoting

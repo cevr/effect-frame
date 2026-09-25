@@ -153,10 +153,9 @@ const AlertsCard = (props: OverviewProps) =>
 
 export const OverviewView = (props: OverviewProps) =>
   Effect.gen(function* () {
-    const params = yield* props.params.get;
-    const week = yield* link(overview, params, { range: "7d" });
-    const month = yield* link(overview, params, {});
-    const ever = yield* link(overview, params, { range: "all" });
+    const week = yield* link(overview, props.params, { range: "7d" });
+    const month = yield* link(overview, props.params, {});
+    const ever = yield* link(overview, props.params, { range: "all" });
     const range = Source.select(props.search, (search) =>
       rangeLabel(Option.fromNullishOr(search.range)),
     );

@@ -242,6 +242,9 @@ const program = Effect.gen(function* () {
 - `link` takes a segment. `Link` draws `aria-current="page"`
   on the destination, and `aria-current="true"` on a segment the current URL
   continues below. Neither holds on not-found or on another route.
+- `link(to, params, search)` takes fixed params or a `Source` of them. A
+  layout that outlives a param move passes `props.params`, so its links
+  follow the params it holds now instead of the ones it was drawn with.
 - `Route.client(name, root)` takes a branch of a root segment only, and so
   do `Route.ssr`, `Route.streamed`, and `Route.awaitAll`. A mode is the
   constructor; no route value carries a mode field.

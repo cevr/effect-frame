@@ -1,7 +1,7 @@
 import { Source } from "effect-frame/actor/client";
 import type { Child, Node } from "effect-frame/view";
 import { Dom, View } from "effect-frame/view";
-import { Effect, Option, Predicate } from "effect";
+import { Effect, Option, Predicate, Stream } from "effect";
 import type { Current, Linkable, SearchUpdater } from "./codec.js";
 import { Router } from "./router.js";
 
@@ -28,28 +28,63 @@ export interface Link {
 export type LinkSearch<Search> = Search | SearchUpdater<Search>;
 
 /**
+ * Fixed params, or a `Source` of them the link follows. A view that
+ * outlives a param move (a layout while its params change) passes a Source,
+ * so its links print and move with the params it holds now.
+ */
+export type LinkParams<Params> = Params | Source<Params>;
+
+/**
  * A segment is the page while a tree that holds it matched and the URL ends
  * at it, and an ancestor while the URL continues below it. Not-found and
  * another route are neither.
+ *
+ * ```ts
+ * // Fixed params: a list page's link to one list.
+ * const inbox = yield* link(list, { list: "inbox" }, {});
+ * // A layout's link that follows its own params across a tenant move.
+ * const home = yield* link(overview, props.params, {});
+ * ```
  */
 export const link = <Params, Search>(
   to: Linkable<Params, Search>,
-  params: NoInfer<Params>,
+  params: LinkParams<NoInfer<Params>>,
   search: LinkSearch<NoInfer<Search>>,
 ): Effect.Effect<Link, never, Router> =>
   Effect.gen(function* () {
     const router = yield* Router;
-    const hrefAt = (url: URL): string => to.hrefAt(url, params, searchAt(to, url, search));
-    const href = Source.select(router.current, (match) => hrefAt(match.url));
+    const held = paramsSource(params);
+    const hrefAt =
+      (fixed: Params) =>
+      (url: URL): string =>
+        to.hrefAt(url, fixed, searchAt(to, url, search));
+    const href = Source.zip(router.current, held, (match, fixed) => hrefAt(fixed)(match.url));
     const current = Source.select(router.current, (match) => to.currentAt(match));
     return {
       href,
       current,
       active: Source.select(current, (where) => where !== "none"),
-      push: router.push(hrefAt),
-      replace: router.replace(hrefAt),
+      push: Effect.flatMap(held.get, (fixed) => router.push(hrefAt(fixed))),
+      replace: Effect.flatMap(held.get, (fixed) => router.replace(hrefAt(fixed))),
     };
   });
+
+const paramsSource = <Params,>(params: LinkParams<Params>): Source<Params> => {
+  if (isParamsSource(params)) {
+    return params;
+  }
+  return Source.succeed(params);
+};
+
+/** A Source is a `get` Effect and a `changes` Stream; a params record is neither. */
+function isParamsSource<Params>(params: LinkParams<Params>): params is Source<Params> {
+  return (
+    Predicate.hasProperty(params, "get") &&
+    Predicate.hasProperty(params, "changes") &&
+    Effect.isEffect(params.get) &&
+    Stream.isStream(params.changes)
+  );
+}
 
 const searchAt = <Params, Search>(
   to: Linkable<Params, Search>,

@@ -94,9 +94,8 @@ export const DashShell = <ChildR,>(props: Route.LayoutPropsOf<typeof dash, Child
           alerts: 0,
         });
         const tenant = Source.select(header, (shown) => shown.value);
-        const params = yield* props.params.get;
-        const home = yield* link(overview, params, {});
-        const book = yield* link(ordersIndex, params, {});
+        const home = yield* link(overview, props.params, {});
+        const book = yield* link(ordersIndex, props.params, {});
         const memo = yield* MemoCard(props.data.memo.ref);
         const outlet = yield* props.outlet;
         return (

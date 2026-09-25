@@ -4,8 +4,14 @@ registerDom();
 
 // Public imports only: this file is the application's view of the route
 // surface. See `docs/design/route-public.md`.
-import { implementQuery, query as queryContract, Policies, Policy } from "effect-frame/actor";
-import type { ActorTransport, QueryCache, Source } from "effect-frame/actor";
+import {
+  implementQuery,
+  query as queryContract,
+  Policies,
+  Policy,
+  Source,
+} from "effect-frame/actor";
+import type { ActorTransport, QueryCache } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import * as Frame from "effect-frame/frame";
 import {
@@ -587,6 +593,43 @@ const compiled = [
   hiddenCheck,
 ];
 
+// A layout that outlives a param move: its links follow the params Source.
+const space = Route.segment("space", {
+  path: "/space/:space",
+  params: Schema.Struct({ space: Schema.String }),
+});
+const room = Route.child(space, "room", {
+  path: "rooms/:room",
+  params: Schema.Struct({ room: Schema.String }),
+});
+const Spaces = Route.client(
+  "spaces",
+  Route.layout(
+    space,
+    [
+      Route.leaf(room, (props) =>
+        Effect.succeed(<p id="room">{View.bind(props.params, (params) => params.room)}</p>),
+      ),
+    ],
+    (props) =>
+      Effect.gen(function* () {
+        const lobby = yield* link(
+          room,
+          Source.select(props.params, (params) => ({ space: params.space, room: "lobby" })),
+          {},
+        );
+        return (
+          <nav id="spaces">
+            <Link link={lobby} class="lobby">
+              lobby
+            </Link>
+            {yield* props.outlet}
+          </nav>
+        );
+      }),
+  ),
+);
+
 // ---------------------------------------------------------------------------
 // Proofs
 // ---------------------------------------------------------------------------
@@ -743,6 +786,35 @@ describe("public nested routes", () => {
         yield* page.waitFor({ label: "not found", until: (actual) => hasAt(actual, "#missing") });
         expect(yield* where).toEqual(["none", "none"]);
         expect(yield* homeLink.active.get).toBe(false);
+      }),
+  );
+
+  it.scoped.layer(frameLayer("public-link-params"))(
+    "3. a link given a params Source prints and moves with the params it holds now",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* makeRoot;
+        const { page, router, location } = yield* mountApp(Spaces, root, "/space/s1/rooms/a");
+        yield* page.waitFor({
+          label: "room a",
+          until: (actual) => textAt(actual, "#room") === "a",
+        });
+        expect(attributeAt(root, "a.lobby", "href")).toBe("/space/s1/rooms/lobby");
+
+        // The layout stays; its params move to s2, and the link follows.
+        yield* router.push("/space/s2/rooms/b");
+        yield* page.waitFor({
+          label: "the lobby link in s2",
+          until: (actual) =>
+            textAt(actual, "#room") === "b" &&
+            attributeAt(root, "a.lobby", "href") === "/space/s2/rooms/lobby",
+        });
+        yield* click(root, "a.lobby");
+        yield* page.waitFor({
+          label: "the s2 lobby",
+          until: (actual) => textAt(actual, "#room") === "lobby",
+        });
+        expect(location.history.at(-1)).toBe("push /space/s2/rooms/lobby");
       }),
   );
 });

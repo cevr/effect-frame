@@ -3,7 +3,7 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import { Actor, Behavior, Value, modify } from "effect-frame/actor";
-import type { LocalActorRef, SetValue, Source } from "effect-frame/actor";
+import type { LocalValueRef, Source } from "effect-frame/actor";
 import { Dom, For, Portal, Show, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import type { Host } from "effect-frame/view";
@@ -259,7 +259,7 @@ const idOf = (node: Node): string => {
 };
 
 const recordWith = (
-  events: LocalActorRef<ReadonlyArray<string>, SetValue<ReadonlyArray<string>>>,
+  events: LocalValueRef<ReadonlyArray<string>>,
   label: string,
 ): Effect.Effect<void> => Effect.asVoid(modify(events, (labels) => [...labels, label]));
 

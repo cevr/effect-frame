@@ -7,8 +7,7 @@ import {
   Behavior,
   implementQuery,
   query,
-  type LocalActorRef,
-  type SetValue,
+  type LocalValueRef,
   Policies,
   Policy,
   QueryCache,
@@ -93,7 +92,7 @@ const SearchPage = () =>
     }),
   });
 
-const InspectionPage = (local: LocalActorRef<string, SetValue<string>>) =>
+const InspectionPage = (local: LocalValueRef<string>) =>
   Effect.gen(function* () {
     const search = yield* SearchPage();
     return (

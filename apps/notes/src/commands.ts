@@ -1,4 +1,4 @@
-import type { LocalActorRef, RemoteActorRef, SetValue } from "effect-frame/actor/client";
+import type { LocalValueRef, RemoteActorRef } from "effect-frame/actor/client";
 import { Generated, Value } from "effect-frame/actor/client";
 import { Effect } from "effect";
 import type { Notes, NotesMessage } from "./contract.js";
@@ -18,15 +18,13 @@ export const dispatch = Effect.fn("Notes.dispatch")(function* (
   return yield* notes.send(message);
 });
 
-export type DraftRef = LocalActorRef<string, SetValue<string>>;
-
 /**
  * Write the draft text. The draft actor dies with the view; a keystroke that
  * arrives after the scope closed gets a Rejected handle, which the view
  * drops.
  */
 export const writeDraft =
-  (draft: DraftRef) =>
+  (draft: LocalValueRef<string>) =>
   (text: string): Effect.Effect<void> =>
     Effect.asVoid(draft.send(Value.Set(text)));
 

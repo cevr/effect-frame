@@ -19,7 +19,7 @@ _Avoid_: Actor contract.
 
 **Actor reference**:
 A client's handle for observing an actor and submitting its messages. Its placement is named where it is made, and shows in its type.
-_Code_: `Actor.local` (`LocalActorRef`), `Actor.remote` (`RemoteActorRef`), `Actor.remoteCommands` (`RemoteCommandRef`), `Actor.durable` (server only).
+_Code_: `Actor.local` (`LocalActorRef`; `LocalValueRef<A>` for `Actor.local(Behavior.value(a))`), `Actor.remote` (`RemoteActorRef`), `Actor.remoteCommands` (`RemoteCommandRef`), `Actor.durable` (server only).
 _Avoid_: Actor instance.
 
 **Public snapshot**:

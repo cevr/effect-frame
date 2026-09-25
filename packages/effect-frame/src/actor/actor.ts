@@ -154,6 +154,13 @@ export const local = Effect.fn("Actor.local")(function* <
 });
 
 /**
+ * A local reference to a `Behavior.value` actor: the reference type of
+ * `Actor.local(Behavior.value(initial))`. Name it where the reference crosses
+ * a function boundary, such as a prop.
+ */
+export type LocalValueRef<A, Refusal = never> = LocalActorRef<A, SetValue<A>, Refusal>;
+
+/**
  * Update simple state from its current value inside one turn. Only a local
  * reference to a `Behavior.value` actor has this. The message that reaches the
  * behavior is still a plain `Set`. It returns the handle, as `send` does, and
@@ -164,17 +171,15 @@ export const local = Effect.fn("Actor.local")(function* <
 export const modify: {
   <A>(
     update: (value: A) => A,
-  ): <Refusal>(
-    ref: LocalActorRef<A, SetValue<A>, Refusal>,
-  ) => Effect.Effect<CommandHandle<A, "local", Refusal>>;
+  ): <Refusal>(ref: LocalValueRef<A, Refusal>) => Effect.Effect<CommandHandle<A, "local", Refusal>>;
   <A, Refusal>(
-    ref: LocalActorRef<A, SetValue<A>, Refusal>,
+    ref: LocalValueRef<A, Refusal>,
     update: (value: A) => A,
   ): Effect.Effect<CommandHandle<A, "local", Refusal>>;
 } = Function.dual(
   2,
   <A, Refusal>(
-    ref: LocalActorRef<A, SetValue<A>, Refusal>,
+    ref: LocalValueRef<A, Refusal>,
     update: (value: A) => A,
   ): Effect.Effect<CommandHandle<A, "local", Refusal>> =>
     ref.derive((value) => Value.Set(update(value))),

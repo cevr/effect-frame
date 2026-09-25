@@ -7,7 +7,7 @@
 export * as Behavior from "./behavior.js";
 export { Value, type SetValue } from "./set-value.js";
 export type { Turn } from "./behavior.js";
-export { modify, type LocalActorRef } from "./actor.js";
+export { modify, type LocalActorRef, type LocalValueRef } from "./actor.js";
 export { Actor } from "./placement.js";
 export * from "./vocabulary.js";
 export {

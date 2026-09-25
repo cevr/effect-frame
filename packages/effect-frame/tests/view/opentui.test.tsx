@@ -1,6 +1,6 @@
 /** @jsxImportSource effect-frame/view/opentui */
 import { Actor, Behavior, Value, modify, Source } from "effect-frame/actor";
-import type { LocalActorRef, QueryState, SetValue } from "effect-frame/actor";
+import type { LocalValueRef, QueryState } from "effect-frame/actor";
 import { View } from "effect-frame/view";
 import type { Host } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -48,7 +48,7 @@ const terminalText = (node: BaseRenderable): string => {
 };
 
 interface CounterProps {
-  readonly count: LocalActorRef<number, SetValue<number>>;
+  readonly count: LocalValueRef<number>;
 }
 
 const Counter = (props: CounterProps) =>
@@ -59,7 +59,7 @@ const Counter = (props: CounterProps) =>
   );
 
 interface DraftProps {
-  readonly draft: LocalActorRef<string, SetValue<string>>;
+  readonly draft: LocalValueRef<string>;
 }
 
 const Composer = (props: DraftProps) =>

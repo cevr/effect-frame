@@ -20,7 +20,7 @@ import type {
   ContractMismatch,
   Displayed,
   IdentifiedCommandHandle,
-  LocalActorRef,
+  LocalValueRef,
   MailboxStore,
   Provisional,
   ProvisionalRevision,
@@ -203,7 +203,7 @@ const localRequirementsAreExact: Equals<
 > = true;
 const localRefType: Equals<
   Effect.Success<ReturnType<typeof spawnNeeding>>,
-  LocalActorRef<number, SetValue<number>>
+  LocalValueRef<number>
 > = true;
 const durableNeeding = () =>
   Actor.durable({

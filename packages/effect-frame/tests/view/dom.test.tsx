@@ -3,7 +3,7 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import { Actor, Behavior, Value, modify, Source } from "effect-frame/actor";
-import type { LocalActorRef, SetValue } from "effect-frame/actor";
+import type { LocalValueRef } from "effect-frame/actor";
 import { Dom, For, Match, Portal, Show, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import type { Host, ScopesClosed } from "effect-frame/view";
@@ -769,7 +769,7 @@ describe("browser view", () => {
     Effect.gen(function* () {
       const root = yield* makeRoot;
       const finished = yield* Ref.make(false);
-      const spawned = yield* Ref.make<ReadonlyArray<LocalActorRef<number, SetValue<number>>>>([]);
+      const spawned = yield* Ref.make<ReadonlyArray<LocalValueRef<number>>>([]);
 
       const Owned = (_props: NoProps) =>
         Effect.gen(function* () {
@@ -837,7 +837,7 @@ const titlesAt = (root: Node): ReadonlyArray<string> => {
 };
 
 const setTasks = Effect.fn("DomTest.setTasks")(function* (
-  tasks: LocalActorRef<ReadonlyArray<Task>, SetValue<ReadonlyArray<Task>>>,
+  tasks: LocalValueRef<ReadonlyArray<Task>>,
   next: ReadonlyArray<Task>,
 ) {
   yield* tasks.call(Value.Set(next));

@@ -36,7 +36,7 @@ A message a client submits to an actor to change its state. Every state change i
 _Avoid_: Mutation, action, server function.
 
 **View**:
-A function from props to an Effect that produces a node tree once, in a scope that owns everything the setup opened. A view is composed by yielding it inside another view's setup, never by placing it as a JSX tag; a JSX tag is a synchronous function or an intrinsic name.
+A function from props to an Effect that produces a node tree once, in a scope that owns everything the setup opened. A view is composed by yielding it inside another view's setup, never by placing it as a JSX tag; a JSX tag is a synchronous function or an intrinsic name. A view names the props it is given, even when it reads none: a leaf types them `Route.PropsOf<typeof segment>`. An exported view with no parameter is refused by the Effect language service's `lazyEffect` rule.
 _Code_: `(props) => Effect.gen(function* () { ... })`, typed `View.View<Props, E, R>`. `View.mount` puts a view on a host; the router's `mount` puts a route tree on one.
 _Avoid_: Component, widget, render function.
 

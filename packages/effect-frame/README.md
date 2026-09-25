@@ -14,6 +14,11 @@ typechecks, lints and tests (`tests/examples/`). The words are defined in
 - A view is a function of its props that returns an Effect:
   `(props) => Effect.gen(function* () { ... })`. It runs once per mounted
   identity. A change moves only what binds the source that changed.
+- A view names the props it is given, even a page that reads none: a leaf
+  types them `Route.PropsOf<typeof segment>`, a layout
+  `Route.LayoutPropsOf<typeof segment, ChildR>`. The Effect language
+  service's `lazyEffect` rule refuses an exported view with no parameter,
+  `() => Effect.gen(...)`.
 - A child view is a function the parent yields, never a JSX tag. A
   PascalCase JSX tag is one of `For`, `Show`, `Match`, `Portal` or `Await`.
 - A contract, a query, and a behavior are browser safe. The server half of

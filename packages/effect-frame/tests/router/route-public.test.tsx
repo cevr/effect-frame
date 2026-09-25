@@ -37,15 +37,19 @@ const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }
 // ---------------------------------------------------------------------------
 
 const TenantInfo = queryContract("PublicTenantInfo", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ tenant: Schema.String }),
   result: Schema.String,
+  depends: [],
 });
 
 const PostBody = queryContract("PublicPostBody", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
   result: Schema.String,
+  depends: [],
 });
 
 const TenantLive = implementQuery(TenantInfo, ({ tenant }) => Effect.succeed(`Tenant ${tenant}`));

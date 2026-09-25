@@ -8,9 +8,11 @@ import { Policies, Policy } from "../../src/actor/policy.js";
 import { describe, expect, it } from "effect-bun-test";
 
 const RootCloseQuery = query("InspectionRootCloseProbe", {
+  version: 1,
   policy: "public",
   args: Schema.String,
   result: Schema.String,
+  depends: [],
 });
 
 describe("QueryTest root ownership", () => {

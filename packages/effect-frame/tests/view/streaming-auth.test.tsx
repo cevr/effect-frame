@@ -39,9 +39,11 @@ import {
  */
 
 const Secret = query("StreamSecret", {
+  version: 1,
   args: Schema.Struct({ id: Schema.String }),
   result: Schema.Struct({ label: Schema.String }),
   policy: "member",
+  depends: [],
 });
 
 const secretLabel = "classified-label";

@@ -28,6 +28,7 @@ export type RangeArgs = Schema.Schema.Type<typeof RangeArgs>;
  * is why it names `Alerts`: an `Ack` changes it.
  */
 export const TenantInfo = query("TenantInfo", {
+  version: 1,
   args: TenantArgs,
   result: Schema.Struct({ name: Schema.String, plan: Schema.String, alerts: Schema.Finite }),
   policy: "tenantMember",
@@ -39,6 +40,7 @@ export type Point = Schema.Schema.Type<typeof Point>;
 
 /** Fulfilled revenue per day in the window. */
 export const Revenue = query("Revenue", {
+  version: 1,
   args: RangeArgs,
   result: Schema.Struct({ points: Schema.Array(Point) }),
   policy: "tenantMember",
@@ -51,6 +53,7 @@ export const Revenue = query("Revenue", {
  * differs so one module can import both.
  */
 export const OrderList = query("Orders", {
+  version: 1,
   args: RangeArgs,
   result: Schema.Struct({ rows: Schema.Array(OrderRow) }),
   policy: "tenantMember",
@@ -62,6 +65,7 @@ export type Stage = Schema.Schema.Type<typeof Stage>;
 
 /** How many orders in the window were placed, are open, fulfilled, cancelled. */
 export const Funnel = query("Funnel", {
+  version: 1,
   args: RangeArgs,
   result: Schema.Struct({ stages: Schema.Array(Stage) }),
   policy: "tenantMember",
@@ -77,6 +81,7 @@ export type Latency = Schema.Schema.Type<typeof Latency>;
  * own `refresh` reads it again.
  */
 export const Slowest = query("Slowest", {
+  version: 1,
   args: TenantArgs,
   result: Schema.Struct({ rows: Schema.Array(Latency) }),
   policy: "tenantMember",
@@ -85,6 +90,7 @@ export const Slowest = query("Slowest", {
 
 /** The open orders, oldest first: the orders page's detail panel. */
 export const OrderDetail = query("OrderDetail", {
+  version: 1,
   args: TenantArgs,
   result: Schema.Struct({ rows: Schema.Array(OrderRow) }),
   policy: "tenantMember",

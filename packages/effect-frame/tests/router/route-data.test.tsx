@@ -1062,9 +1062,11 @@ describe("an exited segment releases its scope and its unshared keys (#18 §4.3)
 // ---------------------------------------------------------------------------
 
 const Secret = query("RouteSecret", {
+  version: 1,
   args: Schema.Struct({ id: Schema.String }),
   result: Schema.Struct({ label: Schema.String }),
   policy: "member",
+  depends: [],
 });
 
 const secretLabel = "classified-label";

@@ -42,21 +42,27 @@ const ProbeLive = implementTransparent(
 );
 
 const Single = query("ApplicationServiceSingle", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({}),
   result: Schema.Struct({ value: Schema.Finite }),
+  depends: [],
 });
 
 const Batched = query.batched("ApplicationServiceBatch", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
   result: Schema.Struct({ value: Schema.Finite }),
+  depends: [],
 });
 
 const ActorReading = query("ActorReading", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
   result: Schema.Finite,
+  depends: [],
 });
 
 const batchReleases = { current: 0 };
@@ -118,11 +124,31 @@ const hostWithoutApplicationValue = ActorHost.layer({
   store: ActorHost.memoryStore,
 }).pipe(Layer.provide(policies));
 
-// A host names its mailbox store: there is no in-memory default to lose
-// durability to.
-// @ts-expect-error `store` is required
-const hostWithoutStore = ActorHost.layer({ implementations: [ProbeLive] });
-void hostWithoutStore;
+// Declarations the types refuse. Never run: each would fail at run time.
+const refusedDeclarations = () => {
+  // A host names its mailbox store: there is no in-memory default to lose
+  // durability to.
+  // @ts-expect-error `store` is required
+  const hostWithoutStore = ActorHost.layer({ implementations: [ProbeLive] });
+
+  // A query names its version and its dependencies: neither has a default.
+  // @ts-expect-error `version` is required
+  const withoutVersion = query("NoVersion", {
+    args: Schema.String,
+    result: Schema.String,
+    policy: "public",
+    depends: [],
+  });
+  // @ts-expect-error `depends` is required; `depends: []` is written on purpose
+  const withoutDepends = query("NoDepends", {
+    version: 1,
+    args: Schema.String,
+    result: Schema.String,
+    policy: "public",
+  });
+  return [hostWithoutStore, withoutVersion, withoutDepends];
+};
+void refusedDeclarations;
 type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 

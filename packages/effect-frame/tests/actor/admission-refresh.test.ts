@@ -29,6 +29,7 @@ const HeldCounter = contract("AdmissionRefreshHeldCounter", {
 });
 
 const CounterValue = query("AdmissionRefreshCounterValue", {
+  version: 1,
   policy: "public",
   args: Schema.String,
   result: Schema.Finite,

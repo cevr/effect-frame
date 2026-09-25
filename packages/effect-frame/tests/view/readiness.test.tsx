@@ -96,9 +96,11 @@ const mountScoped = <E, R>(view: View.View<Record<string, never>, E, R>, root: H
  * failed without replacing the cache or transport.
  */
 const ReadinessQuery = query("ReadinessView", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ id: Schema.String }),
   result: Schema.String,
+  depends: [],
 });
 
 type ReadinessResponse =

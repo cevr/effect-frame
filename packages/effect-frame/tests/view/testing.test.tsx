@@ -65,9 +65,11 @@ const hasText = (root: Node, selector: string, expected: string): boolean =>
   });
 
 const Search = query("ViewTestingSearch", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({}),
   result: Schema.String,
+  depends: [],
 });
 
 let searchGate: Option.Option<Deferred.Deferred<void>> = Option.none();

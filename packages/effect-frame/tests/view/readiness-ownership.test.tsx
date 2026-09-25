@@ -42,9 +42,11 @@ import { describe, expect, it } from "effect-bun-test";
 const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
 
 const OwnershipQuery = query("ReadinessOwnership", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ id: Schema.String }),
   result: Schema.String,
+  depends: [],
 });
 
 type Response =

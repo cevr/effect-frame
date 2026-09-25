@@ -35,21 +35,27 @@ const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }
 // ---------------------------------------------------------------------------
 
 const Tenant = queryContract("ActiveTenant", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ tenant: Schema.String }),
   result: Schema.String,
+  depends: [],
 });
 
 const Post = queryContract("ActivePost", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
   result: Schema.String,
+  depends: [],
 });
 
 const Comments = queryContract("ActiveComments", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
   result: Schema.String,
+  depends: [],
 });
 
 const SetText = Schema.TaggedStruct("SetText", { text: Schema.String });

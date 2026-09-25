@@ -50,8 +50,11 @@ export interface QueryContract<
 }
 
 export interface QueryOptions<Args extends Pure, Result extends Pure, Policy extends string> {
-  /** Defaults to 1. */
-  readonly version?: number;
+  /**
+   * Bumped when `args` or `result` changes incompatibly. Required, like a
+   * contract's: a client and a host on different versions refuse each other.
+   */
+  readonly version: number;
   /** Selects one cached value. Include the tenant so a policy can read it. */
   readonly args: Args;
   readonly result: Result;
@@ -63,10 +66,11 @@ export interface QueryOptions<Args extends Pure, Result extends Pure, Policy ext
   readonly policy: Policy;
   /**
    * The actor contracts this query reads from, as contracts rather than
-   * strings, so a rename cannot silently break the dependency edge. Defaults
-   * to none: no commit marks the query stale.
+   * strings, so a rename cannot silently break the dependency edge.
+   * Required: `depends: []` says, on purpose, that no commit marks the query
+   * stale.
    */
-  readonly depends?: ReadonlyArray<{ readonly name: string }>;
+  readonly depends: ReadonlyArray<{ readonly name: string }>;
 }
 
 export type QueryMode = "single" | "batched";
@@ -90,12 +94,12 @@ const makeQuery = <
   mode: Mode,
 ): QueryContract<Name, Args, Result, Policy, Mode> => ({
   name,
-  version: options.version ?? 1,
+  version: options.version,
   mode,
   args: Schema.fromJsonString(options.args),
   result: Schema.fromJsonString(options.result),
   policy: options.policy,
-  depends: (options.depends ?? []).map((dependency) => dependency.name),
+  depends: options.depends.map((dependency) => dependency.name),
   raw: { args: options.args, result: options.result },
 });
 

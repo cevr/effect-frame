@@ -133,6 +133,7 @@ export const LedgerLive = implementTransparent(
 
 /** How many entries a tenant's ledgers hold. A read, behind the same rule. */
 export const LedgerCount = query("LedgerCount", {
+  version: 1,
   args: Schema.Struct({ tenant: Schema.String }),
   result: Schema.Finite,
   policy: "tenantMember",

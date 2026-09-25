@@ -48,9 +48,11 @@ import { describe, expect, it } from "effect-bun-test";
 const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
 
 const BlockedQuery = query("ViewTestInspectionBlocked", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({}),
   result: Schema.String,
+  depends: [],
 });
 
 class BlockControl extends Context.Service<

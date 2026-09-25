@@ -43,9 +43,11 @@ const Audited = counterOf("Audited", "auditors");
 const Open = counterOf("Open", "public");
 
 const Totals = query("Totals", {
+  version: 1,
   args: Schema.Struct({ tenant: Schema.String }),
   result: Schema.Finite,
   policy: "finance",
+  depends: [],
 });
 const TotalsLive = implementQuery(Totals, () => Effect.succeed(0));
 

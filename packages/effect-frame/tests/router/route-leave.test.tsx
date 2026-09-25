@@ -55,15 +55,19 @@ const policies = Layer.succeed(Policies, Policies.of({ public: AccessPolicy.allo
 // ---------------------------------------------------------------------------
 
 const TenantInfo = queryContract("LeaveTenantInfo", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ tenant: Schema.String }),
   result: Schema.String,
+  depends: [],
 });
 
 const PostBody = queryContract("LeavePostBody", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ tenant: Schema.String, postId: Schema.String }),
   result: Schema.String,
+  depends: [],
 });
 
 const SetText = Schema.TaggedStruct("SetText", { text: Schema.String });

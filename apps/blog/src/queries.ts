@@ -36,6 +36,7 @@ export type PostBodyValue = Schema.Schema.Type<typeof PostBodyValue>;
 
 /** Every published post, newest first. The index shows it and the build enumerates it. */
 export const PostIndex = query("PostIndex", {
+  version: 1,
   args: Schema.Struct({}),
   result: Schema.Array(PostSummary),
   policy: "public",
@@ -44,6 +45,7 @@ export const PostIndex = query("PostIndex", {
 
 /** One post's title, date, and body. */
 export const PostBody = query("PostBody", {
+  version: 1,
   args: Schema.Struct({ slug: Slug }),
   result: PostBodyValue,
   policy: "public",
@@ -56,6 +58,7 @@ export const PostBody = query("PostBody", {
  * (`PrerenderUnauthorized`, #20, #23 §2.3).
  */
 export const Draft = query("Draft", {
+  version: 1,
   args: Schema.Struct({ slug: Slug }),
   result: PostBodyValue,
   policy: "editor",

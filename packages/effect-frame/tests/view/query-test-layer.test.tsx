@@ -46,6 +46,7 @@ const CounterLive = implementTransparent(
 );
 
 const Count = query("QueryTestCount", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ id: Schema.String }),
   result: Schema.Struct({ count: Schema.Finite }),
@@ -53,15 +54,19 @@ const Count = query("QueryTestCount", {
 });
 
 const Rows = query.batched("QueryTestRows", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
   result: Schema.Struct({ id: Schema.Finite, value: Schema.String }),
+  depends: [],
 });
 
 const Failure = query("QueryTestFailure", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({}),
   result: Schema.String,
+  depends: [],
 });
 
 interface CountControl {

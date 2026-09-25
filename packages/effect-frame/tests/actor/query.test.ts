@@ -133,9 +133,11 @@ const TopSku = query("TopSku", {
  * default: `"public"` is written here, and the host's table registers it.
  */
 const ExchangeRate = query("ExchangeRate", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ pair: Schema.String }),
   result: Schema.Struct({ rate: Schema.Finite }),
+  depends: [],
 });
 
 /** Counts server reads, so a test can prove one read served two declarations. */

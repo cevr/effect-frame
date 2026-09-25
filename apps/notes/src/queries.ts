@@ -30,6 +30,7 @@ export type ListEntry = Schema.Schema.Type<typeof ListEntry>;
 
 /** Every catalog list whose name contains `q`, with its note count. */
 export const ListIndex = query("ListIndex", {
+  version: 1,
   args: Schema.Struct({ q: Schema.optionalKey(Schema.String) }),
   result: Schema.Array(ListEntry),
   policy: "public",
@@ -41,6 +42,7 @@ export type Counts = Schema.Schema.Type<typeof Counts>;
 
 /** How many notes one list shows under `filter`, and how many of them are done. */
 export const ListCounts = query("ListCounts", {
+  version: 1,
   args: Schema.Struct({ list: ListName, filter: Schema.optionalKey(Filter) }),
   result: Counts,
   policy: "public",

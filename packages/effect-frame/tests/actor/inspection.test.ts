@@ -84,21 +84,27 @@ const durableOptions = {
 };
 
 const Blocked = query("InspectionBlocked", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
   result: Schema.Struct({ value: Schema.String }),
+  depends: [],
 });
 
 const Concurrent = query("InspectionConcurrent", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
   result: Schema.Finite,
+  depends: [],
 });
 
 const Failed = query("InspectionFailed", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
   result: Schema.Finite,
+  depends: [],
 });
 
 const InspectionSource = contract("InspectionSource", {
@@ -110,6 +116,7 @@ const InspectionSource = contract("InspectionSource", {
 });
 
 const Lifecycle = query("InspectionLifecycle", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
   result: Schema.Struct({ value: Schema.Finite }),
@@ -117,9 +124,11 @@ const Lifecycle = query("InspectionLifecycle", {
 });
 
 const SameRootQuery = query("SameRootQuery", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
   result: Schema.Finite,
+  depends: [],
 });
 
 let concurrentReads = 0;

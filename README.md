@@ -631,9 +631,11 @@ const Ledger = contract("Ledger", {
 });
 
 const Totals = query("Totals", {
+  version: 1,
   args: Schema.Struct({ tenant: Schema.String }),
   result: Schema.Finite,
   policy: "tenantMember",
+  depends: [],
 });
 
 // One rule for actors and queries. `Policy.of` refuses Anonymous first.

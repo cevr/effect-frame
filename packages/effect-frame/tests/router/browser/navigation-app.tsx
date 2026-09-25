@@ -86,9 +86,11 @@ const held = Route.child(site, "held", {
  * says. It is released when the leaf exits, so a Back reads it again.
  */
 const Rows = declareQuery("Rows", {
+  version: 1,
   args: Schema.Struct({ id: Schema.String }),
   result: Schema.Struct({ height: Schema.Finite }),
   policy: "public",
+  depends: [],
 });
 const rows = Route.child(site, "rows", {
   path: "rows/:id",

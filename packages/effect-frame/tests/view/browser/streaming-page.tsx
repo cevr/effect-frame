@@ -8,9 +8,11 @@ import { View } from "effect-frame/view";
 import { Effect, Schema } from "effect";
 
 export const Label = query("BrowserStreamLabel", {
+  version: 1,
   args: Schema.Struct({ id: Schema.String }),
   result: Schema.Struct({ label: Schema.String }),
   policy: "public",
+  depends: [],
 });
 
 export const Page = (props: { readonly id: string }) =>

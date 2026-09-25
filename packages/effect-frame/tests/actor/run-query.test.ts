@@ -12,15 +12,19 @@ import { describe, expect, it } from "effect-bun-test";
 const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
 
 const Titles = query("RunQueryTitles", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ prefix: Schema.String }),
   result: Schema.Array(Schema.String),
+  depends: [],
 });
 
 const Broken = query("RunQueryBroken", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({}),
   result: Schema.String,
+  depends: [],
 });
 
 let titleReads = 0;

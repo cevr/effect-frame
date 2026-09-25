@@ -31,6 +31,7 @@ const RowQuery = query.batched("ViewListRow", {
   policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
   result: Schema.Struct({ id: Schema.Finite }),
+  depends: [],
 });
 
 class TestFetchFailure extends Schema.TaggedError<TestFetchFailure>()("TestFetchFailure", {

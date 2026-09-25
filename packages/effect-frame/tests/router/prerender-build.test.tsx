@@ -315,9 +315,11 @@ describe("the prerender build (#23 §2)", () => {
 // ---------------------------------------------------------------------------
 
 const Draft = query("PrerenderDraft", {
+  version: 1,
   args: Schema.Struct({ id: Schema.String }),
   result: Schema.Struct({ label: Schema.String }),
   policy: "member",
+  depends: [],
 });
 
 const draftLabel = "unpublished-draft";

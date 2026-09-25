@@ -26,9 +26,11 @@ import type { Scope } from "effect";
 import { scopeFinalizerCountUnsafe } from "../../../../node_modules/effect/dist/internal/effect.js";
 
 export const HeldQuery = query("InspectionGatewayHeld", {
+  version: 1,
   policy: "public",
   args: Schema.Struct({ id: Schema.String }),
   result: Schema.String,
+  depends: [],
 });
 
 export interface FixtureConfig {

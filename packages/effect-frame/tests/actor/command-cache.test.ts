@@ -39,6 +39,7 @@ const Counter = contract("CommandCacheCounter", {
 });
 
 const CounterValue = query("CommandCacheCounterValue", {
+  version: 1,
   policy: "public",
   args: Schema.String,
   result: Schema.Finite,
@@ -46,6 +47,7 @@ const CounterValue = query("CommandCacheCounterValue", {
 });
 
 const Unrelated = query("CommandCacheUnrelated", {
+  version: 1,
   policy: "public",
   args: Schema.String,
   result: Schema.String,

@@ -21,9 +21,11 @@ import { Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
  */
 
 export const Label = query("StreamLabel", {
+  version: 1,
   args: Schema.Struct({ id: Schema.String }),
   result: Schema.Struct({ label: Schema.String }),
   policy: "public",
+  depends: [],
 });
 
 /** One side's query host: the labels it answers, the reads it held, the reads it saw. */

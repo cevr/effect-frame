@@ -208,6 +208,10 @@ const program = Effect.gen(function* () {
   It has no view: `to` answers the `Route.redirect` before anything draws.
 - A view that can fail, and every `View.lazy` view, needs an `errored`
   handler. It receives a `Route.RouteFailure`.
+- `View.lazy` returns a `LazyView`, tagged `"LazyView"`. A route given it
+  starts the import beside its data; a route given a view wrapped around
+  it sees a plain View and imports at setup, so hand the route the
+  `LazyView` itself.
 - Every segment view gets `params`, `search`, `data`, `href`,
   `pushSearch`, and `replaceSearch`. A layout also gets `outlet`.
 - Every move is `push` or `replace`: `router.push(href)`, a link's

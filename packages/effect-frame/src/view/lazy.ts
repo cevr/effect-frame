@@ -1,4 +1,4 @@
-import { Context, Deferred, Effect, Exit, Option, Schema } from "effect";
+import { Context, Deferred, Effect, Exit, Option, Predicate, Schema } from "effect";
 import type { View } from "./view.js";
 
 /**
@@ -6,10 +6,12 @@ import type { View } from "./view.js";
  * `effect-frame/view`. See `docs/design/route-pending.md` and
  * `docs/design/route-public.md`. `lazy`, `LazyImportFailed`, and `Module`
  * are public; the transition's handles (`Ticket`, `Definition`,
- * `definitionOf`, `withTicket`) are not.
+ * `withTicket`) are not.
  *
- * `lazy(load)` returns a View with the same Props and R as the imported
- * view, and one more typed error: `LazyImportFailed`. It imports only view
+ * `lazy(load)` returns a `LazyView`: a View with the same Props and R as
+ * the imported view, and one more typed error: `LazyImportFailed`. It is
+ * tagged and carries its definition, so a route reads the definition off
+ * the value it was given and starts the import beside data acquisition. It imports only view
  * code. A route's matching, checks, and data stay available before the
  * import, so a protected child never starts its import before its parent's
  * check continued.
@@ -71,8 +73,6 @@ const Tickets = Context.Reference<ReadonlyMap<object, Deferred.Deferred<void, La
   { defaultValue: () => new Map() },
 );
 
-const definitions = new WeakMap<object, Definition>();
-
 const describe = (cause: unknown): string => {
   if (cause instanceof Error) {
     return cause.message;
@@ -80,9 +80,29 @@ const describe = (cause: unknown): string => {
   return String(cause);
 };
 
-export const lazy = <P, E, R>(
-  load: () => Promise<Module<P, E, R>>,
-): View<P, E | LazyImportFailed, R> => {
+/**
+ * A view whose code is imported on first use, as `View.lazy` returns it:
+ * callable as a View, and tagged with the definition a route starts the
+ * import from. A route given a view wrapped around a `LazyView` (for
+ * example `(props) => LazyPost(props)`) sees a plain View, and the import
+ * waits for setup; hand the route the `LazyView` itself.
+ */
+export interface LazyView<P, E, R> extends View<P, E | LazyImportFailed, R> {
+  readonly _tag: "LazyView";
+  readonly definition: Definition;
+}
+
+/**
+ * A view imported on first use. A route given it starts the import after
+ * its checks continue, beside its data.
+ *
+ * ```ts
+ * const post = Route.leaf(postSegment, View.lazy(() => import("./post-view.js")), {
+ *   errored: (failure) => <p>{View.bind(failure, (f) => f._tag)}</p>,
+ * });
+ * ```
+ */
+export const lazy = <P, E, R>(load: () => Promise<Module<P, E, R>>): LazyView<P, E, R> => {
   const token = {};
   let state: State<P, E, R> = { _tag: "Idle" };
 
@@ -148,13 +168,23 @@ export const lazy = <P, E, R>(
       return yield* imported(props);
     });
 
-  definitions.set(view, { token, start });
-  return view;
+  const tagged: Pick<LazyView<P, E, R>, "_tag" | "definition"> = {
+    _tag: "LazyView",
+    definition: { token, start },
+  };
+  return Object.assign(view, tagged);
 };
 
-/** The lazy definition behind a view, when it is one. */
-export const definitionOf = <P, E, R>(view: View<P, E, R>): Option.Option<Definition> =>
-  Option.fromNullishOr(definitions.get(view));
+/** The lazy definition a view carries, when it is a `LazyView`. */
+export const definitionOf = <P, E, R>(view: View<P, E, R>): Option.Option<Definition> => {
+  if (isLazyView(view)) {
+    return Option.some(view.definition);
+  }
+  return Option.none();
+};
+
+const isLazyView = <P, E, R>(view: View<P, E, R> | LazyView<P, E, R>): view is LazyView<P, E, R> =>
+  Predicate.hasProperty(view, "_tag") && view._tag === "LazyView";
 
 /** Run a setup with the attempt a transition took for it. */
 export const withTicket = <A, E, R>(

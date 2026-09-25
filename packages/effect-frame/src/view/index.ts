@@ -22,7 +22,7 @@ export type {
 } from "./host.js";
 export type { Attached, Bind, Bound, Handler, PlainPost, Prepared } from "./view.js";
 export type { CommandForm, FormBinding } from "./form.js";
-export type { Module as LazyModule } from "./lazy.js";
+export type { LazyView, Module as LazyModule } from "./lazy.js";
 // The interpreter's node model stays inside the package: an author needs
 // only `Node`, `Child`, and the props of the tags it wraps.
 export type { Child, Node } from "./jsx-runtime.js";

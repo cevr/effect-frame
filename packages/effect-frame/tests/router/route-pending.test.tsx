@@ -766,6 +766,8 @@ describe("private route pending and lazy views", () => {
   it.effect("0. keeps exact lazy Props, E, and R, and typed pending options", () =>
     Effect.sync(() => {
       expect(typeFixtures.slice(0, 5)).toEqual([true, true, true, true, true]);
+      // A lazy view is a tagged value: the route reads its definition off it.
+      expect(lazyFixture._tag).toBe("LazyView");
     }),
   );
 

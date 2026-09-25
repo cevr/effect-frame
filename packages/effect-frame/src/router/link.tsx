@@ -79,13 +79,6 @@ export interface LinkProps {
   readonly children: Child;
 }
 
-/**
- * An anchor drawn from a `Link`: a real `href`, so the platform's own
- * affordances hold (open in a new tab, copy link, middle click),
- * `aria-current="page"` on the destination, and `aria-current="true"` on an
- * ancestor segment of it. A plain click
- * runs the typed move against the latest URL without a document load.
- */
 /** `false` removes the attribute. */
 const currentAttribute = (where: Current): string | false => {
   if (where === "page") {
@@ -97,6 +90,13 @@ const currentAttribute = (where: Current): string | false => {
   return false;
 };
 
+/**
+ * An anchor drawn from a `Link`: a real `href`, so the platform's own
+ * affordances hold (open in a new tab, copy link, middle click),
+ * `aria-current="page"` on the destination, and `aria-current="true"` on an
+ * ancestor segment of it. A plain click
+ * runs the typed move against the latest URL without a document load.
+ */
 export const Link = (props: LinkProps): Node => (
   <a
     attach={Dom.attach((element) =>

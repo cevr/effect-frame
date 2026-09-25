@@ -14,8 +14,8 @@ import type { Traversal } from "./traversal.js";
 import { makeSource, register as registerTraversals } from "./traversal.js";
 
 /**
- * The browser `Location` with commit control over Back and Forward (route
- * slice 5, `docs/design/route-leave.md`) and the Navigation API landing of
+ * The browser `Location` with commit control over Back and Forward
+ * (`docs/design/route-leave.md`) and the Navigation API landing of
  * #31 (`docs/design/navigation-behavior.md`). Public as `browserNavigation`;
  * `browserCommit(precommit)` is the proof seam.
  *

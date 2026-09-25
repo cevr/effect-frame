@@ -16,7 +16,7 @@ import { buildLayout, buildLeaf } from "./branch.js";
 import type { MountedRoute } from "./leave.js";
 
 /**
- * PRIVATE (route slice 5). A leaf and a layout whose views may register
+ * PRIVATE. A leaf and a layout whose views may register
  * leave checks with `Leave.onLeave`. See `docs/design/route-leave.md`.
  *
  * They build the same branch as the public `Route.leaf` and `Route.layout`.

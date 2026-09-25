@@ -6,8 +6,8 @@ import type { Router } from "./router.js";
 import type { Runtime as UrlStateRuntime } from "./url-state-runtime.js";
 
 /**
- * Route checks, typed targets, and the typed route failure (route slice 3,
- * `docs/design/route-checks.md`). The `Route` namespace exports the check
+ * Route checks, typed targets, and the typed route failure
+ * (`docs/design/route-checks.md`). The `Route` namespace exports the check
  * vocabulary; the registry (`register`, `read`, `Checker`) and
  * `redirectLimit` stay internal. See `docs/design/route-public.md`.
  *

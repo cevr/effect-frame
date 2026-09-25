@@ -9,7 +9,7 @@ export { Leave, Stay } from "./leave-registry.js";
 export type { LeaveKind, LeaveVerdict } from "./leave-registry.js";
 
 /**
- * PRIVATE (route slice 5). Scoped leave checks. Not exported from
+ * PRIVATE. Scoped leave checks. Not exported from
  * `effect-frame/router`. See `docs/design/route-leave.md`.
  *
  * A mounted segment's view registers a check while it sets up. The check is

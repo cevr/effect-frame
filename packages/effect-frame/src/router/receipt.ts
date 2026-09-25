@@ -3,7 +3,7 @@ import type { RouteInstance, UrlUpdater } from "./codec.js";
 import type { RouterService } from "./router.js";
 
 /**
- * PRIVATE (route slices 3 and 5). What one navigate or replace request did.
+ * PRIVATE. What one navigate or replace request did.
  * The public `navigate`/`replace` are this same path with the result
  * dropped, so there is one command path, not two. Not exported: the public
  * surface changes once, when the route surface is chosen.

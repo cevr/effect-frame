@@ -4,7 +4,7 @@ import type { Entered } from "./codec.js";
 import type { RouterService } from "./router.js";
 
 /**
- * PRIVATE (route slice 5). The part of leave checks that the router reads.
+ * PRIVATE. The part of leave checks that the router reads.
  * It holds no `Router` value, so the router can import it without a cycle.
  * See `leave.ts` for the registration a view makes, and
  * `docs/design/route-leave.md`.

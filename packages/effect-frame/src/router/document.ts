@@ -87,7 +87,7 @@ export type DocumentOutcome<R> = DocumentRedirect | RenderedDocument<R>;
  * declaration, or the first drawing had not ended. Nothing was written, and
  * everything the render started is closed. `phase` says which step waited.
  * `agree`: the drawing and the seed written beside it did not come to one
- * instant, because a query kept moving (review round 2); a document whose
+ * instant, because a query kept moving; a document whose
  * seed the markup does not show is never written.
  */
 export class DocumentTimedOut extends Schema.TaggedError<DocumentTimedOut>()("DocumentTimedOut", {

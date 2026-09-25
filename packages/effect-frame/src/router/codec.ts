@@ -216,8 +216,8 @@ export type SearchUpdater<Search> = (previous: Search) => Search;
 /**
  * Give a search field a decoding default and omit that value when encoding.
  *
- * Effect RC.115 exposes `withDecodingDefaultTypeKey`, but its `omit` strategy
- * omits every encoded value. URL state needs the default value omitted only,
+ * Effect's `withDecodingDefaultTypeKey` with the `omit` strategy omits
+ * every encoded value. URL state needs the default value omitted only,
  * so this small field combinator keeps the actual Schema codec as the single
  * source of both parsing and printing.
  */

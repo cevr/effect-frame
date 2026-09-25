@@ -4,7 +4,7 @@ import type { LocationService } from "./router.js";
 import type { Landing } from "./landing.js";
 
 /**
- * PRIVATE (route slice 5). A platform traversal (Back or Forward) that the
+ * PRIVATE. A platform traversal (Back or Forward) that the
  * router sees before the platform commits it. A `Location` may carry a
  * source of them beside its `pops`, through this registry, without a change
  * to the public `LocationService`. See `docs/design/route-leave.md`.

@@ -113,8 +113,8 @@ import {
 /**
  * The nested route model: segments, branches, and the client mode. The
  * public `Route` namespace (`route.ts`) lists what of this module is public;
- * see `docs/design/route-public.md`. The transition itself is route slice 2,
- * the #36 dependency (`docs/design/nested-transition.md`). A flat
+ * see `docs/design/route-public.md`. The transition is described in
+ * `docs/design/nested-transition.md`. A flat
  * `Route.client(name, definition)` is a tree of one leaf, so it runs here too.
  *
  * A tree of segments mounts as one `AnyRoute`. The existing router keeps
@@ -138,7 +138,7 @@ import {
  *   `Source` of the current real `RemoteActorRef`. A moved binding holds a
  *   new ref; an old ref keeps its old address.
  *
- * Route slice 3 adds (see `docs/design/route-checks.md`):
+ * Checks and failures (see `docs/design/route-checks.md`):
  *
  * - A segment's `before` check. The router runs every matched segment's
  *   check, parent first, before history moves and before this module plans
@@ -149,7 +149,7 @@ import {
  *   data goes to the same handler as `Declaration`. A failed instance is
  *   never stayed: the next navigation that matches it enters it again.
  *
- * Route slice 4 adds (see `docs/design/route-pending.md`):
+ * Pending presentation (see `docs/design/route-pending.md`):
  *
  * - A leaf or layout may present `pending` while its entered instance
  *   prepares: a lazy import or its own suspended setup. Timing starts when
@@ -163,9 +163,9 @@ import {
  *   every entered import before it creates an instance, so the first frame
  *   holds imported views and never a pending fallback.
  *
- * Route slice 5 is internal (see `docs/design/route-leave.md`): the tree
+ * Leave checks are internal (see `docs/design/route-leave.md`): the tree
  * answers the router's leave questions from its mounted instances, deepest
- * first. No public constructor reaches it.
+ * first. No public constructor reaches them.
  */
 
 // ---------------------------------------------------------------------------
@@ -715,8 +715,8 @@ export type LayoutPropsOf<Seg, ChildR> =
     : never;
 
 /**
- * What a segment shows when it fails. It receives the failure as a Source
- * so a later slice can replace attempts without rerunning this handler.
+ * What a segment shows when it fails. It receives the failure as a Source,
+ * so a new attempt can publish into it without running this handler again.
  */
 export interface Recovery<E> {
   readonly errored: (failure: Source<RouteFailure<E>>) => Node;
@@ -776,15 +776,15 @@ export type LeafOptionsFor<E> = [E] extends [never]
 const behaviorOf = (options: ReadonlyArray<LeafOptions>): Option.Option<NavigationBehavior> =>
   Option.flatMap(Option.fromNullishOr(options[0]), (one) => Option.fromNullishOr(one.behavior));
 
-/**
- * A mounted segment. `R` is its view's requirements. It appears only in
- * output positions, so a child branch widens into its layout's union.
- */
 /** Which branch made an instance. Compared by reference. */
 interface BranchIdentity {
   readonly segment: string;
 }
 
+/**
+ * A mounted segment. `R` is its view's requirements. It appears only in
+ * output positions, so a child branch widens into its layout's union.
+ */
 interface Instance<R> {
   readonly key: string;
   readonly branch: BranchIdentity;
@@ -924,14 +924,14 @@ interface MatchInput {
   readonly search: SearchRecord;
 }
 
+/** Brands a branch value: only `Route.leaf` and `Route.layout` make one. */
+const BranchBrand: unique symbol = Symbol.for("effect-frame/router/Branch");
+
 /**
  * A segment with its view and children. `ViewR` is what its view needs,
  * including every child's view requirements that the outlet carries.
  * `DataR` is what its transition needs: declarations and checks.
  */
-/** Brands a branch value: only `Route.leaf` and `Route.layout` make one. */
-const BranchBrand: unique symbol = Symbol.for("effect-frame/router/Branch");
-
 export interface Branch<Seg extends AnySegment, ViewR, DataR> {
   readonly _tag: "Branch";
   readonly [BranchBrand]: "Branch";

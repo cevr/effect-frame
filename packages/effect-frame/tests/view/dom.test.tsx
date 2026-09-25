@@ -261,7 +261,7 @@ const WithPortal = (props: PortalProps) =>
   Effect.succeed(
     <section>
       <Show when={props.open}>
-        <Portal into={props.into}>
+        <Portal into={Dom.target(props.into)}>
           <dialog id="modal">hello</dialog>
         </Portal>
       </Show>

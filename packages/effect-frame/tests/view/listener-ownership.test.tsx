@@ -175,7 +175,7 @@ const PortalPage = (props: PortalProps) =>
     <main>
       <output id="events">{View.bind(props.events, (labels) => labels.join(","))}</output>
       <Show when={props.open}>
-        <Portal into={props.into}>
+        <Portal into={Dom.target(props.into)}>
           <button id="portal" onClick={View.event(props.record("portal"))}>
             portal
           </button>
@@ -638,7 +638,7 @@ describe("view listener ownership", () => {
             <button id="before" onClick={View.event(Effect.void)}>
               before
             </button>
-            <Portal into={into}>
+            <Portal into={Dom.target(into)}>
               <button id="portal" onClick={View.event(Effect.void)}>
                 portal
               </button>

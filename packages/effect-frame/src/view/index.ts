@@ -23,6 +23,7 @@ export type {
   StaticProps,
 } from "./host.js";
 export type { Attached, Bind, Bound, Handler, PlainPost, Prepared, PreparedKind } from "./view.js";
+export type { PortalHost, PortalTarget } from "./portal-target.js";
 // The HTML tags and their props: what JSX checks an element against.
 export type { Attr, HtmlElements } from "./intrinsics.js";
 export type { CommandForm, FormBinding } from "./form.js";

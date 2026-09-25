@@ -15,6 +15,7 @@ import {
 } from "effect";
 import { driveOnly, sendsNothing } from "../drive-transport.js";
 import type { Cleanup, EventHandler, Host, PropertyValue, StaticProps } from "../host.js";
+import type { PortalHost } from "../portal-target.js";
 import { flush, mountView } from "../runtime.js";
 import type { View } from "../view.js";
 import type { ScopesClosed } from "../readiness.js";
@@ -357,6 +358,8 @@ export interface RecorderOptions {
   readonly limit?: number;
 }
 
+const noPortal: PortalHost<RemoteNode> = { name: "Remote", resolve: () => Option.none() };
+
 export interface Recorder {
   readonly host: Host<RemoteNode>;
   /**
@@ -500,6 +503,8 @@ export const recorder = (options: RecorderOptions = {}): Recorder => {
     },
     // A recorder has no live node, so a behaviour never runs here, as on the server host.
     attach: () => {},
+    // Nor a node outside the view to draw a Portal under: it resolves no target.
+    portal: noPortal,
     // The shadow keeps the node until the next drain, so a `Remove` the
     // runtime writes after the owner ends still finds it.
     forget: (node) => {

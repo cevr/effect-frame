@@ -200,6 +200,7 @@ const observeHost = <HostNode>(
     createText: (text: string) => host.createText(text),
     createDetachedElement: host.createDetachedElement,
     createDetachedText: host.createDetachedText,
+    portal: host.portal,
     setProperty: (node: HostNode, name: string, value: PropertyValue) =>
       write("setProperty", () => host.setProperty(node, name, value)),
     insert: (parent: HostNode, node: HostNode, anchor) =>

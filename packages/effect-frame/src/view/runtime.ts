@@ -35,6 +35,8 @@ import type {
   ShowNode,
 } from "./jsx-runtime.js";
 import { repopulate } from "./form.js";
+import { PortalTargetRefused } from "./portal-target.js";
+import type { PortalTarget } from "./portal-target.js";
 import type { ScopesClosed } from "./readiness.js";
 import type { Attached, Bound, Handler, PlainPost, Prepared, View } from "./view.js";
 import * as Inspection from "../inspection/registry.js";
@@ -603,6 +605,7 @@ const presentationHost = <HostNode>(
       attachments.set(node, runs);
     },
     boundaryMarks: host.boundaryMarks,
+    portal: host.portal,
     // Hidden content was not drawn by the server, so it adopts no marks (#22).
     adoptBoundary: (shown) => visible && adoptBoundaryOf(host)(shown),
     show,
@@ -744,6 +747,7 @@ const trackHostWrites = <HostNode>(host: Host<HostNode>): TrackedHost<HostNode> 
     adoptBoundary: host.adoptBoundary,
     setupStarted: host.setupStarted,
     sourceBound: host.sourceBound,
+    portal: host.portal,
     setProperty: host.setProperty,
     insert: (parent, node, anchor) => {
       remember(parent, node);
@@ -1538,6 +1542,25 @@ const buildElement =
 // ---------------------------------------------------------------------------
 
 /**
+ * The node a target names, when the drawing host made it. A host with no
+ * `portal` member, or one that did not make the target, refuses it with a
+ * defect that names both hosts.
+ */
+const resolvePortal = <HostNode>(host: Host<HostNode>, target: PortalTarget): HostNode => {
+  const portals = Option.fromNullishOr(host.portal);
+  const resolved = Option.flatMap(portals, (portal) => portal.resolve(target));
+  if (Option.isSome(resolved)) {
+    return resolved.value;
+  }
+  const name = Option.match(portals, {
+    onNone: () => "drawing",
+    onSome: (portal) => portal.name,
+  });
+  // oxlint-disable-next-line effect/noThrowStatement -- a build is synchronous and runs inside Solid; the Effect that runs the build turns this throw into its defect
+  throw PortalTargetRefused.make({ host: name, made: target.host });
+};
+
+/**
  * The children build under `into` instead of the parent, with a slot of
  * their own, and the portal reports no nodes to its parent. They leave
  * with the scope that built them: a finalizer on the current scope removes
@@ -1551,8 +1574,7 @@ const planPortal = <HostNode>(
   return () => {
     const { host, tracker } = renderer;
     const inner: Slot<HostNode> = { nodes: [] };
-    // oxlint-disable-next-line effect/noAs -- the tree holds a host node it cannot type
-    const into = portal.into as HostNode;
+    const into = resolvePortal(host, portal.into);
     children(into, inner, () => {});
     const scope = tracker.scope();
     tracker.run(

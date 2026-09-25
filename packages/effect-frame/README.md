@@ -511,7 +511,7 @@ Bun.serve({
 | `<Show when>`                             | tag            | a branch while a boolean source is true                                      |
 | `<Match on cases>`                        | tag            | one branch per tag of a union source                                         |
 | `<Await state loading failed ready>`      | tag            | all three states of a query in one place                                     |
-| `<Portal into>`                           | tag            | children drawn under another host node                                       |
+| `<Portal into={Dom.target(element)}>`     | tag            | children drawn under a node the host made a target of                        |
 | `View.mount`, `View.flush`                | yielded Effect | mounting a view without the router, and settling it in a test                |
 
 ## JSX

@@ -1,6 +1,7 @@
 import type { Form } from "effect-frame/actor/client";
 import type { Option } from "effect";
 import type { BoundaryKind } from "./jsx-runtime.js";
+import type { PortalHost } from "./portal-target.js";
 
 /**
  * What a renderer must provide. The runtime knows nothing about the DOM or a
@@ -79,6 +80,14 @@ export interface Host<Node> {
    * does (#87).
    */
   readonly forget?: (node: Node) => void;
+  /**
+   * The Portal targets this host made. A `<Portal>` draws only into a
+   * target its host resolves; any other target, and any Portal on a host
+   * without this member, is a defect that names the host. The HTML and
+   * Remote hosts name themselves and resolve nothing: a server render has
+   * no node outside the view to draw under.
+   */
+  readonly portal?: PortalHost<Node>;
 }
 
 /** The comment pair around one readiness boundary in server HTML (#22). */

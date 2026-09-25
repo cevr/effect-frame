@@ -424,7 +424,7 @@ describe("readiness ownership", () => {
               );
               const value = yield* View.ready(entry.state, "");
               return (
-                <Portal into={target}>
+                <Portal into={Dom.target(target)}>
                   <p
                     id="portal"
                     attach={Dom.attach((element) =>

@@ -1,7 +1,7 @@
 import type { QueryState } from "effect-frame/actor";
 import type { Host, Node as ViewNode, ScopesClosed } from "effect-frame/view";
 import type { MatchNode } from "../../src/view/jsx-runtime.js";
-import { For, Html, Match, Remote, View } from "effect-frame/view";
+import { Dom, For, Html, Match, Portal, Remote, View } from "effect-frame/view";
 import * as Driven from "effect-frame/view/driven";
 import type { AnyContract } from "effect-frame/actor/client";
 import { Source } from "effect-frame/actor";
@@ -350,5 +350,32 @@ describe("effect branches", () => {
   test("a case's services stay visible and the table is exhaustive", () => {
     expect([matchCarriesItsServices, showCarriesNothing]).toEqual([true, true]);
     void matchIncomplete;
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A Portal's target is made by a host
+// ---------------------------------------------------------------------------
+
+declare const aside: Element;
+
+const portalIntoTarget = () => (
+  <Portal into={Dom.target(aside)}>
+    <p />
+  </Portal>
+);
+
+const portalIntoNode = () => (
+  // @ts-expect-error a host node is not a target: `Dom.target(node)` makes one
+  <Portal into={aside}>
+    <p />
+  </Portal>
+);
+
+describe("portal targets", () => {
+  test("a Portal takes a target a host made, never a raw node", () => {
+    void portalIntoTarget;
+    void portalIntoNode;
+    expect(true).toBe(true);
   });
 });

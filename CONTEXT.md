@@ -47,7 +47,7 @@ _Avoid_: Ref, node reference, mixin, directive, attached behavior.
 
 **Portal**:
 A region of a view drawn under a host node outside the view's own subtree. The view still owns it: it reads the view's sources, runs in its scope, and leaves with its shown branch or row.
-_Code_: `<Portal>`.
+_Code_: `<Portal into>`, whose `PortalTarget` only a host module makes (`Dom.target(element)`). A host draws only into a target it made; the HTML and Remote hosts make none and refuse a Portal with `View.PortalTargetRefused`.
 _Avoid_: Teleport, overlay root.
 
 **Source**:

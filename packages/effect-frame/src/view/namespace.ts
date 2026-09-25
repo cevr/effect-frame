@@ -14,6 +14,7 @@ export { form } from "./form.js";
 export { keyed, list, match, show } from "./control.js";
 export { attempt } from "./attempt.js";
 export { LazyImportFailed, lazy } from "./lazy.js";
+export { PortalTargetRefused } from "./portal-target.js";
 export { flush, mount } from "./runtime.js";
 export {
   ErroredScope,

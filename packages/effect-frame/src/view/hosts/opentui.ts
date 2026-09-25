@@ -1,8 +1,16 @@
-import type { BaseRenderable, RenderContext, Renderable } from "@opentui/core";
-import { BoxRenderable, InputRenderable, TextNodeRenderable, TextRenderable } from "@opentui/core";
+import type { RenderContext, Renderable } from "@opentui/core";
+import {
+  BaseRenderable,
+  BoxRenderable,
+  InputRenderable,
+  TextNodeRenderable,
+  TextRenderable,
+} from "@opentui/core";
 import type { Effect, Scope } from "effect";
 import { Option } from "effect";
 import type { Cleanup, EventHandler, Host, PropertyValue, StaticProps } from "../host.js";
+import type { PortalHost, PortalTarget } from "../portal-target.js";
+import { makeTarget } from "../portal-target.js";
 import type { Attached } from "../view.js";
 import { attach as attachNode } from "../view.js";
 
@@ -21,6 +29,23 @@ export type TuiNode = BaseRenderable;
 export const attach = (
   run: (node: TuiNode) => Effect.Effect<unknown, never, Scope.Scope>,
 ): Attached<TuiNode> => attachNode<TuiNode>(run);
+
+/**
+ * The target a `<Portal>` draws its children under: a renderable outside
+ * the view's own subtree, such as the renderer's root. Only a terminal host
+ * draws into it.
+ */
+export const target = (renderable: TuiNode): PortalTarget => makeTarget("OpenTUI", renderable);
+
+const portal: PortalHost<TuiNode> = {
+  name: "OpenTUI",
+  resolve: (made) => {
+    if (made.host === "OpenTUI" && made.node instanceof BaseRenderable) {
+      return Option.some(made.node);
+    }
+    return Option.none();
+  },
+};
 
 const create = (context: RenderContext, tag: string, options: StaticProps): Renderable => {
   if (tag === "box") {
@@ -97,10 +122,10 @@ export const make = (context: RenderContext): Host<TuiNode> => ({
     Reflect.set(node, name, value);
   },
   insert: (parent, node, anchor) => {
-    const target = asParent(parent);
+    const container = asParent(parent);
     Option.match(anchor, {
-      onNone: () => target.add(node),
-      onSome: (before) => target.insertBefore(node, before),
+      onNone: () => container.add(node),
+      onSome: (before) => container.insertBefore(node, before),
     });
   },
   remove: (parent, node) => {
@@ -117,4 +142,5 @@ export const make = (context: RenderContext): Host<TuiNode> => ({
     return () => void emitter.off(name, listener);
   },
   attach: (node, run) => run(node),
+  portal,
 });

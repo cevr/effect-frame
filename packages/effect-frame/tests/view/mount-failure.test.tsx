@@ -32,7 +32,7 @@ const Composite = (props: CompositeProps) =>
           </li>
         )}
       </For>
-      <Portal into={props.into}>
+      <Portal into={Dom.target(props.into)}>
         <p id="portal">portal</p>
       </Portal>
       <p id="after">after</p>

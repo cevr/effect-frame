@@ -8,6 +8,8 @@ import {
   drivenContainer,
 } from "../boundary-mark.js";
 import type { Cleanup, EventHandler, Host, PropertyValue, StaticProps } from "../host.js";
+import type { PortalHost, PortalTarget } from "../portal-target.js";
+import { makeTarget } from "../portal-target.js";
 import type { Attached } from "../view.js";
 import { attach as attachNode } from "../view.js";
 
@@ -155,6 +157,29 @@ const createElement = (tag: string, staticProps: StaticProps): DomNode => {
 
 const createText = (text: string): DomNode => document.createTextNode(text);
 
+/**
+ * The target a `<Portal>` draws its children under: an element outside the
+ * view's own subtree, such as `document.body`. Only the browser host draws
+ * into it.
+ *
+ * ```tsx
+ * <Portal into={Dom.target(document.body)}>
+ *   <dialog open>saved</dialog>
+ * </Portal>
+ * ```
+ */
+export const target = (element: Element): PortalTarget => makeTarget("Dom", element);
+
+const portal: PortalHost<DomNode> = {
+  name: "Dom",
+  resolve: (made) => {
+    if (made.host === "Dom" && made.node instanceof Node) {
+      return Option.some(made.node);
+    }
+    return Option.none();
+  },
+};
+
 export const host: Host<DomNode> = {
   createElement,
   createText,
@@ -186,6 +211,7 @@ export const host: Host<DomNode> = {
     return () => node.removeEventListener(name, listener);
   },
   attach: (node, run) => run(node),
+  portal,
 };
 
 // ---------------------------------------------------------------------------
@@ -455,6 +481,7 @@ export const hydrate = (root: Node): Hydration => {
     setText: host.setText,
     addEventListener: host.addEventListener,
     adoptBoundary,
+    portal,
   };
 
   const finish = Effect.sync((): HydrationReport => {

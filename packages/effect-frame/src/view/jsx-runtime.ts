@@ -2,6 +2,7 @@ import type { Source } from "effect-frame/actor";
 import type { Effect, Scope } from "effect";
 import { Option, Predicate } from "effect";
 import type { Attached, Bound, Prepared } from "./view.js";
+import type { PortalTarget } from "./portal-target.js";
 import type { Children, HtmlElements } from "./intrinsics.js";
 
 /**
@@ -91,7 +92,7 @@ export interface MatchNode<A = unknown> {
  */
 export interface PortalNode {
   readonly _tag: "Portal";
-  readonly into: unknown;
+  readonly into: PortalTarget;
   readonly children: Node;
 }
 

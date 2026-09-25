@@ -3,6 +3,7 @@ import { QueryCache, Streaming } from "effect-frame/actor/client";
 import type { CacheContext } from "../../actor/query-client.js";
 import { Deferred, Effect, Equal, Exit, Layer, Option, Schema, Scope, Stream } from "effect";
 import type { BoundaryMarks, Cleanup, Host, PropertyValue, StaticProps } from "../host.js";
+import type { PortalHost } from "../portal-target.js";
 import type { BoundaryKind } from "../jsx-runtime.js";
 import { flush, mountView } from "../runtime.js";
 import type { View } from "../view.js";
@@ -273,6 +274,8 @@ const limitOf = (closeWhen: Effect.Effect<void>) =>
  * leaves the tree: the two writes after which no `Loading` fallback may be
  * left (#22). `bindings` hears every source the drawing binds.
  */
+const noPortal: PortalHost<HtmlNode> = { name: "Html", resolve: () => Option.none() };
+
 const makeHost = (
   changed: () => void,
   setupStarted: Option.Option<() => () => void> = Option.none(),
@@ -329,6 +332,8 @@ const makeHost = (
   addEventListener: (): Cleanup => () => {},
   // The server has no live node, so a behaviour never runs here.
   attach: () => {},
+  // Nor a node outside the view to draw a Portal under: it resolves no target.
+  portal: noPortal,
   boundaryMarks: boundaryMarks(changed),
   ...Option.match(setupStarted, {
     onNone: () => ({}),

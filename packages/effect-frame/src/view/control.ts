@@ -2,11 +2,12 @@ import { Source } from "effect-frame/actor/client";
 import { Context, Effect, Option, Predicate, Scope } from "effect";
 import type { ForNode, MatchNode, Node, PortalNode, ShowNode } from "./jsx-runtime.js";
 import { Empty } from "./jsx-runtime.js";
+import type { PortalTarget } from "./portal-target.js";
 
 /**
  * Control flow in a view. The tags `For`, `Show` and `Match` each take an
  * explicit source, so a reader sees what makes the list or the branch move;
- * `Portal` takes the host node it draws under. A tag only builds a marker,
+ * `Portal` takes the target, made by the host, that it draws under. A tag only builds a marker,
  * and the runtime interprets it. `View.list`, `View.keyed`, `View.show` and
  * `View.match` are the Effect forms of a keyed list, a keyed region and a
  * branch: they run each row's or branch's setup as an Effect, which a tag
@@ -298,9 +299,12 @@ export const Match = <A extends Tagged>(props: MatchProps<A>): MatchNode<A> => {
   };
 };
 
-export interface PortalProps<HostNode> {
-  /** The host node the children are drawn under. */
-  readonly into: HostNode;
+export interface PortalProps {
+  /**
+   * Where the children are drawn: a target the host module made, such as
+   * `Dom.target(document.body)`. Only that host draws into it.
+   */
+  readonly into: PortalTarget;
   readonly children: Node;
 }
 
@@ -309,8 +313,12 @@ export interface PortalProps<HostNode> {
  * toast under a region outside the view's own subtree. The children are
  * still the view's: they read its sources, run in its scope, and leave with
  * its branch or row. Only their place in the document differs.
+ *
+ * A host draws a Portal only into a target it made; the HTML and Remote
+ * hosts make none, so a Portal in a server render is a defect,
+ * `View.PortalTargetRefused`, not a region that silently draws nothing.
  */
-export const Portal = <HostNode>(props: PortalProps<HostNode>): PortalNode => ({
+export const Portal = (props: PortalProps): PortalNode => ({
   _tag: "Portal",
   into: props.into,
   children: props.children,

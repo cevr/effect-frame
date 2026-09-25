@@ -136,7 +136,7 @@ const Home = (_props: Route.RouteProps<{}, {}>) =>
         <Link link={here} replace>
           home
         </Link>
-        <button id="go" onClick={View.event(() => router.replace("/books/9"))}>
+        <button id="go" onClick={View.event(router.replace("/books/9"))}>
           go
         </button>
       </section>
@@ -158,13 +158,13 @@ const Book = (
         <p id="book-search">{View.bind(props.search, (search) => search.q)}</p>
         <button
           id="update-search"
-          onClick={View.event(() => props.pushSearch((previous) => ({ q: `${previous.q}a` })))}
+          onClick={View.event(props.pushSearch((previous) => ({ q: `${previous.q}a` })))}
         >
           update
         </button>
         <button
           id="replace-search"
-          onClick={View.event(() => props.replaceSearch((previous) => ({ q: `${previous.q}r` })))}
+          onClick={View.event(props.replaceSearch((previous) => ({ q: `${previous.q}r` })))}
         >
           replace
         </button>

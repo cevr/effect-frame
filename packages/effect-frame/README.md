@@ -214,7 +214,7 @@ const Controls = (props: { readonly counter: RemoteActorRef<typeof Counter> }) =
       endpoint: "/actors",
       returnTo: counter.href({ name: props.counter.key.name }, {}),
     });
-    const reset = View.event(() => Effect.asVoid(props.counter.send(Reset.make({}))));
+    const reset = View.event(Effect.asVoid(props.counter.send(Reset.make({}))));
     return (
       <div>
         <form onSubmit={add.submit}>
@@ -492,8 +492,8 @@ Bun.serve({
 | Write                                     | Kind           | For                                                                          |
 | ----------------------------------------- | -------------- | ---------------------------------------------------------------------------- |
 | `View.bind(source, f?)`                   | prop or child  | a value that follows a source, projected by `f` where it is drawn            |
-| `View.event(handler)`                     | `on*` prop     | an event handler, an Effect                                                  |
-| `View.submit(handler)`                    | `onSubmit`     | a submit whose default action the host suppresses                            |
+| `View.event(handler \| effect)`           | `on*` prop     | an event handler, or the Effect a handler that reads no event runs           |
+| `View.submit(handler \| effect)`          | `onSubmit`     | a submit whose default action the host suppresses                            |
 | `View.form({ ref, message, ... })`        | yielded Effect | a command form that posts with no script                                     |
 | `View.list({ each, keyBy, row })`         | yielded Effect | a keyed list whose rows run an Effect                                        |
 | `View.keyed(source, keyBy, row)`          | yielded Effect | one region built again for each new identity                                 |
@@ -528,7 +528,10 @@ own options.
 missing`.
 - An `on*` prop is the event in lowercase (`onKeyDown` listens for
   `keydown`) and takes `View.event` or `View.submit`. A plain function
-  reports `"wrap the handler with View.event(handler)"`.
+  reports `"wrap the handler with View.event(handler)"`. A handler that
+  reads its event is `View.event((event) => ...)`; one that reads none is
+  the Effect itself, `View.event(addPane)`, run once per event. Either way
+  the Effect cannot fail: a view has no place to return a failure.
 - `View.submit` has the host suppress the default action first. A form's
   `onSubmit` takes only that kind, `View.submit` or a `View.form` binding's
   `submit`, so a form never posts natively by mistake. A view writes no

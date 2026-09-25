@@ -106,7 +106,7 @@ const ListBody = (props: BodyProps) =>
                 <input
                   type="checkbox"
                   checked={View.bind(note, (value) => value.done)}
-                  onChange={View.event(() =>
+                  onChange={View.event(
                     Effect.flatMap(note.get, (value) =>
                       dispatch(notes, { _tag: "Toggle", id: value.id }),
                     ),
@@ -115,7 +115,7 @@ const ListBody = (props: BodyProps) =>
                 <span>{View.bind(note, (value) => value.text)}</span>
                 <button
                   type="button"
-                  onClick={View.event(() =>
+                  onClick={View.event(
                     Effect.flatMap(note.get, (value) =>
                       dispatch(notes, { _tag: "Remove", id: value.id }),
                     ),

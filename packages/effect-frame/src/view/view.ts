@@ -1,7 +1,7 @@
 import type { Form } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor/client";
 import type { Effect, Scope } from "effect";
-import { Option, identity } from "effect";
+import { Option, Predicate, identity } from "effect";
 import type { HostEvent } from "./host.js";
 import type { Node } from "./jsx-runtime.js";
 
@@ -110,10 +110,30 @@ export const bind: Bind = <A, B>(source: Source<A>, project?: (value: A) => B): 
   });
 
 /**
+ * What a prepared handler runs: a `Handler` that reads its event, or an
+ * Effect run once per event when the handler reads none. An Effect is a
+ * description, so running it on each event is what `() => effect` did.
+ * Both refuse a failure: a view has no place to return one.
+ */
+type HandlerWork = Handler | Effect.Effect<unknown>;
+
+/**
+ * An Effect is not a function, so the handler form is the one a host can
+ * call as it stands, and the Effect form ignores the event it is given.
+ */
+const toHandler = (work: HandlerWork): Handler => {
+  if (Predicate.isFunction(work)) {
+    return work;
+  }
+  return () => work;
+};
+
+/**
  * Run the handler's Effect when the host fires. The runtime forks it into
  * the scope of the view that owns the element, so the fiber dies with the
  * view: a `Show` branch's handler ends with the branch, a row's with the
- * row.
+ * row. A handler that reads no event is the Effect itself:
+ * `onClick={View.event(addPane)}`.
  *
  * The handler runs on a fiber of its own. Synchronous handler work for an
  * open owner can complete before the host's callback returns, while work that
@@ -122,22 +142,34 @@ export const bind: Bind = <A, B>(source: Source<A>, project?: (value: A) => B): 
  * only flushes writes already reached by Solid and does not wait for a
  * suspended handler fiber.
  */
-export const event = (handler: Handler): Prepared<"event"> => ({
+export interface Event {
+  (handler: Handler): Prepared<"event">;
+  (effect: Effect.Effect<unknown>): Prepared<"event">;
+}
+
+export const event: Event = (work: HandlerWork): Prepared<"event"> => ({
   _tag: "Prepared",
   kind: "event",
-  handler,
+  handler: toHandler(work),
   post: Option.none(),
 });
 
 /**
  * `event`, but the host suppresses its default action first: its kind is
  * `"submit"`, which a form's `onSubmit` requires. The form posts nothing
- * without a script; a form that sends a command uses `form`.
+ * without a script; a form that sends a command uses `form`. Like `event`,
+ * it takes a handler or the Effect a handler that reads no event would
+ * return.
  */
-export const submit = (handler: Handler): Prepared<"submit"> => ({
+export interface Submit {
+  (handler: Handler): Prepared<"submit">;
+  (effect: Effect.Effect<unknown>): Prepared<"submit">;
+}
+
+export const submit: Submit = (work: HandlerWork): Prepared<"submit"> => ({
   _tag: "Prepared",
   kind: "submit",
-  handler,
+  handler: toHandler(work),
   post: Option.none(),
 });
 

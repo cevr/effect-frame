@@ -75,11 +75,9 @@ const scope = Scope.makeUnsafe();
 const root = document.createElement("main");
 let started = false;
 const tree = jsx("button", {
-  onClick: View.event(() =>
-    Effect.sync(() => {
+  onClick: View.event(Effect.sync(() => {
       started = true;
-    }).pipe(Effect.andThen(Effect.forever(Effect.yieldNow)))
-  ),
+    }).pipe(Effect.andThen(Effect.forever(Effect.yieldNow)))),
   children: "start",
 });
 await Effect.runPromise(View.mount(() => Effect.succeed(tree), {}, Dom.host, root).pipe(Scope.provide(scope)));
@@ -141,11 +139,11 @@ const ShowPage = (props: ShowProps) =>
   Effect.succeed(
     <main>
       <output id="events">{View.bind(props.events, (labels) => labels.join(","))}</output>
-      <button id="sibling" onClick={View.event(() => props.record("sibling"))}>
+      <button id="sibling" onClick={View.event(props.record("sibling"))}>
         sibling
       </button>
       <Show when={props.open}>
-        <button id="branch" onClick={View.event(() => props.record("branch"))}>
+        <button id="branch" onClick={View.event(props.record("branch"))}>
           branch
         </button>
       </Show>
@@ -156,14 +154,14 @@ const ForPage = (props: ForProps) =>
   Effect.succeed(
     <main>
       <output id="events">{View.bind(props.events, (labels) => labels.join(","))}</output>
-      <button id="sibling" onClick={View.event(() => props.record("sibling"))}>
+      <button id="sibling" onClick={View.event(props.record("sibling"))}>
         sibling
       </button>
       <For each={props.tasks} keyBy={(task) => task.id}>
         {(task) => (
           <button
             id={View.bind(task, (value) => `row-${value.id}`)}
-            onClick={View.event(() => props.record("row"))}
+            onClick={View.event(props.record("row"))}
           >
             row
           </button>
@@ -178,7 +176,7 @@ const PortalPage = (props: PortalProps) =>
       <output id="events">{View.bind(props.events, (labels) => labels.join(","))}</output>
       <Show when={props.open}>
         <Portal into={props.into}>
-          <button id="portal" onClick={View.event(() => props.record("portal"))}>
+          <button id="portal" onClick={View.event(props.record("portal"))}>
             portal
           </button>
         </Portal>
@@ -190,7 +188,7 @@ const ClosingShowPage = (props: ClosingShowProps) =>
   Effect.succeed(
     <main>
       <output id="events">{View.bind(props.events, (labels) => labels.join(","))}</output>
-      <button id="sibling" onClick={View.event(() => props.record("sibling"))}>
+      <button id="sibling" onClick={View.event(props.record("sibling"))}>
         sibling
       </button>
       <Show when={props.open}>
@@ -207,7 +205,7 @@ const ClosingShowPage = (props: ClosingShowProps) =>
               );
             }),
           )}
-          onClick={View.event(() =>
+          onClick={View.event(
             Effect.sync(() => {
               props.branchCalls.value += 1;
             }).pipe(Effect.andThen(props.record("branch"))),
@@ -637,11 +635,11 @@ describe("view listener ownership", () => {
       const Broken = () =>
         Effect.succeed(
           <>
-            <button id="before" onClick={View.event(() => Effect.void)}>
+            <button id="before" onClick={View.event(Effect.void)}>
               before
             </button>
             <Portal into={into}>
-              <button id="portal" onClick={View.event(() => Effect.void)}>
+              <button id="portal" onClick={View.event(Effect.void)}>
                 portal
               </button>
             </Portal>

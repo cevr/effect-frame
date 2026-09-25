@@ -192,7 +192,7 @@ const makePostView = (probes: Probes) => (props: Route.PropsOf<typeof post>) =>
         <p id="post-mode">{View.bind(props.search, (search) => search.mode)}</p>
         <button
           id="edit"
-          onClick={View.event(() => props.pushSearch((search) => ({ ...search, mode: "edit" })))}
+          onClick={View.event(props.pushSearch((search) => ({ ...search, mode: "edit" })))}
         >
           edit
         </button>
@@ -276,7 +276,7 @@ const makeApp = (probes: Probes, importer: Importer) =>
               <Link link={first}>first post</Link>
               <button
                 id="tab"
-                onClick={View.event(() =>
+                onClick={View.event(
                   props.replaceSearch((search) => ({ ...search, tab: "people" })),
                 )}
               >

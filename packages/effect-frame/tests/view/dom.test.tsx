@@ -39,10 +39,25 @@ const Counter = (_props: NoProps) =>
         <span id="count">{View.bind(Source.select(count.state, (n) => String(n)))}</span>
         <button
           id="up"
-          onClick={View.event(() =>
+          onClick={View.event(
             modify(count, (n) => n + 1).pipe(Effect.catchTag("ActorStopped", () => Effect.void)),
           )}
         >
+          up
+        </button>
+      </div>
+    );
+  });
+
+/** A handler that reads no event is the Effect itself, run once per event. */
+const EffectCounter = (_props: NoProps) =>
+  Effect.gen(function* () {
+    const count = yield* Actor.local(Behavior.value(0));
+    const up = modify(count, (n) => n + 1).pipe(Effect.catchTag("ActorStopped", () => Effect.void));
+    return (
+      <div>
+        <span id="count">{View.bind(count.state, String)}</span>
+        <button id="up" onClick={View.event(up)}>
           up
         </button>
       </div>
@@ -270,6 +285,25 @@ describe("browser view", () => {
         },
       );
       expect(textOf(root, "#count")).toBe("1");
+    }),
+  );
+
+  it.scoped("an Effect handler runs once for each event", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const page = yield* pageMount(root, EffectCounter, noProps);
+      const button = root.querySelector("#up");
+      yield* page.act(
+        Effect.sync(() => {
+          button?.dispatchEvent(new Event("click"));
+          button?.dispatchEvent(new Event("click"));
+        }),
+        {
+          label: "two clicks run the Effect twice",
+          until: (actualRoot) => textAt(actualRoot, "#count") === "2",
+        },
+      );
+      expect(textOf(root, "#count")).toBe("2");
     }),
   );
 
@@ -614,7 +648,7 @@ describe("browser view", () => {
         Effect.succeed(
           <button
             id="say"
-            onClick={View.event(() =>
+            onClick={View.event(
               Ref.update(seen, (all) => [...all, "hi"]).pipe(
                 Effect.andThen(Deferred.succeed(handled, void 0)),
               ),
@@ -639,7 +673,7 @@ describe("browser view", () => {
       const handled = yield* Deferred.make<void>();
       const Keys = (_props: NoProps) =>
         Effect.succeed(
-          <input id="keys" onKeyDown={View.event(() => Deferred.succeed(handled, void 0))} />,
+          <input id="keys" onKeyDown={View.event(Deferred.succeed(handled, void 0))} />,
         );
       const page = yield* pageMount(root, Keys, noProps);
       yield* page.act(
@@ -685,7 +719,7 @@ describe("browser view", () => {
         Effect.succeed(
           <form
             id="form"
-            onSubmit={View.submit(() =>
+            onSubmit={View.submit(
               Ref.set(sent, true).pipe(Effect.andThen(Deferred.succeed(handled, void 0))),
             )}
           >
@@ -881,7 +915,7 @@ const CountedRows = (props: CountedRowsProps) =>
               <span class="title">{View.bind(task, (value) => value.title)}</span>
               <button
                 class="tap"
-                onClick={View.event(() =>
+                onClick={View.event(
                   modify(clicks, (n) => n + 1).pipe(
                     Effect.catchTag("ActorStopped", () => Effect.void),
                   ),

@@ -47,7 +47,7 @@ export const NotesTerminal = (props: NotesTerminalProps) =>
         <input
           width={40}
           onInput={View.event((event) => setDraft(event.value))}
-          onEnter={View.event(() =>
+          onEnter={View.event(
             Effect.flatMap(draft.state.get, (text) =>
               Effect.andThen(addNote(notes, text), setDraft("")),
             ),

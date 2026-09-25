@@ -43,7 +43,7 @@ const NeedsClock = (_props: NoProps) =>
   Effect.gen(function* () {
     const clock = yield* Clock;
     const now = yield* clock.now;
-    return <p onClick={View.event(() => Effect.void)}>{String(now)}</p>;
+    return <p onClick={View.event(Effect.void)}>{String(now)}</p>;
   });
 
 const MayFail = (_props: NoProps) => Effect.fail(Offline.make());
@@ -265,5 +265,52 @@ describe("the view entry's kind rule", () => {
     expect(noFlatFunction).toBe(true);
     expect(everyFlatValueIsATag).toBe(true);
     expect(theTags).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A handler that reads no event is its Effect
+// ---------------------------------------------------------------------------
+
+declare const addPane: Effect.Effect<void>;
+declare const draft: Source<string>;
+
+/** `View.event` and `View.submit` take a handler, or the Effect it would return. */
+const handlerForms = () => (
+  <form onSubmit={View.submit(Effect.flatMap(draft.get, () => addPane))}>
+    <input onInput={View.event((event) => Effect.log(event.value))} />
+    <button type="button" onClick={View.event(addPane)}>
+      add
+    </button>
+  </form>
+);
+
+/** What stays refused: a raw Effect, a raw function, a raw Source, and a failure. */
+const refusedHandlers = () => (
+  <div>
+    {/* @ts-expect-error an Effect in an on* prop names no handler kind */}
+    <button type="button" onClick={addPane} />
+    {/* @ts-expect-error a raw function is wrapped with View.event */}
+    <button type="button" onClick={() => addPane} />
+    {/* @ts-expect-error a raw Source is wrapped with View.bind */}
+    <p>{draft}</p>
+  </div>
+);
+
+/** A handler's Effect has no error channel, in either form. */
+// @ts-expect-error `Offline` is not handled
+// @effect-diagnostics-next-line missingEffectError:off
+const failingEvent = View.event(Effect.fail(Offline.make()));
+// @ts-expect-error `Offline` is not handled
+// @effect-diagnostics-next-line missingEffectError:off
+const failingSubmit = View.submit(Effect.fail(Offline.make()));
+
+describe("handler forms", () => {
+  test("an Effect is a handler that reads no event; the refusals stay", () => {
+    void handlerForms;
+    void refusedHandlers;
+    void failingEvent;
+    void failingSubmit;
+    expect(true).toBe(true);
   });
 });

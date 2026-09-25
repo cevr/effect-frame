@@ -486,12 +486,12 @@ const makeApp = (probes: Probes) => {
             ready={(value) => <span id="comments">{View.bind(value)}</span>}
             failed={() => <span id="comments">failed</span>}
           />
-          <button id="boom" onClick={View.event(() => Effect.die("boom"))}>
+          <button id="boom" onClick={View.event(Effect.die("boom"))}>
             boom
           </button>
           <button
             id="current"
-            onClick={View.event(() =>
+            onClick={View.event(
               Effect.flatMap(props.data.draft.ref.get, (current) => sendText(current, "current")),
             )}
           >

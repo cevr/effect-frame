@@ -61,7 +61,7 @@ const OrdersCard = (props: OverviewProps) =>
                 <button
                   type="button"
                   class="fulfil"
-                  onClick={View.event(() =>
+                  onClick={View.event(
                     Effect.flatMap(order.get, (value) =>
                       Effect.flatMap(props.data.book.ref.get, (book) =>
                         Effect.asVoid(book.send({ _tag: "Fulfil", id: value.id })),
@@ -135,7 +135,7 @@ const AlertsCard = (props: OverviewProps) =>
                 <button
                   type="button"
                   class="ack"
-                  onClick={View.event(() =>
+                  onClick={View.event(
                     Effect.flatMap(alert.get, (value) =>
                       Effect.asVoid(ack(props.data.alerts.ref, props.data.tenant, value)),
                     ),
@@ -189,7 +189,7 @@ export const OverviewView = (props: OverviewProps) =>
         <button
           id="show-funnel"
           type="button"
-          onClick={View.event(() => Effect.asVoid(revealed.send(Value.Set(true))))}
+          onClick={View.event(Effect.asVoid(revealed.send(Value.Set(true))))}
         >
           funnel
         </button>

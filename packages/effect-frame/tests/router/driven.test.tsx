@@ -77,7 +77,7 @@ const RoomView = (params: { readonly room: string }) =>
         <button
           id="add"
           type="button"
-          onClick={View.event(() => Effect.asVoid(room.send({ _tag: "Add", amount: 1 })))}
+          onClick={View.event(Effect.asVoid(room.send({ _tag: "Add", amount: 1 })))}
         >
           add
         </button>

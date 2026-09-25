@@ -426,7 +426,7 @@ const makeTree = (probes: Probes) => {
           </button>
           <button
             id="note"
-            onClick={View.event(() =>
+            onClick={View.event(
               Effect.flatMap(props.data.notes.ref.get, (current) => sendText(current, "note")),
             )}
           >
@@ -434,7 +434,7 @@ const makeTree = (probes: Probes) => {
           </button>
           <button
             id="current"
-            onClick={View.event(() =>
+            onClick={View.event(
               Effect.flatMap(props.data.draft.ref.get, (current) => sendText(current, "current")),
             )}
           >

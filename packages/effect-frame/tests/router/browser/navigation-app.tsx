@@ -272,10 +272,7 @@ const start = (): void => {
       };
       return (
         <article id="form-page">
-          <form
-            id="form"
-            onSubmit={View.submit(() => SubscriptionRef.set(error, "title is required"))}
-          >
+          <form id="form" onSubmit={View.submit(SubscriptionRef.set(error, "title is required"))}>
             <input id="field" name="title" />
             <p id="error">{View.bind(errorSource)}</p>
             <button id="send" type="submit">

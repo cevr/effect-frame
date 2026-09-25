@@ -349,10 +349,7 @@ const makePostView = (probes: Probes) => (props: Route.PropsOf<typeof postSegmen
         <p id="post-param">{View.bind(props.params, (params) => params.postId)}</p>
         <span id="post-tenant">{View.bind(tenant)}</span>
         <output id="post-actor">{View.bind(local.state, String)}</output>
-        <button
-          id="bump"
-          onClick={View.event(() => Effect.orDie(local.call(Value.Set(BumpedRevision))))}
-        >
+        <button id="bump" onClick={View.event(Effect.orDie(local.call(Value.Set(BumpedRevision))))}>
           bump
         </button>
       </article>

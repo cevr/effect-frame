@@ -91,7 +91,7 @@ const sendingBranch = Route.leaf(counterSegment, (props) =>
         <button
           id="add"
           type="button"
-          onClick={View.event(() => Effect.asVoid(counter.send({ _tag: "Add", amount: 1 })))}
+          onClick={View.event(Effect.asVoid(counter.send({ _tag: "Add", amount: 1 })))}
         >
           add
         </button>

@@ -62,7 +62,7 @@ _Avoid_: Binding (that word is a route's data), reactive prop.
 
 **Prepared handler**:
 An event handler made ready for a host: an Effect to run on the event, and whether the host suppresses the default action.
-_Code_: `View.event(handler)` (kind `"event"`), `View.submit(handler)` and a `View.form` binding's `submit` (kind `"submit"`), the type `Prepared`.
+_Code_: `View.event(handler)` or `View.event(effect)` for a handler that reads no event (kind `"event"`), `View.submit(handler)` and a `View.form` binding's `submit` (kind `"submit"`), the type `Prepared`.
 _Avoid_: Callback, listener, event prop.
 
 **Rendering mode**:

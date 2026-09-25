@@ -87,7 +87,7 @@ const Clicker = (_props: NoProps) =>
     return (
       <div>
         <span id="count">{View.bind(Source.select(counter.state, (n) => String(n)))}</span>
-        <button id="add" onClick={View.event(() => Effect.asVoid(counter.send(1)))}>
+        <button id="add" onClick={View.event(Effect.asVoid(counter.send(1)))}>
           add
         </button>
       </div>

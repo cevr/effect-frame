@@ -557,7 +557,7 @@ describe("scoped view test harness", () => {
         Effect.succeed(
           <button
             id="dispatch"
-            onClick={View.event(() =>
+            onClick={View.event(
               Effect.gen(function* () {
                 yield* Deferred.succeed(started, void 0);
                 yield* Deferred.await(released);
@@ -615,7 +615,7 @@ describe("scoped view test harness", () => {
           View.mount(
             () =>
               Effect.succeed(
-                <button id="listener" onClick={View.event(() => Effect.void)}>
+                <button id="listener" onClick={View.event(Effect.void)}>
                   listener
                 </button>,
               ),

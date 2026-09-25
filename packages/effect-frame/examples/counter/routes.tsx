@@ -64,7 +64,7 @@ const Controls = (props: { readonly counter: RemoteActorRef<typeof Counter> }) =
       endpoint: "/actors",
       returnTo: counter.href({ name: props.counter.key.name }, {}),
     });
-    const reset = View.event(() => Effect.asVoid(props.counter.send(Reset.make({}))));
+    const reset = View.event(Effect.asVoid(props.counter.send(Reset.make({}))));
     return (
       <div>
         <form onSubmit={add.submit}>

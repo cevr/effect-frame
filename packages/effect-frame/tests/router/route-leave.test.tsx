@@ -349,7 +349,7 @@ const PostView = (props: Route.PropsOf<typeof postSegment>) =>
         <textarea id="draft" />
         <button
           id="send"
-          onClick={View.event(() =>
+          onClick={View.event(
             Effect.flatMap(props.data.draft.ref.get, (current) => sendText(current, "typed")),
           )}
         >

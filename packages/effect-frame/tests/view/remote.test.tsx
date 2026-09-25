@@ -102,9 +102,7 @@ const NotesPage = (props: PageProps) =>
         <button
           id="add"
           type="button"
-          onClick={View.event(() =>
-            notes.send({ _tag: "Add", id: "clicked", text: "added by a click" }),
-          )}
+          onClick={View.event(notes.send({ _tag: "Add", id: "clicked", text: "added by a click" }))}
         >
           add
         </button>
@@ -190,7 +188,7 @@ const RowButtons = (props: PageProps) =>
             <li>
               <button
                 type="button"
-                onClick={View.event(() =>
+                onClick={View.event(
                   Effect.flatMap(note.get, (value) => notes.send({ _tag: "Toggle", id: value.id })),
                 )}
               >

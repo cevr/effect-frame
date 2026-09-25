@@ -48,7 +48,7 @@ export const OrdersLayout = <ChildR,>(props: Route.LayoutPropsOf<typeof orders, 
                 <button
                   type="button"
                   class="fulfil"
-                  onClick={View.event(() =>
+                  onClick={View.event(
                     Effect.flatMap(row.get, (value) => send({ _tag: "Fulfil", id: value.id })),
                   )}
                 >
@@ -57,7 +57,7 @@ export const OrdersLayout = <ChildR,>(props: Route.LayoutPropsOf<typeof orders, 
                 <button
                   type="button"
                   class="cancel"
-                  onClick={View.event(() =>
+                  onClick={View.event(
                     Effect.flatMap(row.get, (value) => send({ _tag: "Cancel", id: value.id })),
                   )}
                 >

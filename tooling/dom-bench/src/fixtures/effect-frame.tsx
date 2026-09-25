@@ -88,12 +88,12 @@ const Benchmark = (props: BenchmarkProps) =>
             >
               <td class="col-md-1">{row.id}</td>
               <td class="col-md-4">
-                <a href="#" onClick={View.submit(() => selectRow(item))}>
+                <a href="#" onClick={View.submit(selectRow(item))}>
                   {View.bind(item, (value) => value.label)}
                 </a>
               </td>
               <td class="col-md-1">
-                <a href="#" onClick={View.submit(() => removeRow(item))}>
+                <a href="#" onClick={View.submit(removeRow(item))}>
                   <span aria-hidden="true">×</span>
                 </a>
               </td>

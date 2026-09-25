@@ -75,9 +75,13 @@ describe("single flight at width (#17, #28)", () => {
       const before = handlers.runs();
 
       yield* click(app.root, '#orders li[data-order="o6"] .fulfil');
+      // Revenue and the open count are two queries and two bindings: each
+      // paints on its own turn, so wait for both.
       yield* settle(
-        Effect.sync(() => textOf(app.root, "#revenue") === "490"),
-        "revenue after the fulfil",
+        Effect.sync(
+          () => textOf(app.root, "#revenue") === "490" && textOf(app.root, "#open") === "1",
+        ),
+        "revenue and the open count after the fulfil",
       );
 
       const sighting = settlementOf(wire, "Fulfil o6");
@@ -97,8 +101,6 @@ describe("single flight at width (#17, #28)", () => {
       });
       // The refreshed values landed from the reply: the client read none again.
       expect([revenue, orders, funnel].map(wire.readsOf)).toEqual([1, 1, 1]);
-      expect(textOf(app.root, "#open")).toBe("1");
-      expect(textOf(app.root, "#revenue")).toBe("490");
     }),
   );
 
@@ -226,12 +228,17 @@ describe("single flight at width (#17, #28)", () => {
       expect(sighting?.failed).toEqual([funnel]);
       // The failure never became the command's: its receipt carries the commit.
       expect(Option.isSome(sighting?.committed ?? Option.none())).toBe(true);
+      // Each binding follows its source on a fiber of its own, so the count
+      // and the list can paint on different turns. Wait for all three.
       yield* settle(
-        Effect.sync(() => textOf(app.root, "#revenue") === "490"),
-        "revenue after the fulfil",
+        Effect.sync(
+          () =>
+            textOf(app.root, "#revenue") === "490" &&
+            textOf(app.root, "#open") === "1" &&
+            textOf(app.root, '#orders li[data-order="o6"] span') === "o6 fulfilled",
+        ),
+        "revenue, the open count and the o6 row after the fulfil",
       );
-      expect(textOf(app.root, "#open")).toBe("1");
-      expect(textOf(app.root, '#orders li[data-order="o6"] span')).toBe("o6 fulfilled");
     }),
   );
 

@@ -110,7 +110,11 @@ describe("readiness on the list page", () => {
       expect(textOf(app.root, "#counts")).toBe("0 of 0 done");
 
       yield* wire.open(held);
-      yield* settle(Effect.sync(() => textOf(app.root, "#counts") === "0 of 1 done"));
+      yield* settle(
+        Effect.sync(
+          () => textOf(app.root, "#counts") === "0 of 1 done" && has(app.root, "#list li input"),
+        ),
+      );
       // Toggling moves the done count through another refresh.
       const box = elementOf(app.root, '#list input[type="checkbox"]', HTMLInputElement);
       box.checked = true;

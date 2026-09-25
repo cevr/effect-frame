@@ -86,9 +86,13 @@ describe("notes end to end", () => {
         { commandId: id("c1"), timeout: "2 seconds" },
       );
 
-      yield* settle(Effect.sync(() => textOf(root, "#count") === "1"));
-      expect(textOf(root, "#list li span")).toBe("buy milk");
-      expect(textOf(root, "#count")).toBe("1");
+      // The count and the list are two bindings, each painted on its own turn.
+      yield* settle(
+        Effect.sync(
+          () => textOf(root, "#count") === "1" && textOf(root, "#list li span") === "buy milk",
+        ),
+        "the second client's note",
+      );
     }),
   );
 
@@ -132,10 +136,15 @@ describe("notes end to end", () => {
           (applied) => applied.revision.value === target.revision.value,
         ),
       );
-      yield* settle(Effect.sync(() => textOf(root, "#list li span") === "walk dog"));
-      const frame = yield* draw(setup);
-      expect(frame).toContain("walk dog");
-      expect(textOf(root, "#list li span")).toBe("walk dog");
+      // The actor's revision moves before either list paints its row, each on
+      // a turn of its own: wait for both drawings.
+      yield* settle(
+        Effect.map(
+          draw(setup),
+          (frame) => frame.includes("walk dog") && textOf(root, "#list li span") === "walk dog",
+        ),
+        "the row in the browser and the terminal",
+      );
       expect(yield* terminal.applied.get).toEqual(yield* browser.applied.get);
     }),
   );
@@ -159,8 +168,12 @@ describe("notes end to end", () => {
         { commandId: id("c3"), timeout: "5 seconds" },
       );
 
-      yield* settle(Effect.sync(() => textOf(root, "#count") === "1"));
-      expect(textOf(root, "#list li span")).toBe("after restart");
+      yield* settle(
+        Effect.sync(
+          () => textOf(root, "#count") === "1" && textOf(root, "#list li span") === "after restart",
+        ),
+        "the note after the restart",
+      );
     }),
   );
 

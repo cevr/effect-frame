@@ -46,7 +46,15 @@ describe("the queries a command refreshes", () => {
       elementOf(app.root, "#compose", HTMLFormElement).dispatchEvent(
         new Event("submit", { bubbles: true, cancelable: true }),
       );
-      yield* settle(Effect.sync(() => textOf(app.root, "#counts") === "0 of 1 done"));
+      // The counts and the list index are two queries, each painted on its
+      // own turn: wait for both refreshed values.
+      yield* settle(
+        Effect.sync(
+          () =>
+            textOf(app.root, "#counts") === "0 of 1 done" &&
+            textOf(app.root, '#names a[href="/lists/inbox"] + .size') === "1",
+        ),
+      );
 
       const replies = wire.commands.filter((one) => one.text === "buy milk");
       expect(replies.map((one) => one.refreshed).filter((keys) => keys.length > 0)).toEqual([
@@ -54,7 +62,6 @@ describe("the queries a command refreshes", () => {
       ]);
       // The two refreshed values landed from the reply: neither was read again.
       expect([wire.readsOf(inboxCounts), wire.readsOf(listIndex)]).toEqual([1, 1]);
-      expect(textOf(app.root, '#names a[href="/lists/inbox"] + .size')).toBe("1");
     }),
   );
 

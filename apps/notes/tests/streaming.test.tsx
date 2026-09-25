@@ -180,9 +180,15 @@ describe("the streamed list page (#22)", () => {
 
         const client = yield* clientOf(server.url);
         yield* client(hydrateAt(root, `${server.url}${listPage}`));
+        // The failure paints on a turn of its own, after the read that will
+        // settle it has started. That read is held, so wait for both.
         yield* settle(
-          Effect.sync(() => wire.readsOf('ListCounts{"list":"inbox"}') === 2),
-          "a /query read",
+          Effect.sync(
+            () =>
+              wire.readsOf('ListCounts{"list":"inbox"}') === 2 &&
+              textOf(root, "#failure") === "could not load: StreamEnded",
+          ),
+          "a /query read, and the failure on screen",
         );
         yield* wire.open(held);
         yield* settle(

@@ -60,14 +60,19 @@ describe("the compose form's command", () => {
 
       const held = yield* wire.holdSend("buy milk");
       yield* compose(app.root, "buy milk");
+      // The status, the list and the count are three bindings, each painted
+      // on its own turn; the send is held, so all three settle before it.
       yield* settle(
-        Effect.sync(() => textOf(app.root, "#status") === "Sent"),
-        "status Sent",
+        Effect.sync(
+          () =>
+            textOf(app.root, "#status") === "Sent" &&
+            rows(app.root).join("|") === "buy milk" &&
+            textOf(app.root, "#count") === "1",
+        ),
+        "status Sent and the predicted row",
       );
       // The host has not seen the command, and the row is already drawn.
       expect(wire.commands).toEqual([]);
-      expect(rows(app.root)).toEqual(["buy milk"]);
-      expect(textOf(app.root, "#count")).toBe("1");
       expect(textOf(app.root, "#counts")).toBe("0 of 0 done");
 
       yield* wire.open(held);
@@ -92,7 +97,12 @@ describe("the compose form's command", () => {
         yield* settle(Effect.sync(() => textOf(app.root, "#counts") === "0 of 0 done"));
         yield* compose(app.root, "keep me");
         yield* settle(
-          Effect.sync(() => textOf(app.root, "#status") === "Applied"),
+          Effect.sync(
+            () =>
+              textOf(app.root, "#status") === "Applied" &&
+              rows(app.root).join("|") === "keep me" &&
+              textOf(app.root, "#counts") === "0 of 1 done",
+          ),
           "first add",
         );
         const before = yield* app.run(
@@ -142,25 +152,31 @@ describe("the compose form's command", () => {
 
         const held = yield* wire.holdSend("file me");
         yield* compose(app.root, "file me");
-        yield* settle(
-          Effect.sync(() => textOf(app.root, "#status") === "Sent"),
-          "status Sent",
-        );
         // The rule is the server's alone: the page predicted the add.
-        expect(rows(app.root)).toEqual(["file me"]);
-        expect(textOf(app.root, "#count")).toBe("1");
+        yield* settle(
+          Effect.sync(
+            () =>
+              textOf(app.root, "#status") === "Sent" &&
+              rows(app.root).join("|") === "file me" &&
+              textOf(app.root, "#count") === "1",
+          ),
+          "status Sent and the predicted row",
+        );
 
         yield* wire.open(held);
-        yield* settle(
-          Effect.sync(() => textOf(app.root, "#status") === "Rejected"),
-          "Rejected",
-        );
         // The real host's policy refused it, and the predicted row is gone.
+        yield* settle(
+          Effect.sync(
+            () =>
+              textOf(app.root, "#status") === "Rejected" &&
+              rows(app.root).length === 0 &&
+              textOf(app.root, "#count") === "0",
+          ),
+          "Rejected, and the predicted row taken back",
+        );
         expect(wire.refusals).toEqual([
           { text: "file me", reason: Unauthorized.make({ contract: "Notes" }) },
         ]);
-        expect(rows(app.root)).toEqual([]);
-        expect(textOf(app.root, "#count")).toBe("0");
         expect(yield* before.applied.get).toEqual(committed);
         expect(wire.commands).toEqual([]);
       }),

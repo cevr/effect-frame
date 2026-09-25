@@ -3,7 +3,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Effect } from "effect";
+import { Effect, Equal } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { routes } from "../src/routes.js";
 import { click, has, mountApp, settle, tappedHost, textOf } from "./fixture.js";
@@ -35,31 +35,32 @@ describe("readiness on the overview (#16)", () => {
       const { handlers, wire } = yield* tappedHost();
       const slow = yield* handlers.hold("Slowest");
       const app = yield* mountApp({ transport: wire.transport, href: overview, routes });
-      yield* settle(
-        Effect.sync(() => textOf(app.root, "#revenue") === "460"),
-        "the page painted around the slow read",
-      );
-
-      // Every other card shows its content; the slow one shows its own fallback.
-      expect(paintedCards(app.root)).toEqual({
+      // Every other card shows its content; the slow one shows its own
+      // fallback. Each card's bindings paint on their own turns, so wait
+      // for the whole page.
+      const painted = {
         tenant: "Acme Co",
         memo: true,
         revenue: "460",
         orders: 7,
         open: "2",
         alerts: 3,
-      });
+      };
+      yield* settle(
+        Effect.sync(() => Equal.equals(paintedCards(app.root), painted)),
+        "the page painted around the slow read",
+      );
+      expect(paintedCards(app.root)).toEqual(painted);
       expect(has(app.root, "#skeleton")).toBe(false);
       expect(textOf(app.root, "#slowest-loading")).toBe("measuring");
       expect(has(app.root, "#slowest-card")).toBe(false);
 
       yield* wire.open(slow);
       yield* settle(
-        Effect.sync(() => has(app.root, "#slowest-card")),
-        "the slowest card",
+        Effect.sync(() => textOf(app.root, "#slowest li") === "POST /checkout 2140ms"),
+        "the slowest card and its rows",
       );
       expect(has(app.root, "#slowest-loading")).toBe(false);
-      expect(textOf(app.root, "#slowest li")).toBe("POST /checkout 2140ms");
       expect(paintedCards(app.root).revenue).toBe("460");
     }),
   );
@@ -120,11 +121,16 @@ describe("readiness on the overview (#16)", () => {
         expect(connected).toEqual([]);
 
         yield* wire.open(funnel);
+        // The card was built while the scope was pending, so its list follows
+        // the read on a turn of its own: wait for the rows too.
         yield* settle(
-          Effect.sync(() => !has(app.root, "#skeleton") && has(app.root, "#funnel-card")),
+          Effect.sync(
+            () =>
+              !has(app.root, "#skeleton") &&
+              textOf(app.root, "#funnel") === "placed 7open 2fulfilled 4cancelled 1",
+          ),
           "the scope settled with the funnel",
         );
-        expect(textOf(app.root, "#funnel")).toBe("placed 7open 2fulfilled 4cancelled 1");
         expect(paintedCards(app.root).revenue).toBe("460");
       }),
   );

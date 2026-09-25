@@ -114,8 +114,9 @@ The lint is strict and the rules are written down in `.oxlintrc.json`:
   (`tooling/checks/src/commit-message.ts`).
 - A change to a published package carries a changeset in `.changeset/`. CI
   runs `changeset status --since=origin/main` on a pull request: a change
-  to `src/**` or `package.json` of `effect-frame` with no changeset turns
-  it red. A change that needs no release takes `changeset add --empty`.
+  to what `effect-frame` publishes (`src/**`, `package.json`, `README.md`,
+  `tsdown.config.ts`, `tsconfig.build.json`) with no changeset turns it
+  red. A change that needs no release takes `changeset add --empty`.
 - A package below 1.0 takes no `major` changeset: a breaking change on 0.x
   is `minor`. The first major release is the owner's decision, written by
   setting `firstMajor` in `tooling/checks/src/changesets.ts`; until then

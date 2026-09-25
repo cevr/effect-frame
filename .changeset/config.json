@@ -13,5 +13,11 @@
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
   "ignore": [],
-  "changedFilePatterns": ["src/**", "package.json"]
+  "changedFilePatterns": [
+    "src/**",
+    "package.json",
+    "README.md",
+    "tsdown.config.ts",
+    "tsconfig.build.json"
+  ]
 }

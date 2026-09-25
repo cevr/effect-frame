@@ -40,18 +40,21 @@ effect-frame inspect --url <gateway> --root <id|prefix|name> [--json]
 
 ## Attach a development root
 
-```ts
-import { attachGateway, defaultOpenTimeout, defaultRetry } from "effect-frame/inspection";
+<!-- example: ../effect-frame/examples/features/inspection.ts#attach -->
 
-// Development entry only. The production entry imports nothing from
-// effect-frame/inspection.
-const attachment =
-  yield *
-  attachGateway({
-    url: "ws://127.0.0.1:4318",
-    token: attachTokenFromDevServer,
-    retry: defaultRetry,
-    openTimeout: defaultOpenTimeout,
+```ts
+// Development entry only: a production entry imports nothing from
+// effect-frame/inspection. It needs the root's `Frame.Service`, returns at
+// once, and retries in the background.
+export const attach = (attachToken: string) =>
+  Effect.gen(function* () {
+    const attachment = yield* attachGateway({
+      url: "ws://127.0.0.1:4318",
+      token: attachToken,
+      retry: defaultRetry,
+      openTimeout: defaultOpenTimeout,
+    });
+    return attachment.status; // a Stream: the current status, then each change
   });
 ```
 

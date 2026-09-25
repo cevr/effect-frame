@@ -4,6 +4,8 @@ Effect Frame provides one actor model for full-stack declarative interfaces.
 
 This file is the glossary, and only the glossary: each term is defined once (`bun run docs` refuses a second definition). `_Code_` names the symbols a term is written as, so one word has one meaning in prose and in code.
 
+How an app uses these words is [the package README](packages/effect-frame/README.md); how to change the repository is [AGENTS.md](AGENTS.md).
+
 ## Language
 
 **Actor contract**:

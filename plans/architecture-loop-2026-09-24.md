@@ -257,6 +257,7 @@ Loop decisions on owner questions (the owner may reverse any; each names its nor
 - AP4 / docs 7 (`FollowedActor.send`): rejected — pass 1 (c3d9917) decided a send names the reference.
 - P2-A6 (A12): its own pass, after a model-based test; not in pass 2.
 - P2-G9 (the wait is the expectation): hold until W2 lands; re-open if a test still settles on one binding.
+- Batch E key inference (06804f1): keep the one written rule — a plain fixed-key struct codec names its own search keys (`inferredSearchKeys`, `SegmentOptions.search`). It is stated, not silent, and 30 segments pass `Schema.Struct({})`; an annotated `Route.search` never takes it (explicit: the rule is written where the option is).
 
 Apply groups (one after the other in the worktree):
 

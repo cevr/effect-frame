@@ -1,7 +1,6 @@
 import { Source } from "effect-frame/actor/client";
 import type { Host } from "effect-frame/view";
 import { View } from "effect-frame/view";
-import { read as readInspection, register as registerInspection } from "./route-inspection.js";
 import type { Duration } from "effect";
 import {
   Cause,
@@ -148,7 +147,6 @@ interface Mounted<R> {
 }
 
 const newRouteInstance = (): RouteInstance => ({ _tag: "RouteInstance" });
-const unavailableInspection = Symbol.for("effect-frame/frame/inspection-unavailable");
 
 /**
  * The name of the router's own not-found route: what `Router.current`
@@ -218,8 +216,8 @@ const notFoundRoute = <R>(view: View.View<NotFoundProps, never, R>): AnyRoute<R>
               }),
               Effect.as(SubscriptionRef.set(current, next), true),
             ),
+          inspection: Effect.succeed({ params: {}, search: {} }),
         };
-        registerInspection(entered, Effect.succeed({ params: {}, search: {} }));
         registerShell(
           entered,
           Effect.sync(() => ({
@@ -623,14 +621,7 @@ export const mount: <R, HostNode, N = R>(
               const registration = yield* registry.value.register(routeOwner.value, (id) =>
                 Effect.gen(function* () {
                   const mountedPhase = yield* Ref.get(phase);
-                  const decoded = yield* Option.match(readInspection(mountedEntered), {
-                    onNone: () =>
-                      Effect.succeed({
-                        params: unavailableInspection,
-                        search: unavailableInspection,
-                      }),
-                    onSome: (read) => read,
-                  });
+                  const decoded = yield* mountedEntered.inspection;
                   const canonical = yield* SubscriptionRef.get(navigations);
                   return {
                     _tag: "Route",

@@ -25,6 +25,7 @@ export {
 export type {
   AnyRoute,
   Entered,
+  EnteredValues,
   Current,
   Linkable,
   ParamsCodec,

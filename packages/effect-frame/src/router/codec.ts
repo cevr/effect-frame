@@ -510,6 +510,14 @@ export interface Entered<R> {
   readonly instance?: RouteInstance;
   readonly setup: Effect.Effect<Node, never, R | Scope.Scope>;
   readonly update: (url: URL) => Effect.Effect<boolean>;
+  /** The deepest mounted segment's decoded values, for the inspection record. */
+  readonly inspection: Effect.Effect<EnteredValues>;
+}
+
+/** The decoded params and search the inspection record shows for a mounted route. */
+export interface EnteredValues {
+  readonly params: unknown;
+  readonly search: unknown;
 }
 
 /**

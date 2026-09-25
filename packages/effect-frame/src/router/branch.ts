@@ -94,7 +94,6 @@ import {
   search as searchCodec,
 } from "./codec.js";
 import type { RouteMatch } from "./router.js";
-import { register as registerInspection } from "./route-inspection.js";
 import { Router } from "./router.js";
 import type { LeaveEntry, LeaveInput, MountedRouteService } from "./leave.js";
 import { MountedRoute } from "./leave.js";
@@ -3031,6 +3030,12 @@ const mountTree = <Name extends string, ViewR, DataR, Extra extends object>(
                     }),
                   ),
               }),
+            inspection: Effect.suspend(() =>
+              Option.match(mounted, {
+                onNone: () => Effect.succeed({ params: {}, search: {} }),
+                onSome: (current) => deepest(current.root),
+              }),
+            ),
           };
           // Leave questions for a candidate: the mounted root answers for the
           // whole tree. A candidate of another route exits every instance.
@@ -3054,15 +3059,6 @@ const mountTree = <Name extends string, ViewR, DataR, Extra extends object>(
               Option.match(shell, {
                 onNone: () => Effect.die("the tree reported a shell before its first mount"),
                 onSome: Effect.succeed,
-              }),
-            ),
-          );
-          registerInspection(
-            entered,
-            Effect.suspend(() =>
-              Option.match(mounted, {
-                onNone: () => Effect.succeed({ params: {}, search: {} }),
-                onSome: (current) => deepest(current.root),
               }),
             ),
           );

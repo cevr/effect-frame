@@ -2,8 +2,11 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Dom, Html, Portal, Remote, View } from "effect-frame/view";
-import { Cause, Effect, Exit, Option, Schema } from "effect";
+import { Actor, Behavior, Value } from "effect-frame/actor";
+import type { Source } from "effect-frame/actor";
+import { Dom, Html, Portal, Remote, Show, View } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
+import { Cause, Deferred, Duration, Effect, Exit, Option, Schema, Scope } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 /**
@@ -31,6 +34,31 @@ const refusal = <A, E>(exit: Exit.Exit<A, E>): Option.Option<View.PortalTargetRe
     onSuccess: () => Option.none(),
     onFailure: (cause) => Option.liftPredicate(Cause.squash(cause), isRefused),
   });
+
+/**
+ * A Portal a `Show` reveals after mount. The view's own finalizer hands the
+ * exit its mount scope closed with to `closed`.
+ */
+const LatePortal = (props: {
+  readonly open: Source<boolean>;
+  readonly into: Element;
+  readonly closed: Deferred.Deferred<Exit.Exit<unknown, unknown>>;
+}) =>
+  Effect.gen(function* () {
+    yield* Effect.addFinalizer((exit) => Deferred.succeed(props.closed, exit));
+    return (
+      <section>
+        <Show when={props.open}>
+          <Portal into={Dom.target(props.into)}>
+            <dialog id="modal">hello</dialog>
+          </Portal>
+        </Show>
+      </section>
+    );
+  });
+
+const Label = (props: { readonly label: Source<string> }) =>
+  Effect.succeed(<p id="label">{View.bind(props.label, (label) => label)}</p>);
 
 describe("a Portal's target", () => {
   it.effect("the HTML host refuses a Portal, naming itself and the host that made the target", () =>
@@ -71,5 +99,41 @@ describe("a Portal's target", () => {
       expect(into.querySelector("#modal")?.textContent).toBe("hello");
       expect(root.querySelector("#modal")).toBeNull();
     }),
+  );
+
+  it.scoped(
+    "a Portal a Show reveals after mount closes its mount with the refusal, and reactivity goes on",
+    () =>
+      Effect.gen(function* () {
+        const open = yield* Actor.local(Behavior.value(false));
+        const label = yield* Actor.local(Behavior.value("before"));
+        const closed = yield* Deferred.make<Exit.Exit<unknown, unknown>>();
+        const recording = Remote.recorder();
+        const remoteScope = yield* Scope.make();
+        yield* View.mount(
+          LatePortal,
+          { open: open.state, into: document.createElement("aside"), closed },
+          recording.host,
+          Remote.root,
+        ).pipe(Scope.provide(remoteScope));
+
+        const main = document.createElement("main");
+        const other = yield* ViewTest.make({
+          host: Dom.host,
+          root: main,
+          setup: (host, root) => View.mount(Label, { label: label.state }, host, root),
+        });
+
+        yield* open.call(Value.Set(true));
+        const exit = yield* Deferred.await(closed).pipe(Effect.timeout(Duration.seconds(2)));
+        expect(Option.map(refusal(exit), (error) => [error.host, error.made])).toEqual(
+          Option.some(["Remote", "Dom"]),
+        );
+
+        yield* other.act(label.call(Value.Set("after")), {
+          label: "another mount still follows its source",
+          until: () => main.querySelector("#label")?.textContent === "after",
+        });
+      }),
   );
 });

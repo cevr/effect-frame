@@ -261,6 +261,21 @@ interface Tracker {
   readonly afterCommit: (task: () => void) => void;
   /** The scope current at the call: the branch or row being built. */
   readonly scope: () => Scope.Scope;
+  /**
+   * Report a defect a build met, since a build never throws. While the mount
+   * builds, the mount fails with it. Once the mount is live, a branch or row
+   * that meets one closes the mount's scope with it: the view's owner sees
+   * the defect, and the rest of the process keeps running.
+   */
+  readonly refuse: (defect: PortalTargetRefused) => void;
+}
+
+/** What only the mount reads from its tracker: how its first build ended. */
+interface MountTracker extends Tracker {
+  /** The first defect the mount's own build reported. */
+  readonly refusal: () => Option.Option<PortalTargetRefused>;
+  /** The mount is live: from now on a defect closes the mount's scope. */
+  readonly settle: () => void;
 }
 
 interface Renderer<HostNode> {
@@ -872,8 +887,9 @@ const makeTracker = Effect.fn("View.makeTracker")(function* (
   let pending: Array<() => void> = [];
   let depth = 0;
   // A build is synchronous and does not throw: a view that fails does so
-  // in its setup Effect, before the tree exists. So the depth is restored
-  // by plain sequence, and the queue drains only for the outermost build.
+  // in its setup Effect, before the tree exists, and a defect a build meets
+  // goes through `refuse`. So the depth is restored by plain sequence, and
+  // the queue drains only for the outermost build.
   const commit = <A>(build: () => A): A => {
     depth += 1;
     const value = build();
@@ -886,6 +902,16 @@ const makeTracker = Effect.fn("View.makeTracker")(function* (
       }
     }
     return value;
+  };
+
+  let refusal: Option.Option<PortalTargetRefused> = Option.none();
+  let live = false;
+  const refuse = (defect: PortalTargetRefused): void => {
+    if (live) {
+      void runFork(Scope.close(mountScope, Exit.die(defect)));
+      return;
+    }
+    refusal = Option.orElse(refusal, () => Option.some(defect));
   };
 
   return {
@@ -908,7 +934,12 @@ const makeTracker = Effect.fn("View.makeTracker")(function* (
       const scope = current;
       return (event) => runOwned(handler(event), scope);
     },
-  } satisfies Tracker;
+    refuse,
+    refusal: () => refusal,
+    settle: () => {
+      live = true;
+    },
+  } satisfies MountTracker;
 });
 
 // ---------------------------------------------------------------------------
@@ -1543,29 +1574,34 @@ const buildElement =
 // ---------------------------------------------------------------------------
 
 /**
- * The node a target names, when the drawing host made it. A host with no
- * `portal` member, or one that did not make the target, refuses it with a
- * defect that names both hosts.
+ * The node a target names, when the drawing host made it. `None` when the
+ * host has no `portal` member or did not make the target.
  */
-const resolvePortal = <HostNode>(host: Host<HostNode>, target: PortalTarget): HostNode => {
-  const portals = Option.fromNullishOr(host.portal);
-  const resolved = Option.flatMap(portals, (portal) => portal.resolve(target));
-  if (Option.isSome(resolved)) {
-    return resolved.value;
-  }
-  const name = Option.match(portals, {
-    onNone: () => "drawing",
-    onSome: (portal) => portal.name,
+const resolvePortal = <HostNode>(
+  host: Host<HostNode>,
+  target: PortalTarget,
+): Option.Option<HostNode> =>
+  Option.flatMap(Option.fromNullishOr(host.portal), (portal) => portal.resolve(target));
+
+/** The defect for a target the drawing host did not make, naming both hosts. */
+const refusedPortal = <HostNode>(host: Host<HostNode>, target: PortalTarget): PortalTargetRefused =>
+  PortalTargetRefused.make({
+    host: Option.match(Option.fromNullishOr(host.portal), {
+      onNone: () => "drawing",
+      onSome: (portal) => portal.name,
+    }),
+    made: target.host,
   });
-  // oxlint-disable-next-line effect/noThrowStatement -- a build is synchronous and runs inside Solid; the Effect that runs the build turns this throw into its defect
-  throw PortalTargetRefused.make({ host: name, made: target.host });
-};
 
 /**
  * The children build under `into` instead of the parent, with a slot of
  * their own, and the portal reports no nodes to its parent. They leave
  * with the scope that built them: a finalizer on the current scope removes
  * them from `into`, since the parent's teardown would not find them.
+ *
+ * A target the host refuses draws nothing and goes to the tracker as a
+ * defect. A build may run inside Solid's flush, where a throw would halt
+ * every reactive graph in the process.
  */
 const planPortal = <HostNode>(
   renderer: Renderer<HostNode>,
@@ -1574,22 +1610,26 @@ const planPortal = <HostNode>(
   const children = plan(renderer, portal.children);
   return () => {
     const { host, tracker } = renderer;
-    const inner: Slot<HostNode> = { nodes: [] };
-    const into = resolvePortal(host, portal.into);
-    children(into, inner, () => {});
-    const scope = tracker.scope();
-    tracker.run(
-      Scope.addFinalizer(
-        scope,
-        Effect.sync(() => {
-          for (const node of inner.nodes) {
-            host.remove(into, node);
-          }
-          inner.nodes = [];
-        }),
-      ),
-      scope,
-    );
+    Option.match(resolvePortal(host, portal.into), {
+      onNone: () => tracker.refuse(refusedPortal(host, portal.into)),
+      onSome: (into) => {
+        const inner: Slot<HostNode> = { nodes: [] };
+        children(into, inner, () => {});
+        const scope = tracker.scope();
+        tracker.run(
+          Scope.addFinalizer(
+            scope,
+            Effect.sync(() => {
+              for (const node of inner.nodes) {
+                host.remove(into, node);
+              }
+              inner.nodes = [];
+            }),
+          ),
+          scope,
+        );
+      },
+    });
   };
 };
 
@@ -1816,8 +1856,10 @@ export const mountView = Effect.fn("View.mount")(function* <Props, E, R, HostNod
     // Planning creates the signals a binding writes to, so it belongs inside
     // the root that owns them. The acquire/release pair owns the Solid root
     // before phase changes can yield. If planning defects after host writes,
-    // capture the defect as an Exit, close the root, and remove those writes
-    // before re-failing the acquire effect.
+    // or the build refused something, capture the defect as an Exit, close
+    // the root, and remove those writes before re-failing the acquire
+    // effect. A build that succeeds settles the tracker: a later refusal
+    // closes the mount's scope instead.
     yield* Effect.acquireRelease(
       Effect.gen(function* () {
         let dispose: Option.Option<() => void> = Option.none();
@@ -1832,7 +1874,14 @@ export const mountView = Effect.fn("View.mount")(function* <Props, E, R, HostNod
               });
               return disposeRoot;
             });
-          }),
+          }).pipe(
+            Effect.flatMap((close) =>
+              Option.match(tracker.refusal(), {
+                onNone: () => Effect.succeed(close),
+                onSome: (defect) => Effect.die(defect),
+              }),
+            ),
+          ),
         );
         return yield* Exit.match(outcome, {
           onFailure: (cause) =>
@@ -1846,7 +1895,11 @@ export const mountView = Effect.fn("View.mount")(function* <Props, E, R, HostNod
               }),
               Effect.failCause(cause),
             ),
-          onSuccess: (close) => Effect.succeed(close),
+          onSuccess: (close) =>
+            Effect.sync(() => {
+              tracker.settle();
+              return close;
+            }),
         });
       }),
       (close) =>

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "typecheck": {
+      "inputs": [
+        "$TURBO_EXTENDS$",
+        "fixture/**/*.ts",
+        "fixture-contract/**/*.ts",
+        "fixture-conformance/**/*.ts",
+        "scripts/**/*.ts"
+      ]
+    }
+  }
+}

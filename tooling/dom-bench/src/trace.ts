@@ -147,7 +147,7 @@ export const reduceChromeTrace = (
   startLogicEvent = "click",
 ): TraceReduction => {
   const decodedEntries = decodeChromeTraceEvents(entries);
-  const events = relevantEvents(decodedEntries).sort((left, right) => left.end - right.end);
+  const events = relevantEvents(decodedEntries).toSorted((left, right) => left.end - right.end);
   const clicks = events.filter((event) => event.type === startLogicEvent);
   if (clicks.length !== 1) {
     throw new Error(`expected one ${startLogicEvent} event, found ${clicks.length}`);

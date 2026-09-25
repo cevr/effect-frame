@@ -597,7 +597,7 @@ const measure = async (
 };
 
 const median = (values: ReadonlyArray<number>): number => {
-  const sorted = values.slice().sort((left, right) => left - right);
+  const sorted = values.toSorted((left, right) => left - right);
   return sorted[Math.floor(sorted.length / 2)] ?? 0;
 };
 

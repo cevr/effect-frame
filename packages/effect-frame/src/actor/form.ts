@@ -271,7 +271,7 @@ const settle = (draft: Draft): FormTree => {
   }
   const entries = Array.from(draft.children);
   if (draft.list) {
-    return entries.sort(byIndex).map(([, child]) => settle(child));
+    return entries.toSorted(byIndex).map(([, child]) => settle(child));
   }
   return Object.fromEntries(entries.map(([key, child]) => [key, settle(child)]));
 };

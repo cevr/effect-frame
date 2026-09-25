@@ -98,6 +98,7 @@ export const all = <
     onNone: (): Source<ReadonlyArray<unknown>> => constant([]),
     onSome: (first) =>
       members.slice(1).reduce<Source<ReadonlyArray<unknown>>>(
+        // oxlint-disable-next-line oxc/no-accumulating-spread -- the reduce accumulates sources, and each read's tuple is as long as the product.
         (left, member) => zip(left, member, (known, value) => [...known, value]),
         select(first, (value) => [value]),
       ),

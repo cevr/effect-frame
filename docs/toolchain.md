@@ -20,6 +20,7 @@ The editor-only native-preview package was not the typecheck target.
 Oxlint uses the complete recommended rule map from the installed `oxlint-plugin-effect` 0.12.1 package.
 The skill's older twelve-rule example is not the current preset.
 Host, script, and application paths do have lint escape hatches: per-file `overrides` in `.oxlintrc.json` and `oxlint-disable` comments with a reason. `bun run lint` passes `--report-unused-disable-directives-severity=error`, so a disable comment that no longer suppresses anything fails the gate.
+The `plugins` list names `unicorn` and `oxc` with the rest, because a `plugins` list replaces oxlint's default set. One of their rules is off by name: `unicorn/consistent-function-scoping`, which asks to hoist every closure that captures nothing. Effect code keeps a helper next to the one `Effect.gen` body, view, or test that uses it, and that rule flagged 59 such helpers and no defect.
 
 ## Checks
 

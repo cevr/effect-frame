@@ -108,7 +108,7 @@ const acceptSocket = (ws: ServerWebSocket<RootData>): AcceptedSocket => {
     return created;
   };
   const emit = (name: EventName, event: Socket.WebSocketEvent): void => {
-    for (const call of [...listenersOf(name).values()]) call(event);
+    for (const call of Array.from(listenersOf(name).values())) call(event);
   };
   const like: Socket.WebSocketLike = {
     get readyState() {
@@ -660,7 +660,7 @@ export const make = Effect.fn("InspectionGateway.make")(function* (options: Gate
     }),
     (running) =>
       Effect.sync(() => {
-        for (const connection of [...registry.values()]) {
+        for (const connection of Array.from(registry.values())) {
           terminate(connection, { _tag: "Closed" }, 1001, "gateway closed");
         }
         running.stop(true);

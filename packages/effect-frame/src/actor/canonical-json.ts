@@ -33,7 +33,7 @@ const sort = (value: Json): Json => {
     const sorted: Record<string, Json> = {};
     // Code-unit order, not locale order: the key must be the same on every
     // machine that encodes the same arguments.
-    const fields = Object.entries(value).sort(([left], [right]) => compare(left, right));
+    const fields = Object.entries(value).toSorted(([left], [right]) => compare(left, right));
     for (const [field, nested] of fields) {
       sorted[field] = sort(nested);
     }

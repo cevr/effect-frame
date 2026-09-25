@@ -5,7 +5,7 @@
     "suspicious": "error",
     "perf": "error"
   },
-  "plugins": ["typescript", "import", "node"],
+  "plugins": ["typescript", "unicorn", "oxc", "import", "node"],
   "jsPlugins": ["oxlint-plugin-effect/plugin"],
   "rules": {
     "typescript/no-explicit-any": "error",
@@ -30,6 +30,7 @@
       }
     ],
     "no-underscore-dangle": "off",
+    "unicorn/consistent-function-scoping": "off",
     "no-nested-ternary": "error",
     "complexity": [
       "error",

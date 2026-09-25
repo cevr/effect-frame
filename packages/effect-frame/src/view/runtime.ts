@@ -539,7 +539,7 @@ const presentationHost = <HostNode>(
     if (!visible) {
       return;
     }
-    const writes = [...mounted.entries()].reverse();
+    const writes = Array.from(mounted.entries()).toReversed();
     for (const [node, parent] of writes) {
       host.remove(parent, node);
       forgetPhysical(parent, node);
@@ -756,7 +756,7 @@ const trackHostWrites = <HostNode>(host: Host<HostNode>): TrackedHost<HostNode> 
     addEventListener: host.addEventListener,
     attach: host.attach,
     cleanup: () => {
-      for (const write of [...writes.values()].reverse()) {
+      for (const write of Array.from(writes.values()).toReversed()) {
         host.remove(write.parent, write.node);
       }
       writes.clear();

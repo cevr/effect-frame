@@ -146,14 +146,14 @@ describe("Frame.inspect actor and query records", () => {
       const initial = yield* Frame.inspect;
       expect(initial.actors).toHaveLength(3);
       expect(initial.actors.every((actor) => actor.kind === "local")).toBe(true);
-      expect(initial.actors.map((actor) => actor.revision).sort()).toEqual([0, 0, 0]);
+      expect(initial.actors.map((actor) => actor.revision).toSorted()).toEqual([0, 0, 0]);
 
       yield* cell.set(1);
       yield* reducer.call({ _tag: "Increment" });
       yield* machine.call(StepEvent.Go);
 
       const changed = yield* Frame.inspect;
-      expect(changed.actors.map((actor) => actor.revision).sort()).toEqual([1, 1, 1]);
+      expect(changed.actors.map((actor) => actor.revision).toSorted()).toEqual([1, 1, 1]);
 
       const child = yield* Scope.make();
       yield* spawn(Behavior.value("owned")).pipe(Scope.provide(child));

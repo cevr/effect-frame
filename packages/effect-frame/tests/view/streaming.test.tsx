@@ -264,7 +264,7 @@ describe("a streamed document, on the client", () => {
         Effect.flatMap(QueryCache, (cache) => cache.active),
         client,
       );
-      expect([...placeholders].sort()).toEqual(active.map(Streaming.recordId).sort());
+      expect(placeholders.toSorted()).toEqual(active.map(Streaming.recordId).toSorted());
       expect(placeholders.length).toBe(2);
     }),
   );

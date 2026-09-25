@@ -23,13 +23,12 @@ export const celldBin = process.env["CELLD_BIN"] ?? DEFAULT_CELLD_BIN;
 /** The one node child the launcher spawned. */
 const nodeChild = (launcherPid: number): number => {
   const out = execFileSync("pgrep", ["-P", String(launcherPid)], { encoding: "utf8" });
-  const pids = out
+  const first = out
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
     .map((line) => Number.parseInt(line, 10))
-    .filter((pid) => Number.isInteger(pid));
-  const first = pids[0];
+    .find((pid) => Number.isInteger(pid));
   if (first === undefined) {
     throw new Error(`launcher ${launcherPid} has no child`);
   }

@@ -213,7 +213,7 @@ const makeBindings = (): Bindings => {
       Effect.sync(() => {
         // A catch-up may draw a branch that binds more sources: those read
         // their current value when they bind.
-        for (const one of [...live]) {
+        for (const one of Array.from(live)) {
           one.catchUp();
         }
       }),

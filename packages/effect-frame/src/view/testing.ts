@@ -165,7 +165,7 @@ const recordMutation = <HostNode>(state: HarnessState<HostNode>, operation: stri
   if (state.recentHostOperations.length > RECENT_OPERATION_LIMIT) {
     state.recentHostOperations.shift();
   }
-  for (const waiter of [...state.waiters]) {
+  for (const waiter of Array.from(state.waiters)) {
     if (state.revision > waiter.afterRevision) {
       finishWaiter(state, waiter, Effect.void);
     }
@@ -529,10 +529,10 @@ export const make = Effect.fn("ViewTest.make")(function* <HostNode, A, E, R>(
       return;
     }
     state.closed = true;
-    for (const waiter of [...state.waiters]) {
+    for (const waiter of Array.from(state.waiters)) {
       finishWaiter(state, waiter, Effect.fail(waiter.onClose()));
     }
-    for (const waiter of [...state.closeWaiters]) {
+    for (const waiter of Array.from(state.closeWaiters)) {
       finishCloseWaiter(state, waiter, Effect.fail(waiter.onClose()));
     }
   };

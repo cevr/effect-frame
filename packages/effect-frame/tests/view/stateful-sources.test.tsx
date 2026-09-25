@@ -3,14 +3,8 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import { QueryCache, followQuery } from "effect-frame/actor";
-import type {
-  QueryCacheService,
-  QueryFailure,
-  QueryState,
-  ResultOf,
-  Source,
-} from "effect-frame/actor";
-import { Failed, Loading, Ready } from "effect-frame/actor/client";
+import type { QueryCacheService, QueryFailure, ResultOf, Source } from "effect-frame/actor";
+import { QueryState } from "effect-frame/actor/client";
 import { LoadingScope, ready } from "effect-frame/view";
 import { Effect, Equal, Match, Option, Queue, Schema, Stream, SubscriptionRef } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -56,13 +50,16 @@ const cacheOf = (cells: ReadonlyMap<string, Held>): QueryCacheService => ({
       const typed = (state: Labelled) =>
         Match.value(state).pipe(
           Match.tagsExhaustive({
-            Loading: () => Effect.succeed(Loading<ResultOf<typeof contract>, QueryFailure>()),
+            Loading: () =>
+              Effect.succeed(QueryState.Loading<ResultOf<typeof contract>, QueryFailure>()),
             Ready: (found) =>
               Effect.map(Effect.orDie(decode(`{"label":"${found.value.label}"}`)), (value) =>
-                Ready<ResultOf<typeof contract>, QueryFailure>(value, found.stale),
+                QueryState.Ready<ResultOf<typeof contract>, QueryFailure>(value, found.stale),
               ),
             Failed: (failed) =>
-              Effect.succeed(Failed<ResultOf<typeof contract>, QueryFailure>(failed.error)),
+              Effect.succeed(
+                QueryState.Failed<ResultOf<typeof contract>, QueryFailure>(failed.error),
+              ),
           }),
         );
       const source = sourceOf(cell);

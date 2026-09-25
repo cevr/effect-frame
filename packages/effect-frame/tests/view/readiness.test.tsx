@@ -12,7 +12,7 @@ import {
   Policy,
 } from "effect-frame/actor";
 import type { QueryEntry } from "effect-frame/actor";
-import { Behavior, Value, spawn, Source } from "effect-frame/actor/client";
+import { Behavior, QueryState, Value, spawn, Source } from "effect-frame/actor/client";
 import { QueryTest } from "effect-frame/actor/testing";
 import {
   Await,
@@ -21,7 +21,6 @@ import {
   Html,
   Loading,
   Query,
-  QueryState,
   View,
   ViewTest,
   mount,
@@ -433,7 +432,7 @@ describe("readiness through context", () => {
       // This source-level fixture covers a view transition that QueryCache
       // deliberately does not expose: Failed stays Failed until its refresh
       // succeeds. Ordinary query/readiness behavior uses QueryTest above.
-      const controlled = yield* QueryState.fakeQuery<string, string>();
+      const controlled = yield* ViewTest.fakeQuery(QueryState.Loading<string, string>());
 
       const Page = () =>
         Errored({
@@ -548,7 +547,7 @@ describe("readiness through context", () => {
       // Query consumes a Source directly and has no cache or transport
       // boundary. Keep this as a source-level union test; ordinary query and
       // readiness behavior uses QueryTest above.
-      const controlled = yield* QueryState.fakeQuery<string, string>();
+      const controlled = yield* ViewTest.fakeQuery(QueryState.Loading<string, string>());
       const Page = () =>
         Effect.succeed(
           <Query
@@ -598,7 +597,7 @@ describe("readiness through context", () => {
   it.scoped("Await matches the union to one of three views, with no scope", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
-      const controlled = yield* QueryState.fakeQuery<string, string>();
+      const controlled = yield* ViewTest.fakeQuery(QueryState.Loading<string, string>());
 
       const Page = () =>
         Await({
@@ -860,8 +859,8 @@ describe("readiness through context", () => {
   it.scoped("a change read before a late registration does not bring the content back", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;
-      const shown = yield* QueryState.fakeQuery<string, string>();
-      const late = yield* QueryState.fakeQuery<string, string>();
+      const shown = yield* ViewTest.fakeQuery(QueryState.Loading<string, string>());
+      const late = yield* ViewTest.fakeQuery(QueryState.Loading<string, string>());
       const rows = yield* SubscriptionRef.make<ReadonlyArray<string>>([]);
 
       const LateCard = Effect.gen(function* () {
@@ -994,7 +993,7 @@ describe("readiness on the server", () => {
 
   it.scoped("a server render draws the fallback for a query with no value yet", () =>
     Effect.gen(function* () {
-      const controlled = yield* QueryState.fakeQuery<string, string>();
+      const controlled = yield* ViewTest.fakeQuery(QueryState.Loading<string, string>());
       const Page = () =>
         Loading({
           fallback: <p id="pending">loading</p>,
@@ -1014,8 +1013,8 @@ describe("readiness on the server", () => {
 
   it.scoped("a query already resolved renders its content, not its fallback", () =>
     Effect.gen(function* () {
-      const controlled = yield* QueryState.fakeQuery<string, string>(
-        QueryState.ready<string, string>("Alpha"),
+      const controlled = yield* ViewTest.fakeQuery(
+        QueryState.Ready<string, string>("Alpha", false),
       );
       const Page = () =>
         Loading({
@@ -1034,7 +1033,7 @@ describe("readiness on the server", () => {
 
   it.scoped("an already failed source renders Errored around Loading in one HTML frame", () =>
     Effect.gen(function* () {
-      const controlled = yield* QueryState.fakeQuery<string, string>(QueryState.failed("boom"));
+      const controlled = yield* ViewTest.fakeQuery(QueryState.Failed<string, string>("boom"));
       const Page = () =>
         Errored({
           fallback: (error) => (

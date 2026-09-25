@@ -11,7 +11,6 @@ import type {
   QueryCacheService,
   QueryEntry,
   QueryFailure,
-  QueryState,
   Refused,
   RemoteActorRef,
   ResultOf,
@@ -22,12 +21,12 @@ import type {
 import {
   ActorTransport,
   QueryCache,
-  Ready,
   Source,
   canonicalize,
   keyOf,
   committedRevision,
   ref,
+  QueryState,
 } from "effect-frame/actor/client";
 import type { Node, Remote } from "effect-frame/view";
 import { View } from "effect-frame/view";
@@ -1485,7 +1484,7 @@ const successes = <A, E>(exit: Exit.Exit<A, E>): ReadonlyArray<A> => {
 /** While the next key loads, the last value stays on screen marked stale. */
 const carry = <A, E>(shown: QueryState<A, E>, incoming: QueryState<A, E>): QueryState<A, E> => {
   if (incoming._tag === "Loading" && shown._tag === "Ready") {
-    return Ready(shown.value, true);
+    return QueryState.Ready(shown.value, true);
   }
   return incoming;
 };

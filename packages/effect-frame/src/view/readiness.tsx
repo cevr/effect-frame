@@ -1,4 +1,4 @@
-import { Source, isFailed, isReady } from "effect-frame/actor/client";
+import { QueryState, Source } from "effect-frame/actor/client";
 import {
   Context as ServiceMap,
   Effect,
@@ -12,7 +12,6 @@ import { advance, followedChanges } from "../actor/advance.js";
 import { readAhead } from "../actor/read-ahead.js";
 import { Match } from "./control.js";
 import type { Node, RetainedNode } from "./jsx-runtime.js";
-import type { QueryState } from "./query-state.js";
 
 /**
  * Readiness through context (#16).
@@ -287,22 +286,23 @@ const hasSettled: (state: QueryState<unknown, unknown>) => boolean = EffectMatch
  * whether to show its own fallback. One tag is the exception, so it is a
  * predicate, not a table.
  */
-const isNotFailed = <Value, Error>(state: QueryState<Value, Error>): boolean => !isFailed(state);
+const isNotFailed = <Value, Error>(state: QueryState<Value, Error>): boolean =>
+  !QueryState.isFailed(state);
 
 /** One member narrowed, so a predicate and not a table. */
 const valueOf = <Value, Error>(state: QueryState<Value, Error>): Option.Option<Value> =>
-  Option.map(Option.liftPredicate(state, isReady), (found) => found.value);
+  Option.map(Option.liftPredicate(state, QueryState.isReady), (found) => found.value);
 
 const readyValueOf = <Value, Error>(
   state: QueryState<Value, Error>,
 ): Option.Option<ReadyValue<Value>> =>
-  Option.map(Option.liftPredicate(state, isReady), (found) => ({
+  Option.map(Option.liftPredicate(state, QueryState.isReady), (found) => ({
     value: found.value,
     stale: found.stale,
   }));
 
 const errorOf = <Value, Error>(state: QueryState<Value, Error>): Option.Option<Error> =>
-  Option.map(Option.liftPredicate(state, isFailed), (found) => found.error);
+  Option.map(Option.liftPredicate(state, QueryState.isFailed), (found) => found.error);
 
 /** The first failure among the contributions, in registration order. */
 const firstFailure = (contributions: ReadonlyArray<Contribution>): Option.Option<unknown> =>

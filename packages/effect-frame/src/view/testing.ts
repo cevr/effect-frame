@@ -1,5 +1,18 @@
 import { flush } from "@solidjs/signals";
-import { Clock, Context, Duration, Effect, Exit, Fiber, Option, Scope, Schema } from "effect";
+import { QueryState, Source } from "effect-frame/actor/client";
+import {
+  Clock,
+  Context,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Match,
+  Option,
+  Scope,
+  Schema,
+  SubscriptionRef,
+} from "effect";
 import * as Frame from "../frame.js";
 import type { Host, HostEvent, PropertyValue, StaticProps } from "./host.js";
 
@@ -598,4 +611,51 @@ export const make = Effect.fn("ViewTest.make")(function* <HostNode, A, E, R>(
   );
 
   return { setup, root: options.root, waitFor, act, close } satisfies ViewTest<HostNode, A>;
+});
+
+/**
+ * A query source a test drives by hand: a `Source<QueryState<…>>` whose
+ * transitions the test controls, which is the whole surface `View.ready`
+ * and the readiness boundaries consume.
+ */
+export interface FakeQuery<Value, Error> {
+  readonly source: Source<QueryState<Value, Error>>;
+  /** Deliver a first value, or replace one. */
+  readonly resolve: (value: Value) => Effect.Effect<void>;
+  /** Hold the current value and mark it stale, as a refetch does. */
+  readonly refetch: Effect.Effect<void>;
+  readonly reject: (error: Error) => Effect.Effect<void>;
+}
+
+/**
+ * Make a `FakeQuery` that starts at `initial`.
+ *
+ * ```ts
+ * const query = yield* ViewTest.fakeQuery(QueryState.Loading<string, never>());
+ * yield* query.resolve("Alpha");
+ * ```
+ */
+export const fakeQuery: <Value, Error>(
+  initial: QueryState<Value, Error>,
+) => Effect.Effect<FakeQuery<Value, Error>> = Effect.fn("ViewTest.fakeQuery")(function* <
+  Value,
+  Error,
+>(initial: QueryState<Value, Error>) {
+  const ref = yield* SubscriptionRef.make(initial);
+  return {
+    source: Source.fromSubscriptionRef(ref),
+    resolve: (value: Value) =>
+      SubscriptionRef.set(ref, QueryState.Ready<Value, Error>(value, false)),
+    refetch: SubscriptionRef.update(ref, (state) =>
+      Match.value(state).pipe(
+        Match.withReturnType<QueryState<Value, Error>>(),
+        Match.tagsExhaustive({
+          Loading: (current) => current,
+          Ready: (current) => QueryState.Ready<Value, Error>(current.value, true),
+          Failed: () => QueryState.Loading<Value, Error>(),
+        }),
+      ),
+    ),
+    reject: (error: Error) => SubscriptionRef.set(ref, QueryState.Failed<Value, Error>(error)),
+  } satisfies FakeQuery<Value, Error>;
 });

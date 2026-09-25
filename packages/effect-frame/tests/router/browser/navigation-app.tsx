@@ -8,6 +8,7 @@
  * `browserNavigation` Location, with the public `followLinks`.
  */
 import type { Source } from "effect-frame/actor";
+import { QueryState } from "effect-frame/actor/client";
 import { Policies, Policy, implementQuery, query as declareQuery } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import {
@@ -18,7 +19,7 @@ import {
   followLinks,
   mount,
 } from "effect-frame/router";
-import { Dom, Loading, QueryState, View, ready } from "effect-frame/view";
+import { Dom, Loading, View, ViewTest, ready } from "effect-frame/view";
 import { Deferred, Duration, Effect, Exit, Layer, Option, Schema, SubscriptionRef } from "effect";
 import * as Receipt from "../../../src/router/receipt.js";
 
@@ -169,7 +170,7 @@ const start = (): void => {
     Effect.gen(function* () {
       yield* ran("slow");
       // Never resolved: the response is still open while the shell shows.
-      const query = yield* QueryState.fakeQuery<string, never>();
+      const query = yield* ViewTest.fakeQuery(QueryState.Loading<string, never>());
       const body = yield* Loading({
         fallback: <p id="slow-fallback">loading</p>,
         children: Effect.map(ready(query.source, ""), (value) => (
@@ -187,7 +188,7 @@ const start = (): void => {
   const LateView = () =>
     Effect.gen(function* () {
       yield* ran("late");
-      const query = yield* QueryState.fakeQuery<string, never>();
+      const query = yield* ViewTest.fakeQuery(QueryState.Loading<string, never>());
       const context = yield* Effect.context<never>();
       control.settle = () => Effect.runPromiseWith(context)(query.resolve("settled"));
       const region = yield* Loading({

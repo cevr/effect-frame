@@ -2,7 +2,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { QueryCache, Ready, Streaming, useQuery } from "effect-frame/actor";
+import { QueryCache, Streaming, useQuery, QueryState } from "effect-frame/actor";
 import type { ActorTransport } from "effect-frame/actor";
 import {
   Errored,
@@ -356,7 +356,7 @@ describe("the settles a document holds until hydration", () => {
         expect((yield* entry.state.get)._tag).toBe("Loading");
         yield* resumed.hydrated;
         // After both, the entry shows its value: no wait.
-        expect(yield* entry.state.get).toEqual(Ready({ label: "Alpha" }, false));
+        expect(yield* entry.state.get).toEqual(QueryState.Ready({ label: "Alpha" }, false));
       }).pipe(Effect.provideContext(client));
     }),
   );
@@ -379,7 +379,7 @@ describe("the settles a document holds until hydration", () => {
         // A late patch after hydration lands at once, and closed waits for it.
         yield* Deferred.succeed(gate, void 0);
         yield* within("closed after hydrated", resumed.closed);
-        expect(yield* entry.state.get).toEqual(Ready({ label: "Alpha" }, false));
+        expect(yield* entry.state.get).toEqual(QueryState.Ready({ label: "Alpha" }, false));
       }).pipe(Effect.provideContext(client));
     }),
   );
@@ -399,7 +399,7 @@ describe("the settles a document holds until hydration", () => {
         const entry = yield* cache.open(Label, { id: "a" });
         expect((yield* entry.state.get)._tag).toBe("Loading");
         yield* resumed.hydrated;
-        expect(yield* entry.state.get).toEqual(Ready({ label: "Alpha" }, false));
+        expect(yield* entry.state.get).toEqual(QueryState.Ready({ label: "Alpha" }, false));
       }).pipe(Effect.provideContext(client));
     }),
   );
@@ -436,7 +436,7 @@ describe("the settles a document holds until hydration", () => {
         const cache = yield* QueryCache;
         const entry = yield* cache.open(Label, { id: "a" });
         const ahead = readAhead(entry.state, () => true);
-        expect(yield* ahead.get).toEqual(Ready({ label: "Old" }, false));
+        expect(yield* ahead.get).toEqual(QueryState.Ready({ label: "Old" }, false));
         // The client reads the key itself: the seed can no longer land.
         yield* Effect.forkScoped(entry.refresh);
         yield* eventually("the read started", () => clientControl.calls.includes("a"));
@@ -458,7 +458,7 @@ describe("the settles a document holds until hydration", () => {
         const cache = yield* QueryCache;
         const entry = yield* cache.open(Label, { id: "a" });
         // The shell's own patch: the first read shows it, before hydration.
-        expect(yield* entry.state.get).toEqual(Ready({ label: "Alpha" }, false));
+        expect(yield* entry.state.get).toEqual(QueryState.Ready({ label: "Alpha" }, false));
         yield* within("closed", resumed.closed);
       }).pipe(Effect.provideContext(client));
     }),

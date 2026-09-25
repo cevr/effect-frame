@@ -409,9 +409,7 @@ The rule has two halves.
    before the first drawing drew the fresh value against the stale markup;
    it now waits for `Resumed.hydrated` (review round 2).
 
-Prerender uses the `AwaitAll` pipeline, so it gets the rule too. A
-`QueryState.held` source that a view builds from its own stream keeps
-the copy semantics: it has no upstream to read.
+Prerender uses the `AwaitAll` pipeline, so it gets the rule too.
 
 #### Mutations
 

@@ -56,7 +56,6 @@ export * as Remote from "./hosts/remote.js";
 export * as ViewTest from "./testing.js";
 
 // Readiness through context (#16).
-export * as QueryState from "./query-state.js";
 export {
   Await,
   Errored,

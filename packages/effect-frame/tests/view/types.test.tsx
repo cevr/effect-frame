@@ -1,4 +1,5 @@
-import type { ErroredScope, Host, LoadingScope, MatchNode, QueryState } from "effect-frame/view";
+import type { QueryState } from "effect-frame/actor";
+import type { ErroredScope, Host, LoadingScope, MatchNode } from "effect-frame/view";
 import { For, Loading, Match, View, mount, orErrored, ready } from "effect-frame/view";
 import { Source } from "effect-frame/actor";
 import type { Scope } from "effect";
@@ -20,7 +21,7 @@ class Offline extends Schema.TaggedError<Offline>()("Offline", {}) {}
 declare const host: Host<string>;
 
 /** A query state source, as the Query primitive (#17) will hand one over. */
-declare const query: Source<QueryState.QueryState<string, string>>;
+declare const query: Source<QueryState<string, string>>;
 
 /** A view with no input of its own still takes props: an empty record. */
 interface NoProps {

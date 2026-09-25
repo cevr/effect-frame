@@ -54,8 +54,11 @@ interface NavigationSample extends Navigation {
   readonly routeName: string;
 }
 
-/** Which route the document is on, and at what URL. */
-export interface Match {
+/**
+ * Which route the document is on, and at what URL. Named `RouteMatch` so it
+ * never meets the view's `Match` tag in one file.
+ */
+export interface RouteMatch {
   readonly name: string;
   readonly url: URL;
 }
@@ -72,7 +75,7 @@ export interface RouterService {
   /** Every navigation, the current one first. */
   readonly navigations: Source<Navigation>;
   /** The route the document is on, by name, with its URL. */
-  readonly current: Source<Match>;
+  readonly current: Source<RouteMatch>;
 }
 
 export class Router extends Context.Service<Router, RouterService>()(
@@ -1090,7 +1093,7 @@ const serverRouter = (url: URL): RouterService => {
       }),
     );
   const navigation: Navigation = { url, kind: "initial" };
-  const match: Match = { name: "not-found", url };
+  const match: RouteMatch = { name: "not-found", url };
   return {
     navigate: refuse,
     replace: refuse,

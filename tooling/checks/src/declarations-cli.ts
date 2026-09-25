@@ -2,12 +2,14 @@ import { Effect, Exit } from "effect";
 import { repositoryRoot } from "./browser-entries.js";
 import { checkDeclarations, formatLeak } from "./declarations.js";
 import { checkSubpaths, formatMissing } from "./subpaths.js";
+import { collisions, declaredAliases, formatCollision, readSurfaces } from "./collisions.js";
 
 /**
  * The declaration rules as a command. `bun run gate` runs it after the
  * build. A published subpath whose `types` or `default` file the build did
  * not write, or a leaked `any` or `unknown` in any package's `dist`, turns
- * the gate red with the file of each one. It also writes the consumer
+ * the gate red with the file of each one, and so does a value name that
+ * two subpaths export (`collisions.ts`). It also writes the consumer
  * module that imports every published subpath, which `tsc -p consumer`
  * then compiles against `dist`.
  */
@@ -30,8 +32,23 @@ const subpathRule = Effect.gen(function* () {
   );
 });
 
+const collisionRule = Effect.gen(function* () {
+  const { name, surfaces } = yield* readSurfaces(repositoryRoot, "packages/effect-frame");
+  const found = collisions(surfaces, declaredAliases);
+  if (found.length > 0) {
+    yield* Effect.logError(found.map((one) => formatCollision(name, one)).join("\n"));
+    return yield* Effect.fail(
+      `declarations: ${String(found.length)} names are exported by more than one subpath`,
+    );
+  }
+  return yield* Effect.log(
+    `declarations: ${name}'s ${String(surfaces.length)} subpaths export each value name once`,
+  );
+});
+
 const main = Effect.gen(function* () {
   yield* subpathRule;
+  yield* collisionRule;
   const checked = yield* checkDeclarations(repositoryRoot);
   if (checked.files === 0) {
     return yield* Effect.fail("declarations: no dist/**/*.d.ts found; run the build first");

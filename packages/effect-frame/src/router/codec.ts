@@ -5,7 +5,7 @@ import { Effect, Option, Predicate, Result, Schema, SchemaGetter } from "effect"
 import { matchPrefix, refuseOutOfDomain, segmentFault, segmentsOf, textFault } from "./path.js";
 export { UrlValueRejected } from "./path.js";
 import type { NavigationBehavior } from "./navigation-behavior.js";
-import type { Match } from "./router.js";
+import type { RouteMatch } from "./router.js";
 
 /**
  * A route is a bidirectional codec for a URL plus the view that URL shows
@@ -543,7 +543,7 @@ export interface Linkable<Params, Search> {
    * Where the current match is relative to this destination: on it
    * (`"page"`), below it (`"ancestor"`, a segment only), or elsewhere.
    */
-  readonly currentAt: (current: Match) => Current;
+  readonly currentAt: (current: RouteMatch) => Current;
 }
 
 /**

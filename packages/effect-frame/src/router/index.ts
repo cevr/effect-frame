@@ -12,7 +12,7 @@ export {
   Router,
   mount,
   type LocationService,
-  type Match,
+  type RouteMatch,
   type MountOptions,
   type Navigation,
   type NotFoundProps,

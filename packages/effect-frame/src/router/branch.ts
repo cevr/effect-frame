@@ -79,7 +79,7 @@ import type {
 } from "./codec.js";
 import { matchPrefix, segmentsOf } from "./path.js";
 import { address, parseTemplate, printSearch, readSearch, search as searchCodec } from "./codec.js";
-import type { Location, Match as RouterMatch } from "./router.js";
+import type { Location, RouteMatch } from "./router.js";
 import { register as registerInspection } from "./route-inspection.js";
 import { Router } from "./router.js";
 import type { LeaveEntry, LeaveInput, MountedRouteService } from "./leave.js";
@@ -352,7 +352,7 @@ export interface Segment<
    * `"ancestor"` when the URL continues below it, and `"none"` otherwise,
    * including not-found and another route.
    */
-  currentAt(current: RouterMatch): Current;
+  currentAt(current: RouteMatch): Current;
   /** Phantom: this segment's own declarations. */
   readonly "~own": (_: never) => Own;
   /** Phantom: the declarations the view sees. */
@@ -540,7 +540,7 @@ const makeSegment = <
     href: printer.href,
     hrefAt: printer.hrefAt,
     searchAt: printer.searchAt,
-    currentAt: (current: RouterMatch): Current => {
+    currentAt: (current: RouteMatch): Current => {
       const trees = Option.fromNullishOr(treesOf.get(made));
       if (!Option.exists(trees, (names) => names.has(current.name))) {
         return "none";

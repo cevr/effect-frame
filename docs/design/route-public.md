@@ -163,7 +163,7 @@ interface Route.Segment<Name, Params, Search, Own, Data, CheckR = never, Root ex
   href(params: Params, search: Search): string;
   hrefAt(current: URL, params: Params, search: Search): string;
   searchAt(current: URL): Search;
-  currentAt(current: Match): Route.Current;
+  currentAt(current: RouteMatch): Route.Current;
   readonly "~data": (_: never) => Data;    // phantoms
   readonly "~check": (_: never) => CheckR;
   readonly "~root": (_: never) => Root;
@@ -310,7 +310,7 @@ type Route.Current = "page" | "ancestor" | "none";
 interface Linkable<Params, Search> {
   readonly hrefAt: (current: URL, params: Params, search: Search) => string;
   readonly searchAt: (current: URL) => Search; // the current decoded search, or the empty one
-  readonly currentAt: (current: Match) => Current;
+  readonly currentAt: (current: RouteMatch) => Current;
 }
 interface Link {
   readonly href: Source<string>;

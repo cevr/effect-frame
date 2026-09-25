@@ -56,7 +56,7 @@ interface ListProps {
 const TaskList = (props: ListProps) =>
   Effect.succeed(
     <ul>
-      <For each={props.tasks} keyBy={(task: Task) => task.id}>
+      <For each={props.tasks} keyBy={(task) => task.id}>
         {(task: Source<Task>) => <li>{View.bind(task, (value) => value.title)}</li>}
       </For>
     </ul>,
@@ -742,7 +742,7 @@ const CountedList = (props: CountedListProps) =>
     });
     return (
       <ul>
-        <For each={props.tasks} keyBy={(task: Task) => task.id}>
+        <For each={props.tasks} keyBy={(task) => task.id}>
           {(task: Source<Task>) => <li>{View.bind(shout(task))}</li>}
         </For>
       </ul>

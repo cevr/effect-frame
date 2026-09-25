@@ -108,10 +108,7 @@ const NotesPage = (props: PageProps) =>
           add
         </button>
         <ul id="list">
-          <For
-            each={select(notes.state, (snapshot) => snapshot.notes)}
-            keyBy={(note: Note) => note.id}
-          >
+          <For each={select(notes.state, (snapshot) => snapshot.notes)} keyBy={(note) => note.id}>
             {(note) => (
               <li>
                 <input type="checkbox" checked={View.bind(note, (value) => value.done)} />
@@ -181,10 +178,7 @@ const RowButtons = (props: PageProps) =>
     const notes = yield* ref(Notes, props.key);
     return (
       <ul id="buttons">
-        <For
-          each={select(notes.state, (snapshot) => snapshot.notes)}
-          keyBy={(note: Note) => note.id}
-        >
+        <For each={select(notes.state, (snapshot) => snapshot.notes)} keyBy={(note) => note.id}>
           {(note) => (
             <li>
               <button

@@ -1,6 +1,6 @@
 import type { Source } from "effect-frame/actor";
 import type { ErroredScope, Host, LoadingScope, MatchNode, QueryState } from "effect-frame/view";
-import { Loading, Match, View, mount, orErrored, ready } from "effect-frame/view";
+import { For, Loading, Match, View, mount, orErrored, ready } from "effect-frame/view";
 import { select } from "effect-frame/actor";
 import type { Scope } from "effect";
 import { Context, Effect, Schema } from "effect";
@@ -196,3 +196,25 @@ const matchIsExhaustive: Equals<ReturnType<typeof complete>, MatchNode<Light>> =
 void incomplete;
 void surplus;
 void matchIsExhaustive;
+
+// ---------------------------------------------------------------------------
+// A keyed For infers its item through an inline select
+// ---------------------------------------------------------------------------
+
+interface Row {
+  readonly id: string;
+  readonly label: string;
+}
+
+declare const rows: Source<{ readonly items: ReadonlyArray<Row> }>;
+
+/**
+ * `select` has one signature, so an inline projection in `each` gives `For`
+ * its item type: `keyBy` and the row read `Row` with no annotation.
+ */
+const inlineSelect = () => (
+  <For each={select(rows, (state) => state.items)} keyBy={(row) => row.id}>
+    {(row) => <li>{View.bind(select(row, (one) => one.label))}</li>}
+  </For>
+);
+void inlineSelect;

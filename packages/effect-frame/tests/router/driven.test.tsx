@@ -118,7 +118,7 @@ const LineupView = (params: { readonly room: string }) =>
     const lineup = yield* Effect.orDie(ref(Lineup, params.room));
     return (
       <ul id="lineup">
-        <For each={select(lineup.state, (items) => items)} keyBy={(item: string) => item}>
+        <For each={select(lineup.state, (items) => items)} keyBy={(item) => item}>
           {(item) => <li>{View.bind(item, (value) => value)}</li>}
         </For>
       </ul>

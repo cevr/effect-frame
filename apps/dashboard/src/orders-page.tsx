@@ -41,7 +41,7 @@ export const OrdersLayout = <ChildR,>(props: Route.LayoutPropsOf<typeof orders, 
       <article id="orders-page">
         <h2 id="orders-of">{View.bind(props.data.tenant.state, nameOf)}</h2>
         <ul id="rows">
-          <For each={select(all, (result) => result.rows)} keyBy={(row: Order) => row.id}>
+          <For each={select(all, (result) => result.rows)} keyBy={(row) => row.id}>
             {(row) => (
               <li data-order={View.bind(row, (value) => value.id)}>
                 <span>{View.bind(row, (value) => `${value.id} ${value.status}`)}</span>
@@ -78,7 +78,7 @@ export const OrdersIndex = (props: Route.PropsOf<typeof ordersIndex>) =>
     const detail = yield* ready(yield* orErrored(props.data.detail.state), { rows: [] });
     return (
       <ul id="detail">
-        <For each={select(detail, (result) => result.rows)} keyBy={(row: Order) => row.id}>
+        <For each={select(detail, (result) => result.rows)} keyBy={(row) => row.id}>
           {(row) => <li>{View.bind(row, (value) => `${value.id} ${value.amount}`)}</li>}
         </For>
       </ul>

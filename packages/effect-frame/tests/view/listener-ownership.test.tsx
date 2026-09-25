@@ -158,7 +158,7 @@ const ForPage = (props: ForProps) =>
       <button id="sibling" onClick={View.event(() => props.record("sibling"))}>
         sibling
       </button>
-      <For each={props.tasks} keyBy={(task: Task) => task.id}>
+      <For each={props.tasks} keyBy={(task) => task.id}>
         {(task) => (
           <button
             id={View.bind(task, (value) => `row-${value.id}`)}

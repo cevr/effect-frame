@@ -6,8 +6,7 @@ import { Effect, Option } from "effect";
 import { ack, fulfil, sender } from "./commands.js";
 import type { OrdersCommands } from "./commands.js";
 import { Orders } from "./contract.js";
-import type { Alert, Order } from "./contract.js";
-import type { Latency, Point, Stage } from "./queries.js";
+import type { Point } from "./queries.js";
 import { rangeLabel } from "./queries.js";
 import { overview } from "./segments.js";
 
@@ -57,7 +56,7 @@ const OrdersCard = (props: OverviewProps, book: OrdersCommands) =>
       <section id="orders-card" class="card">
         <h2>orders</h2>
         <ul id="orders">
-          <For each={rows} keyBy={(order: Order) => order.id}>
+          <For each={rows} keyBy={(order) => order.id}>
             {(order) => (
               <li data-order={View.bind(order, (value) => value.id)}>
                 <span>{View.bind(order, (value) => `${value.id} ${value.status}`)}</span>
@@ -89,7 +88,7 @@ const FunnelCard = (props: OverviewProps) =>
       <section id="funnel-card" class="card">
         <h2>funnel</h2>
         <ul id="funnel">
-          <For each={select(shown, (result) => result.stages)} keyBy={(stage: Stage) => stage.name}>
+          <For each={select(shown, (result) => result.stages)} keyBy={(stage) => stage.name}>
             {(stage) => <li>{View.bind(stage, (value) => `${value.name} ${value.count}`)}</li>}
           </For>
         </ul>
@@ -107,10 +106,7 @@ const SlowestCard = (props: OverviewProps) =>
         <section id="slowest-card" class="card">
           <h2>slowest</h2>
           <ul id="slowest">
-            <For
-              each={select(shown, (result) => result.rows)}
-              keyBy={(row: Latency) => row.endpoint}
-            >
+            <For each={select(shown, (result) => result.rows)} keyBy={(row) => row.endpoint}>
               {(row) => <li>{View.bind(row, (value) => `${value.endpoint} ${value.ms}ms`)}</li>}
             </For>
           </ul>
@@ -130,7 +126,7 @@ const AlertsCard = (props: OverviewProps) =>
       <section id="alerts-card" class="card">
         <h2>alerts</h2>
         <ul id="alerts">
-          <For each={items} keyBy={(alert: Alert) => alert.id}>
+          <For each={items} keyBy={(alert) => alert.id}>
             {(alert) => (
               <li data-alert={View.bind(alert, (value) => value.id)}>
                 <span>{View.bind(alert, (value) => value.text)}</span>

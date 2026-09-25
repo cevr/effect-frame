@@ -103,7 +103,7 @@ const ListBody = (props: BodyProps) =>
           ))}
         </ul>
         <ul id="list">
-          <For each={filtered(all, props.filter)} keyBy={(note: Note) => note.id}>
+          <For each={filtered(all, props.filter)} keyBy={(note) => note.id}>
             {(note) => (
               <li>
                 <input

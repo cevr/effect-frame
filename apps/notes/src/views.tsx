@@ -122,7 +122,7 @@ export const IndexView = (props: Route.PropsOf<typeof index>) =>
           onInput={View.event((event) => search(event.value))}
         />
         <ul id="found">
-          <For each={found} keyBy={(entry: ListEntry) => entry.name}>
+          <For each={found} keyBy={(entry) => entry.name}>
             {(entry) => <li>{View.bind(entry, (value) => value.name)}</li>}
           </For>
         </ul>

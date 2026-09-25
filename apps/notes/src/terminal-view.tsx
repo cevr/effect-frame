@@ -36,10 +36,7 @@ export const NotesTerminal = (props: NotesTerminalProps) =>
       <box flexDirection="column" width={48}>
         <text>{View.bind(notes.state, (snapshot) => `notes: ${snapshot.notes.length}`)}</text>
         <box flexDirection="column">
-          <For
-            each={select(notes.state, (snapshot) => snapshot.notes)}
-            keyBy={(note: Note) => note.id}
-          >
+          <For each={select(notes.state, (snapshot) => snapshot.notes)} keyBy={(note) => note.id}>
             {(note) => <text>{View.bind(note, line)}</text>}
           </For>
         </box>

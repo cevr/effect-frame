@@ -24,7 +24,7 @@ const Composite = (props: CompositeProps) =>
   Effect.succeed(
     <>
       <p id="first">first</p>
-      <For each={props.tasks} keyBy={(task: Task) => task.id}>
+      <For each={props.tasks} keyBy={(task) => task.id}>
         {(task) => (
           <li data-task={View.bind(task, (value) => value.id)}>
             {View.bind(task, (value) => value.title)}
@@ -51,7 +51,7 @@ const Turnover = (props: TurnoverProps) =>
           <p id="branch-child">branch</p>
         </section>
       </Show>
-      <For each={props.tasks} keyBy={(task: Task) => task.id}>
+      <For each={props.tasks} keyBy={(task) => task.id}>
         {(task) => (
           <article id={View.bind(task, (value) => `row-${value.id}`)}>
             <span id={View.bind(task, (value) => `row-child-${value.id}`)}>

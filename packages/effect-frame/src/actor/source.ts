@@ -37,13 +37,10 @@ export const fromSubscriptionRef = <A>(ref: SubscriptionRef.SubscriptionRef<A>):
  * const title = Source.select(post.state, (post) => post.title);
  * ```
  */
-export const select: {
-  <A, B>(project: (value: A) => B): (source: Source<A>) => Source<B>;
-  <A, B>(source: Source<A>, project: (value: A) => B): Source<B>;
-} = Function.dual(2, <A, B>(source: Source<A>, project: (value: A) => B): Source<B> => ({
+export const select = <A, B>(source: Source<A>, project: (value: A) => B): Source<B> => ({
   get: Effect.map(source.get, project),
   changes: Stream.map(source.changes, project),
-}));
+});
 
 /**
  * A source that never changes: its value, then nothing.
@@ -235,16 +232,11 @@ const derive = <A>(
  * const typed = yield* Source.debounce(input.state, "300 millis");
  * ```
  */
-export const debounce: {
-  (
-    duration: Duration.Input,
-  ): <A>(source: Source<A>) => Effect.Effect<Source<A>, never, Scope.Scope>;
-  <A>(source: Source<A>, duration: Duration.Input): Effect.Effect<Source<A>, never, Scope.Scope>;
-} = Function.dual(
-  2,
-  <A>(source: Source<A>, duration: Duration.Input): Effect.Effect<Source<A>, never, Scope.Scope> =>
-    derive(source, (changes) => Stream.debounce(changes, duration)),
-);
+export const debounce = <A>(
+  source: Source<A>,
+  duration: Duration.Input,
+): Effect.Effect<Source<A>, never, Scope.Scope> =>
+  derive(source, (changes) => Stream.debounce(changes, duration));
 
 /**
  * Rate-limit changes without conflation: later values remain queued.
@@ -253,26 +245,21 @@ export const debounce: {
  * const shaped = yield* Source.throttle(position, "100 millis");
  * ```
  */
-export const throttle: {
-  (
-    duration: Duration.Input,
-  ): <A>(source: Source<A>) => Effect.Effect<Source<A>, never, Scope.Scope>;
-  <A>(source: Source<A>, duration: Duration.Input): Effect.Effect<Source<A>, never, Scope.Scope>;
-} = Function.dual(
-  2,
-  <A>(source: Source<A>, duration: Duration.Input): Effect.Effect<Source<A>, never, Scope.Scope> =>
-    derive(source, (changes) =>
-      changes.pipe(
-        Stream.rechunk(1),
-        Stream.throttle({
-          cost: () => 1,
-          duration,
-          strategy: "shape",
-          units: 1,
-        }),
-      ),
+export const throttle = <A>(
+  source: Source<A>,
+  duration: Duration.Input,
+): Effect.Effect<Source<A>, never, Scope.Scope> =>
+  derive(source, (changes) =>
+    changes.pipe(
+      Stream.rechunk(1),
+      Stream.throttle({
+        cost: () => 1,
+        duration,
+        strategy: "shape",
+        units: 1,
+      }),
     ),
-);
+  );
 
 /**
  * Load the latest source value through an Effect that may fail, as a
@@ -317,7 +304,8 @@ export const load = <A, B, E, R>(
 
 /**
  * The combinators under the type's own name: `Source.select` beside
- * `Source<A>`, as `Stream.map` sits beside `Stream<A>`.
+ * `Source<A>`, as `Stream.map` sits beside `Stream<A>`. Each takes the
+ * source first.
  */
 export const Source = {
   all,

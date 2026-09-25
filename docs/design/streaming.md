@@ -503,7 +503,9 @@ The rule that fixes both is the one a seed already follows (review round
    before hydration too. `Resumed.hydrated` lands each held settle and
    waits until each slot that took one shows it. A client can await them
    in either order, and after both, every taken seed is on screen
-   (review round 1).
+   (review round 1). A slot takes a seed and registers its publication
+   in one uninterruptible step, so an interrupted open never leaves
+   either one waiting (review round 2).
 4. **A boundary may draw it ahead.** A readiness boundary has marks, so it
    can replace the server's branch (`resolvedAhead`). An entry's state
    source carries its held settle as a capability (`src/actor/read-ahead.ts`).
@@ -580,6 +582,7 @@ Each mutation was applied alone, and the new test file,
 | `hydrated` does not wait for publication       | 2 tests   |
 | A held seed ignores a superseding read         | 1 test    |
 | A held seed outlives its slot                  | 1 test    |
+| `closed` waits for no landed seed              | 1 test    |
 
 ### A streamed shell does not wait for a late setup
 

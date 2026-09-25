@@ -337,7 +337,7 @@ const within = <A,>(label: string, effect: Effect.Effect<A>) =>
   });
 
 describe("the settles a document holds until hydration", () => {
-  it.scopedLive("closed completes when the channel ends, before hydration, in either order", () =>
+  it.scopedLive("closed completes when the channel ends, before hydration", () =>
     Effect.gen(function* () {
       const client = yield* sideOf(makeControl({}));
       yield* Effect.gen(function* () {
@@ -356,6 +356,29 @@ describe("the settles a document holds until hydration", () => {
         expect((yield* entry.state.get)._tag).toBe("Loading");
         yield* resumed.hydrated;
         // After both, the entry shows its value: no wait.
+        expect(yield* entry.state.get).toEqual(Ready({ label: "Alpha" }, false));
+      }).pipe(Effect.provideContext(client));
+    }),
+  );
+
+  it.scopedLive("hydrated completes before the channel ends, and closed after it", () =>
+    Effect.gen(function* () {
+      const client = yield* sideOf(makeControl({}));
+      yield* Effect.gen(function* () {
+        const gate = yield* Deferred.make<void>();
+        const resumed = yield* resumeWith(
+          [placeholderOf("a")],
+          [lateRecord(idOf("a"), "Alpha"), closedRecord],
+          gate,
+        );
+        const cache = yield* QueryCache;
+        const entry = yield* cache.open(Label, { id: "a" });
+        // Hydration is done while the key is still open: it waits for no patch.
+        yield* within("hydrated before the channel ends", resumed.hydrated);
+        expect((yield* entry.state.get)._tag).toBe("Loading");
+        // A late patch after hydration lands at once, and closed waits for it.
+        yield* Deferred.succeed(gate, void 0);
+        yield* within("closed after hydrated", resumed.closed);
         expect(yield* entry.state.get).toEqual(Ready({ label: "Alpha" }, false));
       }).pipe(Effect.provideContext(client));
     }),

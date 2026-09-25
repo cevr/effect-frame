@@ -668,7 +668,22 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
   // Join the live set, then count the claims that exist now. A claim made
   // after the join updates this slot itself, so none is missed.
   yield* ownership.join(slot);
-  yield* begin(slot, seeds.take(keyOf(key)), seeds.hydrated);
+  // Taking a seed and promising to publish it are one step: `end` and
+  // `expire` wait for every taken seed, so an interrupt between the two
+  // would hold them forever (review round 2).
+  const seed = yield* Effect.uninterruptible(
+    Effect.suspend(() => {
+      const taken = seeds.take(keyOf(key));
+      return Effect.as(
+        Option.match(taken, {
+          onNone: () => Effect.void,
+          onSome: (found) => Scope.addFinalizer(scope, Deferred.succeed(found.published, void 0)),
+        }),
+        taken,
+      );
+    }),
+  );
+  yield* begin(slot, seed, seeds.hydrated);
   return slot;
 });
 
@@ -680,7 +695,8 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
  * the slot's scope, as a read: a read the client starts meanwhile, or a
  * value that lands by another path, supersedes it. `StreamEnded` lands, and
  * the slot reads again at once. `published` completes once the seed has
- * landed, was superseded, or the slot closed.
+ * landed, was superseded, or the slot closed: `makeSlot` registers the
+ * last when it takes the seed.
  */
 const begin = (
   slot: CacheSlot,
@@ -702,8 +718,7 @@ const begin = (
             }
             return Option.none();
           });
-          return Effect.andThen(
-            Scope.addFinalizer(slot.scope, published),
+          return Effect.asVoid(
             Effect.forkIn(
               Effect.flatMap(Deferred.await(found.settled), (state) =>
                 read.commit(landSeed(slot, state, hydrated)),

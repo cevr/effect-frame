@@ -54,7 +54,8 @@ import {
   SubscriptionRef,
 } from "effect";
 import { advance, advancedChanges } from "../actor/advance.js";
-import { documentOf } from "../actor/query-client.js";
+import { currentDocument } from "../actor/query-client.js";
+import type { DocumentAccess } from "../actor/query-client.js";
 import { heldOf, holding } from "../actor/read-ahead.js";
 import { attempt } from "../view/attempt.js";
 import type { Definition as LazyDefinition, Ticket } from "../view/lazy.js";
@@ -1603,10 +1604,9 @@ const actorKey = (
  * revision, and the client could resume only one of them.
  */
 const openSharedActor =
-  (cache: Option.Option<QueryCacheService>) =>
+  (document: Option.Option<DocumentAccess>) =>
   (key: ActorKey): Effect.Effect<RemoteActorRef<AnyContract>, TransportReadError, Scope.Scope> =>
     Effect.gen(function* () {
-      const document = Option.flatMap(cache, documentOf);
       const seeded = yield* Option.match(document, {
         onNone: () => Effect.succeed(Option.none<Projection>()),
         onSome: (found) => found.actorSeed(key.id),
@@ -2981,7 +2981,7 @@ const mountTree = <Name extends string, ViewR, DataR, Extra extends object>(
                 resolve: yield* ResolveBeforeRender,
                 cache,
                 transport: yield* Effect.serviceOption(ActorTransport),
-                actors: yield* RcMap.make({ lookup: openSharedActor(cache) }).pipe(
+                actors: yield* RcMap.make({ lookup: openSharedActor(yield* currentDocument) }).pipe(
                   Scope.provide(declarations),
                 ),
                 nextKey: (segmentName) => {

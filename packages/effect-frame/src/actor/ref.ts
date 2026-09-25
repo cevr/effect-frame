@@ -9,8 +9,8 @@ import { transportCommands } from "./remote-commands.js";
 import type { RemoteRejection } from "./remote-commands.js";
 import type { Address, AnyContract, KeyOf, MessageOf, SnapshotOf } from "./contract.js";
 import type { QueryKey } from "./query.js";
-import { QueryCache, internalsOf } from "./query-client.js";
-import type { QueryCacheService } from "./query-client.js";
+import { QueryCache, internalsFor } from "./query-client.js";
+import type { CacheInternals, QueryCacheService } from "./query-client.js";
 import * as Provisional from "./provisional.js";
 import { fromSubscriptionRef, select } from "./source.js";
 import type { Source } from "./source.js";
@@ -146,6 +146,10 @@ const commandSurface = Effect.fn("Actor.commandSurface")(function* <C extends An
 ) {
   const transport = yield* ActorTransport;
   const cache = yield* Effect.serviceOption(QueryCache);
+  const internals = yield* Option.match(cache, {
+    onNone: () => Effect.succeed(Option.none<CacheInternals>()),
+    onSome: internalsFor,
+  });
   const encodeMessage = Schema.encodeEffect(contract.message);
   const { observe, display, refuses } = hooks;
   const withDisplay = (
@@ -179,30 +183,20 @@ const commandSurface = Effect.fn("Actor.commandSurface")(function* <C extends An
    * The cache owns each unresolved command's dependents: they show stale
    * from before the first request until the command settles or this
    * reference closes, so the view shows stale content instead of a gap. An
-   * Applied settlement delivers its captured refreshes first. A cache not
-   * built by `QueryCache.layer` (a user's own, or a wrapper) keeps the public
-   * contract instead: the contract is invalidated when the command starts and
-   * the reply's refreshes are applied. A client with no cache owns nothing.
+   * Applied settlement delivers its captured refreshes first. Ownership is
+   * the `QueryCache.layer` internals in context; a client without them owns
+   * nothing.
    */
   const own = (active: ReadonlyArray<QueryKey>) =>
-    Option.match(cache, {
+    Option.match(internals, {
       onNone: () => Commands.ownNothing<SnapshotOf<C>>(active),
-      onSome: (service) =>
-        Option.match(internalsOf(service), {
-          onNone: () =>
-            Effect.as(
-              service.invalidate(contract.name),
-              (settlement: Commands.Settlement<SnapshotOf<C>>) =>
-                service.apply(settlement.refreshed),
-            ),
-          onSome: (owning) =>
-            Effect.map(
-              owning.claim(contract.name),
-              (claim): Commands.SettlementHook<SnapshotOf<C>> =>
-                (settlement) =>
-                  claim.settle(settlement.refreshed),
-            ),
-        }),
+      onSome: (owning) =>
+        Effect.map(
+          owning.claim(contract.name),
+          (claim): Commands.SettlementHook<SnapshotOf<C>> =>
+            (settlement) =>
+              claim.settle(settlement.refreshed),
+        ),
     });
 
   const adapter = transportCommands(transport, address, (projection) =>

@@ -5,12 +5,12 @@ import type {
   Refreshed,
   TransportReadError,
   TransportService,
+  QueryCache,
 } from "effect-frame/actor/client";
 import {
   ActorTransport,
   Anonymous,
   CurrentPrincipal,
-  QueryCache,
   QueryFailure,
   Streaming,
   Unauthorized,
@@ -368,7 +368,7 @@ export const build = <Routes extends AnyRoute<unknown>, N, DE, DR, CE, CR>(
         enumerate<PrerenderError<Routes>, PrerenderServices<Routes>>(target.plan),
         (pages) => pages.map((page) => ({ route: target.route, page })),
       ),
-    ).pipe(Effect.provideService(QueryCache, cache), withShared);
+    ).pipe(Effect.provideContext(cache), withShared);
     // Duplicates collapse: the first input that printed an href is its page.
     const byHref = new Map<string, (typeof found)[number][number]>();
     for (const one of found.flat()) {

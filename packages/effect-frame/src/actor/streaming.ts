@@ -2,8 +2,8 @@ import type { Scope } from "effect";
 import { Deferred, Effect, Filter, Match, Option, Schema, Stream } from "effect";
 import type { QueryFailure as QueryFailureType, QueryKey, QueryState } from "./query.js";
 import { Failed, QueryFailure, Ready, keyOf } from "./query.js";
-import type { DocumentAccess, DocumentEntry } from "./query-client.js";
-import { QueryCache, documentOf } from "./query-client.js";
+import type { DocumentAccess, DocumentEntry, QueryCache } from "./query-client.js";
+import { currentDocument } from "./query-client.js";
 
 /**
  * Streamed documents. A streamed response writes the shell, then one
@@ -177,11 +177,7 @@ const stateOf = (patch: Patch): Encoded =>
     }),
   );
 
-const accessOf: Effect.Effect<Option.Option<DocumentAccess>, never, QueryCache> = Effect.gen(
-  function* () {
-    return documentOf(yield* QueryCache);
-  },
-);
+const accessOf: Effect.Effect<Option.Option<DocumentAccess>, never, QueryCache> = currentDocument;
 
 const noEntries: ReadonlyArray<DocumentEntry> = [];
 const noActors: ReadonlyArray<ActorSeed> = [];

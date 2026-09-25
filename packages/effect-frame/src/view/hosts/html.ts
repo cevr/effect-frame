@@ -1,17 +1,7 @@
 import type { ActorTransport } from "effect-frame/actor/client";
 import { QueryCache, Streaming } from "effect-frame/actor/client";
-import {
-  Context,
-  Deferred,
-  Effect,
-  Equal,
-  Exit,
-  Layer,
-  Option,
-  Schema,
-  Scope,
-  Stream,
-} from "effect";
+import type { CacheContext } from "../../actor/query-client.js";
+import { Deferred, Effect, Equal, Exit, Layer, Option, Schema, Scope, Stream } from "effect";
 import type { BoundaryMarks, Cleanup, Host, PropertyValue, StaticProps } from "../host.js";
 import type { BoundaryKind } from "../jsx-runtime.js";
 import { flush, mountView } from "../runtime.js";
@@ -429,12 +419,9 @@ export interface Document {
  * fresh one (`requestCache`); the router's server document passes the one
  * cache its request already holds, so its checks and its drawing share it.
  */
-export type CacheSource = Effect.Effect<QueryCache["Service"], never, Scope.Scope>;
+export type CacheSource = Effect.Effect<CacheContext, never, Scope.Scope>;
 
-export const requestCache: CacheSource = Effect.map(
-  Layer.build(Layer.fresh(QueryCache.layer)),
-  (context) => Context.get(context, QueryCache),
-);
+export const requestCache: CacheSource = Layer.build(Layer.fresh(QueryCache.layer));
 
 /**
  * What a document pipeline draws: something mounted over `root` on `host`
@@ -459,11 +446,11 @@ const viewDrawing =
 /** Mount a drawing over `root` in the current scope and draw one frame. */
 const draw = <E, R>(
   drawing: Drawing<E, R>,
-  cache: QueryCache["Service"],
+  cache: CacheContext,
   root: HtmlElement,
   over: Host<HtmlNode> = host,
 ): Effect.Effect<void, E, Exclude<R, QueryCache>> =>
-  drawing(over, root).pipe(Effect.andThen(flush), Effect.provideService(QueryCache, cache));
+  Effect.provideContext(Effect.andThen(drawing(over, root), flush), cache);
 
 /**
  * Render one view as a streamed document (#22): the shell and its
@@ -529,11 +516,7 @@ export const streamPrepared = <E, R>(
     // The shell shows every value the settled patches carry, and no value
     // an entry still behind a placeholder holds.
     const records = yield* readDrawn(
-      Effect.provideService(
-        Streaming.shell({ closeWhen: Deferred.await(limit) }),
-        QueryCache,
-        cache,
-      ),
+      Effect.provideContext(Streaming.shell({ closeWhen: Deferred.await(limit) }), cache),
       (read) => [read.placeholders, read.actors, read.settled],
       bindings,
       limit,
@@ -631,7 +614,7 @@ export const awaitAllPage: <E, R>(
     const html = yield* Effect.gen(function* () {
       const cache = yield* cacheOf;
       const withCache = <A, E2, R2>(effect: Effect.Effect<A, E2, R2>) =>
-        Effect.provideService(effect, QueryCache, cache);
+        Effect.provideContext(effect, cache);
       // The limit runs once, from the drawing.
       const limit = yield* Deferred.make<void>();
       yield* Effect.forkIn(
@@ -741,9 +724,8 @@ export const renderSeeded: <E, R>(
       );
       const limit = yield* limitOf(options.closeWhen);
       const records = yield* readDrawn(
-        Effect.provideService(
+        Effect.provideContext(
           Effect.all({ seed: Streaming.settledPatches, actors: Streaming.actorSeeds }),
-          QueryCache,
           cache,
         ),
         (read) => [read.seed, read.actors],

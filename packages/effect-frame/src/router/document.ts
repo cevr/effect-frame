@@ -1,7 +1,7 @@
 import type { ScopesClosed, View } from "effect-frame/view";
 import { Deferred, Duration, Effect, Exit, Option, Schema, Scope, Stream } from "effect";
-import type { ActorTransport, Principal } from "effect-frame/actor/client";
-import { CurrentPrincipal, QueryCache } from "effect-frame/actor/client";
+import type { ActorTransport, Principal, QueryCache } from "effect-frame/actor/client";
+import { CurrentPrincipal } from "effect-frame/actor/client";
 import type {
   CacheSource,
   Document,
@@ -193,7 +193,7 @@ export const settleAndPrepare = <R, N, A>(
       const settlement = yield* Effect.raceFirst(
         settleRequest(options.routes, options.url).pipe(
           Effect.provideService(Location, requestLocation(options.url)),
-          Effect.provideService(QueryCache, cache),
+          Effect.provideContext(cache),
           Scope.provide(checks),
         ),
         timedOut("settle"),

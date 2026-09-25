@@ -307,9 +307,11 @@ export interface QueryCacheService {
 }
 
 /**
- * Source-private: what a reference and `followQuery` need from a cache built
- * here and nowhere else. It is not part of `QueryCacheService`, so a custom
- * cache implements only the public surface, and no public entry exports it.
+ * Source-private: what a reference, `followQuery` and the streamed document
+ * need from a cache built here and nowhere else. `QueryCache.layer` provides
+ * it as `QueryCacheInternals`. It is not part of `QueryCacheService`, so a
+ * custom cache implements only the public surface, and no public entry
+ * exports it.
  */
 export interface CacheInternals {
   /**
@@ -329,6 +331,10 @@ export interface CacheInternals {
     contract: Q,
     args: ArgsOf<Q>,
   ) => Effect.Effect<StampedEntry<Q>, never, ActorTransport | Scope.Scope>;
+  /** The streamed document's side of this cache: what a render writes and a page seeds. */
+  readonly document: DocumentAccess;
+  /** The cache these internals belong to. A context whose `QueryCache` is another has none. */
+  readonly cache: QueryCacheService;
 }
 
 interface StampedEntry<Q extends AnyQuery> {
@@ -356,15 +362,22 @@ export class QueryCache extends Context.Service<QueryCache, QueryCacheService>()
 ) {}
 
 /**
- * The ownership each real cache built here carries, keyed by that exact
- * service. A claim therefore always lands in the cache the reference reads,
- * and a cache built elsewhere has none: its commands own nothing.
+ * Source-private: what `QueryCache.layer` provides beside the public cache.
+ * Command ownership, stamped reads and the streamed document read it from
+ * Context. It is not exported from any subpath, so the two services always
+ * come as a pair from one `QueryCache.layer`; a context without it owns
+ * nothing and seeds nothing.
  */
-const internals = new WeakMap<QueryCacheService, CacheInternals>();
+/**
+ * Source-private: one built cache, as the Context `QueryCache.layer` builds.
+ * It carries the cache's internals beside it, so a pipeline that hands a
+ * cache on provides this whole Context, never the `QueryCache` service alone.
+ */
+export type CacheContext = Context.Context<QueryCache>;
 
-/** Source-private: the internals of a cache built by `layer`. */
-export const internalsOf = (cache: QueryCacheService): Option.Option<CacheInternals> =>
-  Option.fromNullishOr(internals.get(cache));
+export class QueryCacheInternals extends Context.Service<QueryCacheInternals, CacheInternals>()(
+  "effect-frame/src/actor/query-client/QueryCacheInternals",
+) {}
 
 const encodeKey = <Q extends AnyQuery>(contract: Q, args: ArgsOf<Q>): Effect.Effect<QueryKey> =>
   Effect.map(Effect.orDie(Schema.encodeEffect(contract.args)(args)), (encoded) => ({
@@ -874,11 +887,33 @@ export interface DocumentAccess {
   readonly actorSeed: (id: string) => Effect.Effect<Option.Option<Projection>>;
 }
 
-const documents = new WeakMap<QueryCacheService, DocumentAccess>();
+/**
+ * Source-private: the internals of `cache`, when the context holds the ones
+ * `QueryCache.layer` built beside it. A cache provided on its own over
+ * another cache's internals has none, so a claim never lands in a cache the
+ * reader does not read.
+ */
+export const internalsFor = (
+  cache: QueryCacheService,
+): Effect.Effect<Option.Option<CacheInternals>> =>
+  Effect.map(
+    Effect.serviceOption(QueryCacheInternals),
+    Option.filter((found) => found.cache === cache),
+  );
 
-/** Source-private: the document access of a cache built by `layer`. */
-export const documentOf = (cache: QueryCacheService): Option.Option<DocumentAccess> =>
-  Option.fromNullishOr(documents.get(cache));
+/** Source-private: the document access of the cache in context, if `QueryCache.layer` built it. */
+export const currentDocument: Effect.Effect<Option.Option<DocumentAccess>> = Effect.flatMap(
+  Effect.serviceOption(QueryCache),
+  (cache) =>
+    Option.match(cache, {
+      onNone: () => Effect.succeed(Option.none<DocumentAccess>()),
+      onSome: (found) =>
+        Effect.map(
+          internalsFor(found),
+          Option.map((owned) => owned.document),
+        ),
+    }),
+);
 
 /** One cache's document: what the streamed render reads, and what new slots take. */
 interface CacheDocument {
@@ -1094,7 +1129,11 @@ const entryOf = <Q extends AnyQuery>(
   };
 };
 
-const make = (): Effect.Effect<QueryCacheService, never, Scope.Scope> =>
+const make = (): Effect.Effect<
+  Context.Context<QueryCache | QueryCacheInternals>,
+  never,
+  Scope.Scope
+> =>
   Effect.gen(function* () {
     const clock = yield* Clock.Clock;
     const registry = yield* Effect.serviceOption(Inspection.Registry);
@@ -1311,9 +1350,14 @@ const make = (): Effect.Effect<QueryCacheService, never, Scope.Scope> =>
       invalidate,
       principalChanged: principalGone,
     };
-    internals.set(service, { claim, openStamped });
-    documents.set(service, document.access);
-    return service;
+    return Context.make(QueryCache, service).pipe(
+      Context.add(QueryCacheInternals, {
+        claim,
+        openStamped,
+        document: document.access,
+        cache: service,
+      }),
+    );
   });
 
 export namespace QueryCache {
@@ -1331,8 +1375,11 @@ export namespace QueryCache {
    *   ),
    * );
    * ```
+   *
+   * The layer also provides the cache's source-private internals (command
+   * ownership and the streamed document); they are not part of its type.
    */
-  export const layer: LayerType.Layer<QueryCache> = Layer.effect(QueryCache, make());
+  export const layer: LayerType.Layer<QueryCache> = Layer.effectContext(make());
 }
 
 /**
@@ -1426,16 +1473,17 @@ const carry = <A, E>(
 };
 
 /**
- * Opens one entry with its stamped states. A cache not built here has no
- * generations: every state is stamped with the same one, and the carry
- * rule is the plain one.
+ * Opens one entry with its stamped states. Without the internals of
+ * `QueryCache.layer` there are no generations: every state is stamped with
+ * the same one, and the carry rule is the plain one.
  */
 const openStamped = <Q extends AnyQuery>(
   cache: QueryCacheService,
+  internals: Option.Option<CacheInternals>,
   contract: Q,
   args: ArgsOf<Q>,
 ): Effect.Effect<StampedEntry<Q>, never, ActorTransport | Scope.Scope> =>
-  Option.match(internalsOf(cache), {
+  Option.match(internals, {
     onSome: (found) => found.openStamped(contract, args),
     onNone: () =>
       Effect.map(cache.open(contract, args), (entry): StampedEntry<Q> => ({
@@ -1457,6 +1505,7 @@ export const followQuery = Effect.fn("followQuery")(function* <Q extends AnyQuer
   args: Source<Option.Option<ArgsOf<Q>>>,
 ) {
   const cache = yield* QueryCache;
+  const internals = yield* internalsFor(cache);
   const transport = yield* ActorTransport;
   const scope = yield* Effect.scope;
   const output = yield* SubscriptionRef.make<Stamped<QueryState<ResultOf<Q>, QueryFailure>>>({
@@ -1492,9 +1541,10 @@ export const followQuery = Effect.fn("followQuery")(function* <Q extends AnyQuer
       }
       yield* leave;
       const child = yield* Scope.fork(scope);
-      const opened = yield* Scope.provide(openStamped(cache, contract, next), child).pipe(
-        Effect.provideService(ActorTransport, transport),
-      );
+      const opened = yield* Scope.provide(
+        openStamped(cache, internals, contract, next),
+        child,
+      ).pipe(Effect.provideService(ActorTransport, transport));
       current = Option.some({
         key,
         scope: child,

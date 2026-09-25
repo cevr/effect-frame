@@ -141,12 +141,13 @@ started before the settlement still lands, marked stale, and a later read
 follows. The value from before the command never shows as fresh. Closing the
 record scope releases the claim.
 
-The claim is not on the public `QueryCacheService`. Each cache that
-`QueryCache.layer` builds carries it privately, keyed by that service, so a claim
+The claim is not on the public `QueryCacheService`. `QueryCache.layer`
+provides a second, source-private service beside the cache,
+`QueryCacheInternals` (the claim, the stamped read and the streamed document),
+which names the cache it belongs to. A reference reads it from Context and uses
+it only when it belongs to the `QueryCache` in the same context, so a claim
 always lands in the cache the reference reads. A custom or wrapped cache has no
-claim. It keeps the public contract: the reference invalidates the contract when
-a command starts and applies the reply's refreshes when it is Applied. A Frame
-with no cache owns nothing.
+internals and owns nothing, as a Frame with no cache owns nothing.
 
 ### Inspection
 

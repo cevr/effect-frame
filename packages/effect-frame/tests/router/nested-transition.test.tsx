@@ -390,7 +390,7 @@ const makeTree = (probes: Probes) => {
       );
       const local = yield* spawnAtRevision(PostRevision);
       // A control that captured the ref at setup keeps that address.
-      const draftAtSetup = yield* props.data.draft.get;
+      const draftAtSetup = yield* props.data.draft.ref.get;
       const title = yield* View.ready(props.data.post.state, "");
       const comments = yield* View.ready(props.data.comments.state, "");
       const tenant = yield* View.ready(props.data.tenant.state, "");
@@ -408,6 +408,7 @@ const makeTree = (probes: Probes) => {
             )}
           </p>
           <output id="post-actor">{View.bind(local.state, String)}</output>
+          <output id="post-draft">{View.bind(props.data.draft.state)}</output>
           <button
             id="stale"
             onClick={View.event(() =>
@@ -421,7 +422,7 @@ const makeTree = (probes: Probes) => {
           <button
             id="current"
             onClick={View.event(() =>
-              Effect.flatMap(props.data.draft.get, (current) => sendText(current, "current")),
+              Effect.flatMap(props.data.draft.ref.get, (current) => sendText(current, "current")),
             )}
           >
             current
@@ -642,7 +643,10 @@ type TypedApp = ReturnType<typeof makeTree>;
 const routeServices: Equals<RouteServices<TypedApp>, QueryCache | ActorTransport> = true;
 const inheritedTenant: Equals<PostData["tenant"], FollowedQuery<string, QueryFailure>> = true;
 const ownPost: Equals<PostData["post"], FollowedQuery<string, QueryFailure>> = true;
-const actorSource: Equals<PostData["draft"], Source<RemoteActorRef<typeof Draft>>> = true;
+const actorBinding: Equals<
+  PostData["draft"],
+  { readonly ref: Source<RemoteActorRef<typeof Draft>>; readonly state: Source<string> }
+> = true;
 const postParams: Equals<
   Effect.Success<Route.PropsOf<typeof postSegment>["params"]["get"]>,
   { readonly tenant: string; readonly postId: string }
@@ -692,7 +696,7 @@ const typeFixtures = [
   routeServices,
   inheritedTenant,
   ownPost,
-  actorSource,
+  actorBinding,
   postParams,
   leakyServices,
   leakyWithoutScope,
@@ -896,6 +900,11 @@ describe("private nested transition", () => {
         expect(textAt(root, "#post-param")).toBe("1");
         yield* click(root, "#current");
         expect(yield* Queue.take(wire.commands)).toBe(draftKey("t1", "1"));
+        // The binding's state is the state of the reference it holds now.
+        yield* page.waitFor({
+          label: "the draft binding shows post 1's actor",
+          until: (actual) => textAt(actual, "#post-draft") === "current",
+        });
 
         yield* Deferred.succeed(snapshot2.gate, void 0);
         yield* Fiber.join(moving);
@@ -914,6 +923,11 @@ describe("private nested transition", () => {
         yield* Deferred.succeed(post2.gate, void 0);
         yield* readyPage(page, "2");
         expect(textAt(root, "#post-stale")).toBe("false");
+        // The draft binding's state followed the move to post 2's actor.
+        yield* page.waitFor({
+          label: "the draft binding shows post 2's actor",
+          until: (actual) => textAt(actual, "#post-draft") === "",
+        });
 
         const after = yield* Frame.inspect;
         expect(root.querySelector("#post")).toBe(postElement);
@@ -942,6 +956,10 @@ describe("private nested transition", () => {
         });
         yield* click(root, "#current");
         expect(yield* Queue.take(wire.commands)).toBe(draftKey("t1", "2"));
+        yield* page.waitFor({
+          label: "the send reached post 2's actor, which the binding shows",
+          until: (actual) => textAt(actual, "#post-draft") === "current",
+        });
 
         // A search-only change moves no key, yet publishes the new search
         // and keeps every declaration and every entry.

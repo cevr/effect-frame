@@ -69,7 +69,7 @@ const ledger = Route.segment("ledger", {
 const ledgerRoute = Route.prerender(
   "ledgers",
   Route.leaf(ledger, (props) =>
-    Effect.map(props.data.ledger.get, (opened) => (
+    Effect.map(props.data.ledger.ref.get, (opened) => (
       <p id="count">{View.bind(opened.state, (state) => state.count)}</p>
     )),
   ),

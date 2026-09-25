@@ -489,7 +489,7 @@ const makeApp = (probes: Probes) => {
           <button
             id="current"
             onClick={View.event(() =>
-              Effect.flatMap(props.data.draft.get, (current) => sendText(current, "current")),
+              Effect.flatMap(props.data.draft.ref.get, (current) => sendText(current, "current")),
             )}
           >
             current
@@ -711,7 +711,7 @@ const typedLeaf = Route.leaf(postSegment, failingView, {
 });
 const typedLeafServices: Equals<
   Route.PropsOf<typeof postSegment>["data"]["draft"],
-  Source<RemoteActorRef<typeof Draft>>
+  Route.FollowedActor<typeof Draft>
 > = true;
 /** A segment prints its whole path with its own codecs. */
 const printed = Route.redirect(postSegment, { tenant: "t1", postId: "7" }, { tab: "edit" });

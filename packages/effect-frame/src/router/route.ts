@@ -69,6 +69,7 @@ export type {
   DrivenAt,
   LayoutPropsOf,
   LeafOptions,
+  FollowedActor,
   ModeConstructor,
   NoParams,
   Pending,

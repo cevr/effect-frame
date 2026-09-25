@@ -146,7 +146,7 @@ export const ListView = (props: ListProps) =>
       Effect.map(props.params.get, (params): Opened => ({ name: params.list, notes }));
     // One body per list: a new list is a new body over the route's new reference.
     const body = yield* View.keyed(
-      Source.mapEffect(props.data.notes, opened),
+      Source.mapEffect(props.data.notes.ref, opened),
       (one) => one.name,
       (one) =>
         Effect.flatMap(one.get, (current) =>

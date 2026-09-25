@@ -92,7 +92,7 @@ export const PostView = (props: PostProps) =>
     });
     // One island per post: a move to another post opens a new one.
     const island = yield* View.keyed(
-      Source.mapEffect(props.data.reactions, opened),
+      Source.mapEffect(props.data.reactions.ref, opened),
       (one) => one.slug,
       (one) =>
         Effect.flatMap(one.get, (current) =>

@@ -138,7 +138,7 @@ type Route.ActorBehavior<C> = Behavior<SnapshotOf<C>, MessageOf<C>, unknown, Ref
 type Route.Declaration = QueryDeclaration<AnyQuery> | ActorDeclaration<AnyContract>;
 type Route.Declarations = Readonly<Record<string, Declaration>>;
 type Route.RouteData<Data extends Declarations> = {
-  readonly [K in keyof Data]: /* Query: FollowedQuery<ResultOf<Q>, QueryFailure>; Actor: Source<RemoteActorRef<C>> */;
+  readonly [K in keyof Data]: /* Query: FollowedQuery<ResultOf<Q>, QueryFailure>; Actor: FollowedActor<C>, { ref, state } */;
 };
 ```
 

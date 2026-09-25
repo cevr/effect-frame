@@ -206,6 +206,10 @@ const program = Effect.gen(function* () {
   handler. It receives a `Route.RouteFailure`.
 - Every segment view gets `params`, `search`, `data`, `href`,
   `updateSearch`, and `replaceSearch`. A layout also gets `outlet`.
+- Each `data` binding has a `state` Source. A `Route.query` binding also has
+  `refresh` and `override`. A `Route.actor` binding is `{ ref, state }`:
+  `state` follows the reference the route holds now, and a send names it,
+  `Effect.flatMap(props.data.notes.ref.get, (ref) => ref.send(message, options))`.
 - A view written apart from its segment types its props from the segment:
   `Route.PropsOf<typeof post>` for a leaf, and
   `Route.LayoutPropsOf<typeof tenant, ChildR>` for a layout. A layout view

@@ -120,10 +120,7 @@ const SlowestCard = (props: OverviewProps) =>
 /** The live alerts: the route's `Alerts` actor, followed as it changes. */
 const AlertsCard = (props: OverviewProps) =>
   Effect.sync(() => {
-    const items = Source.select(
-      Source.switchMap(props.data.alerts, (current) => current.state),
-      (snapshot) => snapshot.items,
-    );
+    const items = Source.select(props.data.alerts.state, (snapshot) => snapshot.items);
     return (
       <section id="alerts-card" class="card">
         <h2>alerts</h2>
@@ -138,7 +135,7 @@ const AlertsCard = (props: OverviewProps) =>
                   class="ack"
                   onClick={View.event(() =>
                     Effect.flatMap(alert.get, (value) =>
-                      Effect.asVoid(ack(props.data.alerts, props.data.tenant, value)),
+                      Effect.asVoid(ack(props.data.alerts.ref, props.data.tenant, value)),
                     ),
                   )}
                 >

@@ -282,12 +282,32 @@ export const actor = <C extends AnyContract>(
   };
 };
 
-/** What a view receives for one declaration. */
+/**
+ * What a view receives for a `Route.actor` declaration: the reference the
+ * transition holds now, and the state that reference shows. A move to a new
+ * key swaps the reference, and `state` follows the new one. There is no
+ * `send` here: a send names its reference, so the address stays visible.
+ *
+ * ```tsx
+ * const NotesView = (props: Route.PropsOf<typeof list>) =>
+ *   Effect.gen(function* () {
+ *     const add = (text: string) =>
+ *       Effect.flatMap(props.data.notes.ref.get, (ref) => ref.send({ _tag: "Add", text }, options));
+ *     return <ul>{View.bind(props.data.notes.state, (state) => state.items.length)}</ul>;
+ *   });
+ * ```
+ */
+export interface FollowedActor<C extends AnyContract> {
+  readonly ref: Source<RemoteActorRef<C>>;
+  readonly state: Source<SnapshotOf<C>>;
+}
+
+/** What a view receives for one declaration: the same `{ state }` shape for a query and an actor. */
 export type BindingOf<D> =
   D extends QueryDeclaration<infer Q extends AnyQuery>
     ? FollowedQuery<ResultOf<Q>, QueryFailure>
     : D extends ActorDeclaration<infer C extends AnyContract>
-      ? Source<RemoteActorRef<C>>
+      ? FollowedActor<C>
       : never;
 
 /** Every binding a segment's view receives, inherited ones included. */
@@ -1583,9 +1603,13 @@ const actorBinding = (
   state: Source<InstanceState<unknown, unknown>>,
 ): Binding => {
   let current = first;
-  const exposed: Source<RemoteActorRef<AnyContract>> = Source.mapEffect(state, (value) =>
+  const ref: Source<RemoteActorRef<AnyContract>> = Source.mapEffect(state, (value) =>
     refIn(value, name),
   );
+  const exposed: FollowedActor<AnyContract> = {
+    ref,
+    state: Source.switchMap(ref, (held) => held.state),
+  };
   return {
     current: () => current,
     exposed,

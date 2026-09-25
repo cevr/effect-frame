@@ -45,8 +45,11 @@ const app = Branch.route("app", tree); // one AnyRoute for mountRouter
   A silent shadow would give the ancestor the child's value. The flat
   `Route.client` path is unchanged.
 - A query declaration binds to `FollowedQuery<ResultOf<Q>, QueryFailure>`.
-- An actor declaration binds to `Source<RemoteActorRef<C>>`. The Source emits
-  the current real ref. One ref is never mutated.
+- An actor declaration binds to `FollowedActor<C>`: `{ ref, state }`, the
+  query binding's shape. `ref` is a `Source<RemoteActorRef<C>>` that emits
+  the current real ref; one ref is never mutated. `state` is
+  `Source.switchMap(ref, (r) => r.state)`, so it follows a move. There is
+  no `send` on the binding: a send names its reference.
 - `props.outlet` is an `Effect<Node, never, ChildR>`. It is a delayed setup.
   The layout yields it where the child must be owned. If the layout yields it
   inside `Loading`, the child's `ready` reads register with that Loading. If
@@ -100,7 +103,8 @@ The consequences:
 - A moved query binding keeps its output `SubscriptionRef`. The old follow is
   closed and the last value is carried as stale until the new key is ready.
 - A moved actor binding publishes a new ref with the new values in one set. A
-  control that reads `props.data.draft` sends to the new address. A control
+  control that reads `props.data.draft.ref` sends to the new address, and
+  `props.data.draft.state` shows the new actor's state. A control
   that captured the old ref at setup still sends to the old address.
 - The view setup runs through the private `attempt` helper, owned by the view
   scope. An instance closed during setup does not return a node.
@@ -113,7 +117,7 @@ All proofs use a real `QueryCache`, a real actor host and transport, `ViewTest`,
 
 | Claim                                                 | Proof                                                                                              | What it observes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Route data types are exact                            | 0. "keeps exact route data and requirement types"                                                  | The route's services equal `QueryCache \| ActorTransport`. The inherited binding is a `FollowedQuery`. The actor binding is `Source<RemoteActorRef<typeof Draft>>`. A leaky outlet keeps `LoadingScope`. A name collision, a missing binding, and a ref used as a function do not compile.                                                                                                                                                                                                                                      |
+| Route data types are exact                            | 0. "keeps exact route data and requirement types"                                                  | The route's services equal `QueryCache \| ActorTransport`. The inherited binding is a `FollowedQuery`. The actor binding is `{ ref: Source<RemoteActorRef<typeof Draft>>; state: Source<string> }`. A leaky outlet keeps `LoadingScope`. A name collision, a missing binding, and a ref used as a function do not compile.                                                                                                                                                                                                      |
 | Starts are parallel and precede every view            | 1. "starts every declaration in parallel, then starts the unseeded child under the layout Loading" | With the actor snapshot held, all queries have started and no view setup ran. After the gate, the layout shows and the child starts under the Loading fallback.                                                                                                                                                                                                                                                                                                                                                                 |
 | A replaced child keeps its layout; ownership overlaps | 2. "replaces the child under a retained layout and overlaps a shared key"                          | Post to edit: the same layout element, outlet element, local actor ID, and one layout setup. The shared post key has one call and the same record ID. The post view closed while its draft subscription and comments query were held. After it, both were released.                                                                                                                                                                                                                                                             |
 | A post ID change keeps the view and moves bindings    | 3. "moves query and actor bindings on a post-ID change while the view stays"                       | While the new snapshot is held, params still show 1 and the current control sends to t1/1. After the move, params show 2, the title carries the old value marked stale, the subscription moved from t1/1 to t1/2, and the tenant has one call. The retained control holds the released t1/1 ref, so its command does no work and sends nothing (its supplied ID reports Uncertain at attempt 0); the current control sends to t1/2. A search-only change moves no key, but the view shows the new tab, and it acquires nothing. |

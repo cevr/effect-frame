@@ -75,7 +75,7 @@ const counterSegment = Route.segment("counter", {
 
 const counterBranch = Route.leaf(counterSegment, (props) =>
   Effect.gen(function* () {
-    const counter = yield* props.data.counter.get;
+    const counter = yield* props.data.counter.ref.get;
     return <p id="count">{View.bind(counter.state, (value) => String(value))}</p>;
   }),
 );
@@ -83,7 +83,7 @@ const counterBranch = Route.leaf(counterSegment, (props) =>
 /** The same segment, drawn with a button that sends through the route's reference. */
 const sendingBranch = Route.leaf(counterSegment, (props) =>
   Effect.gen(function* () {
-    const counter = yield* props.data.counter.get;
+    const counter = yield* props.data.counter.ref.get;
     return (
       <div>
         <p id="count">{View.bind(counter.state, (value) => String(value))}</p>
@@ -113,14 +113,14 @@ const twiceBranch = Route.layout(
   [
     Route.leaf(detailSegment, (props) =>
       Effect.gen(function* () {
-        const again = yield* props.data.again.get;
+        const again = yield* props.data.again.ref.get;
         return <p id="again">{View.bind(again.state, (value) => String(value))}</p>;
       }),
     ),
   ],
   (props) =>
     Effect.gen(function* () {
-      const counter = yield* props.data.counter.get;
+      const counter = yield* props.data.counter.ref.get;
       const outlet = yield* props.outlet;
       return (
         <section>

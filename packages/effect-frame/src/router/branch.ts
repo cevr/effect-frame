@@ -84,7 +84,14 @@ import type {
   Current,
 } from "./codec.js";
 import { matchPrefix, segmentsOf } from "./path.js";
-import { address, parseTemplate, printSearch, readSearch, search as searchCodec } from "./codec.js";
+import {
+  RouteBrand,
+  address,
+  parseTemplate,
+  printSearch,
+  readSearch,
+  search as searchCodec,
+} from "./codec.js";
 import type { RouteMatch } from "./router.js";
 import { register as registerInspection } from "./route-inspection.js";
 import { Router } from "./router.js";
@@ -99,7 +106,6 @@ import type { NavigationBehavior } from "./navigation-behavior.js";
 import type { AnyView, DrivenServices, ErasedDriven } from "./driven.js";
 import { drivenOf, drivenShell } from "./driven.js";
 import type { RenderingMode } from "./rendering-mode.js";
-import { register as registerMode } from "./rendering-mode.js";
 import type {
   AnyInputs,
   InputsError,
@@ -2654,6 +2660,7 @@ const mountTree = <Name extends string, ViewR, DataR, Extra extends object>(
   const outline = (url: URL) => Option.map(matchUrl(root, url), (matched) => matched.outline);
   const mountable: Extra & Tree<Name, ViewR | DataR> = {
     ...extra,
+    [RouteBrand]: mode,
     name,
     searchKeys: treeSearchKeys(root.searchKeys),
     enter: (url, navigation = unavailable) =>
@@ -2776,7 +2783,6 @@ const mountTree = <Name extends string, ViewR, DataR, Extra extends object>(
       onSome: (matched) => matched.check(url, kind),
     });
   registerChecks(mountable, checks);
-  registerMode(mountable, mode);
   return mountable;
 };
 

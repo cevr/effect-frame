@@ -308,7 +308,10 @@ const answer = renderDocument({
   on the server too.
 - `Rendered.route` is `{ _tag: "Matched", route }`, the route value, or
   `{ _tag: "NotFound" }`. `status` is 404 for not-found and 200 otherwise.
-  A hand-written route and not-found render as `SSR`.
+  Not-found renders as `SSR`.
+- Every route comes from a mode constructor, and names itself. `mount` and
+  the server document die with `Route.RouteNameRejected` when two routes
+  share a name, or when one is named `"not-found"`, the router's own.
 - `Route.ssr`: the server resolves every query the matched branch
   declares, in parallel, before any view draws. It draws once and writes
   one seed script. The client hydrates with no read.

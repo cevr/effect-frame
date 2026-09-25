@@ -33,6 +33,7 @@ import type {
 } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import {
+  Cause,
   Context,
   Deferred,
   Effect,
@@ -41,6 +42,7 @@ import {
   Layer,
   Option,
   Ref,
+  Result,
   Schema,
   Scope,
   Stream,
@@ -453,7 +455,7 @@ describe("declared data on the server (#18 §3.3)", () => {
     }),
   );
 
-  it.scopedLive("a user route named not-found is that route, not the fallback", () =>
+  it.scopedLive("a document refuses a route named not-found: the name is the router's own", () =>
     Effect.gen(function* () {
       const server = yield* sideOf(makeControl({}));
       const named = Route.ssr(
@@ -463,13 +465,12 @@ describe("declared data on the server (#18 §3.3)", () => {
           () => Effect.succeed(<p id="page">a page</p>),
         ),
       );
-      const rendered = yield* renderIn(server, [named], new URL(`${origin}/not-found`));
-      expect(rendered.route).toEqual({ _tag: "Matched", route: named });
-      expect(rendered.status).toBe(200);
-      const html = (yield* collect(rendered.body)).join("");
-      expect(html).toContain('<p id="page" tabindex="-1">a page</p>');
-      const fallback = yield* renderIn(server, [named], new URL(`${origin}/elsewhere`));
-      expect([fallback.route, fallback.status]).toEqual([{ _tag: "NotFound" }, 404]);
+      const refused = yield* Effect.exit(renderIn(server, [named], new URL(`${origin}/not-found`)));
+      const defect = Exit.match(refused, {
+        onSuccess: () => "rendered",
+        onFailure: (cause) => Result.getOrElse(Cause.findDefect(cause), () => "no defect"),
+      });
+      expect(defect).toMatchObject({ _tag: "RouteNameRejected", route: "not-found" });
     }),
   );
 });

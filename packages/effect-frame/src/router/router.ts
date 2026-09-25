@@ -13,11 +13,14 @@ import {
   Predicate,
   Queue,
   Ref,
+  Schema,
   Scope,
   Stream,
   SubscriptionRef,
 } from "effect";
 import type { AnyRoute, Entered, RouteInstance, RouteNavigation, UrlUpdater } from "./codec.js";
+import { RouteBrand } from "./codec.js";
+import { notFoundMode } from "./rendering-mode.js";
 import {
   Runtime as UrlStateRuntime,
   makeRuntime as makeUrlStateRuntime,
@@ -140,9 +143,52 @@ interface Mounted<R> {
 const newRouteInstance = (): RouteInstance => ({ _tag: "RouteInstance" });
 const unavailableInspection = Symbol.for("effect-frame/frame/inspection-unavailable");
 
+/**
+ * The name of the router's own not-found route: what `Router.current`
+ * answers when no route matched. No user route may take it.
+ */
+export const notFoundName = "not-found";
+
+/**
+ * A route list the router refused: two routes share a name, or one takes
+ * `notFoundName`. A route's name is how `Router.current` and the inspector
+ * tell routes apart, so two routes with one name would be one route to them.
+ * Reported as a defect of `mount` or of the server document.
+ */
+export class RouteNameRejected extends Schema.TaggedError<RouteNameRejected>()(
+  "RouteNameRejected",
+  { route: Schema.String, reason: Schema.String },
+) {}
+
+/** Dies with `RouteNameRejected` unless every route has its own name, and none is `notFoundName`. */
+const admitNames = (routes: ReadonlyArray<AnyRoute<unknown>>): Effect.Effect<void> => {
+  const seen = new Set<string>();
+  for (const route of routes) {
+    if (route.name === notFoundName) {
+      return Effect.die(
+        RouteNameRejected.make({
+          route: route.name,
+          reason: `${notFoundName} is the router's own route; name this route something else`,
+        }),
+      );
+    }
+    if (seen.has(route.name)) {
+      return Effect.die(
+        RouteNameRejected.make({
+          route: route.name,
+          reason: `two routes are named ${route.name}; a route's name identifies it`,
+        }),
+      );
+    }
+    seen.add(route.name);
+  }
+  return Effect.void;
+};
+
 /** The not-found view as a route that matches everything, so one rule mounts both. */
 const notFoundRoute = <R>(view: View.View<NotFoundProps, never, R>): AnyRoute<R> => ({
-  name: "not-found",
+  [RouteBrand]: notFoundMode,
+  name: notFoundName,
   searchKeys: { known: true, keys: [] },
   enter: (url) =>
     Option.some(
@@ -273,6 +319,7 @@ export const mount: <R, HostNode, N = R>(
 > = Effect.fn("Router.mount")(function* <R, HostNode, N = R>(
   options: MountOptions<R, HostNode, N>,
 ) {
+  yield* admitNames(options.routes);
   const location = yield* Location;
   const scope = yield* Effect.scope;
   const routes: ReadonlyArray<AnyRoute<R | N>> = options.routes;
@@ -1088,7 +1135,7 @@ const serverRouter = (url: URL): RouterService => {
       }),
     );
   const navigation: Navigation = { url, kind: "initial" };
-  const match: RouteMatch = { name: "not-found", url };
+  const match: RouteMatch = { name: notFoundName, url };
   return {
     navigate: refuse,
     replace: refuse,
@@ -1115,6 +1162,7 @@ export const settleRequest = <R>(
   Exclude<Exclude<Exclude<R, Router>, UrlStateRuntime>, Scope.Scope> | Scope.Scope
 > =>
   Effect.gen(function* () {
+    yield* admitNames(routes);
     const route = Option.fromNullishOr(
       routes.find((candidate) => Option.isSome(candidate.enter(url))),
     );

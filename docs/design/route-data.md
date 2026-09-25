@@ -82,9 +82,11 @@ match. An empty segment is no segment both ways: `href` refuses one, and
 
 ## Decisions
 
-1. **A mode is the mount constructor.** A route value carries no mode
-   field. The constructor records the mode in a private registry
-   (`rendering-mode.ts`), as `check.ts` records a tree's checks. The names
+1. **A mode is the mount constructor.** No author writes a mode field.
+   The constructor stamps the mode under the route's brand (`RouteBrand`
+   in `codec.ts`), so only a mode constructor makes a route, and every
+   route knows how it renders. Not-found's mode is the named constant
+   `notFoundMode`. The names
    are #22's: `ClientOnly`, `SSR`, `AwaitAll`, `Streamed`. `driven` is not
    built.
 2. **`Route.client` keeps its name.** It is the `ClientOnly` constructor.
@@ -271,7 +273,7 @@ All tests are in `packages/effect-frame/tests/router/`.
 | SSR resolves declared data before render                                             | `route-data.test.tsx` — "an SSR render resolves the branch's declared data before render, and the client hydrates with no read"                                                                                                                                                                                           |
 | Streamed, AwaitAll, ClientOnly                                                       | `route-data.test.tsx` — one test per mode                                                                                                                                                                                                                                                                                 |
 | A settled outlet inside `Loading` draws its content on the first frame               | `route-data.test.tsx` — "an SSR layout that puts its outlet in Loading draws the leaf, and the client claims it", "an AwaitAll layout that puts its outlet in Loading draws the leaf, and the client claims it"; both red before decision 15                                                                              |
-| Not-found is 404, and a route named not-found is not it                              | `route-data.test.tsx` — "a URL no route matches renders not-found as SSR, with status 404", "a user route named not-found is that route, not the fallback"                                                                                                                                                                |
+| Not-found is 404, and no user route may be named not-found                           | `route-data.test.tsx` — "a URL no route matches renders not-found as SSR, with status 404", "a document refuses a route named not-found: the name is the router's own"                                                                                                                                                    |
 | The request settles first; a redirect is the answer                                  | `route-data.test.tsx` — "an SSR route that redirects to a ClientOnly route answers Redirect, and draws nothing", "a ClientOnly route runs its checks on the server, and a redirect is the answer"                                                                                                                         |
 | One cache per request: a query read once and written once, released with the request | `route-data.test.tsx` — "a query the check and the page both read is read once and written once: SSR / AwaitAll / Streamed", "closing the request Scope releases the request cache and stops its reads"                                                                                                                   |
 | The mounted router does not settle again                                             | `route-data.test.tsx` — "a route that passes its checks is settled once: …"                                                                                                                                                                                                                                               |
@@ -305,7 +307,7 @@ change was reverted.
 | `settleRequest` runs no check                                 | Killed           | the redirect, settled-once, and check-timeout tests (4)                    |
 | The mounted router settles again                              | Killed           | "a route that passes its checks is settled once: …"                        |
 | Not-found answers 200                                         | Killed           | the two not-found tests                                                    |
-| A route named `"not-found"` is taken for the fallback         | Killed           | "a user route named not-found is that route, not the fallback"             |
+| A route named `"not-found"` is taken for the fallback         | Killed           | "a document refuses a route named not-found: the name is the router's own" |
 | The settlement does not race the limit                        | Killed (timeout) | "a check that never answers times out at the limit, …"                     |
 | The drawing does not race the limit                           | Killed (timeout) | the three actor-snapshot tests and the SSR limit test                      |
 | The drawing's Scope is not closed when the preparation fails  | **Survived**     | none: see below                                                            |

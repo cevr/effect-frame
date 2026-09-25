@@ -3,7 +3,7 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import { Location, Route, UrlState, mount, NavigationBehavior } from "effect-frame/router";
-import type { AnyRoute, Entered, LocationService } from "effect-frame/router";
+import type { AnyRoute, LocationService } from "effect-frame/router";
 import type { Source } from "effect-frame/actor";
 import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -360,29 +360,6 @@ describe("Frame router inspection", () => {
       }),
   );
 
-  it.scoped.layer(Frame.layer({ name: "custom-route" }))(
-    "does not execute arbitrary custom route inspection work",
-    () =>
-      Effect.gen(function* () {
-        const custom: AnyRoute<never> = {
-          name: "custom",
-          searchKeys: { known: true, keys: [] },
-          enter: () =>
-            Option.some(
-              Effect.succeed<Entered<never>>({
-                setup: Effect.succeed(<p>custom</p>),
-                update: () => Effect.succeed(true),
-              }),
-            ),
-        };
-        yield* makeStart("http://app.test/custom", [custom]);
-
-        const route = routeNamed(yield* Frame.inspect, "custom");
-        expect(route.params).toEqual({ _tag: "Opaque", reason: "unsupported-value" });
-        expect(route.search).toEqual({ _tag: "Opaque", reason: "unsupported-value" });
-      }),
-  );
-
   it.scoped.layer(Frame.layer({ name: "navigation-resolution" }))(
     "retains the resolved navigation name without re-entering routes or codecs",
     () =>
@@ -717,20 +694,20 @@ describe("Frame router inspection", () => {
           "old",
           Route.leaf(oldSegment, () => Effect.succeed(<p>old</p>)),
         );
-        const bad: AnyRoute<never> = {
-          name: "bad",
-          searchKeys: { known: true, keys: [] },
-          enter: () =>
-            Option.some(
-              Effect.acquireRelease(
-                Effect.succeed<Entered<never>>({
-                  setup: Effect.die("bad route setup"),
-                  update: () => Effect.succeed(true),
-                }),
-                () => Effect.sync(() => void (released += 1)),
-              ),
+        const badSegment = Route.segment("bad", {
+          path: "/bad",
+          params: Nothing,
+          search: Route.search(Nothing),
+        });
+        const bad = Route.client(
+          "bad",
+          Route.leaf(badSegment, () =>
+            Effect.andThen(
+              Effect.acquireRelease(Effect.void, () => Effect.sync(() => void (released += 1))),
+              Effect.die("bad route setup"),
             ),
-        };
+          ),
+        );
         const { router } = yield* makeStart("http://app.test/old", [old, bad]);
         const failed = yield* Effect.exit(router.navigate("/bad"));
         expect(Exit.isFailure(failed)).toBe(true);
@@ -750,26 +727,26 @@ describe("Frame router inspection", () => {
         const started = yield* Deferred.make<void>();
         const hold = yield* Deferred.make<void>();
         let released = 0;
-        const blocked: AnyRoute<never> = {
-          name: "blocked",
-          searchKeys: { known: true, keys: [] },
-          enter: () =>
-            Option.some(
-              Effect.gen(function* () {
-                yield* Effect.acquireRelease(Effect.void, (_value, _exit) =>
-                  Effect.sync(() => {
-                    released += 1;
-                  }),
-                );
-                yield* Deferred.succeed(started, void 0);
-                yield* Deferred.await(hold);
-                return yield* Effect.succeed<Entered<never>>({
-                  setup: Effect.succeed(<p>blocked</p>),
-                  update: () => Effect.succeed(true),
-                });
-              }),
-            ),
-        };
+        const blockedSegment = Route.segment("blocked", {
+          path: "/blocked",
+          params: Nothing,
+          search: Route.search(Nothing),
+        });
+        const blocked = Route.client(
+          "blocked",
+          Route.leaf(blockedSegment, () =>
+            Effect.gen(function* () {
+              yield* Effect.acquireRelease(Effect.void, (_value, _exit) =>
+                Effect.sync(() => {
+                  released += 1;
+                }),
+              );
+              yield* Deferred.succeed(started, void 0);
+              yield* Deferred.await(hold);
+              return <p>blocked</p>;
+            }),
+          ),
+        );
         const location = yield* makeLocation("http://app.test/blocked");
         const mounting = yield* Effect.forkChild(
           mount({
@@ -805,23 +782,24 @@ describe("Frame router inspection", () => {
           "old-lifetime",
           Route.leaf(oldSegment, () => Effect.succeed(<p>old</p>)),
         );
-        const owned: AnyRoute<never> = {
-          name: "owned",
-          searchKeys: { known: true, keys: [] },
-          enter: () =>
-            Option.some(
-              Effect.acquireRelease(
-                Effect.succeed<Entered<never>>({
-                  setup: Effect.succeed(<p>owned</p>),
-                  update: () => Effect.succeed(true),
+        const ownedSegment = Route.segment("owned", {
+          path: "/owned",
+          params: Nothing,
+          search: Route.search(Nothing),
+        });
+        const owned = Route.client(
+          "owned",
+          Route.leaf(ownedSegment, () =>
+            Effect.as(
+              Effect.acquireRelease(Effect.void, (_value, _exit) =>
+                Effect.sync(() => {
+                  released += 1;
                 }),
-                (_value, _exit) =>
-                  Effect.sync(() => {
-                    released += 1;
-                  }),
               ),
+              <p>owned</p>,
             ),
-        };
+          ),
+        );
         const { router } = yield* makeStart("http://app.test/old-lifetime", [old, owned]);
         yield* router.navigate("/owned");
         expect(released).toBe(0);

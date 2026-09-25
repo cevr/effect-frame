@@ -12,8 +12,9 @@ import type {
 import { awaitAllDrawing, renderSeeded, requestCache, streamPrepared } from "../view/hosts/html.js";
 import { ResolveBeforeRender } from "./branch.js";
 import type { AnyRoute } from "./codec.js";
+import { modeOf } from "./codec.js";
 import type { RenderingMode } from "./rendering-mode.js";
-import { read as readMode } from "./rendering-mode.js";
+import { notFoundMode } from "./rendering-mode.js";
 import { Restore } from "./navigation-behavior.js";
 import type { LocationService, NotFoundProps, Router } from "./router.js";
 import { Location, SettledRequest, mount, settleRequest } from "./router.js";
@@ -54,7 +55,7 @@ export interface DocumentOptions<R, N = R> {
   readonly closeWhen: Effect.Effect<void>;
 }
 
-/** Which route a document shows. A user route may be named anything, `"not-found"` too. */
+/** Which route a document shows. No user route may be named `"not-found"` (`RouteNameRejected`). */
 export type DocumentRoute<R> =
   | { readonly _tag: "Matched"; readonly route: AnyRoute<R> }
   | { readonly _tag: "NotFound" };
@@ -69,7 +70,7 @@ export interface DocumentRedirect {
 export interface RenderedDocument<R> {
   readonly _tag: "Rendered";
   readonly route: DocumentRoute<R>;
-  /** The settled tree's mode. A hand-written route and not-found render as `SSR`. */
+  /** The settled route's mode. Not-found renders as `notFoundMode` (`SSR`). */
   readonly mode: RenderingMode;
   /** 404 for not-found, 200 otherwise. */
   readonly status: 200 | 404;
@@ -202,10 +203,10 @@ export const settleAndPrepare = <R, N, A>(
         const redirect: DocumentRedirect = { _tag: "Redirect", location: settlement.location };
         return redirect;
       }
-      const mode = Option.getOrElse(
-        Option.flatMap(settlement.route, readMode),
-        (): RenderingMode => "SSR",
-      );
+      const mode = Option.match(settlement.route, {
+        onNone: () => notFoundMode,
+        onSome: modeOf,
+      });
       const routed: Drawing<DocumentTimedOut, Mounted<R> | Mounted<N> | Scope.Scope> = (
         host,
         root,

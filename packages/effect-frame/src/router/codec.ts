@@ -5,6 +5,7 @@ import { Effect, Option, Predicate, Result, Schema, SchemaGetter } from "effect"
 import { matchPrefix, refuseOutOfDomain, segmentFault, segmentsOf, textFault } from "./path.js";
 export { UrlValueRejected } from "./path.js";
 import type { RouteMatch } from "./router.js";
+import type { RenderingMode } from "./rendering-mode.js";
 
 /**
  * A route is a bidirectional codec for a URL plus the view that URL shows
@@ -503,8 +504,20 @@ export interface Entered<R> {
   readonly update: (url: URL) => Effect.Effect<boolean>;
 }
 
-/** A route with its shapes erased: what a router holds. */
+/**
+ * Brands a route value and holds its rendering mode: only the mode
+ * constructors (`Route.client`, `Route.ssr`, `Route.streamed`,
+ * `Route.awaitAll`, `Route.prerender`, `Route.driven`, `Route.redirecting`)
+ * make one, so every route a router holds knows how it renders.
+ */
+export const RouteBrand: unique symbol = Symbol.for("effect-frame/router/Route");
+
+/** How a branded route renders a document. */
+export const modeOf = <R>(route: AnyRoute<R>): RenderingMode => route[RouteBrand];
+
+/** A route with its shapes erased: what a router holds. A mode constructor makes one. */
 export interface AnyRoute<R> {
+  readonly [RouteBrand]: RenderingMode;
   readonly name: string;
   /** Encoded search ownership. Unknown means an opaque codec needs a declaration. */
   readonly searchKeys: SearchKeyInfo;

@@ -2,8 +2,7 @@ import { Source } from "effect-frame/actor/client";
 import type { Child, Node } from "effect-frame/view";
 import { Dom, View } from "effect-frame/view";
 import { Effect, Option, Predicate } from "effect";
-import type { AnyRoute, Current, Linkable, SearchUpdater } from "./codec.js";
-import type { RouterService } from "./router.js";
+import type { Current, Linkable, SearchUpdater } from "./codec.js";
 import { Router } from "./router.js";
 
 /**
@@ -63,11 +62,6 @@ const searchAt = <Params, Search>(
 
 function isUpdater<Search>(search: LinkSearch<Search>): search is SearchUpdater<Search> {
   return Predicate.isFunction(search);
-}
-
-/** `true` while the document is on `route`, whatever its values. */
-export function isActive<R>(router: RouterService, route: AnyRoute<R>): Source<boolean> {
-  return Source.select(router.current, (match) => match.name === route.name);
 }
 
 export interface LinkProps {

@@ -17,7 +17,19 @@ import type { LocationService } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import type { Node } from "effect-frame/view";
-import { Deferred, Effect, Fiber, Option, Queue, Ref, Schema, Stream } from "effect";
+import {
+  Cause,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Option,
+  Queue,
+  Ref,
+  Result,
+  Schema,
+  Stream,
+} from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 /**
@@ -203,6 +215,33 @@ const start = (initial: string, routes: ReadonlyArray<Route.AnyRoute<Router>> = 
   });
 
 describe("router", () => {
+  it.scoped("mount refuses two routes with one name, and a route named not-found", () =>
+    Effect.gen(function* () {
+      const other = Route.client("home", Route.leaf(bookSegment, Book));
+      const twice = yield* Effect.exit(start("http://app.test/", [home, other]));
+      const reservedSegment = Route.segment("not-found", {
+        path: "/not-found",
+        params: Nothing,
+        search: Nothing,
+      });
+      const reserved = Route.client(
+        "not-found",
+        Route.leaf(reservedSegment, () => Effect.succeed(<p>reserved</p>)),
+      );
+      const named = yield* Effect.exit(start("http://app.test/", [home, reserved]));
+      const defects = [twice, named].map((exit) =>
+        Exit.match(exit, {
+          onSuccess: () => "mounted",
+          onFailure: (cause) => Result.getOrElse(Cause.findDefect(cause), () => "no defect"),
+        }),
+      );
+      expect(defects).toMatchObject([
+        { _tag: "RouteNameRejected", route: "home" },
+        { _tag: "RouteNameRejected", route: "not-found" },
+      ]);
+    }),
+  );
+
   it.scoped("shows the route the initial URL matches, or not-found", () =>
     Effect.gen(function* () {
       const found = yield* start("http://app.test/");

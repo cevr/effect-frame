@@ -93,6 +93,7 @@ export type {
 
 // Checks, redirects, and route failures.
 export { CheckNavigation, Continue, RedirectCycle, redirect } from "./check.js";
+export { RouteNameRejected } from "./router.js";
 export type {
   Before,
   BeforeInput,

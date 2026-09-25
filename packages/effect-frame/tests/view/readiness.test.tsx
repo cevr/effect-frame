@@ -5,14 +5,14 @@ registerDom();
 import {
   Actor,
   QueryCache,
-  QueryFailure,
+  QueryFailed,
   implementQuery,
   query,
   Policies,
   Policy,
   ActorHost,
 } from "effect-frame/actor";
-import type { QueryEntry } from "effect-frame/actor";
+import type { QueryEntry, QueryFailure } from "effect-frame/actor";
 import { Behavior, QueryState, Value, Source } from "effect-frame/actor/client";
 import { Await, Dom, Html, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -181,20 +181,20 @@ const pendingResponse = (gate: Deferred.Deferred<void>, value: string): Readines
 
 const failedResponse = (error: string): ReadinessResponse => ({ _tag: "Failed", error });
 
-const errorText = (value: Option.Option<unknown>): string =>
+/** A routed failure is typed: a `QueryFailed` shows its detail, any other its tag. */
+const errorText = (value: Option.Option<QueryFailure>): string =>
   Option.match(value, {
     onNone: () => "",
-    onSome: (error) =>
-      Option.match(Option.liftPredicate(error, Schema.is(QueryFailure)), {
-        onNone: () => "unknown",
-        onSome: (failure) => {
-          if (failure._tag === "QueryFailed") {
-            return failure.detail;
-          }
-          return "unknown";
-        },
-      }),
+    onSome: (failure) => {
+      if (failure._tag === "QueryFailed") {
+        return failure.detail;
+      }
+      return failure._tag;
+    },
   });
+
+/** A failure a controlled source carries, as a server's `QueryFailed`. */
+const failed = (detail: string) => QueryFailed.make({ query: "Controlled", detail });
 
 describe("readiness through context", () => {
   it.scoped.layer(readinessLayer)(
@@ -439,15 +439,11 @@ describe("readiness through context", () => {
       // This source-level fixture covers a view transition that QueryCache
       // deliberately does not expose: Failed stays Failed until its refresh
       // succeeds. Ordinary query/readiness behavior uses the local host above.
-      const controlled = yield* ViewTest.fakeQuery(QueryState.Loading<string, string>());
+      const controlled = yield* ViewTest.fakeQuery(QueryState.Loading<string, QueryFailure>());
 
       const Page = () =>
         View.errored({
-          fallback: (error) => (
-            <p id="controlled-failed">
-              {bound(error, (found) => Option.getOrElse(found, () => "?"))}
-            </p>
-          ),
+          fallback: (error) => <p id="controlled-failed">{bound(error, errorText)}</p>,
           content: Effect.gen(function* () {
             const inner = View.loading({
               fallback: <p id="controlled-pending">loading</p>,
@@ -463,7 +459,7 @@ describe("readiness through context", () => {
       const page = yield* mountScoped(Page, root);
       expect(textOf(root, "#controlled-pending")).toBe("loading");
 
-      yield* page.act(controlled.reject("boom"), {
+      yield* page.act(controlled.reject(failed("boom")), {
         label: "controlled failure is shown",
         until: (actualRoot) => textAt(actualRoot, "#controlled-failed") === "boom",
       });
@@ -1076,15 +1072,11 @@ describe("readiness on the server", () => {
   it.scoped("an already failed source renders Errored around Loading in one HTML frame", () =>
     Effect.gen(function* () {
       const controlled = yield* ViewTest.fakeQuery(
-        QueryState.Failed<string, string>("boom", Option.none()),
+        QueryState.Failed<string, QueryFailure>(failed("boom"), Option.none()),
       );
       const Page = () =>
         View.errored({
-          fallback: (error) => (
-            <p id="error">
-              {bound(error, (value) => Option.match(value, { onNone: () => "", onSome: String }))}
-            </p>
-          ),
+          fallback: (error) => <p id="error">{bound(error, errorText)}</p>,
           content: View.loading({
             fallback: <p id="pending">loading</p>,
             content: Effect.gen(function* () {

@@ -1,9 +1,9 @@
-import type { Source } from "effect-frame/actor/client";
+import type { Source, QueryFailure } from "effect-frame/actor/client";
 import { Link, link } from "effect-frame/router";
 import type { NotFoundProps, Route } from "effect-frame/router";
 import { View } from "effect-frame/view";
 import type { Node } from "effect-frame/view";
-import { Effect, Option, Predicate } from "effect";
+import { Effect, Option } from "effect";
 import type { PostSummary } from "./queries.js";
 import type { chrome } from "./segments.js";
 import { index, post } from "./segments.js";
@@ -16,18 +16,13 @@ import { index, post } from "./segments.js";
 /** What the chrome shows while its outlet waits for a read. A built page never shows it. */
 export const skeleton: Node = <p id="skeleton">loading</p>;
 
-const describe = (failure: Option.Option<unknown>): string =>
+const describe = (failure: Option.Option<QueryFailure>): string =>
   Option.match(failure, {
     onNone: () => "",
-    onSome: (error) => {
-      if (Predicate.hasProperty(error, "_tag") && Predicate.isString(error._tag)) {
-        return `could not load: ${error._tag}`;
-      }
-      return "could not load";
-    },
+    onSome: (error) => `could not load: ${error._tag}`,
   });
 
-const failure = (first: Source<Option.Option<unknown>>): Node => (
+const failure = (first: Source<Option.Option<QueryFailure>>): Node => (
   <p id="failure">{View.bind(first, describe)}</p>
 );
 

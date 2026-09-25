@@ -1,4 +1,4 @@
-import type { QueryState } from "effect-frame/actor";
+import type { QueryFailure, QueryState } from "effect-frame/actor";
 import type { Host, Node as ViewNode, ScopesClosed } from "effect-frame/view";
 import type { MatchNode } from "../../src/view/jsx-runtime.js";
 import { Dom, For, Html, Match, Portal, Remote, View } from "effect-frame/view";
@@ -6,7 +6,7 @@ import * as Driven from "effect-frame/view/driven";
 import type { AnyContract } from "effect-frame/actor/client";
 import { Source } from "effect-frame/actor";
 import type { Scope } from "effect";
-import { Context, Effect, Schema } from "effect";
+import { Context, Effect, Option, Schema } from "effect";
 import { describe, expect, test } from "bun:test";
 import type * as ViewEntryModule from "effect-frame/view";
 
@@ -26,6 +26,9 @@ declare const host: Host<string>;
 
 /** A query state source, as the Query primitive (#17) will hand one over. */
 declare const query: Source<QueryState<string, string>>;
+
+/** A read a route or the cache hands over: its failure is a `QueryFailure`. */
+declare const routed: Source<QueryState<string, QueryFailure>>;
 
 /** A view with no input of its own still takes props: an empty record. */
 interface NoProps {
@@ -138,10 +141,28 @@ const mountWrapped = () => View.mount(() => wrapped, {}, host, "root");
 const wrappedWithError = View.loading({
   fallback: <p>loading</p>,
   content: Effect.gen(function* () {
-    const title = yield* View.ready(yield* View.orErrored(query), "");
+    const title = yield* View.ready(yield* View.orErrored(routed), "");
     return <h1>{View.bind(title)}</h1>;
   }),
 });
+
+/** The error fallback reads a typed failure: what `orErrored` routes is a `QueryFailure`. */
+const typedFallback = View.errored({
+  fallback: (error: Source<Option.Option<QueryFailure>>) => (
+    <p>
+      {View.bind(error, (found) =>
+        Option.match(found, { onNone: () => "", onSome: (failure) => failure._tag }),
+      )}
+    </p>
+  ),
+  content: Effect.gen(function* () {
+    yield* View.orErrored(routed);
+    return <p>content</p>;
+  }),
+});
+
+// @ts-expect-error a read whose failure is not a QueryFailure does not route to View.errored.
+const untypedRoute = () => View.orErrored(query);
 
 const orErroredKeepsItsOwnRequirement: Equals<
   Effect.Services<typeof wrappedWithError>,
@@ -168,6 +189,8 @@ describe("readiness types", () => {
     expect(orErroredKeepsItsOwnRequirement).toBe(true);
     void mountReadyOutside;
     void mountWrappedWithError;
+    void typedFallback;
+    void untypedRoute;
     void renderReadyOutside;
     void drawReadyOutside;
     void sessionReadyOutside;

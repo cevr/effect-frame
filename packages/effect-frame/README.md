@@ -524,10 +524,10 @@ Bun.serve({ port: 3000, fetch: (request) => handler(request) });
 | `View.show({ when, content, fallback })`  | yielded Effect | a branch whose setup runs only while a boolean source is true                |
 | `View.match(on, cases)`                   | yielded Effect | one branch per tag of a union source, whose case runs a setup                |
 | `View.loading({ fallback, content })`     | yielded Effect | a boundary that shows `fallback` until every `View.ready` inside has a value |
-| `View.errored({ fallback, content })`     | yielded Effect | a boundary that shows `fallback` when `View.orErrored` inside fails          |
+| `View.errored({ fallback, content })`     | yielded Effect | a boundary that shows `fallback`, given the first `QueryFailure`, on failure |
 | `View.ready(state, placeholder)`          | yielded Effect | a query's value, inside `View.loading`                                       |
 | `View.readyWithStale(state, placeholder)` | yielded Effect | the same, with the `stale` flag                                              |
-| `View.orErrored(state)`                   | yielded Effect | a query's state whose failure goes to `View.errored`                         |
+| `View.orErrored(state)`                   | yielded Effect | a query's state whose `QueryFailure` goes to `View.errored`                  |
 | `View.attempt(setup, fallback)`           | yielded Effect | one setup's typed failure, handled in place                                  |
 | `View.lazy(load)`                         | a view         | a view imported on first use                                                 |
 | `View.attach(run)`, `Dom.attach(run)`     | `attach` prop  | a behaviour on the host node, for the element's lifetime                     |

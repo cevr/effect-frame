@@ -2,8 +2,8 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Actor, Behavior, Value } from "effect-frame/actor";
-import type { QueryState, Source } from "effect-frame/actor";
+import { Actor, Behavior, QueryFailed, Value } from "effect-frame/actor";
+import type { QueryFailure, QueryState, Source } from "effect-frame/actor";
 import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import type { Host, Node as ViewNode } from "effect-frame/view";
@@ -12,7 +12,7 @@ import type { Scope } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
 type Kind = "Loading" | "Errored";
-type State = QueryState<string, string>;
+type State = QueryState<string, QueryFailure>;
 
 const readyState: State = { _tag: "Ready", value: "ok", stale: false };
 
@@ -21,7 +21,11 @@ const hiddenState = (kind: Kind): State => {
   if (kind === "Loading") {
     return { _tag: "Loading" };
   }
-  return { _tag: "Failed", error: "error", last: Option.none() };
+  return {
+    _tag: "Failed",
+    error: QueryFailed.make({ query: "Label", detail: "error" }),
+    last: Option.none(),
+  };
 };
 
 /** A boundary of either kind whose content waits on `state`. */

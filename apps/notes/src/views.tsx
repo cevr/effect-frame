@@ -1,9 +1,10 @@
+import type { QueryFailure } from "effect-frame/actor/client";
 import { Actor, Behavior, Source } from "effect-frame/actor/client";
 import { Link, link } from "effect-frame/router";
 import type { NotFoundProps, Route } from "effect-frame/router";
 import { For, View } from "effect-frame/view";
 import type { Node } from "effect-frame/view";
-import { Effect, Option, Predicate } from "effect";
+import { Effect, Option } from "effect";
 import { writeDraft } from "./commands.js";
 import type { ListEntry } from "./queries.js";
 import type { lists, shell } from "./segments.js";
@@ -19,19 +20,14 @@ import { index, list, scratch } from "./segments.js";
 export const skeleton: Node = <p id="skeleton">loading</p>;
 
 /** The tag of a failure a query routed to `Errored`. */
-const describe = (failure: Option.Option<unknown>): string =>
+const describe = (failure: Option.Option<QueryFailure>): string =>
   Option.match(failure, {
     onNone: () => "",
-    onSome: (error) => {
-      if (Predicate.hasProperty(error, "_tag") && Predicate.isString(error._tag)) {
-        return `could not load: ${error._tag}`;
-      }
-      return "could not load";
-    },
+    onSome: (error) => `could not load: ${error._tag}`,
   });
 
 /** The error fallback. It reads the first failure routed to its scope. */
-export const failure = (first: Source<Option.Option<unknown>>): Node => (
+export const failure = (first: Source<Option.Option<QueryFailure>>): Node => (
   <p id="failure">{View.bind(first, describe)}</p>
 );
 

@@ -1,3 +1,4 @@
+import type { QueryFailure } from "effect-frame/actor/client";
 import { QueryState, Source } from "effect-frame/actor/client";
 import {
   Context as ServiceMap,
@@ -41,16 +42,16 @@ import type { Node, RetainedNode } from "./jsx-runtime.js";
  */
 interface Registration {
   readonly settled: Source<boolean>;
-  readonly failure: Source<Option.Option<unknown>>;
+  readonly failure: Source<Option.Option<QueryFailure>>;
 }
 
 /** One registration's current contribution, read when the scope recomputes. */
 interface Contribution {
   readonly settled: boolean;
-  readonly failure: Option.Option<unknown>;
+  readonly failure: Option.Option<QueryFailure>;
 }
 
-const noFailure: Source<Option.Option<unknown>> = {
+const noFailure: Source<Option.Option<QueryFailure>> = {
   get: Effect.succeed(Option.none()),
   changes: Stream.empty,
 };
@@ -221,11 +222,11 @@ export const ready: <Value, Error>(
  * const counts = yield* View.ready(yield* View.orErrored(entry.state), zero);
  * ```
  */
-export const orErrored: <Value, Error>(
+export const orErrored: <Value, Error extends QueryFailure>(
   state: Source<QueryState<Value, Error>>,
 ) => Effect.Effect<Source<QueryState<Value, Error>>, never, ErroredScope | Scope.Scope> = Effect.fn(
   "Readiness.orErrored",
-)(function* <Value, Error>(state: Source<QueryState<Value, Error>>) {
+)(function* <Value, Error extends QueryFailure>(state: Source<QueryState<Value, Error>>) {
   const erroredScope = yield* ErroredScope;
   const read = readAhead(state, yield* ReadAhead);
   yield* erroredScope.register({
@@ -340,7 +341,7 @@ const errorOf = <Value, Error>(state: QueryState<Value, Error>): Option.Option<E
   Option.map(Option.liftPredicate(state, QueryState.isFailed), (found) => found.error);
 
 /** The first failure among the contributions, in registration order. */
-const firstFailure = (contributions: ReadonlyArray<Contribution>): Option.Option<unknown> =>
+const firstFailure = (contributions: ReadonlyArray<Contribution>): Option.Option<QueryFailure> =>
   Option.flatMap(
     Option.fromNullishOr(contributions.find((one) => Option.isSome(one.failure))),
     (one) => one.failure,
@@ -482,10 +483,11 @@ export interface LoadingProps<E, R> {
 export interface ErroredProps<E, R> {
   /**
    * The fallback reads the first failure among the queries routed here, in
-   * registration order. It is `unknown` because one scope may hold queries
-   * with different error types; the fallback narrows what it shows.
+   * registration order. `View.orErrored` routes only a `QueryFailure`, the
+   * failure every route read and cache entry carries, so the fallback reads
+   * it typed.
    */
-  readonly fallback: (error: Source<Option.Option<unknown>>) => Node;
+  readonly fallback: (error: Source<Option.Option<QueryFailure>>) => Node;
   readonly content: Effect.Effect<Node, E, R>;
 }
 

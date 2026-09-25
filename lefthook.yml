@@ -10,3 +10,7 @@ pre-push:
   jobs:
     - name: format
       run: bun run fmt:check
+commit-msg:
+  jobs:
+    - name: conventional commit
+      run: bun tooling/checks/src/commit-message-cli.ts {1}

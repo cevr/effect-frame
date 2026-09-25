@@ -25,6 +25,8 @@ The real-browser proofs find their browser through one rule, `tooling/browser/sr
 `bun run docs` holds the reference docs to the code. `CONTEXT.md` defines each term once (`tooling/checks/src/glossary.ts`), and every ts or tsx block in a reference doc is a marked region of a compiled file (`tooling/checks/src/examples.ts`); `bun run docs --fix` writes the blocks from their regions. It also refuses a `major` changeset on a package below 1.0, and a published package at 1.0 or above, until `firstMajor` in `tooling/checks/src/changesets.ts` is set (`changeset add` warns about a first major release; a changeset written by hand does not).
 The `plugins` list names `unicorn` and `oxc` with the rest, because a `plugins` list replaces oxlint's default set. One of their rules is off by name: `unicorn/consistent-function-scoping`, which asks to hoist every closure that captures nothing. Effect code keeps a helper next to the one `Effect.gen` body, view, or test that uses it, and that rule flagged 59 such helpers and no defect.
 
+The change rules run outside the gate. Lefthook's `commit-msg` hook runs `tooling/checks/src/commit-message.ts` on the message git wrote and refuses a subject with no Conventional Commits type. CI runs `changeset status --since=origin/main` on a pull request, on a full clone (`fetch-depth: 0`); `.changeset/config.json` counts a change to a package's `src/**` or `package.json`, and private packages are not versioned, so only `effect-frame` needs a changeset. The Version PR is exempt.
+
 ## Checks
 
 - `bun install`: passed. The compiler patch verified itself.

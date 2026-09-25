@@ -650,6 +650,32 @@ describe("browser view", () => {
     }),
   );
 
+  it.scoped("a select's change event carries the chosen option's value", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const chosen = yield* Deferred.make<string>();
+      const Pick = (_props: NoProps) =>
+        Effect.succeed(
+          <select id="pick" onChange={View.event((event) => Deferred.succeed(chosen, event.value))}>
+            <option value="a">a</option>
+            <option value="b">b</option>
+          </select>,
+        );
+      const page = yield* pageMount(root, Pick, noProps);
+      yield* page.act(
+        Effect.sync(() => {
+          const select = root.querySelector("#pick");
+          if (select instanceof HTMLSelectElement) {
+            select.value = "b";
+            select.dispatchEvent(new Event("change"));
+          }
+        }),
+        { label: "change reaches its handler", until: () => true },
+      );
+      expect(yield* Deferred.await(chosen)).toBe("b");
+    }),
+  );
+
   it.scoped("submit suppresses the form's own navigation before it runs", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;

@@ -104,7 +104,7 @@ export type StaticProps = Readonly<Record<string, PropertyValue>>;
  * default action the view may suppress.
  */
 export interface HostEvent {
-  /** The event's own value, when it has one: an input's text. */
+  /** The event's own value, when it has one: an input's text, a select's chosen option. */
   readonly value: string;
   readonly preventDefault: () => void;
   /**

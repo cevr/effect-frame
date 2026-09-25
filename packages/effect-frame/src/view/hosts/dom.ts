@@ -49,9 +49,14 @@ interface Valued {
   readonly value: string;
 }
 
+/** The value of the control that fired: an input's text, a select's chosen option. */
 const valueOf = (event: Event): string => {
   const target = event.target;
-  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+  if (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement
+  ) {
     const valued: Valued = target;
     return valued.value;
   }

@@ -1,7 +1,7 @@
 import { Context, Effect, Option, Schema, Stream } from "effect";
 import type { Scope } from "effect";
 import { describe, expect, test } from "bun:test";
-import { Behavior as Behaviors, Cell, Refused, durable, spawn } from "effect-frame/actor";
+import { Behavior as Behaviors, Refused, durable, spawn } from "effect-frame/actor";
 import type {
   ActorRef,
   ActorStopped,
@@ -217,8 +217,6 @@ const durableRequirementsAreExact: Equals<
   Effect.Services<ReturnType<typeof durableNeeding>>,
   Needed | MailboxStore | Scope.Scope
 > = true;
-const cellMake = () => Cell.make(0);
-const cellNeedsOnlyAScope: Equals<Effect.Services<ReturnType<typeof cellMake>>, Scope.Scope> = true;
 
 // @ts-expect-error a durable call requires a timeout
 const _durableCallWithoutOptions = () => store.call(message);
@@ -299,7 +297,6 @@ describe("reference types", () => {
     expect(localRequirementsAreExact).toBe(true);
     expect(localRefType).toBe(true);
     expect(durableRequirementsAreExact).toBe(true);
-    expect(cellNeedsOnlyAScope).toBe(true);
     expect(queryCacheIsPublicOnly).toBe(true);
   });
 

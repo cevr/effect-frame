@@ -14,7 +14,7 @@ export type { LeaveKind, LeaveVerdict } from "./leave-registry.js";
  *
  * A mounted segment's view registers a check while it sets up. The check is
  * a closure, so it can read state that only that instance owns: a local
- * draft actor, a Cell, a form. It unregisters when the Scope it was
+ * draft actor, a form. It unregisters when the Scope it was
  * registered in closes. The registration lives on the mounted instance, not
  * in a global registry and not on a DOM event.
  *

@@ -82,7 +82,6 @@ export * as HttpTransport from "./http/client.js";
 export * as Wire from "./http/wire.js";
 // One path per combinator: `Source.select`, `Source.zip`, and the rest.
 export { Source, type AllValues, type ValueOf } from "./source.js";
-export * as Cell from "./cell.js";
 // Plain-form posts and generated fields.
 export * as Form from "./form.js";
 export * as Generated from "./generated.js";

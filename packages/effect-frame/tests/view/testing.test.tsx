@@ -4,7 +4,6 @@ registerDom();
 
 import {
   Behavior,
-  Cell,
   Source,
   implementQuery,
   modify,
@@ -13,6 +12,7 @@ import {
   Policies,
   Policy,
   QueryCache,
+  Value,
 } from "effect-frame/actor";
 import type { QueryState, Source as SourceType } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
@@ -995,9 +995,9 @@ describe("scoped view test harness", () => {
     () =>
       Effect.gen(function* () {
         const root = yield* makeRoot;
-        const input = yield* Cell.make(0);
+        const input = yield* spawn(Behavior.value(0));
         const debounced = yield* Source.debounce(input.state, "1 second");
-        const recurring = yield* Cell.make(0);
+        const recurring = yield* spawn(Behavior.value(0));
         const recurringReached = yield* Deferred.make<void>();
         const Page = () =>
           Effect.gen(function* () {
@@ -1005,8 +1005,8 @@ describe("scoped view test harness", () => {
               Effect.repeat(
                 Effect.gen(function* () {
                   yield* Effect.sleep("1 second");
-                  yield* recurring.update((value) => value + 1);
-                  if ((yield* recurring.get) === 3) {
+                  yield* modify(recurring, (value) => value + 1);
+                  if ((yield* recurring.state.get) === 3) {
                     yield* Deferred.succeed(recurringReached, void 0);
                   }
                 }),
@@ -1026,8 +1026,8 @@ describe("scoped view test harness", () => {
           setup: (host, mountRoot) => View.mount(Page, {}, host, mountRoot),
         });
 
-        yield* input.set(1);
-        yield* input.set(2);
+        yield* input.send(Value.Set(1));
+        yield* input.send(Value.Set(2));
         expect(root.querySelector("#debounced")?.textContent).toBe("0");
         yield* TestClock.adjust("1 second");
         yield* page.waitFor({

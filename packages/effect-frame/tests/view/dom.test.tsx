@@ -2,7 +2,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Behavior, Cell, Value, modify, spawn, Source } from "effect-frame/actor";
+import { Behavior, Value, modify, spawn, Source } from "effect-frame/actor";
 import type { LocalActorRef, SetValue } from "effect-frame/actor";
 import { Dom, For, Match, Portal, Show, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -844,12 +844,19 @@ const CountedRows = (props: CountedRowsProps) =>
       keyBy: (task: Task) => task.id,
       row: (task: Source<Task>) =>
         Effect.gen(function* () {
-          const clicks = yield* Cell.make(0);
+          const clicks = yield* spawn(Behavior.value(0));
           yield* Effect.addFinalizer(() => Ref.update(props.closed, (n) => n + 1));
           return (
             <li>
               <span class="title">{View.bind(task, (value) => value.title)}</span>
-              <button class="tap" onClick={View.event(() => clicks.update((n) => n + 1))}>
+              <button
+                class="tap"
+                onClick={View.event(() =>
+                  modify(clicks, (n) => n + 1).pipe(
+                    Effect.catchTag("ActorStopped", () => Effect.void),
+                  ),
+                )}
+              >
                 {View.bind(clicks.state, String)}
               </button>
             </li>

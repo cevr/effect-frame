@@ -1,13 +1,13 @@
 import { Deferred, Effect, Exit, Fiber, Ref, Scope, Stream, SubscriptionRef } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it, yieldFibers } from "effect-bun-test";
-import { Cell, QueryState, Source } from "effect-frame/actor/client";
+import { QueryState, Source, Behavior, Value, spawn } from "effect-frame/actor/client";
 import type { QueryState as QueryStateValue } from "effect-frame/actor/client";
 
 describe("time-based sources", () => {
   it.scoped("debounce emits the seed and only the latest quiet value", () =>
     Effect.gen(function* () {
-      const cell = yield* Cell.make(0);
+      const cell = yield* spawn(Behavior.value(0));
       const debounced = yield* Source.debounce(cell.state, "1 second");
       const seen = yield* Stream.take(debounced.changes, 2).pipe(
         Stream.runCollect,
@@ -16,8 +16,8 @@ describe("time-based sources", () => {
       yield* yieldFibers;
 
       expect(yield* debounced.get).toBe(0);
-      yield* cell.set(1);
-      yield* cell.set(2);
+      yield* cell.send(Value.Set(1));
+      yield* cell.send(Value.Set(2));
       yield* yieldFibers;
       expect(yield* debounced.get).toBe(0);
 
@@ -29,7 +29,7 @@ describe("time-based sources", () => {
 
   it.scoped("throttle emits the first value and shapes later values", () =>
     Effect.gen(function* () {
-      const cell = yield* Cell.make(0);
+      const cell = yield* spawn(Behavior.value(0));
       const throttled = yield* Source.throttle(cell.state, "1 second");
       const seen = yield* Stream.take(throttled.changes, 3).pipe(
         Stream.runCollect,
@@ -37,11 +37,11 @@ describe("time-based sources", () => {
       );
       yield* yieldFibers;
 
-      yield* cell.set(1);
+      yield* cell.send(Value.Set(1));
       yield* yieldFibers;
       expect(yield* throttled.get).toBe(1);
 
-      yield* cell.set(2);
+      yield* cell.send(Value.Set(2));
       yield* yieldFibers;
       expect(yield* throttled.get).toBe(1);
 
@@ -53,13 +53,13 @@ describe("time-based sources", () => {
 
   it.scoped("time-based work ends with its owner scope", () =>
     Effect.gen(function* () {
-      const cell = yield* Cell.make(0);
+      const cell = yield* spawn(Behavior.value(0));
       const owner = yield* Scope.make();
       const debounced = yield* Source.debounce(cell.state, "1 second").pipe(Scope.provide(owner));
 
-      yield* cell.set(1);
+      yield* cell.send(Value.Set(1));
       yield* Scope.close(owner, Exit.void);
-      yield* cell.set(2);
+      yield* cell.send(Value.Set(2));
       yield* TestClock.adjust("1 second");
 
       expect(yield* debounced.get).toBe(0);
@@ -115,7 +115,7 @@ describe("Effect-derived sources", () => {
       const secondStarted = yield* Deferred.make<void>();
       const calls = yield* Ref.make<ReadonlyArray<number>>([]);
       const released = yield* Ref.make<ReadonlyArray<number>>([]);
-      const cell = yield* Cell.make(0);
+      const cell = yield* spawn(Behavior.value(0));
 
       const waitFor = (
         id: number,
@@ -154,12 +154,12 @@ describe("Effect-derived sources", () => {
       yield* yieldFibers;
       expect(yield* derived.get).toEqual(QueryState.Ready("zero", false));
 
-      yield* cell.set(1);
+      yield* cell.send(Value.Set(1));
       yield* Deferred.await(firstStarted);
       yield* yieldFibers;
       expect(yield* derived.get).toEqual(QueryState.Ready("zero", true));
 
-      yield* cell.set(2);
+      yield* cell.send(Value.Set(2));
       yield* Deferred.await(secondStarted);
       yield* yieldFibers;
       expect(yield* derived.get).toEqual(QueryState.Ready("zero", true));
@@ -173,7 +173,7 @@ describe("Effect-derived sources", () => {
       yield* yieldFibers;
       expect(yield* derived.get).toEqual(QueryState.Ready("two", false));
 
-      yield* cell.set(3);
+      yield* cell.send(Value.Set(3));
       yield* yieldFibers;
       expect(yield* derived.get).toEqual(QueryState.Failed("invalid"));
 
@@ -195,7 +195,7 @@ describe("Effect-derived sources", () => {
       const started = yield* Deferred.make<void>();
       const released = yield* Ref.make(false);
       const owner = yield* Scope.make();
-      const cell = yield* Cell.make(0);
+      const cell = yield* spawn(Behavior.value(0));
       const derived = yield* Source.load(cell.state, () =>
         Effect.acquireRelease(Effect.as(Deferred.succeed(started, void 0), "value"), () =>
           Ref.set(released, true),

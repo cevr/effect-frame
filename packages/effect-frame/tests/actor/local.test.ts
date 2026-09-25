@@ -14,7 +14,6 @@ import { Event, Machine, State } from "effect-machine";
 import {
   ActorStopped,
   Behavior,
-  Cell,
   Refused,
   Source,
   Value,
@@ -387,7 +386,7 @@ describe("source products and followers", () => {
 
   it.scoped("on runs for the current value and every change, and ends with the scope", () =>
     Effect.gen(function* () {
-      const cell = yield* Cell.make(0);
+      const cell = yield* spawn(Behavior.value(0));
       const seen: Array<number> = [];
       const scope = yield* Scope.make();
       yield* Scope.provide(
@@ -395,26 +394,15 @@ describe("source products and followers", () => {
         scope,
       );
       yield* yieldFibers;
-      yield* cell.set(1);
-      yield* cell.update((value) => value + 1);
+      yield* cell.send(Value.Set(1));
+      yield* modify(cell, (value) => value + 1);
       yield* yieldFibers;
       expect(seen).toEqual([0, 1, 2]);
 
       yield* Scope.close(scope, Exit.void);
-      yield* cell.set(9);
+      yield* cell.send(Value.Set(9));
       yield* yieldFibers;
       expect(seen).toEqual([0, 1, 2]);
-    }),
-  );
-
-  it.scoped("a write to a cell whose scope has closed is a no-op", () =>
-    Effect.gen(function* () {
-      const scope = yield* Scope.make();
-      const cell = yield* Scope.provide(Cell.make("open"), scope);
-      yield* Scope.close(scope, Exit.void);
-      yield* cell.set("late");
-      yield* cell.update((value) => `${value}!`);
-      expect(yield* cell.get).toBe("open");
     }),
   );
 });

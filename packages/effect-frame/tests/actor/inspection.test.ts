@@ -16,7 +16,6 @@ import { describe, expect, it } from "effect-bun-test";
 import { Event, Machine, State } from "effect-machine";
 import {
   Behavior,
-  Cell,
   CommandId,
   MailboxStore,
   Policies,
@@ -26,6 +25,7 @@ import {
   implementQuery,
   query,
   spawn,
+  Value,
 } from "effect-frame/actor";
 import { QueryCache, Uncertain } from "effect-frame/actor/client";
 import { QueryTest } from "effect-frame/actor/testing";
@@ -142,7 +142,7 @@ const makeFrame = (name: string) => Frame.layer({ name });
 describe("Frame.inspect actor and query records", () => {
   it.scoped.layer(makeFrame("actors"))("samples local actors from applied memory", () =>
     Effect.gen(function* () {
-      const cell = yield* Cell.make(0);
+      const cell = yield* spawn(Behavior.value(0));
       const reducer = yield* spawn(
         Behavior.reducer<number, { readonly _tag: "Increment" }>({
           initial: 0,
@@ -156,7 +156,7 @@ describe("Frame.inspect actor and query records", () => {
       expect(initial.actors.every((actor) => actor.kind === "local")).toBe(true);
       expect(initial.actors.map((actor) => actor.revision).toSorted()).toEqual([0, 0, 0]);
 
-      yield* cell.set(1);
+      yield* cell.send(Value.Set(1));
       yield* reducer.call({ _tag: "Increment" });
       yield* machine.call(StepEvent.Go);
 

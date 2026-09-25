@@ -1386,18 +1386,24 @@ const make = (): Effect.Effect<
 export namespace QueryCache {
   /**
    * The client's query cache. Provide it once per root, beside the
-   * `ActorTransport` the cache reads through.
+   * `ActorTransport` the cache reads through and the router's `Location`.
    *
    * @example
    * ```ts
-   * const client = QueryCache.layer.pipe(
-   *   Layer.provideMerge(
-   *     HttpTransport.layer({ baseUrl, reconnect: HttpTransport.defaultReconnect }).pipe(
-   *       Layer.provide(FetchHttpClient.layer),
-   *     ),
-   *   ),
+   * const transport = HttpTransport.layer({
+   *   baseUrl,
+   *   reconnect: HttpTransport.defaultReconnect,
+   * }).pipe(Layer.provide(FetchHttpClient.layer));
+   * const client = Layer.mergeAll(
+   *   transport,
+   *   QueryCache.layer,
+   *   Layer.effect(Location, browserNavigation),
    * );
    * ```
+   *
+   * The cache registers its entries for inspection only when the root's
+   * `Frame.layer` is provided into it:
+   * `QueryCache.layer.pipe(Layer.provideMerge(Frame.layer({ name })))`.
    *
    * The layer also provides the cache's source-private internals (command
    * ownership and the streamed document); they are not part of its type.

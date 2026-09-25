@@ -10,11 +10,12 @@ const transport = HttpTransport.layer({
 }).pipe(Layer.provide(FetchHttpClient.layer));
 
 // #region frame-layer
-// One Frame layer per application root, in the same graph as the query
-// cache, so the cache registers its entries in that root.
-export const appLayer = Layer.merge(
-  QueryCache.layer.pipe(Layer.provideMerge(Frame.layer({ name: "counter" }))),
+// One Frame layer per application root, provided into the query cache, so
+// the cache registers its entries in that root. Without it, the cache
+// registers nothing.
+export const appLayer = Layer.mergeAll(
   transport,
+  QueryCache.layer.pipe(Layer.provideMerge(Frame.layer({ name: "counter" }))),
 );
 // #endregion frame-layer
 

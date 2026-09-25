@@ -457,14 +457,15 @@ const start = Effect.gen(function* () {
   return yield* Effect.never;
 });
 
+const transport = HttpTransport.layer({
+  baseUrl: `${location.origin}/actors`,
+  reconnect: HttpTransport.defaultReconnect,
+}).pipe(Layer.provide(FetchHttpClient.layer));
+
+// The client's services: the transport, the query cache, and the URL.
 const services = Layer.mergeAll(
-  Layer.provideMerge(
-    QueryCache.layer,
-    HttpTransport.layer({
-      baseUrl: `${location.origin}/actors`,
-      reconnect: HttpTransport.defaultReconnect,
-    }).pipe(Layer.provide(FetchHttpClient.layer)),
-  ),
+  transport,
+  QueryCache.layer,
   Layer.effect(Location, browserNavigation),
 );
 
@@ -1506,17 +1507,19 @@ See the authorization design, [`docs/design/authorization.md`](https://github.co
 ## Browser inspection
 
 The browser-safe `effect-frame/frame` entry exposes `Frame.layer` and
-`Frame.inspect`. Build one Frame layer for each application root, in the
-same layer graph as the query cache.
+`Frame.inspect`. Build one Frame layer for each application root. The
+registration is optional: the client composition is the same, and the cache
+registers its entries only when the Frame layer is provided into it.
 
 <!-- example: examples/features/inspection.ts#frame-layer -->
 
 ```ts
-// One Frame layer per application root, in the same graph as the query
-// cache, so the cache registers its entries in that root.
-export const appLayer = Layer.merge(
-  QueryCache.layer.pipe(Layer.provideMerge(Frame.layer({ name: "counter" }))),
+// One Frame layer per application root, provided into the query cache, so
+// the cache registers its entries in that root. Without it, the cache
+// registers nothing.
+export const appLayer = Layer.mergeAll(
   transport,
+  QueryCache.layer.pipe(Layer.provideMerge(Frame.layer({ name: "counter" }))),
 );
 ```
 

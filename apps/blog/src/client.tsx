@@ -39,14 +39,15 @@ const start = Effect.gen(function* () {
   return yield* Effect.never;
 });
 
+const transport = HttpTransport.layer({
+  baseUrl: `${location.origin}/actors`,
+  reconnect: HttpTransport.defaultReconnect,
+}).pipe(Layer.provide(FetchHttpClient.layer));
+
+// The client's services: the transport, the query cache, and the URL.
 const services = Layer.mergeAll(
-  Layer.provideMerge(
-    QueryCache.layer,
-    HttpTransport.layer({
-      baseUrl: `${location.origin}/actors`,
-      reconnect: HttpTransport.defaultReconnect,
-    }).pipe(Layer.provide(FetchHttpClient.layer)),
-  ),
+  transport,
+  QueryCache.layer,
   Layer.effect(Location, browserNavigation),
 );
 

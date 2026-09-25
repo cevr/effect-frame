@@ -20,8 +20,10 @@ import type { Node, RetainedNode } from "./jsx-runtime.js";
  * query it was given has a first value, and afterwards keeps showing content
  * while values refresh. The scope is a service in the view's Effect context:
  * `View.ready` requires it, `View.loading` provides it. A `View.ready` call
- * with no `View.loading` above it is a missing service in `R`, which the
- * application must provide, so it does not run by accident.
+ * with no `View.loading` above it leaves `View.LoadingScope` in the view's
+ * `R`, and `ScopesClosed` makes that a compile error, named by its fix,
+ * where the view's services are final: `View.mount`, the `Html` renders,
+ * and every `Route` mode constructor.
  *
  * Nothing is thrown and nothing is caught. Solid's `NotReadyError` and React's
  * Suspense both signal readiness by throwing; here the signal is a type.
@@ -186,7 +188,9 @@ const boundaryAhead = Effect.gen(function* () {
  * removes the consumer from the tree until absence is over.
  *
  * `R` carries `LoadingScope`, so a call outside a `View.loading` leaves it in
- * the mount's `R`. Pair it with `View.orErrored` to route the failure as well.
+ * the view's `R`, and `View.mount` or the route's mode constructor refuses
+ * the view with `View.ready needs a View.loading above it`. Pair it with
+ * `View.orErrored` to route the failure as well.
  *
  * ```ts
  * const title = yield* View.ready(post.state, "");

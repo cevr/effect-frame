@@ -4,9 +4,12 @@ import type { ForNode, MatchNode, Node, PortalNode, ShowNode } from "./jsx-runti
 import { Empty } from "./jsx-runtime.js";
 
 /**
- * Control flow in JSX. Both take an explicit source, so a reader sees what
- * makes the branch or the list move. They only build a marker; the runtime
- * interprets it.
+ * Control flow in a view. The tags `For`, `Show` and `Match` each take an
+ * explicit source, so a reader sees what makes the list or the branch move;
+ * `Portal` takes the host node it draws under. A tag only builds a marker,
+ * and the runtime interprets it. `View.list` and `View.keyed` are the
+ * Effect forms of a keyed list and a keyed region: they run each row's
+ * setup as an Effect, which a tag cannot.
  */
 
 export interface ForProps<Item> {

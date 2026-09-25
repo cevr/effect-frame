@@ -146,9 +146,25 @@ export const submit = (handler: Handler): Prepared<"submit"> => ({
  * parent's own context, so the child's `E` and `R` are visible at the one
  * place they enter. A view is never a JSX tag: a tag is a synchronous
  * function or an intrinsic name, and the runtime runs no Effect found in a
- * tree. A named view is `Effect.fn("Name")(function* (props) { ... })`,
- * which also names its span; an anonymous one is a plain arrow. `bind`,
- * `event` and `submit` are module functions, so a plain function that
- * returns a `Node` needs nothing from the view that calls it.
+ * tree. `View.bind`, `View.event` and `View.submit` are plain functions,
+ * so a plain function that returns a `Node` needs nothing from the view
+ * that calls it.
+ *
+ * Write a view as an arrow that returns `Effect.gen`, or an arrow over one
+ * Effect when it yields nothing else. Its type is inferred:
+ *
+ * ```tsx
+ * const Greeting = (props: { readonly greeting: string }) =>
+ *   Effect.gen(function* () {
+ *     const name = yield* Actor.local(Behavior.value(""));
+ *     const type = View.event((event) => Effect.asVoid(name.send(Value.Set(event.value))));
+ *     return (
+ *       <label>
+ *         name <input value={View.bind(name.state)} onInput={type} />
+ *         <output>{View.bind(name.state, (text) => `${props.greeting}, ${text}`)}</output>
+ *       </label>
+ *     );
+ *   });
+ * ```
  */
 export type View<Props, E, R> = (props: Props) => Effect.Effect<Node, E, R>;

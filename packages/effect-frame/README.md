@@ -513,7 +513,8 @@ Bun.serve({
 | `View.lazy(load)`                         | a view         | a view imported on first use                                                 |
 | `View.attach(run)`, `Dom.attach(run)`     | `attach` prop  | a behaviour on the host node, for the element's lifetime                     |
 | `<For each keyBy fallback?>`              | tag            | a keyed list of plain rows, and `fallback` while it has none                 |
-| `<Show when>`                             | tag            | a branch while a boolean source is true                                      |
+| `<Show when fallback?>`                   | tag            | a branch while a boolean source is true, and `fallback` while it is not      |
+| `<Show when is>{(narrowed) => ...}`       | tag            | a branch while `is` holds, given a source of the narrowed value              |
 | `<Match on cases>`                        | tag            | one branch per tag of a union source                                         |
 | `<Await state loading failed ready>`      | tag            | all three states of a query in one place                                     |
 | `<Portal into={Dom.target(element)}>`     | tag            | children drawn under a node the host made a target of                        |

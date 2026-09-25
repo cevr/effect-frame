@@ -98,13 +98,107 @@ Apply groups (run one after the other in the worktree):
 
 Pass 2 candidates already known: A12, P5/P6 (a conditional that hosts a view, remount on key), P15 (debounced input marks results stale), Foldkit `Stale` on failed refresh, per-field form issues.
 
+More pass 2 candidates, found while applying pass 1:
+
+- Module-level side-channel maps in `packages/effect-frame/src` (re-grepped after A11, which moved the query cache's into a Context service): `router/check.ts` `checkers`; `router/codec.ts` `searchKeyOrders`, `searchFieldDefinitions`, `searchKeyDefinitions`; `router/landing.ts` `shells`, `surfaces`; `router/leave-registry.ts` `askers`; `router/prerender.ts` `enumerations`, `plans`; `router/traversal.ts` `sources`; `router/receipt.ts` `registered`; `router/branch.ts` `segmentRuntimes`, `treesOf`, `runtimes`, `drivenTrees` (`drivenTrees.set` is still in branch.ts). `actor/command-id.ts` `minted` is A18, kept. Each is a WeakMap keyed by a value the caller holds; the explicit form carries the data on the value, as LazyView and DrivenView now do.
+- `Portal.into` typed per host: `PortalProps<HostNode>` takes whatever node type the call infers; the host should fix it.
+- `link` `aria-current` ignores params (defect D13-link above).
+- A gate rule for inline citations: a backticked `Namespace.member` in a reference doc must resolve (runtime keys, then the declarations for type-only names). A one-off run on 2026-09-25 found none stale; `bun run docs` checks code blocks only.
+- Flaky test: `packages/effect-frame/tests/view/streaming.test.tsx` "a placeholder always precedes its patch, and Closed lists every settle" failed once (5 patches seen, 4 expected).
+
+
 | ID  | Candidate | North star | Files | Lines removed | Risk | Status (`done <hash>` / `rejected: <receipt>`) |
 | --- | --------- | ---------- | ----- | ------------- | ---- | ---------------------------------------------- |
+| G1 | CI and release run the local gate | explicit | 6 | 46 | low | done c7fb6cf |
+| G2 | one pinned Bun for CI and local | explicit | 3 | 2 | low | done 0cb5db3 |
+| G3 | delete stale disable directives and exemptions | explicit | 49 | 90 | low | done 614c317 |
+| G4 | default unicorn and oxc plugins back on | explicit | 15 | 20 | low | done dcec3cb |
+| G11 | prove each published subpath against the build | explicit | 4 | 3 | low | done 3a43a9b |
+| G12 | turbo typecheck inputs cover every compiled dir | explicit | 1 | 0 | low | done 05bf0f5 |
+| G13 | dom-bench: client entry, dead check deleted | explicit | 6 | 27 | low | done 0e0ea15 c43f836 |
+| G14 | boundary proved once; scaffold probe deleted | explicit | 13 | 119 | low | done e00c843 |
+| D10/S17 | dead path citations point at moved files | explicit | 8 | 79 | none | done 0e2871c |
+| D14 | refuse a doc citation of a missing path | explicit | 5 | 1 | none | done 15f36d2 |
+| A1/R1/P10 | complete the Source toolkit; load replaces mapEffect | effect-native | 14 | 129 | low | done a496bf2 |
+| V4 | multi-word event props fire (defect) | explicit | 3 | 1 | low | done 5bd87f9 |
+| View O1 | a Loading with no registration shows its content | declarative | 12 | 129 | low | done 5b4c991 |
+| V5 | one source-first signature for select/debounce/throttle | expressive | 13 | 67 | low | done 5e870eb |
+| A2 | one path per Source combinator | explicit | 27 | 132 | low | done eee0604 |
+| A3/V8 | one owner for QueryState; view copy deleted | explicit | 13 | 187 | low-med | done 9950cbf |
+| V2/D9 | one path per view export; ViewTest on its subpath | explicit | 39 | 87 | low | done 865f393 |
+| V9 | node model types stay inside the package | explicit | 4 | 20 | low | done 2a9ecbf |
+| V1/J8 | one kind rule for view exports; Await tag | explicit | 79 | 711 | med | done 5fba240 |
+| V7 | refuse a value name two subpaths export | explicit | 9 | 13 | low | done 90368a2 |
+| Router O2 | View.keyed, a one-row keyed region | declarative | 7 | 28 | low | done 1f3eafb |
+| A4 | delete dead and duplicate actor exports | explicit | 10 | 33 | low | done 5abcc5a |
+| A15 | comments in the present tense | explicit | 26 | 67 | none | done 8cf00f1 |
+| A13 | resolve each policy name once | explicit | 3 | 93 | low | done ecfef7f |
+| A19 | ActorHost requires a store | explicit | 28 | 80 | low | done 2dc0c06 |
+| A9 | query declares version and depends | explicit | 35 | 12 | low | done de8c041 |
+| A8 | one shape for the server half | explicit | 68 | 609 | low | done b3fa068 |
+| D6/A10 | delete useQuery; QueryCache.layer | explicit | 46 | 250 | none | done 7221d25 |
+| A14 | delete Cell; view state is a local value actor | actor-model | 10 | 85 | low | done 3246027 |
+| A7 | placement under an Actor namespace | explicit | 89 | 426 | low | done 85e3518 52ad990 |
+| A6 | a remote reference carries its address | actor-model | 16 | 65 | low | done 0fa9509 |
+| A5/E1 | one form decode; View.form proves its member can post | explicit | 5 | 30 | low | done b897620; partial: decode shared via Form.decode; a whole-contract Codable constraint rejected, it would refuse a script-only member |
+| D7 | form.ts doc matches the member constraint | explicit | 5 | 30 | none | done b897620 |
+| R15 | router comments in the present tense, on their declarations | explicit | 11 | 34 | none | done 9e70e9d |
+| R4+O1 | delete the flat route form | explicit | 31 | 697 | low | done 4e766f9 |
+| O4/R13 | Route.redirect takes its destination; Route.redirecting | declarative | 17 | 84 | low | done d4c6651 |
+| R9 | the navigation option is landing | explicit | 10 | 28 | low | done 8ccecb8 |
+| R6/P1/D8 | hydrate owns the page load; apps call it | declarative | 20 | 140 | low | done 0b64f8d |
+| R10 | mount names landing and traversal read limit | explicit | 41 | 141 | low | done 91bd13a |
+| R11 | a route is branded with its mode; names checked | explicit | 20 | 167 | med | done d46866c 8fe53eb |
+| R12 | one export path for route types | explicit | 22 | 81 | low | done fb695a0 |
+| R2 | actor binding is { ref, state } | declarative | 14 | 27 | med | done c3d9917 |
+| R3/P11 | Route.commandRef, a send-only declaration | actor-model | 12 | 160 | med | done f4164cd |
+| R5 | params follow the template; children inherit | explicit | 25 | 133 | med | done 6b32f4c |
+| R14/P14 | push and replace for every move | explicit | 37 | 271 | med | done 7908e9b |
+| P13 | link follows a params Source | declarative | 7 | 16 | low | done 4e5c9fb |
+| R8 | Link and followLinks share one click policy | explicit | 4 | 33 | low | done 3081ad0 |
+| V10 | View.lazy returns a tagged LazyView; DrivenView tagged | explicit | 10 | 44 | med | done e57471d b785156 |
+| R7 | mount has two owners | explicit | - | - | low | skipped: no clash after View.mount (V1) |
+| V3 | typed intrinsic JSX per host, named errors | explicit | 27 | 181 | med | done 61f807d fa52a41 |
+| V6 | refuse an open readiness scope at the mode constructor | explicit | 21 | 102 | med | done 3ced983 |
+| E14 | session buffer private to shareSessions | explicit | 4 | 17 | none | done 45b131b |
+| E5/E15 | proof actor into its fixture; store factory deleted | explicit | 9 | 35 | low | done bfc43c9 |
+| E7 | frame-host reads the wake through MailboxStore | explicit | 1 | 24 | low | done 6dbc503 |
+| E6a | an object refuses a request naming another address | explicit | 3 | 1 | low | done eb22ef4 |
+| E2/E3/P4 | one actor handler under a prefix; body limit, principal, page answer | explicit | 40 | 585 | med | done 30a2261 |
+| P3 | one page answer (respondDocument) | declarative | 40 | 585 | med | done 30a2261; partial: respondDocument shared; apps not moved to HttpRouter/BunHttpServer; Bun.build not deduplicated |
+| E9 | HTTP transport reads through HttpClient | effect-native | 25 | 192 | med-high | done b5a889a |
+| E4 | delete QueryTest, layerTest, layerLocal | explicit | 44 | 314 | low | done b4bdbea |
+| E8/E13 | attach status is a Stream; retry a Schedule; limits required | effect-native | 50 | 756 | low | done e7f503a 30a2261 |
+| E10 | one owner for the deadline bound and loopback hosts | explicit | 10 | 101 | low | done d03dbe0 |
+| E11 | one argv reader in inspect | explicit | 10 | 101 | low | done d03dbe0; partial: effect/unstable/cli adoption left as an owner check |
+| E12/A17 | internal records use the snapshot schemas | explicit | 13 | 90 | low | done 7925794; partial (A17): bounded internal records kept |
+| A11 | QueryCache internals are a Context service | effect-native | 10 | 138 | med | done 6f61bf2 |
+| P2 | the document names its root once; Dom.root | explicit | 26 | 108 | low | done 0277d0c; Browser.layer rejected: it hides composition |
+| X1 | Loading with no registration, in every comment | explicit | 6 | 21 | none | done 9899813 |
+| G5 | refuse a value a reader can import by two paths | explicit | 9 | 25 | breaking | done 6beeebd |
+| D4 | a view is an arrow that returns Effect.gen | explicit | 3 | 10 | none | done b7b1200 |
+| D5 | JSDoc matches the code (J2, J3, J6, J7, J8) | explicit | 12 | 35 | none | done b7b1200 6beeebd |
+| D2/D12/D15 | glossary: each term once, with its code | explicit | 7 | 33 | none | done 14c7108 |
+| D11 | notes README queries; inspect README block compiled | explicit | 12 | 872 | none | done 898fd70 ed1e0ef |
+| G9 | frame lint plugin: no-switch, disable-reason, span-name | explicit | 29 | 213 | low | done 9b6fd6d b9626a8 |
+| G10 | docs cannot contradict code: glossary rule, compiled blocks | explicit | 18 | 878 | med | done 14c7108 ed1e0ef |
+| D13 | compiled, tested examples; docs rule refuses drift | explicit | 40 | 854 | none | done 301d7f6 ed1e0ef |
+| D1/D3 | root README landing; package README agent entry; AGENTS.md | explicit | 39 | 845 | none | done ed1e0ef ed7690c |
+| X2 | fill this ledger from `git log 54e6c43..HEAD` | explicit | 1 | 0 | none | done (the commit that adds this table) |
+| A12 | QueryCache slot state in one ref | effect-native | - | - | high | skipped: its own pass (subtle ordering); listed under pass 2 |
+| A16 | read-ahead capability on a Source | actor-model | - | - | low | rejected: kept by loop decision (actor-model correctness) |
+| A18 | minted-ID provenance through a WeakSet | actor-model | - | - | n/a | rejected: kept by loop decision (actor-model correctness); `actor/command-id.ts` `minted` |
+| E6b | route the Durable Object by body address | explicit | - | - | med | skipped: deferred to the owner (wire); E6a guards it meanwhile |
+| View O2 | decoded per-event payloads | explicit | - | - | med | skipped: deferred to the owner (widens `Remote.RemoteEvent`, a wire format) |
 
 Counsel defects:
 
 | ID  | Defect | Red test | Status |
 | --- | ------ | -------- | ------ |
+| V4 | `onKeyDown` listened for `keyDown` and never fired | `packages/effect-frame/tests/view/dom.test.tsx` | done 5bd87f9 |
+| V3-select | a `select`'s change event carried an empty value | `packages/effect-frame/tests/view/dom.test.tsx` | done fa52a41 |
+| E6a | a Durable Object served a request naming another address | `packages/host-durable-object/tests/frame-host.test.ts` | done eb22ef4 |
+| D13-link | `link` computes `aria-current` per segment and ignores params: on `/counters/home`, the `/counters/work` link also carries `aria-current="page"` (`router/link.tsx` `to.currentAt(match)`; the notes lists nav too) | none yet | open: pass 2 |
 
 Live check: `<pending>`
 

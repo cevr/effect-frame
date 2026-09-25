@@ -2,14 +2,22 @@ import { Effect, Exit } from "effect";
 import { repositoryRoot } from "./browser-entries.js";
 import { checkDeclarations, formatLeak } from "./declarations.js";
 import { checkSubpaths, formatMissing } from "./subpaths.js";
-import { collisions, declaredAliases, formatCollision, readSurfaces } from "./collisions.js";
+import {
+  collisions,
+  declaredAliases,
+  declaredSynonyms,
+  duplicatePaths,
+  formatCollision,
+  readSurfaces,
+} from "./collisions.js";
 
 /**
  * The declaration rules as a command. `bun run gate` runs it after the
  * build. A published subpath whose `types` or `default` file the build did
  * not write, or a leaked `any` or `unknown` in any package's `dist`, turns
  * the gate red with the file of each one, and so does a value name that
- * two subpaths export (`collisions.ts`). It also writes the consumer
+ * two subpaths export, or a value a reader can import by two paths
+ * (`collisions.ts`). It also writes the consumer
  * module that imports every published subpath, which `tsc -p consumer`
  * then compiles against `dist`.
  */
@@ -41,8 +49,17 @@ const collisionRule = Effect.gen(function* () {
       `declarations: ${String(found.length)} names are exported by more than one subpath`,
     );
   }
+  const duplicated = duplicatePaths(surfaces, declaredAliases, declaredSynonyms);
+  if (duplicated.length > 0) {
+    yield* Effect.logError(
+      duplicated.map((paths) => `${name} exports one value as ${paths.join(" and ")}`).join("\n"),
+    );
+    return yield* Effect.fail(
+      `declarations: ${String(duplicated.length)} values are exported by more than one path`,
+    );
+  }
   return yield* Effect.log(
-    `declarations: ${name}'s ${String(surfaces.length)} subpaths export each value name once`,
+    `declarations: ${name}'s ${String(surfaces.length)} subpaths export each value name once, and each value by one path`,
   );
 });
 

@@ -1,6 +1,5 @@
 export * as Route from "./route.js";
 export * as UrlState from "./url-state.js";
-export { UrlStateConflict, UrlStateSchemaRejected } from "./url-state.js";
 export { Link, link, type LinkParams, type LinkProps, type LinkSearch } from "./link.js";
 export { browserLocation, followLinks } from "./navigation.js";
 export { browserNavigation } from "./browser-commit.js";

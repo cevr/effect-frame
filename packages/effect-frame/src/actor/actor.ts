@@ -1,6 +1,7 @@
 import { Deferred, Effect, Function, Option, Stream } from "effect";
-import type { Behavior, SetValue } from "./behavior.js";
-import { Value } from "./behavior.js";
+import type { Behavior } from "./behavior.js";
+import type { SetValue } from "./set-value.js";
+import { Value } from "./set-value.js";
 import { openLocal } from "./local-engine.js";
 import { select, succeed } from "./source.js";
 import { toApplied } from "./command-handle.js";

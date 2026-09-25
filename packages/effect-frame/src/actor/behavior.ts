@@ -1,3 +1,4 @@
+import type { SetValue } from "./set-value.js";
 import type { Schema, Scope } from "effect";
 import { Effect, Option, Stream } from "effect";
 import { Machine } from "effect-machine";
@@ -72,25 +73,22 @@ export interface Behavior<State, Message, R = never, Refusal extends Refused = n
   readonly wakeAt?: (state: State) => Option.Option<number>;
 }
 
-export interface SetValue<A> {
-  readonly _tag: "Set";
-  readonly value: A;
-}
-
-export const Value = {
-  Set: <A>(value: A): SetValue<A> => ({ _tag: "Set", value }),
-};
-
-/**
- * Simple state. The only message is a serializable replacement. A `modify`
- * helper lives on the local reference, not here, because an updater function
- * cannot cross the durable boundary.
- */
+/** What `Behavior.value` accepts besides its initial value. */
 export interface ValueOptions<A, Refusal extends Refused> {
   /** A value this actor refuses to hold. See `Behavior.refuse`. */
   readonly refuse?: (value: A) => Option.Option<Refusal>;
 }
 
+/**
+ * Simple state. The only message is a serializable replacement,
+ * `Value.Set(next)`. A `modify` helper lives on the local reference, not
+ * here, because an updater function cannot cross the durable boundary.
+ *
+ * ```ts
+ * const draft = yield* Actor.local(Behavior.value(""));
+ * yield* draft.send(Value.Set("hello"));
+ * ```
+ */
 export const value = <A, Refusal extends Refused = never>(
   initial: A,
   options: ValueOptions<A, Refusal> = {},

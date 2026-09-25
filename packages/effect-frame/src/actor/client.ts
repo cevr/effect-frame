@@ -5,8 +5,8 @@
  * `tests/boundary.test.ts` builds this file and checks that promise.
  */
 export * as Behavior from "./behavior.js";
-export { Value } from "./behavior.js";
-export type { SetValue, Turn } from "./behavior.js";
+export { Value, type SetValue } from "./set-value.js";
+export type { Turn } from "./behavior.js";
 export { modify, type LocalActorRef } from "./actor.js";
 export { Actor } from "./placement.js";
 export * from "./vocabulary.js";

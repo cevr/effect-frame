@@ -3,6 +3,7 @@ import type { Child, Node } from "effect-frame/view";
 import { Dom, View } from "effect-frame/view";
 import { Effect, Option, Predicate, Stream } from "effect";
 import type { Current, Linkable, SearchUpdater } from "./codec.js";
+import { followable } from "./navigation.js";
 import { Router } from "./router.js";
 
 /**
@@ -124,7 +125,8 @@ const currentAttribute = (where: Current): string | false => {
  * An anchor drawn from a `Link`: a real `href`, so the platform's own
  * affordances hold (open in a new tab, copy link, middle click),
  * `aria-current="page"` on the destination, and `aria-current="true"` on an
- * ancestor segment of it. A plain click
+ * ancestor segment of it. A plain click, under the policy `followLinks`
+ * shares (`followable`),
  * runs the typed move against the latest URL without a document load.
  */
 export const Link = (props: LinkProps): Node => (
@@ -134,10 +136,7 @@ export const Link = (props: LinkProps): Node => (
         const context = yield* Effect.context<never>();
         const scope = yield* Effect.scope;
         const onClick = (event: Event): void => {
-          if (!(event instanceof MouseEvent)) {
-            return;
-          }
-          if (!isPlainClick(event)) {
+          if (!(event instanceof MouseEvent) || Option.isNone(followable(event))) {
             return;
           }
           event.preventDefault();
@@ -163,16 +162,7 @@ export const Link = (props: LinkProps): Node => (
     href={View.bind(props.link.href)}
     class={Option.getOrElse(Option.fromNullishOr(props.class), () => false)}
     aria-current={View.bind(props.link.current, currentAttribute)}
-    data-frame-replace={props.replace === true}
   >
     {props.children}
   </a>
 );
-
-const isPlainClick = (event: MouseEvent): boolean =>
-  event.button === 0 &&
-  !event.defaultPrevented &&
-  !event.metaKey &&
-  !event.ctrlKey &&
-  !event.shiftKey &&
-  !event.altKey;

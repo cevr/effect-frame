@@ -305,8 +305,11 @@ Route.leaf(tab, TabView, { landing: NavigationBehavior.Preserve });
   same leaf) keeps focus and the caret.
 - The router holds no scroll position and never sets
   `history.scrollRestoration`. It adds no `aria-live` region.
-- `followLinks` leaves a link that only changes the current page's fragment
-  to the browser.
+- `Link` and `followLinks` share one plain-click policy: a modified or
+  middle click, `target="_blank"`, a download, another origin, and a link
+  that only changes the current page's fragment are left to the browser.
+  `followLinks` always pushes; a move that replaces is a `Link` with
+  `replace`.
 
 See [the navigation behavior design](docs/design/navigation-behavior.md).
 

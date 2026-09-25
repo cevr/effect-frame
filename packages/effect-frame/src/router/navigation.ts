@@ -203,8 +203,14 @@ const fragmentOnly = (anchor: HTMLAnchorElement): boolean =>
   anchor.search === window.location.search &&
   (anchor.hash !== "" || anchor.href.endsWith("#"));
 
-/** The anchor a click landed on, when it is one the router should follow. */
-const followable = (event: MouseEvent): Option.Option<HTMLAnchorElement> => {
+/**
+ * The one plain-click policy, which `Link` and `followLinks` share: the
+ * anchor a click landed on, when the browser would have followed a
+ * same-origin link in this tab to another document address. A handled
+ * click, a middle click, a modifier, `target="_blank"`, a download, another
+ * origin, and a fragment on the current page are all left to the browser.
+ */
+export const followable = (event: MouseEvent): Option.Option<HTMLAnchorElement> => {
   if (event.defaultPrevented || event.button !== 0) {
     return Option.none();
   }
@@ -233,8 +239,9 @@ const followable = (event: MouseEvent): Option.Option<HTMLAnchorElement> => {
  * the browser would have followed a same-origin link in this tab to another
  * document address; a middle click, a modifier, `target="_blank"`, a
  * download, another origin, and a fragment on the current page are all left
- * to the browser. A typed Link attaches its queued action to the anchor;
- * this listener handles ordinary anchors and keeps that same policy.
+ * to the browser (`followable`). A typed `Link` handles its own click under
+ * the same policy; this listener handles ordinary anchors, and always
+ * pushes. A move that replaces is a `Link` with `replace`.
  *
  * The decision and `preventDefault` happen inside the listener, on the
  * browser's own call: a stream would deliver the event after the browser
@@ -244,7 +251,7 @@ export const followLinks = /* @__PURE__ */ Effect.fn("Router.followLinks")(funct
   root: EventTarget,
   router: RouterService,
 ) {
-  const hrefs = yield* Queue.unbounded<{ readonly href: string; readonly replace: boolean }>();
+  const hrefs = yield* Queue.unbounded<string>();
   const listener = (event: Event) => {
     if (!(event instanceof MouseEvent)) {
       return;
@@ -253,10 +260,7 @@ export const followLinks = /* @__PURE__ */ Effect.fn("Router.followLinks")(funct
       onNone: () => {},
       onSome: (anchor) => {
         event.preventDefault();
-        Queue.offerUnsafe(hrefs, {
-          href: anchor.href,
-          replace: anchor.getAttribute("data-frame-replace") === "true",
-        });
+        Queue.offerUnsafe(hrefs, anchor.href);
       },
     });
   };
@@ -269,14 +273,7 @@ export const followLinks = /* @__PURE__ */ Effect.fn("Router.followLinks")(funct
         root.removeEventListener("click", listener);
       }),
   );
-  yield* Effect.forkScoped(
-    Stream.runForEach(Stream.fromQueue(hrefs), (request) => {
-      if (request.replace) {
-        return router.replace(request.href);
-      }
-      return router.push(request.href);
-    }),
-  );
+  yield* Effect.forkScoped(Stream.runForEach(Stream.fromQueue(hrefs), (href) => router.push(href)));
 });
 
 /**

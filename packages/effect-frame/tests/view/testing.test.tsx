@@ -16,7 +16,8 @@ import {
 } from "effect-frame/actor";
 import type { QueryState, Source as SourceType } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
-import { Dom, Loading, Query, View, ViewTest, mount, readyWithStale } from "effect-frame/view";
+import { Dom, Loading, Query, View, mount, readyWithStale } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
 import {
   Cause,
   Clock,

@@ -13,7 +13,8 @@ import {
 import type { KeyOf, TransportService } from "effect-frame/actor/client";
 import { ActorTransport, contract, ref, Source } from "effect-frame/actor/client";
 import type { Host } from "effect-frame/view";
-import { Dom, For, Html, Remote, View, ViewTest, mount } from "effect-frame/view";
+import { Dom, For, Html, Remote, View, mount } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
 import * as Driven from "effect-frame/view/driven";
 import {
   Deferred,

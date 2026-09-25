@@ -5,7 +5,8 @@ registerDom();
 import { Location, Route, UrlState, mount } from "effect-frame/router";
 import type { AnyRoute, Entered, LocationService } from "effect-frame/router";
 import type { Source } from "effect-frame/actor";
-import { Dom, View, ViewTest } from "effect-frame/view";
+import { Dom, View } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
 import {
   Deferred,
   Effect,

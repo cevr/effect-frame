@@ -12,7 +12,8 @@ import {
 } from "effect-frame/actor";
 import { contract, ref, resumeCodec } from "effect-frame/actor/client";
 import type { Applied, KeyOf, SnapshotOf } from "effect-frame/actor/client";
-import { Dom, Html, View, ViewTest, mount } from "effect-frame/view";
+import { Dom, Html, View, mount } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
 import { Deferred, Effect, Exit, Layer, Match, Option, Ref, Schema, Scope } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 

@@ -3,7 +3,8 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import { Location, Route, Router, mount as mountRouter } from "effect-frame/router";
-import { Dom, ViewTest } from "effect-frame/view";
+import { Dom } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
 import * as Receipt from "../../src/router/receipt.js";
 import { Cause, Effect, Exit, Option, Queue, Ref, Result, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";

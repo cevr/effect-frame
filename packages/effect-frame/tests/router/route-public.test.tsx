@@ -10,8 +10,9 @@ import { QueryTest } from "effect-frame/actor/testing";
 import * as Frame from "effect-frame/frame";
 import { Link, Location, Route, Router, link, mount as mountRouter } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
-import { Dom, Loading, View, ViewTest, ready, render } from "effect-frame/view";
-import type { LoadingScope, Node } from "effect-frame/view";
+import { Dom, Loading, View, ready, render } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
+import type { LazyModule, LoadingScope, Node } from "effect-frame/view";
 import {
   Context,
   Deferred,
@@ -187,8 +188,8 @@ const makeImporter = Effect.gen(function* () {
 });
 
 const loader =
-  <P, E, R>(importer: Importer, module: View.LazyModule<P, E, R>) =>
-  (): Promise<View.LazyModule<P, E, R>> =>
+  <P, E, R>(importer: Importer, module: LazyModule<P, E, R>) =>
+  (): Promise<LazyModule<P, E, R>> =>
     Effect.runPromise(
       Effect.gen(function* () {
         const call = yield* Ref.updateAndGet(importer.calls, (count) => count + 1);

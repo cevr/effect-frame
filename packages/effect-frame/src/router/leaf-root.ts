@@ -1,5 +1,5 @@
 import type { Attached, Child, ElementNode, ElementProps, Node } from "effect-frame/view";
-import { attach } from "effect-frame/view";
+import { View } from "effect-frame/view";
 import { Effect, Option, Predicate, Ref } from "effect";
 
 /**
@@ -43,7 +43,7 @@ const attachmentsOf = (
 
 /** Record the element while it is in the document. */
 const recorder = (cell: RootCell): Attached<unknown> =>
-  attach<unknown>((node) =>
+  View.attach<unknown>((node) =>
     Effect.acquireRelease(Ref.set(cell, Option.some(node)), () =>
       Ref.update(cell, (current) => Option.filter(current, (held) => held !== node)),
     ),

@@ -19,7 +19,8 @@ import {
   followLinks,
   mount,
 } from "effect-frame/router";
-import { Dom, Loading, View, ViewTest, ready } from "effect-frame/view";
+import { Dom, Loading, View, ready } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
 import { Deferred, Duration, Effect, Exit, Layer, Option, Schema, SubscriptionRef } from "effect";
 import * as Receipt from "../../../src/router/receipt.js";
 

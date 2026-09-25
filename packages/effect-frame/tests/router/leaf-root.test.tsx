@@ -4,7 +4,8 @@ registerDom();
 
 import { Location, Route, mount } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
-import { Dom, Html, ViewTest, render } from "effect-frame/view";
+import { Dom, Html, render } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
 import { Effect, Option, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 

@@ -1,4 +1,4 @@
-export * as View from "./view.js";
+export * as View from "./namespace.js";
 export {
   For,
   Match,
@@ -24,16 +24,9 @@ export type {
   PropertyValue,
   StaticProps,
 } from "./host.js";
-export {
-  attach,
-  bind,
-  event,
-  submit,
-  type Attached,
-  type Bound,
-  type Handler,
-  type Prepared,
-} from "./view.js";
+export type { Attached, Bind, Bound, Handler, PlainPost, Prepared } from "./view.js";
+export type { CommandForm, FormBinding } from "./form.js";
+export type { Module as LazyModule } from "./lazy.js";
 export type {
   BoundaryKind,
   Child,
@@ -53,7 +46,6 @@ export * as Dom from "./hosts/dom.js";
 export * as Html from "./hosts/html-public.js";
 // The streamed host-operation wire (#15), client half. The server half is `effect-frame/view/driven`.
 export * as Remote from "./hosts/remote.js";
-export * as ViewTest from "./testing.js";
 
 // Readiness through context (#16).
 export {

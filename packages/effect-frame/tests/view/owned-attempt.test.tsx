@@ -14,18 +14,8 @@ import {
 } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
-import {
-  Dom,
-  Html,
-  Loading,
-  Query,
-  Show,
-  View,
-  ViewTest,
-  mount,
-  ready,
-  render,
-} from "effect-frame/view";
+import { Dom, Html, Loading, Query, Show, View, mount, ready, render } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
 import type { Node as ViewNode } from "effect-frame/view";
 import * as Frame from "../../src/frame.js";
 import {

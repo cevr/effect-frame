@@ -17,7 +17,8 @@ import type { QueryCache, RemoteActorRef, Source, TransportService } from "effec
 import { QueryTest } from "effect-frame/actor/testing";
 import { Location, Route, mount as mountRouter } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
-import { Dom, Loading, View, ViewTest, ready } from "effect-frame/view";
+import { Dom, Loading, View, ready } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
 import * as Frame from "../../src/frame.js";
 import * as LeaveBranch from "../../src/router/leave-branch.js";
 import * as Leave from "../../src/router/leave.js";

@@ -5,7 +5,8 @@ registerDom();
 import { Behavior, Value, spawn } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
 import type { Host } from "effect-frame/view";
-import { Dom, For, Html, View, ViewTest, mount, render } from "effect-frame/view";
+import { Dom, For, Html, View, mount, render } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
 import { Deferred, Effect, Option, Stream, SubscriptionRef } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 

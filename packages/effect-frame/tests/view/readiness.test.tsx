@@ -22,12 +22,12 @@ import {
   Loading,
   Query,
   View,
-  ViewTest,
   mount,
   orErrored,
   ready,
   readyWithStale,
 } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
 import type { Bound, ReadyValue } from "effect-frame/view";
 import {
   Context,

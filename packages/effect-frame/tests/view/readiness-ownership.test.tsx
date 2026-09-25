@@ -21,12 +21,12 @@ import {
   Loading,
   Portal,
   View,
-  ViewTest,
   mount,
   orErrored,
   ready,
   render,
 } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
 import type { Host } from "effect-frame/view";
 import { make as makeTuiHost } from "effect-frame/view/opentui";
 import type { TuiNode } from "effect-frame/view/opentui";

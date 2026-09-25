@@ -6,7 +6,8 @@ import { Location, Route, Router, UrlState, link, mount } from "effect-frame/rou
 import type { LocationService } from "effect-frame/router";
 import { Behavior, Value, spawn } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
-import { Dom, View, ViewTest } from "effect-frame/view";
+import { Dom, View } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
 import {
   Deferred,
   Effect,

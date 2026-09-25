@@ -4,7 +4,8 @@ registerDom();
 
 import { Behavior, Value, spawn } from "effect-frame/actor";
 import type { QueryState, Source } from "effect-frame/actor";
-import { Dom, Errored, Loading, View, ViewTest, mount, orErrored, ready } from "effect-frame/view";
+import { Dom, Errored, Loading, View, mount, orErrored, ready } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
 import type { Host, Node as ViewNode } from "effect-frame/view";
 import { Effect, Option } from "effect";
 import type { Scope } from "effect";

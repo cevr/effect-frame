@@ -6,7 +6,8 @@ import type { Source } from "effect-frame/actor";
 import * as Frame from "effect-frame/frame";
 import { Location, Route, mount } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
-import { Dom, View, ViewTest } from "effect-frame/view";
+import { Dom, View } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
 import { Effect, Ref, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 

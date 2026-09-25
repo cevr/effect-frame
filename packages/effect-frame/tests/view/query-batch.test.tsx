@@ -18,7 +18,8 @@ import {
 } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
 import { HttpTransport } from "effect-frame/actor/client";
-import { Dom, View, ViewTest, mount } from "effect-frame/view";
+import { Dom, View, mount } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
 import { Deferred, Effect, Exit, Layer, Option, Ref, Schema, Sink, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 

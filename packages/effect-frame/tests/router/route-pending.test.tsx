@@ -15,8 +15,9 @@ import type { ActorTransport, QueryCache, Source } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import { Location, Route, mount as mountRouter } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
-import { Dom, Html, Loading, View, ViewTest, ready, render } from "effect-frame/view";
-import type { LoadingScope, Node } from "effect-frame/view";
+import { Dom, Html, Loading, View, ready, render } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
+import type { LazyModule, LoadingScope, Node } from "effect-frame/view";
 import * as Frame from "../../src/frame.js";
 import * as Receipt from "../../src/router/receipt.js";
 import {
@@ -190,9 +191,9 @@ const loader =
   <P, E, R>(
     importer: Importer,
     events: Ref.Ref<ReadonlyArray<string>>,
-    module: View.LazyModule<P, E, R>,
+    module: LazyModule<P, E, R>,
   ) =>
-  (): Promise<View.LazyModule<P, E, R>> =>
+  (): Promise<LazyModule<P, E, R>> =>
     Effect.runPromise(
       Effect.gen(function* () {
         const call = yield* Ref.updateAndGet(importer.calls, (count) => count + 1);
@@ -674,7 +675,7 @@ const FixturePostView = (props: Route.PropsOf<typeof postSegment>) =>
 /** An import that has already resolved. */
 const resolved =
   <P, E, R>(view: (props: P) => Effect.Effect<Node, E, R>) =>
-  (): Promise<View.LazyModule<P, E, R>> =>
+  (): Promise<LazyModule<P, E, R>> =>
     Effect.runPromise(Effect.succeed({ default: view }));
 
 const lazyFixture = View.lazy(resolved(FixturePostView));

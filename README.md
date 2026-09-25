@@ -78,7 +78,9 @@ from this subpath and carries none of it. The gateway and the reader are the
 
 Public subpaths of `effect-frame`: `actor`, `actor/client`, `actor/testing`,
 `frame`, `inspection`, `view`, `view/testing`, `view/jsx-runtime`,
-`view/jsx-dev-runtime`, `view/opentui`, and `router`.
+`view/jsx-dev-runtime`, `view/driven`, `view/opentui`, `router`, and
+`router/prerender`. The test harnesses are subpaths of their own:
+`QueryTest` from `actor/testing` and `ViewTest` from `view/testing`.
 
 ## Optimistic commands
 

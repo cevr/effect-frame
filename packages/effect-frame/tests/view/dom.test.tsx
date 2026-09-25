@@ -4,7 +4,8 @@ registerDom();
 
 import { Behavior, Cell, Value, modify, spawn, Source } from "effect-frame/actor";
 import type { LocalActorRef, SetValue } from "effect-frame/actor";
-import { Dom, For, Match, Portal, Show, View, ViewTest, mount } from "effect-frame/view";
+import { Dom, For, Match, Portal, Show, View, mount } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
 import type { Host } from "effect-frame/view";
 import { Deferred, Effect, Exit, Option, Ref, Scope, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";

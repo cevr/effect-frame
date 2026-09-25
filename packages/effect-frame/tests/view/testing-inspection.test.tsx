@@ -21,7 +21,8 @@ import {
   type LocationService,
   type NotFoundProps,
 } from "effect-frame/router";
-import { Dom, Loading, Query, View, ViewTest, mount, readyWithStale } from "effect-frame/view";
+import { Dom, Loading, Query, View, mount, readyWithStale } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
 import * as Frame from "../../src/frame.js";
 // @ts-expect-error Effect keeps this pinned scope counter runtime-only; this test checks scope ownership.
 import { scopeFinalizerCountUnsafe } from "../../../../node_modules/effect/dist/internal/effect.js";

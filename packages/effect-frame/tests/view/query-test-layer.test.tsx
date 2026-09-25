@@ -18,7 +18,8 @@ import {
 } from "effect-frame/actor";
 import type { QueryEntry, QueryFailure, QueryState, Source } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
-import { Dom, Loading, Query, View, ViewTest, mount, readyWithStale } from "effect-frame/view";
+import { Dom, Loading, Query, View, mount, readyWithStale } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
 import { Deferred, Effect, Layer, Exit, Fiber, Option, Schema, Scope, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 

@@ -1,6 +1,7 @@
 import { Behavior, Value, modify, spawn, Source } from "effect-frame/actor";
 import type { LocalActorRef, SetValue } from "effect-frame/actor";
-import { View, ViewTest, mount, render } from "effect-frame/view";
+import { View, mount, render } from "effect-frame/view";
+import { ViewTest } from "effect-frame/view/testing";
 import { make as makeHost } from "effect-frame/view/opentui";
 import { InputRenderable, TextNodeRenderable, TextRenderable } from "@opentui/core";
 import type { BaseRenderable } from "@opentui/core";

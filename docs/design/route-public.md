@@ -347,9 +347,9 @@ tells assistive technology nothing.
 ### View
 
 ```ts
-View.lazy: <P, E, R>(load: () => Promise<View.LazyModule<P, E, R>>) =>
+View.lazy: <P, E, R>(load: () => Promise<LazyModule<P, E, R>>) =>
   View.View<P, E | View.LazyImportFailed, R>;
-interface View.LazyModule<P, E, R> { readonly default: View.View<P, E, R> }
+interface LazyModule<P, E, R> { readonly default: View.View<P, E, R> }
 class View.LazyImportFailed // { message: string }
 ```
 
@@ -357,18 +357,18 @@ class View.LazyImportFailed // { message: string }
 
 ## Private to public names
 
-| Private                                                                              | Public                                                  |
-| ------------------------------------------------------------------------------------ | ------------------------------------------------------- |
-| `Branch.segment`, `Branch.child`                                                     | `Route.segment`, `Route.child`                          |
-| `Branch.leaf`, `Branch.layout`                                                       | `Route.leaf`, `Route.layout`                            |
-| `Branch.route(name, tree)`                                                           | `Route.client(name, tree)`                              |
-| `Branch.query`, `Branch.actor`                                                       | `Route.query`, `Route.actor`                            |
-| `Branch.SegmentProps`, `LayoutProps`, `PropsOf`, `LayoutPropsOf`, `RouteData`        | the same names in `Route`                               |
-| `Branch.Pending`, `Recovery`, `Presentation`, `BranchRejected`                       | the same names in `Route`                               |
-| `Check.target`, `Check.redirect`, `Check.Continue`                                   | `Route.target`, `Route.redirect`, `Route.Continue`      |
-| `Check.BeforeInput`, `Before`, `Verdict`, `Target`, `RouteFailure`, `NavigationKind` | the same names in `Route`                               |
-| `Check.RedirectCycle`, `Check.CheckNavigation`                                       | `Route.RedirectCycle`, `Route.CheckNavigation`          |
-| `Lazy.lazy`, `Lazy.LazyImportFailed`, `Lazy.Module`                                  | `View.lazy`, `View.LazyImportFailed`, `View.LazyModule` |
+| Private                                                                              | Public                                                           |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| `Branch.segment`, `Branch.child`                                                     | `Route.segment`, `Route.child`                                   |
+| `Branch.leaf`, `Branch.layout`                                                       | `Route.leaf`, `Route.layout`                                     |
+| `Branch.route(name, tree)`                                                           | `Route.client(name, tree)`                                       |
+| `Branch.query`, `Branch.actor`                                                       | `Route.query`, `Route.actor`                                     |
+| `Branch.SegmentProps`, `LayoutProps`, `PropsOf`, `LayoutPropsOf`, `RouteData`        | the same names in `Route`                                        |
+| `Branch.Pending`, `Recovery`, `Presentation`, `BranchRejected`                       | the same names in `Route`                                        |
+| `Check.target`, `Check.redirect`, `Check.Continue`                                   | `Route.target`, `Route.redirect`, `Route.Continue`               |
+| `Check.BeforeInput`, `Before`, `Verdict`, `Target`, `RouteFailure`, `NavigationKind` | the same names in `Route`                                        |
+| `Check.RedirectCycle`, `Check.CheckNavigation`                                       | `Route.RedirectCycle`, `Route.CheckNavigation`                   |
+| `Lazy.lazy`, `Lazy.LazyImportFailed`, `Lazy.Module`                                  | `View.lazy`, `View.LazyImportFailed`, `LazyModule` (a flat type) |
 
 ## What stays private, and why
 

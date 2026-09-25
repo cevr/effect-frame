@@ -37,9 +37,7 @@ import {
   keyOf,
   query,
   commandRef,
-  queryCacheLayer,
   ref,
-  useQuery,
 } from "effect-frame/actor/client";
 import type { PolicyTable, Subject } from "effect-frame/actor";
 import type { Address, QueryEntry, QueryState, Source } from "effect-frame/actor/client";
@@ -449,7 +447,7 @@ const inProcess = Layer.unwrap(
 ).pipe(Layer.provide(hostLayer));
 
 /** The client runtime: one transport, one query cache, wired at one root. */
-const clientLayer = Layer.merge(inProcess, queryCacheLayer);
+const clientLayer = Layer.merge(inProcess, QueryCache.layer);
 const withDashboard = it.scoped.layer(clientLayer);
 
 /**
@@ -487,9 +485,9 @@ describe("Query: the Dashboard shape", () => {
 
   withDashboard("one command reply refreshes the two queries that declared the dependency", () =>
     Effect.gen(function* () {
-      const revenue = yield* useQuery(Revenue, acme);
-      const topSku = yield* useQuery(TopSku, acme);
-      const rate = yield* useQuery(ExchangeRate, { pair: "USDEUR" });
+      const revenue = yield* QueryCache.use((cache) => cache.open(Revenue, acme));
+      const topSku = yield* QueryCache.use((cache) => cache.open(TopSku, acme));
+      const rate = yield* QueryCache.use((cache) => cache.open(ExchangeRate, { pair: "USDEUR" }));
       const book = yield* ref(OrderBook, acme);
       yield* Effect.all([settledEntry(revenue), settledEntry(topSku), settledEntry(rate)]);
 
@@ -546,12 +544,12 @@ describe("Query: the Dashboard shape", () => {
       // Both dependents were on screen once, and their views have gone.
       const screen = yield* Scope.make();
       const [shownRevenue, shownTopSku] = yield* Scope.provide(
-        Effect.all([useQuery(Revenue, acme), useQuery(TopSku, acme)]),
+        Effect.all([cache.open(Revenue, acme), cache.open(TopSku, acme)]),
         screen,
       );
       yield* Effect.all([settledEntry(shownRevenue), settledEntry(shownTopSku)]);
       yield* Scope.close(screen, Exit.void);
-      const rate = yield* useQuery(ExchangeRate, { pair: "USDEUR" });
+      const rate = yield* cache.open(ExchangeRate, { pair: "USDEUR" });
       yield* settledEntry(rate);
       expect((yield* cache.active).map(keyOf)).toEqual([keyOf(rate.key)]);
       const mark = calls.length;
@@ -573,8 +571,8 @@ describe("Query: the Dashboard shape", () => {
 
   withDashboard("a commit to an actor no query depends on refreshes nothing", () =>
     Effect.gen(function* () {
-      const revenue = yield* useQuery(Revenue, acme);
-      const topSku = yield* useQuery(TopSku, acme);
+      const revenue = yield* QueryCache.use((cache) => cache.open(Revenue, acme));
+      const topSku = yield* QueryCache.use((cache) => cache.open(TopSku, acme));
       yield* Effect.all([settledEntry(revenue), settledEntry(topSku)]);
       const mark = calls.length;
       const runs = [...handlerRuns.entries()];
@@ -600,8 +598,8 @@ describe("Query: the Dashboard shape", () => {
     Effect.gen(function* () {
       const cache = yield* QueryCache;
       const before = runsOf(Pair.name);
-      const first = yield* useQuery(Pair, { a: "1", b: "2" });
-      const second = yield* useQuery(Pair, { b: "2", a: "1" });
+      const first = yield* cache.open(Pair, { a: "1", b: "2" });
+      const second = yield* cache.open(Pair, { b: "2", a: "1" });
       expect(keyOf(first.key)).toBe(keyOf(second.key));
       expect(first.key.args).toBe('{"a":"1","b":"2"}');
       // One entry: one active key and one server read serve both declarations.
@@ -614,8 +612,8 @@ describe("Query: the Dashboard shape", () => {
 
   withDashboard("a failed refresh answers RefreshFailed and does not undo the command", () =>
     Effect.gen(function* () {
-      const revenue = yield* useQuery(Revenue, acme);
-      const funnel = yield* useQuery(Funnel, acme);
+      const revenue = yield* QueryCache.use((cache) => cache.open(Revenue, acme));
+      const funnel = yield* QueryCache.use((cache) => cache.open(Funnel, acme));
       yield* Effect.all([settledEntry(revenue), settledEntry(funnel)]);
       const book = yield* ref(OrderBook, acme);
       const before = yield* book.state.get;
@@ -673,7 +671,7 @@ describe("Query: the Dashboard shape", () => {
 
   withDashboard("a command reference sends with no snapshot and no change stream", () =>
     Effect.gen(function* () {
-      const revenue = yield* useQuery(Revenue, acme);
+      const revenue = yield* QueryCache.use((cache) => cache.open(Revenue, acme));
       yield* settledEntry(revenue);
       const before = Option.getOrThrow(valueOf(yield* revenue.state.get)).total;
       const actorReads = { snapshots: snapshotRequests, streams: changeStreams };
@@ -708,7 +706,7 @@ describe("Query: the Dashboard shape", () => {
 
   withDashboard("an explicit override shows a value as stale until a refresh lands", () =>
     Effect.gen(function* () {
-      const revenue = yield* useQuery(Revenue, acme);
+      const revenue = yield* QueryCache.use((cache) => cache.open(Revenue, acme));
       yield* settledEntry(revenue);
       yield* revenue.override(() => ({ total: 999 }));
       expect(yield* revenue.state.get).toEqual({
@@ -727,7 +725,7 @@ describe("Query: the Dashboard shape", () => {
 
   withDashboard("an override is dropped by any authoritative value", () =>
     Effect.gen(function* () {
-      const revenue = yield* useQuery(Revenue, acme);
+      const revenue = yield* QueryCache.use((cache) => cache.open(Revenue, acme));
       yield* settledEntry(revenue);
       const book = yield* ref(OrderBook, acme);
 
@@ -753,12 +751,15 @@ describe("Query: the Dashboard shape", () => {
 
       // A new declaration after the last one was released reads again.
       const screen = yield* Scope.make();
-      const topSku = yield* Scope.provide(useQuery(TopSku, acme), screen);
+      const topSku = yield* Scope.provide(
+        QueryCache.use((cache) => cache.open(TopSku, acme)),
+        screen,
+      );
       yield* settledEntry(topSku);
       const before = yield* topSku.state.get;
       yield* topSku.override(() => ({ sku: "guess", orders: 99 }));
       yield* Scope.close(screen, Exit.void);
-      const reopened = yield* useQuery(TopSku, acme);
+      const reopened = yield* QueryCache.use((cache) => cache.open(TopSku, acme));
       yield* settledEntry(reopened);
       expect(yield* reopened.state.get).toEqual(before);
     }),
@@ -786,7 +787,7 @@ describe("Query: the Dashboard shape", () => {
 
   withDashboard("a policy denies a read from another tenant", () =>
     Effect.gen(function* () {
-      const denied = yield* useQuery(Revenue, { tenant: "other" });
+      const denied = yield* QueryCache.use((cache) => cache.open(Revenue, { tenant: "other" }));
       yield* settledEntry(denied);
       const state = yield* denied.state.get;
       expect(state._tag).toBe("Failed");
@@ -812,7 +813,7 @@ describe("Query: the Dashboard shape", () => {
 
   withDashboard("open starts the first read and returns before it lands", () =>
     Effect.gen(function* () {
-      const revenue = yield* useQuery(Revenue, acme);
+      const revenue = yield* QueryCache.use((cache) => cache.open(Revenue, acme));
       expect((yield* revenue.state.get)._tag).toBe("Loading");
       yield* settledEntry(revenue);
       expect(yield* revenue.state.get).toEqual({
@@ -826,8 +827,8 @@ describe("Query: the Dashboard shape", () => {
   withDashboard("two declarations of one key share one entry and one read", () =>
     Effect.gen(function* () {
       const before = reads;
-      const first = yield* useQuery(Counted, acme);
-      const second = yield* useQuery(Counted, acme);
+      const first = yield* QueryCache.use((cache) => cache.open(Counted, acme));
+      const second = yield* QueryCache.use((cache) => cache.open(Counted, acme));
       yield* settledEntry(first);
       yield* settledEntry(second);
       expect(reads - before).toBe(1);
@@ -841,7 +842,7 @@ describe("Query: the Dashboard shape", () => {
 
   withDashboard("a refresh marks the value stale and holds it until the new one lands", () =>
     Effect.gen(function* () {
-      const counted = yield* useQuery(Counted, acme);
+      const counted = yield* QueryCache.use((cache) => cache.open(Counted, acme));
       yield* settledEntry(counted);
       const shown = yield* counted.state.get;
       const first = Option.getOrElse(valueOf(shown), () => -1);
@@ -864,7 +865,7 @@ describe("Query: the Dashboard shape", () => {
 
   withDashboard("two concurrent refreshes cost one read", () =>
     Effect.gen(function* () {
-      const counted = yield* useQuery(Counted, acme);
+      const counted = yield* QueryCache.use((cache) => cache.open(Counted, acme));
       yield* settledEntry(counted);
       const before = reads;
       yield* Effect.all([counted.refresh, counted.refresh], { concurrency: "unbounded" });
@@ -877,8 +878,8 @@ describe("Query: the Dashboard shape", () => {
       const cache = yield* QueryCache;
       const outer = yield* Scope.make();
       const inner = yield* Scope.make();
-      const key = (yield* Scope.provide(useQuery(Counted, acme), outer)).key;
-      yield* Scope.provide(useQuery(Counted, acme), inner);
+      const key = (yield* Scope.provide(cache.open(Counted, acme), outer)).key;
+      yield* Scope.provide(cache.open(Counted, acme), inner);
       expect((yield* cache.active).map(keyOf)).toEqual([keyOf(key)]);
 
       yield* Scope.close(inner, Exit.void);
@@ -894,7 +895,7 @@ describe("Query: the Dashboard shape", () => {
     Effect.gen(function* () {
       const cache = yield* QueryCache;
       const scope = yield* Scope.make();
-      const entry = yield* Scope.provide(useQuery(Counted, acme), scope);
+      const entry = yield* Scope.provide(cache.open(Counted, acme), scope);
       // A refresh joins the read in flight; closing the scope ends both.
       const waiting = yield* Effect.forkChild(entry.refresh);
       yield* Scope.close(scope, Exit.void);
@@ -914,7 +915,7 @@ describe("Query: the Dashboard shape", () => {
         changes: SubscriptionRef.changes(args),
       });
       yield* settled(followed.state);
-      const euro = yield* useQuery(ExchangeRate, { pair: "USDEUR" });
+      const euro = yield* QueryCache.use((cache) => cache.open(ExchangeRate, { pair: "USDEUR" }));
 
       // Shown at once, stale, on the followed source and on the entry itself.
       yield* followed.override(() => ({ rate: 1.5 }));
@@ -1015,9 +1016,13 @@ describe("Query: declared batches", () => {
     Effect.gen(function* () {
       const beforeRequests = batchRequests;
       const beforeCalls = batchCalls;
-      const first = yield* useQuery(BatchedLookup, { ...acme, id: 1 });
-      const duplicate = yield* useQuery(BatchedLookup, { ...acme, id: 1 });
-      const second = yield* useQuery(BatchedLookup, { ...acme, id: 2 });
+      const first = yield* QueryCache.use((cache) => cache.open(BatchedLookup, { ...acme, id: 1 }));
+      const duplicate = yield* QueryCache.use((cache) =>
+        cache.open(BatchedLookup, { ...acme, id: 1 }),
+      );
+      const second = yield* QueryCache.use((cache) =>
+        cache.open(BatchedLookup, { ...acme, id: 2 }),
+      );
       yield* Effect.all([settledEntry(first), settledEntry(duplicate), settledEntry(second)], {
         concurrency: "unbounded",
       });
@@ -1043,8 +1048,12 @@ describe("Query: declared batches", () => {
     Effect.gen(function* () {
       const beforeRequests = batchRequests;
       const beforeCalls = batchCalls;
-      const success = yield* useQuery(BatchedLookup, { ...acme, id: 3 });
-      const failure = yield* useQuery(BatchedLookup, { ...acme, id: -1 });
+      const success = yield* QueryCache.use((cache) =>
+        cache.open(BatchedLookup, { ...acme, id: 3 }),
+      );
+      const failure = yield* QueryCache.use((cache) =>
+        cache.open(BatchedLookup, { ...acme, id: -1 }),
+      );
       yield* Effect.all([settledEntry(success), settledEntry(failure)], {
         concurrency: "unbounded",
       });
@@ -1113,9 +1122,12 @@ describe("Query: declared batches", () => {
 
       yield* Effect.ensuring(
         Effect.gen(function* () {
-          yield* Scope.provide(useQuery(BatchedLookup, { ...acme, id: 4 }), firstScope);
+          yield* Scope.provide(
+            QueryCache.use((cache) => cache.open(BatchedLookup, { ...acme, id: 4 })),
+            firstScope,
+          );
           const second = yield* Scope.provide(
-            useQuery(BatchedLookup, { ...acme, id: 5 }),
+            QueryCache.use((cache) => cache.open(BatchedLookup, { ...acme, id: 5 })),
             secondScope,
           );
           yield* Deferred.await(started);
@@ -1141,8 +1153,10 @@ describe("Query: declared batches", () => {
 
   withDashboard("refreshes all active dependent keys through one batch resolver", () =>
     Effect.gen(function* () {
-      const first = yield* useQuery(BatchedLookup, { ...acme, id: 6 });
-      const second = yield* useQuery(BatchedLookup, { ...acme, id: 7 });
+      const first = yield* QueryCache.use((cache) => cache.open(BatchedLookup, { ...acme, id: 6 }));
+      const second = yield* QueryCache.use((cache) =>
+        cache.open(BatchedLookup, { ...acme, id: 7 }),
+      );
       yield* Effect.all([settledEntry(first), settledEntry(second)], { concurrency: "unbounded" });
       const beforeCalls = batchCalls;
       const book = yield* ref(OrderBook, acme);
@@ -1179,7 +1193,9 @@ describe("Query: declared batches", () => {
 
       yield* Effect.ensuring(
         Effect.gen(function* () {
-          const chronology = yield* useQuery(Chronology, { ...acme, id: 1 });
+          const chronology = yield* QueryCache.use((cache) =>
+            cache.open(Chronology, { ...acme, id: 1 }),
+          );
           yield* Deferred.await(firstStarted);
           const book = yield* ref(OrderBook, acme);
           yield* book.call(
@@ -1227,7 +1243,7 @@ const SkewedExchangeRate = query("ExchangeRate", {
 describe("Query: arguments the host cannot decode", () => {
   withDashboard("are a typed refusal, not a defect in the host", () =>
     Effect.gen(function* () {
-      const refused = yield* useQuery(SkewedExchangeRate, { pair: 1 });
+      const refused = yield* QueryCache.use((cache) => cache.open(SkewedExchangeRate, { pair: 1 }));
       yield* settledEntry(refused);
       const state = yield* refused.state.get;
       expect(state._tag).toBe("Failed");

@@ -10,9 +10,9 @@ import {
   modify,
   query,
   spawn,
-  useQuery,
   Policies,
   Policy,
+  QueryCache,
 } from "effect-frame/actor";
 import type { QueryState, Source as SourceType } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
@@ -373,7 +373,7 @@ describe("scoped view test harness", () => {
         View.loading({
           fallback: <p id="loading">loading</p>,
           content: Effect.gen(function* () {
-            const entry = yield* useQuery(Search, {});
+            const entry = yield* QueryCache.use((cache) => cache.open(Search, {}));
             yield* View.readyWithStale(entry.state, "");
             return (
               <Await

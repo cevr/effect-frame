@@ -11,9 +11,7 @@ import {
   contract,
   implementQuery,
   implementTransparent,
-  queryCacheLayer,
   ref,
-  useQuery,
   Source,
 } from "effect-frame/actor";
 import type { TransportService } from "effect-frame/actor";
@@ -167,7 +165,7 @@ const closed = Route.driven(
 const Title = View.loading({
   fallback: <p id="pending-title">loading</p>,
   content: Effect.gen(function* () {
-    const entry = yield* useQuery(Label, { id: "title" });
+    const entry = yield* QueryCache.use((cache) => cache.open(Label, { id: "title" }));
     const value = yield* View.ready(entry.state, { label: "?" });
     return <h1 id="title">{View.bind(value, (found) => found.label)}</h1>;
   }),
@@ -220,7 +218,7 @@ const sharedHost = (title: Deferred.Deferred<void>) =>
 /** A side over `transport`, with its own query cache. */
 const sideOver = (transport: TransportService) =>
   Effect.map(
-    Layer.build(queryCacheLayer.pipe(Layer.provide(Layer.succeed(ActorTransport, transport)))),
+    Layer.build(QueryCache.layer.pipe(Layer.provide(Layer.succeed(ActorTransport, transport)))),
     (built) => Context.add(built, ActorTransport, transport),
   );
 

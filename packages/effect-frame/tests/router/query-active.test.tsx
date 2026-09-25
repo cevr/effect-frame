@@ -11,7 +11,7 @@ import {
   Policy,
 } from "effect-frame/actor";
 import type { QueryKey, TransportService } from "effect-frame/actor";
-import { canonicalize, useQuery } from "effect-frame/actor/client";
+import { canonicalize } from "effect-frame/actor/client";
 import { QueryTest } from "effect-frame/actor/testing";
 import type { FollowedQuery, QueryFailure } from "effect-frame/actor/client";
 import { Location, Route, mount as mountRouter } from "effect-frame/router";
@@ -348,7 +348,9 @@ describe("a route query binding's override (#19)", () => {
 
       // A stayed move of the child's param: the binding now names post 2.
       yield* router.navigate("/app/t1/posts/2");
-      const second = yield* useQuery(Post, { tenant: "t1", postId: "2" });
+      const second = yield* QueryCache.use((cache) =>
+        cache.open(Post, { tenant: "t1", postId: "2" }),
+      );
       yield* second.state.changes.pipe(
         Stream.filter((state) => state._tag === "Ready"),
         Stream.take(1),
@@ -415,7 +417,9 @@ describe("a route query binding's override (#19)", () => {
         const postTwo = yield* hold("post:t1/2");
         const moving = yield* Effect.forkChild(router.navigate("/app/t1/posts/2"));
         yield* Deferred.await(postTwo.started);
-        const second = yield* useQuery(Post, { tenant: "t1", postId: "2" });
+        const second = yield* QueryCache.use((cache) =>
+          cache.open(Post, { tenant: "t1", postId: "2" }),
+        );
         expect(yield* second.state.get).toEqual({ _tag: "Loading" });
 
         // The override reads post 2's own value, and it has none.

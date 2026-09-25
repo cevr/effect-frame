@@ -3,7 +3,7 @@
  * readiness boundary over one query, and a footer after it. The server
  * streams it; `streaming-app.tsx` hydrates it in WebKit or Chrome.
  */
-import { query, useQuery } from "effect-frame/actor/client";
+import { query, QueryCache } from "effect-frame/actor/client";
 import { View } from "effect-frame/view";
 import { Effect, Schema } from "effect";
 
@@ -20,7 +20,7 @@ export const Page = (props: { readonly id: string }) =>
     const scope = yield* View.loading({
       fallback: <p id="pending">loading</p>,
       content: Effect.gen(function* () {
-        const entry = yield* useQuery(Label, { id: props.id });
+        const entry = yield* QueryCache.use((cache) => cache.open(Label, { id: props.id }));
         const value = yield* View.ready(entry.state, { label: "?" });
         return <p id="label">{View.bind(value, (found) => found.label)}</p>;
       }),

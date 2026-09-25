@@ -3,7 +3,7 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import { CommandId } from "effect-frame/actor";
-import { Form, Streaming, queryCacheLayer } from "effect-frame/actor/client";
+import { Form, Streaming, QueryCache } from "effect-frame/actor/client";
 import { Dom, Html, View } from "effect-frame/view";
 import { Effect, Option, Random, Ref, Schedule, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -39,7 +39,7 @@ const withWire = <A, E, R>(body: (wire: Wire) => Effect.Effect<A, E, R>) =>
 /** The client's own cache, the one a streamed document's records seed. */
 const withClientCache = <A, E, R>(body: Effect.Effect<A, E, R>) =>
   // @effect-diagnostics-next-line strictEffectProvide:off
-  Effect.provide(body, queryCacheLayer);
+  Effect.provide(body, QueryCache.layer);
 
 const renderServer = Effect.scoped(Html.renderToString(TasksPage, noProps));
 

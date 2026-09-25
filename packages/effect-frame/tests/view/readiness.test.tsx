@@ -7,7 +7,6 @@ import {
   QueryFailure,
   implementQuery,
   query,
-  useQuery,
   Policies,
   Policy,
 } from "effect-frame/actor";
@@ -204,7 +203,9 @@ describe("readiness through context", () => {
           View.loading({
             fallback: <p id="pending">loading</p>,
             content: Effect.gen(function* () {
-              const entry = yield* useQuery(ReadinessQuery, { id: "title" });
+              const entry = yield* QueryCache.use((cache) =>
+                cache.open(ReadinessQuery, { id: "title" }),
+              );
               const title = yield* View.ready(entry.state, "");
               return <h1 id="title">{View.bind(title)}</h1>;
             }),
@@ -237,7 +238,9 @@ describe("readiness through context", () => {
         View.loading({
           fallback: <p id="pending">loading</p>,
           content: Effect.gen(function* () {
-            const entry = yield* useQuery(ReadinessQuery, { id: "title" });
+            const entry = yield* QueryCache.use((cache) =>
+              cache.open(ReadinessQuery, { id: "title" }),
+            );
             yield* Deferred.succeed(entryReady, entry);
             const title = yield* View.readyWithStale(entry.state, "");
             return (
@@ -299,8 +302,12 @@ describe("readiness through context", () => {
           View.loading({
             fallback: <p id="pending">loading</p>,
             content: Effect.gen(function* () {
-              const left = yield* useQuery(ReadinessQuery, { id: "left" });
-              const right = yield* useQuery(ReadinessQuery, { id: "right" });
+              const left = yield* QueryCache.use((cache) =>
+                cache.open(ReadinessQuery, { id: "left" }),
+              );
+              const right = yield* QueryCache.use((cache) =>
+                cache.open(ReadinessQuery, { id: "right" }),
+              );
               yield* Effect.forkChild(
                 Stream.runHead(
                   Stream.filter(left.state.changes, (state) => state._tag !== "Loading"),
@@ -364,7 +371,9 @@ describe("readiness through context", () => {
           View.errored({
             fallback: (error) => <p id="failed">{bound(error, errorText)}</p>,
             content: Effect.gen(function* () {
-              const entry = yield* useQuery(ReadinessQuery, { id: "failure" });
+              const entry = yield* QueryCache.use((cache) =>
+                cache.open(ReadinessQuery, { id: "failure" }),
+              );
               yield* Deferred.succeed(entryReady, entry);
               const inner = View.loading({
                 fallback: <p id="pending">loading</p>,
@@ -483,12 +492,16 @@ describe("readiness through context", () => {
         View.loading({
           fallback: <p id="outer-pending">outer</p>,
           content: Effect.gen(function* () {
-            const outer = yield* useQuery(ReadinessQuery, { id: "outer" });
+            const outer = yield* QueryCache.use((cache) =>
+              cache.open(ReadinessQuery, { id: "outer" }),
+            );
             const header = yield* View.ready(outer.state, "");
             const nested = View.loading({
               fallback: <p id="inner-pending">inner</p>,
               content: Effect.gen(function* () {
-                const inner = yield* useQuery(ReadinessQuery, { id: "inner" });
+                const inner = yield* QueryCache.use((cache) =>
+                  cache.open(ReadinessQuery, { id: "inner" }),
+                );
                 const body = yield* View.ready(inner.state, "");
                 return <p id="body">{View.bind(body)}</p>;
               }),
@@ -638,10 +651,14 @@ describe("readiness through context", () => {
           View.loading({
             fallback: <p id="pending">loading</p>,
             content: Effect.gen(function* () {
-              const first = yield* useQuery(ReadinessQuery, { id: "first" });
+              const first = yield* QueryCache.use((cache) =>
+                cache.open(ReadinessQuery, { id: "first" }),
+              );
               const a = yield* View.ready(first.state, "");
               // A second query registers after the first already had a value.
-              const second = yield* useQuery(ReadinessQuery, { id: "second" });
+              const second = yield* QueryCache.use((cache) =>
+                cache.open(ReadinessQuery, { id: "second" }),
+              );
               const b = yield* View.ready(second.state, "");
               return (
                 <section>
@@ -685,8 +702,12 @@ describe("readiness through context", () => {
           View.loading({
             fallback: <p id="pending-fallback">loading</p>,
             content: Effect.gen(function* () {
-              const sibling = yield* useQuery(ReadinessQuery, { id: "sibling" });
-              const pending = yield* useQuery(ReadinessQuery, { id: "pending" });
+              const sibling = yield* QueryCache.use((cache) =>
+                cache.open(ReadinessQuery, { id: "sibling" }),
+              );
+              const pending = yield* QueryCache.use((cache) =>
+                cache.open(ReadinessQuery, { id: "pending" }),
+              );
               const siblingValue = yield* View.ready(sibling.state, "");
               const pendingValue = yield* Scope.provide(View.ready(pending.state, ""), owner);
               return (
@@ -736,7 +757,9 @@ describe("readiness through context", () => {
           View.errored({
             fallback: (error) => <p id="failed-owner-error">{bound(error, errorText)}</p>,
             content: Effect.gen(function* () {
-              const entry = yield* useQuery(ReadinessQuery, { id: "failed" });
+              const entry = yield* QueryCache.use((cache) =>
+                cache.open(ReadinessQuery, { id: "failed" }),
+              );
               yield* Scope.provide(View.orErrored(entry.state), owner);
               return <p id="failed-owner-content">content</p>;
             }),
@@ -772,7 +795,9 @@ describe("readiness through context", () => {
         const reveal = yield* Deferred.make<Effect.Effect<void>>();
 
         const LateCard = Effect.gen(function* () {
-          const entry = yield* useQuery(ReadinessQuery, { id: "late" });
+          const entry = yield* QueryCache.use((cache) =>
+            cache.open(ReadinessQuery, { id: "late" }),
+          );
           const value = yield* View.ready(entry.state, "");
           return <p id="late-card">{View.bind(value)}</p>;
         });
@@ -780,7 +805,9 @@ describe("readiness through context", () => {
           View.loading({
             fallback: <p id="late-pending">loading</p>,
             content: Effect.gen(function* () {
-              const entry = yield* useQuery(ReadinessQuery, { id: "shown" });
+              const entry = yield* QueryCache.use((cache) =>
+                cache.open(ReadinessQuery, { id: "shown" }),
+              );
               const value = yield* View.ready(entry.state, "");
               const revealed = yield* spawn(Behavior.value(false));
               yield* Deferred.succeed(reveal, Effect.asVoid(revealed.send(Value.Set(true))));
@@ -944,7 +971,9 @@ describe("readiness through context", () => {
           View.loading({
             fallback: <p id="boundary-pending">loading</p>,
             content: Effect.gen(function* () {
-              const entry = yield* useQuery(ReadinessQuery, { id: "boundary" });
+              const entry = yield* QueryCache.use((cache) =>
+                cache.open(ReadinessQuery, { id: "boundary" }),
+              );
               const value = yield* View.ready(entry.state, "");
               return <p id="boundary-value">{View.bind(value)}</p>;
             }),

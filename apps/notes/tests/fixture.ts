@@ -1,7 +1,6 @@
 import { platformFetch } from "./dom-setup.js";
 
 import type {
-  QueryCache,
   QueryFailure,
   QueryKey,
   Refreshed,
@@ -9,7 +8,7 @@ import type {
   TransportService,
   Unauthorized,
 } from "effect-frame/actor/client";
-import { ActorTransport, HttpTransport, queryCacheLayer } from "effect-frame/actor/client";
+import { ActorTransport, HttpTransport, QueryCache } from "effect-frame/actor/client";
 import { Location, mount } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
@@ -39,7 +38,7 @@ export const transportTo = (url: string): Layer.Layer<ActorTransport> =>
 /** The browser's services over `transport`: the query cache and the transport. */
 export const clientServices = (
   transport: Layer.Layer<ActorTransport>,
-): Layer.Layer<QueryCache | ActorTransport> => Layer.provideMerge(queryCacheLayer, transport);
+): Layer.Layer<QueryCache | ActorTransport> => Layer.provideMerge(QueryCache.layer, transport);
 
 /**
  * One client of the test: its own query cache and transport, built in the

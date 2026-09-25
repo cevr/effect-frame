@@ -9,9 +9,7 @@ import {
   implementBatchedQuery,
   QueryCache,
   Value,
-  queryCacheLayer,
   spawn,
-  useQuery,
   Policies,
   Policy,
   batchedQuery,
@@ -160,7 +158,7 @@ const inProcess = Layer.unwrap(
   }),
 ).pipe(Layer.provide(hostLayer));
 
-const clientLayer = Layer.merge(inProcess, queryCacheLayer);
+const clientLayer = Layer.merge(inProcess, QueryCache.layer);
 
 interface RowsProps {
   readonly items: Source<ReadonlyArray<number>>;
@@ -194,7 +192,7 @@ const Rows = (props: RowsProps) =>
             onNone: () => item.get,
             onSome: Effect.succeed,
           });
-          const entry = yield* useQuery(RowQuery, { id });
+          const entry = yield* QueryCache.use((cache) => cache.open(RowQuery, { id }));
           return <li data-id={String(id)}>{View.bind(entry.state, (state) => state._tag)}</li>;
         }),
     });

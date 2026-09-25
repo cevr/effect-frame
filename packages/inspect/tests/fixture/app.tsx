@@ -13,7 +13,7 @@ import {
   implementQuery,
   query,
   spawn,
-  useQuery,
+  QueryCache,
 } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import * as Frame from "effect-frame/frame";
@@ -126,7 +126,7 @@ export const start = (
         const held = yield* View.loading({
           fallback: <p id="loading">loading</p>,
           content: Effect.gen(function* () {
-            const entry = yield* useQuery(HeldQuery, { id: id.id });
+            const entry = yield* QueryCache.use((cache) => cache.open(HeldQuery, { id: id.id }));
             yield* View.readyWithStale(entry.state, "");
             return (
               <Await

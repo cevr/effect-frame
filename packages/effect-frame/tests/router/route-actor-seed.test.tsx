@@ -10,10 +10,10 @@ import {
   Streaming,
   contract,
   implementTransparent,
-  queryCacheLayer,
   ref,
+  QueryCache,
 } from "effect-frame/actor";
-import type { QueryCache, TransportService } from "effect-frame/actor";
+import type { TransportService } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import { Location, Route, mount as mountRouter, renderDocument } from "effect-frame/router";
 import type { AnyRoute, LocationService, NotFoundProps } from "effect-frame/router";
@@ -155,7 +155,7 @@ const sharedHost = Layer.build(
 /** A side over `transport`: its own query cache, so its own document seeds. */
 const sideOver = (transport: TransportService) =>
   Effect.map(
-    Layer.build(queryCacheLayer.pipe(Layer.provide(Layer.succeed(ActorTransport, transport)))),
+    Layer.build(QueryCache.layer.pipe(Layer.provide(Layer.succeed(ActorTransport, transport)))),
     (built) => Context.add(built, ActorTransport, transport),
   );
 

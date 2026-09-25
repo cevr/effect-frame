@@ -1,13 +1,5 @@
 /* oxlint-disable effect/noGlobals -- this fixture drives happy-dom's document the way a parser would, the boundary under test. */
-import {
-  Policies,
-  Policy,
-  QueryCache,
-  Streaming,
-  implementQuery,
-  query,
-  useQuery,
-} from "effect-frame/actor";
+import { Policies, Policy, QueryCache, Streaming, implementQuery, query } from "effect-frame/actor";
 import type { ActorTransport, QueryFailure, QueryState } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import { Dom, Html, View } from "effect-frame/view";
@@ -98,7 +90,7 @@ export const Page = (props: PageProps) =>
       View.loading({
         fallback: <p id={`pending-${id}`}>{`loading ${id}`}</p>,
         content: Effect.gen(function* () {
-          const entry = yield* useQuery(Label, { id });
+          const entry = yield* QueryCache.use((cache) => cache.open(Label, { id }));
           if ((props.awaited ?? []).includes(id)) {
             yield* entry.state.changes.pipe(
               Stream.filter((state) => state._tag !== "Loading"),
@@ -326,7 +318,7 @@ const shownState = (state: QueryState<{ readonly label: string }, QueryFailure>)
  */
 export const Moving = (props: { readonly mover: Mover }) =>
   Effect.gen(function* () {
-    const entry = yield* useQuery(Label, { id: "a" });
+    const entry = yield* QueryCache.use((cache) => cache.open(Label, { id: "a" }));
     // `a`'s binding moves only when a catch-up reads it: it stands for a
     // binding whose change is still on its way through its fiber.
     const lagging = { get: entry.state.get, changes: Stream.never };
@@ -343,7 +335,7 @@ export const Moving = (props: { readonly mover: Mover }) =>
     const held = yield* View.loading({
       fallback: <p id="held-pending">loading</p>,
       content: Effect.gen(function* () {
-        const found = yield* useQuery(Label, { id: "held" });
+        const found = yield* QueryCache.use((cache) => cache.open(Label, { id: "held" }));
         const value = yield* View.ready(found.state, { label: "?" });
         return <p id="held">{View.bind(value, (one) => one.label)}</p>;
       }),

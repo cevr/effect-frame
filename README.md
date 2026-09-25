@@ -46,10 +46,10 @@ that root.
 ```ts
 import * as Frame from "effect-frame/frame";
 import { Layer } from "effect";
-import { queryCacheLayer } from "effect-frame/actor/client";
+import { QueryCache } from "effect-frame/actor/client";
 
 const frameLayer = Frame.layer({ name: "notes" });
-const appLayer = Layer.merge(queryCacheLayer.pipe(Layer.provideMerge(frameLayer)), transportLayer);
+const appLayer = Layer.merge(QueryCache.layer.pipe(Layer.provideMerge(frameLayer)), transportLayer);
 ```
 
 `Layer.provideMerge` gives the cache the Frame registry and keeps the Frame

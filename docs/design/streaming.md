@@ -507,7 +507,7 @@ The rule that fixes both is the one a seed already follows (review round
 4. **A boundary may draw it ahead.** A readiness boundary has marks, so it
    can replace the server's branch (`resolvedAhead`). An entry's state
    source carries its held settle as a capability (`src/actor/read-ahead.ts`).
-   `useQuery`, `followQuery` and a route's query binding carry it; a
+   `QueryCache.open`, `followQuery` and a route's query binding carry it; a
    derived source (`select`, `zip`) does not. `ready`, `readyWithStale`
    and `orErrored` read through `readAhead`, which shows the held settle
    in place of `Loading` while the boundary's `ReadAhead` flag holds.

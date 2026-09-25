@@ -1,4 +1,4 @@
-import { HttpTransport, queryCacheLayer } from "effect-frame/actor/client";
+import { HttpTransport, QueryCache } from "effect-frame/actor/client";
 import { Location, browserNavigation, followLinks } from "effect-frame/router";
 import { Effect, Layer, Option } from "effect";
 import { hydrateApp } from "./app.js";
@@ -32,7 +32,7 @@ const start = Effect.gen(function* () {
 });
 
 const services = Layer.provideMerge(
-  queryCacheLayer,
+  QueryCache.layer,
   HttpTransport.layer({
     baseUrl: `${location.origin}/actors`,
     reconnect: HttpTransport.defaultReconnect,

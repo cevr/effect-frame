@@ -142,7 +142,7 @@ follows. The value from before the command never shows as fresh. Closing the
 record scope releases the claim.
 
 The claim is not on the public `QueryCacheService`. Each cache that
-`queryCacheLayer` builds carries it privately, keyed by that service, so a claim
+`QueryCache.layer` builds carries it privately, keyed by that service, so a claim
 always lands in the cache the reference reads. A custom or wrapped cache has no
 claim. It keeps the public contract: the reference invalidates the contract when
 a command starts and applies the reply's refreshes when it is Applied. A Frame

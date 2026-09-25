@@ -5,7 +5,7 @@
  * Then it records what it saw on `window.__stream` and tells the page
  * server it has hydrated, which is the server's cue to settle a held query.
  */
-import { HttpTransport, QueryCache, Streaming, queryCacheLayer } from "effect-frame/actor/client";
+import { HttpTransport, QueryCache, Streaming } from "effect-frame/actor/client";
 import { Dom, View } from "effect-frame/view";
 import type { QueryFailure, QueryState } from "effect-frame/actor/client";
 import type { Dom as DomTypes } from "effect-frame/view";
@@ -86,7 +86,7 @@ const start = Effect.gen(function* () {
 });
 
 const layer = Layer.provideMerge(
-  queryCacheLayer,
+  QueryCache.layer,
   HttpTransport.layer({
     baseUrl: `${location.origin}/actors`,
     reconnect: HttpTransport.defaultReconnect,

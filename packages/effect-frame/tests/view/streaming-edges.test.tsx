@@ -2,14 +2,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import {
-  QueryCache,
-  QueryFailed,
-  Streaming,
-  Unreachable,
-  followQuery,
-  useQuery,
-} from "effect-frame/actor";
+import { QueryCache, QueryFailed, Streaming, Unreachable, followQuery } from "effect-frame/actor";
 import type { ActorTransport } from "effect-frame/actor";
 import type { Node } from "effect-frame/view";
 import type { Scope } from "effect";
@@ -49,7 +42,7 @@ import {
 /** Wait until `id`'s entry has settled, so the shell draws its content. */
 const settled = (id: string) =>
   Effect.gen(function* () {
-    const entry = yield* useQuery(Label, { id });
+    const entry = yield* QueryCache.use((cache) => cache.open(Label, { id }));
     yield* entry.state.changes.pipe(
       Stream.filter((state) => state._tag !== "Loading"),
       Stream.take(1),
@@ -61,7 +54,7 @@ const settled = (id: string) =>
 /** The label of `id`, once its entry is ready. */
 const labelOf = (id: string, awaited: boolean) =>
   Effect.gen(function* () {
-    let entry = yield* useQuery(Label, { id });
+    let entry = yield* QueryCache.use((cache) => cache.open(Label, { id }));
     if (awaited) {
       entry = yield* settled(id);
     }
@@ -429,9 +422,12 @@ const HiddenInner = () =>
           fallback: <p id="pending-i">loading i</p>,
           content: labelOf("i", false),
         });
-        const value = yield* View.ready((yield* useQuery(Label, { id: "o" })).state, {
-          label: "?",
-        });
+        const value = yield* View.ready(
+          (yield* QueryCache.use((cache) => cache.open(Label, { id: "o" }))).state,
+          {
+            label: "?",
+          },
+        );
         return (
           <div>
             <p id="label-o">{View.bind(value, (found) => found.label)}</p>
@@ -479,7 +475,7 @@ const Guarded = () =>
       content: View.loading({
         fallback: <p id="pending">loading</p>,
         content: Effect.gen(function* () {
-          const entry = yield* useQuery(Label, { id: "a" });
+          const entry = yield* QueryCache.use((cache) => cache.open(Label, { id: "a" }));
           const value = yield* View.ready(yield* View.orErrored(entry.state), { label: "?" });
           return <p id="label-a">{View.bind(value, (found) => found.label)}</p>;
         }),
@@ -591,7 +587,7 @@ const Listed = () =>
           row: (item) =>
             Effect.gen(function* () {
               const id = yield* item.get;
-              const entry = yield* useQuery(Label, { id });
+              const entry = yield* QueryCache.use((cache) => cache.open(Label, { id }));
               const value = yield* View.ready(entry.state, { label: "?" });
               return <li id={`label-${id}`}>{View.bind(value, (found) => found.label)}</li>;
             }),
@@ -619,7 +615,7 @@ describe("an AwaitAll document over rows", () => {
 /** Query `a` at the top; one list row, outside any boundary, whose setup declares `b` late. */
 const LateRow = () =>
   Effect.gen(function* () {
-    const a = yield* useQuery(Label, { id: "a" });
+    const a = yield* QueryCache.use((cache) => cache.open(Label, { id: "a" }));
     const rows = yield* View.list({
       each: { get: Effect.succeed(["b"]), changes: Stream.empty },
       keyBy: (id) => id,
@@ -627,7 +623,7 @@ const LateRow = () =>
         Effect.gen(function* () {
           const id = yield* item.get;
           yield* Effect.sleep("80 millis");
-          const entry = yield* useQuery(Label, { id });
+          const entry = yield* QueryCache.use((cache) => cache.open(Label, { id }));
           return <li id={`row-${id}`}>{View.bind(entry.state, (state) => state._tag)}</li>;
         }),
     });

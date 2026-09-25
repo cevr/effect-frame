@@ -16,7 +16,6 @@ import {
   contract,
   query,
   ref,
-  useQuery,
 } from "effect-frame/actor/client";
 import type { QueryEntry } from "effect-frame/actor/client";
 
@@ -117,7 +116,7 @@ describe("ActorHost command admission refresh", () => {
   withHost("does not refresh dependent queries before application commits", () =>
     Effect.gen(function* () {
       const control = yield* AdmissionControl;
-      const value = yield* useQuery(CounterValue, "one");
+      const value = yield* QueryCache.use((cache) => cache.open(CounterValue, "one"));
       yield* settled(value);
       expect(yield* value.state.get).toEqual({
         _tag: "Ready",

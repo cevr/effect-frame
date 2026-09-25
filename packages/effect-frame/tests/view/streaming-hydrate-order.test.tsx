@@ -2,7 +2,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { QueryCache, Streaming, useQuery, QueryState } from "effect-frame/actor";
+import { QueryCache, Streaming, QueryState } from "effect-frame/actor";
 import type { ActorTransport } from "effect-frame/actor";
 import { Html, Await, View } from "effect-frame/view";
 import { Deferred, Effect, Option, Stream } from "effect";
@@ -67,7 +67,7 @@ const streamed = <Props,>(
 /** EGW's status line: no boundary, the view reads the query state itself. */
 const Unbounded = (props: { readonly id: string }) =>
   Effect.gen(function* () {
-    const entry = yield* useQuery(Label, { id: props.id });
+    const entry = yield* QueryCache.use((cache) => cache.open(Label, { id: props.id }));
     const status = View.bind(entry.state, (state) => {
       if (state._tag === "Ready") {
         return state.value.label;
@@ -95,7 +95,7 @@ const Unbounded = (props: { readonly id: string }) =>
 /** EGW's results: a `Query` whose branches differ in their static attributes. */
 const Branches = (props: { readonly id: string }) =>
   Effect.gen(function* () {
-    const entry = yield* useQuery(Label, { id: props.id });
+    const entry = yield* QueryCache.use((cache) => cache.open(Label, { id: props.id }));
     return (
       <section>
         <Await
@@ -123,7 +123,7 @@ const Branches = (props: { readonly id: string }) =>
 /** A boundary and a text outside it that read one key. */
 const Beside = (props: { readonly id: string }) =>
   Effect.gen(function* () {
-    const outside = yield* useQuery(Label, { id: props.id });
+    const outside = yield* QueryCache.use((cache) => cache.open(Label, { id: props.id }));
     const status = View.bind(outside.state, (state) => {
       if (state._tag === "Ready") {
         return `found ${state.value.label}`;
@@ -133,7 +133,7 @@ const Beside = (props: { readonly id: string }) =>
     const scope = yield* View.loading({
       fallback: <p id="pending">loading</p>,
       content: Effect.gen(function* () {
-        const entry = yield* useQuery(Label, { id: props.id });
+        const entry = yield* QueryCache.use((cache) => cache.open(Label, { id: props.id }));
         const value = yield* View.ready(entry.state, { label: "?" });
         return <p id="label">{View.bind(value, (found) => found.label)}</p>;
       }),
@@ -151,7 +151,7 @@ const Guarded = (props: { readonly id: string }) =>
   View.errored({
     fallback: () => <p id="failed">failed</p>,
     content: Effect.gen(function* () {
-      const entry = yield* useQuery(Label, { id: props.id });
+      const entry = yield* QueryCache.use((cache) => cache.open(Label, { id: props.id }));
       const state = yield* View.orErrored(entry.state);
       const status = View.bind(state, (found) => {
         if (found._tag === "Ready") {
@@ -170,8 +170,8 @@ describe("a patch written after the shell and read before hydration", () => {
       const server = yield* sideOf(serverControl);
       const Two = () =>
         Effect.gen(function* () {
-          const a = yield* useQuery(Label, { id: "a" });
-          const b = yield* useQuery(Label, { id: "b" });
+          const a = yield* QueryCache.use((cache) => cache.open(Label, { id: "a" }));
+          const b = yield* QueryCache.use((cache) => cache.open(Label, { id: "b" }));
           yield* b.state.changes.pipe(
             Stream.filter((state) => state._tag !== "Loading"),
             Stream.take(1),

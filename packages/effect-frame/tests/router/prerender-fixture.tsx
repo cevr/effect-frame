@@ -1,5 +1,5 @@
-import { Streaming, runQuery, useQuery } from "effect-frame/actor";
-import type { ActorTransport, QueryCache, QueryFailure, QueryState } from "effect-frame/actor";
+import { Streaming, runQuery, QueryCache } from "effect-frame/actor";
+import type { ActorTransport, QueryFailure, QueryState } from "effect-frame/actor";
 import { Route, renderDocument } from "effect-frame/router";
 import type { AnyRoute, NotFoundProps } from "effect-frame/router";
 import * as Prerender from "effect-frame/router/prerender";
@@ -42,7 +42,7 @@ export const indexRoute = Route.prerender("index", {
   search: Route.search(Nothing),
   view: () =>
     Effect.gen(function* () {
-      const index = yield* useQuery(Label, { id: "index" });
+      const index = yield* QueryCache.use((cache) => cache.open(Label, { id: "index" }));
       return (
         <section>
           <h1 id="index">{View.bind(index.state, labelOf)}</h1>

@@ -2,8 +2,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import type { QueryCache } from "effect-frame/actor/client";
-import { ActorTransport, queryCacheLayer } from "effect-frame/actor/client";
+import { ActorTransport, QueryCache } from "effect-frame/actor/client";
 import { Location, Route, renderDocument } from "effect-frame/router";
 import type { AnyRoute, RenderedDocument, Router } from "effect-frame/router";
 import { Context, Effect, Layer, Stream } from "effect";
@@ -124,7 +123,7 @@ const clientOver = (host: Context.Context<ActorTransport>, snapshots: Array<stri
         ),
     }),
   );
-  return Layer.build(Layer.provideMerge(queryCacheLayer, counted));
+  return Layer.build(Layer.provideMerge(QueryCache.layer, counted));
 };
 
 const renderAt = (tree: ListTree, host: Context.Context<ActorTransport>) =>

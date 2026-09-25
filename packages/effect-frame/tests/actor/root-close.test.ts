@@ -3,7 +3,7 @@ import * as Frame from "../../src/frame.js";
 import * as QueryTest from "../../src/actor/testing/query.js";
 import { query } from "../../src/actor/query.js";
 import { implementQuery } from "../../src/actor/query-host.js";
-import { useQuery } from "../../src/actor/query-client.js";
+import { QueryCache } from "../../src/actor/query-client.js";
 import { Policies, Policy } from "../../src/actor/policy.js";
 import { describe, expect, it } from "effect-bun-test";
 
@@ -43,7 +43,10 @@ describe("QueryTest root ownership", () => {
       const consumer = yield* Scope.make();
       const context = yield* Scope.provide(Layer.build(layer), root);
       yield* Effect.provideContext(
-        Scope.provide(useQuery(RootCloseQuery, "blocked"), consumer),
+        Scope.provide(
+          QueryCache.use((cache) => cache.open(RootCloseQuery, "blocked")),
+          consumer,
+        ),
         context,
       );
       yield* Deferred.await(started);

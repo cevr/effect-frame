@@ -8,9 +8,9 @@ import {
   implementQuery,
   query,
   spawn,
-  useQuery,
   Policies,
   Policy,
+  QueryCache,
 } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
@@ -352,7 +352,9 @@ describe("private owned attempt", () => {
                     }
                     yield* push(setups, first.id);
                     const actor = yield* spawnAtRevision(first.revision);
-                    const entry = yield* useQuery(AttemptQuery, { id: `row-${first.id}` });
+                    const entry = yield* QueryCache.use((cache) =>
+                      cache.open(AttemptQuery, { id: `row-${first.id}` }),
+                    );
                     return (
                       <li id={`row-${first.id}`}>
                         <span class="label">{View.bind(item, (row) => row.label)}</span>
@@ -485,7 +487,7 @@ describe("private owned attempt", () => {
                     Effect.gen(function* () {
                       yield* Deferred.succeed(setupScope, yield* Effect.scope);
                       yield* spawnAtRevision(3);
-                      yield* useQuery(AttemptQuery, { id: "doomed" });
+                      yield* QueryCache.use((cache) => cache.open(AttemptQuery, { id: "doomed" }));
                       yield* Effect.addFinalizer(() =>
                         Effect.andThen(
                           Deferred.succeed(finalizerStarted, void 0),
@@ -821,7 +823,7 @@ describe("private owned attempt", () => {
           View.attempt(
             Effect.gen(function* () {
               yield* spawnAtRevision(5);
-              yield* useQuery(AttemptQuery, { id: `setup-${key}` });
+              yield* QueryCache.use((cache) => cache.open(AttemptQuery, { id: `setup-${key}` }));
               if (key === "held") {
                 yield* Effect.addFinalizer(() =>
                   Effect.andThen(
@@ -840,7 +842,9 @@ describe("private owned attempt", () => {
                 }
                 yield* push(fallbackStarts, key);
                 const actor = yield* spawnAtRevision(7);
-                yield* useQuery(AttemptQuery, { id: `fallback-${key}` });
+                yield* QueryCache.use((cache) =>
+                  cache.open(AttemptQuery, { id: `fallback-${key}` }),
+                );
                 return (
                   <li id={`row-${key}`}>
                     {error.reason}:{View.bind(actor.state, String)}
@@ -853,7 +857,7 @@ describe("private owned attempt", () => {
           Effect.gen(function* () {
             yield* Ref.update(parentSetups, (count) => count + 1);
             const parent = yield* spawn(Behavior.value("parent"));
-            yield* useQuery(AttemptQuery, { id: "parent" });
+            yield* QueryCache.use((cache) => cache.open(AttemptQuery, { id: "parent" }));
             const rows = yield* View.list({
               each: rowsSource.state,
               keyBy: (key) => key,
@@ -965,9 +969,9 @@ describe("private owned attempt", () => {
       const declare = Effect.fn("OwnedAttemptTest.declare")(function* (route: ChildRoute) {
         const declarations = yield* Scope.fork(owner);
         if (overlap) {
-          yield* useQuery(AttemptQuery, { id: `tenant-${route.tenant}` }).pipe(
-            Scope.provide(declarations),
-          );
+          yield* QueryCache.use((cache) =>
+            cache.open(AttemptQuery, { id: `tenant-${route.tenant}` }),
+          ).pipe(Scope.provide(declarations));
         }
         return declarations;
       });
@@ -1008,8 +1012,12 @@ describe("private owned attempt", () => {
                 if (route.post === "missing") {
                   return yield* SetupFailed.make({ reason: "missing" });
                 }
-                const tenant = yield* useQuery(AttemptQuery, { id: `tenant-${route.tenant}` });
-                const post = yield* useQuery(AttemptQuery, { id: `post-${route.post}` });
+                const tenant = yield* QueryCache.use((cache) =>
+                  cache.open(AttemptQuery, { id: `tenant-${route.tenant}` }),
+                );
+                const post = yield* QueryCache.use((cache) =>
+                  cache.open(AttemptQuery, { id: `post-${route.post}` }),
+                );
                 const tenantName = yield* View.ready(tenant.state, "");
                 const title = yield* View.ready(post.state, "");
                 return (

@@ -2,7 +2,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { QueryCache, useQuery } from "effect-frame/actor/client";
+import { QueryCache } from "effect-frame/actor/client";
 import { Deferred, Effect, Fiber, Schema } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { TenantId } from "../src/contract.js";
@@ -108,7 +108,9 @@ describe("the dashboard's queries (#17, #18)", () => {
         "the week's revenue",
       );
       // A second declaration spells the route's arguments in the other order.
-      const again = yield* app.run(useQuery(Revenue, { range: "7d", tenant: acme }));
+      const again = yield* app.run(
+        QueryCache.use((cache) => cache.open(Revenue, { range: "7d", tenant: acme })),
+      );
       expect(keyText(again.key)).toBe('Revenue{"range":"7d","tenant":"acme"}');
       yield* settle(
         Effect.map(again.state.get, (state) => state._tag === "Ready"),
@@ -202,7 +204,7 @@ describe("an ack's override on the header (#17, #19 §4)", () => {
   ];
   /** An authoritative read of the header's entry, as any other declaration would make. */
   const refreshHeader = Effect.flatMap(
-    useQuery(TenantInfo, { tenant: acme }),
+    QueryCache.use((cache) => cache.open(TenantInfo, { tenant: acme })),
     (header) => header.refresh,
   );
 
@@ -290,7 +292,9 @@ describe("an ack's override on the header (#17, #19 §4)", () => {
           "the ack reached the host",
         );
         // Globex's entry has no value of its own yet, so the ack wrote nothing.
-        const entry = yield* app.run(useQuery(TenantInfo, { tenant: globex }));
+        const entry = yield* app.run(
+          QueryCache.use((cache) => cache.open(TenantInfo, { tenant: globex })),
+        );
         expect(yield* entry.state.get).toEqual({ _tag: "Loading" });
 
         yield* Deferred.succeed(held, void 0);

@@ -3,7 +3,7 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { QueryCache, Streaming, useQuery } from "effect-frame/actor";
+import { QueryCache, Streaming } from "effect-frame/actor";
 import { Dom, Html, View } from "effect-frame/view";
 import { Deferred, Effect, Fiber, Option, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -394,7 +394,7 @@ const Nested = () =>
     content: View.loading({
       fallback: <p id="pending-outer">outer</p>,
       content: Effect.gen(function* () {
-        const outer = yield* useQuery(Label, { id: "outer" });
+        const outer = yield* QueryCache.use((cache) => cache.open(Label, { id: "outer" }));
         yield* outer.state.changes.pipe(
           Stream.filter((state) => state._tag !== "Loading"),
           Stream.take(1),
@@ -404,7 +404,7 @@ const Nested = () =>
         const inner = yield* View.loading({
           fallback: <p id="pending-inner">inner</p>,
           content: Effect.gen(function* () {
-            const entry = yield* useQuery(Label, { id: "inner" });
+            const entry = yield* QueryCache.use((cache) => cache.open(Label, { id: "inner" }));
             const value = yield* View.ready(entry.state, { label: "?" });
             return <p id="label-inner">{View.bind(value, (found) => found.label)}</p>;
           }),

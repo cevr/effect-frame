@@ -9,15 +9,7 @@ import {
   implementQuery,
   implementTransparent,
 } from "effect-frame/actor";
-import {
-  ActorTransport,
-  QueryCache,
-  contract,
-  query,
-  queryCacheLayer,
-  ref,
-  useQuery,
-} from "effect-frame/actor/client";
+import { ActorTransport, QueryCache, contract, query, ref } from "effect-frame/actor/client";
 import type {
   CommandState,
   QueryEntry,
@@ -157,7 +149,7 @@ const heldTransport = Effect.gen(function* () {
   return transport;
 });
 
-const appLayer = Layer.merge(queryCacheLayer, ActorTransport.layerLocal(heldTransport)).pipe(
+const appLayer = Layer.merge(QueryCache.layer, ActorTransport.layerLocal(heldTransport)).pipe(
   Layer.provide(Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }))),
   Layer.provideMerge(Frame.layer({ name: "command-cache" })),
   Layer.provideMerge(controlLayer),
@@ -221,8 +213,8 @@ const firstState = <State>(
 describe("cache command ownership", () => {
   withApp("concurrent commands keep dependents stale until the last one settles", () =>
     Effect.gen(function* () {
-      const value = yield* useQuery(CounterValue, "one");
-      const unrelated = yield* useQuery(Unrelated, "one");
+      const value = yield* QueryCache.use((cache) => cache.open(CounterValue, "one"));
+      const unrelated = yield* QueryCache.use((cache) => cache.open(Unrelated, "one"));
       yield* until(value, isReady(0, false));
       yield* until(unrelated, isReady("unrelated:one", false));
       const gateA = yield* gate(1);
@@ -253,7 +245,7 @@ describe("cache command ownership", () => {
   withApp("a dependent shows stale from send until the reply's value lands", () =>
     Effect.gen(function* () {
       const control = yield* Control;
-      const value = yield* useQuery(CounterValue, "one");
+      const value = yield* QueryCache.use((cache) => cache.open(CounterValue, "one"));
       yield* until(value, isReady(0, false));
       const seen = yield* recordStates(value);
       const admission = yield* Deferred.make<void>();
@@ -295,7 +287,7 @@ describe("cache command ownership", () => {
       const command = yield* counter.send(1);
       yield* startedTurns(1);
 
-      const late = yield* useQuery(CounterValue, "one");
+      const late = yield* QueryCache.use((cache) => cache.open(CounterValue, "one"));
       expect(yield* until(late, (state) => state._tag === "Ready")).toEqual(ready(0, true));
       expect(yield* reads).toBe(1);
       const seen = yield* recordStates(late);
@@ -325,7 +317,7 @@ describe("cache command ownership", () => {
         release: yield* Deferred.make<void>(),
       };
       yield* Ref.set(control.readHold, Option.some(readHold));
-      const late = yield* useQuery(CounterValue, "one");
+      const late = yield* QueryCache.use((cache) => cache.open(CounterValue, "one"));
       const seen = yield* recordStates(late);
       // The first read took its snapshot before the command applied.
       yield* Deferred.await(readHold.reached);
@@ -366,7 +358,7 @@ describe("cache command ownership", () => {
             ),
           principalChanged: real.principalChanged,
         };
-        const value = yield* useQuery(CounterValue, "one");
+        const value = yield* QueryCache.use((cache) => cache.open(CounterValue, "one"));
         yield* until(value, isReady(0, false));
         const counter = yield* ref(Counter, "one").pipe(Effect.provideService(QueryCache, custom));
         const command = yield* counter.send(1);
@@ -384,7 +376,7 @@ describe("cache command ownership", () => {
     Effect.gen(function* () {
       const cache = yield* QueryCache;
       const view = yield* Scope.make();
-      const value = yield* useQuery(CounterValue, "one").pipe(Scope.provide(view));
+      const value = yield* cache.open(CounterValue, "one").pipe(Scope.provide(view));
       yield* until(value, isReady(0, false));
       const held = yield* gate(1);
       const counter = yield* ref(Counter, "one");
@@ -408,7 +400,7 @@ describe("cache command ownership", () => {
 
   withApp("closing the reference releases its ownership without a settlement", () =>
     Effect.gen(function* () {
-      const value = yield* useQuery(CounterValue, "one");
+      const value = yield* QueryCache.use((cache) => cache.open(CounterValue, "one"));
       yield* until(value, isReady(0, false));
       yield* gate(1);
       const life = yield* Scope.make();
@@ -427,7 +419,7 @@ describe("cache command ownership", () => {
 
   withApp("an exhausted command keeps ownership until its manual retry applies", () =>
     Effect.gen(function* () {
-      const value = yield* useQuery(CounterValue, "one");
+      const value = yield* QueryCache.use((cache) => cache.open(CounterValue, "one"));
       yield* until(value, isReady(0, false));
       const held = yield* gate(1);
       const counter = yield* ref(Counter, "one").pipe(

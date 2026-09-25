@@ -5,7 +5,7 @@
  * router over the page, and resume the island over HTTP. It records what it
  * saw on `window.__prerender`.
  */
-import { HttpTransport, queryCacheLayer } from "effect-frame/actor/client";
+import { HttpTransport, QueryCache } from "effect-frame/actor/client";
 import { Location, browserLocation, mount } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import type { Dom as DomTypes } from "effect-frame/view";
@@ -58,7 +58,7 @@ const start = Effect.gen(function* () {
 });
 
 const layer = Layer.provideMerge(
-  queryCacheLayer,
+  QueryCache.layer,
   HttpTransport.layer({
     baseUrl: `${location.origin}/actors`,
     reconnect: HttpTransport.defaultReconnect,

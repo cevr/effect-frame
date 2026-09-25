@@ -1,11 +1,11 @@
 import type { AnyQueryImplementation } from "effect-frame/actor";
-import type { QueryCache, QueryKey, Refreshed, TransportService } from "effect-frame/actor/client";
+import type { QueryKey, Refreshed, TransportService } from "effect-frame/actor/client";
 import {
   ActorTransport,
   Authenticated,
   CurrentPrincipal,
   QueryFailed,
-  queryCacheLayer,
+  QueryCache,
 } from "effect-frame/actor/client";
 import { Location, mount } from "effect-frame/router";
 import type { AnyRoute, LocationService } from "effect-frame/router";
@@ -322,7 +322,7 @@ export const mountApp = Effect.fn("test.mountApp")(function* <R>(options: {
 }) {
   const root = yield* install('<body><main id="app"></main></body>');
   const client = yield* Layer.build(
-    Layer.provideMerge(queryCacheLayer, Layer.succeed(ActorTransport, options.transport)),
+    Layer.provideMerge(QueryCache.layer, Layer.succeed(ActorTransport, options.transport)),
   );
   const { location, current } = yield* locationAt(options.href);
   const router = yield* mount({

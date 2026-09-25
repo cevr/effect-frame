@@ -2,8 +2,8 @@ import { registerDom } from "./dom-setup.js";
 
 registerDom();
 
-import { Streaming, followQuery, useQuery } from "effect-frame/actor";
-import type { ActorTransport, QueryCache, QueryFailure, QueryState } from "effect-frame/actor";
+import { Streaming, followQuery, QueryCache } from "effect-frame/actor";
+import type { ActorTransport, QueryFailure, QueryState } from "effect-frame/actor";
 import { Source } from "effect-frame/actor/client";
 import type { Node } from "effect-frame/view";
 import { Html, View } from "effect-frame/view";
@@ -64,7 +64,7 @@ const through = <A,>(source: Source<A>, hops: number): Source<A> =>
 /** Wait in setup until `id` has settled: the drawing then binds a settled entry. */
 const settled = (id: string) =>
   Effect.gen(function* () {
-    const entry = yield* useQuery(Label, { id });
+    const entry = yield* QueryCache.use((cache) => cache.open(Label, { id }));
     yield* entry.state.changes.pipe(
       Stream.filter((state) => state._tag !== "Loading"),
       Stream.take(1),
@@ -222,7 +222,7 @@ const Overridden = (props: { readonly server: boolean; readonly pause?: boolean 
     fallback: <p id="pending">loading</p>,
     content: Effect.gen(function* () {
       yield* settled("a");
-      const entry = yield* useQuery(Label, { id: "a" });
+      const entry = yield* QueryCache.use((cache) => cache.open(Label, { id: "a" }));
       if (props.server) {
         yield* entry.override(() => ({ label: "Draft" }));
       }
@@ -306,7 +306,7 @@ const Restless = (): Drawn =>
       row: (item) =>
         Effect.gen(function* () {
           const id = yield* item.get;
-          const entry = yield* useQuery(Label, { id });
+          const entry = yield* QueryCache.use((cache) => cache.open(Label, { id }));
           return <li>{View.bind(entry.state, (state) => state._tag)}</li>;
         }),
     });

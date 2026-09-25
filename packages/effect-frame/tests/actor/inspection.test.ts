@@ -26,7 +26,6 @@ import {
   implementQuery,
   query,
   spawn,
-  useQuery,
 } from "effect-frame/actor";
 import { QueryCache, Uncertain } from "effect-frame/actor/client";
 import { QueryTest } from "effect-frame/actor/testing";
@@ -368,7 +367,10 @@ describe("Frame.inspect actor and query records", () => {
         yield* Scope.provide(Effect.provideContext(spawn(Behavior.value(1)), context), rootScope);
         const consumerScope = yield* Scope.make();
         const queryEntry = yield* Scope.provide(
-          Effect.provideContext(useQuery(SameRootQuery, { id: 1 }), context),
+          Effect.provideContext(
+            QueryCache.use((cache) => cache.open(SameRootQuery, { id: 1 })),
+            context,
+          ),
           consumerScope,
         );
         yield* Stream.runHead(
@@ -450,14 +452,20 @@ describe("Frame.inspect actor and query records", () => {
       const firstScope = yield* Scope.make();
       const secondScope = yield* Scope.make();
 
-      yield* Scope.provide(useQuery(Blocked, { id: 1 }), firstScope);
+      yield* Scope.provide(
+        QueryCache.use((cache) => cache.open(Blocked, { id: 1 })),
+        firstScope,
+      );
       yield* Deferred.await(control.started);
       expect(blockedReads).toBe(1);
       let snapshot = yield* Frame.inspect;
       expect(snapshot.queries).toHaveLength(1);
       expect(snapshot.queries[0]?.state).toBe("Loading");
 
-      yield* Scope.provide(useQuery(Blocked, { id: 1 }), secondScope);
+      yield* Scope.provide(
+        QueryCache.use((cache) => cache.open(Blocked, { id: 1 })),
+        secondScope,
+      );
       snapshot = yield* Frame.inspect;
       expect(snapshot.queries).toHaveLength(1);
       expect(blockedReads).toBe(1);
@@ -485,7 +493,10 @@ describe("Frame.inspect actor and query records", () => {
     Effect.gen(function* () {
       failedReads = 0;
       const firstScope = yield* Scope.make();
-      const first = yield* Scope.provide(useQuery(Failed, { id: 1 }), firstScope);
+      const first = yield* Scope.provide(
+        QueryCache.use((cache) => cache.open(Failed, { id: 1 })),
+        firstScope,
+      );
       yield* Stream.runHead(Stream.filter(first.state.changes, (state) => state._tag === "Failed"));
 
       const failed = yield* Frame.inspect;
@@ -497,7 +508,10 @@ describe("Frame.inspect actor and query records", () => {
       expect((yield* Frame.inspect).queries).toHaveLength(0);
 
       const secondScope = yield* Scope.make();
-      const second = yield* Scope.provide(useQuery(Failed, { id: 1 }), secondScope);
+      const second = yield* Scope.provide(
+        QueryCache.use((cache) => cache.open(Failed, { id: 1 })),
+        secondScope,
+      );
       yield* Stream.runHead(
         Stream.filter(second.state.changes, (state) => state._tag === "Failed"),
       );
@@ -523,7 +537,10 @@ describe("Frame.inspect actor and query records", () => {
     Effect.gen(function* () {
       lifecycleValue = 1;
       const scope = yield* Scope.make();
-      const entry = yield* Scope.provide(useQuery(Lifecycle, { id: 1 }), scope);
+      const entry = yield* Scope.provide(
+        QueryCache.use((cache) => cache.open(Lifecycle, { id: 1 })),
+        scope,
+      );
       yield* Stream.runHead(Stream.filter(entry.state.changes, (state) => state._tag === "Ready"));
 
       const ready = yield* Frame.inspect;
@@ -595,9 +612,17 @@ describe("Frame.inspect actor and query records", () => {
       concurrentReads = 0;
       const scopes = yield* Effect.forEach(Array.from({ length: 10 }), () => Scope.make());
       const entries = yield* Effect.provideService(
-        Effect.forEach(scopes, (scope) => Scope.provide(useQuery(Concurrent, { id: 1 }), scope), {
-          concurrency: 10,
-        }),
+        Effect.forEach(
+          scopes,
+          (scope) =>
+            Scope.provide(
+              QueryCache.use((cache) => cache.open(Concurrent, { id: 1 })),
+              scope,
+            ),
+          {
+            concurrency: 10,
+          },
+        ),
         Scheduler.MaxOpsBeforeYield,
         32,
       );

@@ -36,9 +36,8 @@ import {
   Principal as Principals,
   QueryState,
   followQuery,
-  queryCacheLayer,
   ref,
-  useQuery,
+  QueryCache,
 } from "effect-frame/actor/client";
 import type { Served } from "./auth-fixture.js";
 import {
@@ -626,7 +625,7 @@ const firstState = <A, E>(entry: QueryEntry<A, E>, pass: (state: QueryState<A, E
 /** Runs `effect` with a client query cache beside its transport. */
 const withQueryCache = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   // @effect-diagnostics-next-line strictEffectProvide:off
-  Effect.provide(effect, queryCacheLayer);
+  Effect.provide(effect, QueryCache.layer);
 
 describe("a client cache across a principal change", () => {
   it.scopedLive(
@@ -642,7 +641,9 @@ describe("a client cache across a principal change", () => {
           quickReconnect,
         )(
           Effect.gen(function* () {
-            const entry = yield* useQuery(LedgerCount, { tenant: "acme" });
+            const entry = yield* QueryCache.use((cache) =>
+              cache.open(LedgerCount, { tenant: "acme" }),
+            );
             const read = yield* firstState(entry, QueryState.isReady);
             // Every state the entry shows from here until the refusal lands.
             const watching = yield* Deferred.make<void>();
@@ -667,7 +668,9 @@ describe("a client cache across a principal change", () => {
             const refused = Option.flatMap(states, (all) => Option.fromNullishOr(all.at(-1)));
             const readyAfter = Option.map(states, (all) => all.filter(QueryState.isReady).length);
             // A later declaration of the same key never shows alice's value.
-            const later = yield* useQuery(LedgerCount, { tenant: "acme" });
+            const later = yield* QueryCache.use((cache) =>
+              cache.open(LedgerCount, { tenant: "acme" }),
+            );
             const laterState = yield* later.state.get;
             return { read, refused, readyAfter, laterState };
           }).pipe(withQueryCache),
@@ -821,8 +824,12 @@ describe("every refusal the client receives", () => {
         quickReconnect,
       )(
         Effect.gen(function* () {
-          const acme = yield* useQuery(LedgerCount, { tenant: "acme" });
-          const north = yield* useQuery(LedgerCount, { tenant: "north" });
+          const acme = yield* QueryCache.use((cache) =>
+            cache.open(LedgerCount, { tenant: "acme" }),
+          );
+          const north = yield* QueryCache.use((cache) =>
+            cache.open(LedgerCount, { tenant: "north" }),
+          );
           yield* firstState(acme, QueryState.isReady);
           yield* firstState(north, QueryState.isReady);
           const recorded = yield* statesUntilFailed(north.state.changes);
@@ -892,7 +899,9 @@ describe("every refusal the client receives", () => {
         gate,
       )(
         Effect.gen(function* () {
-          const count = yield* useQuery(LedgerCount, { tenant: "acme" });
+          const count = yield* QueryCache.use((cache) =>
+            cache.open(LedgerCount, { tenant: "acme" }),
+          );
           yield* firstState(count, QueryState.isReady);
           const ledger = yield* ref(Ledger, book);
           // The reply carries the count read for alice after her entry.
@@ -930,7 +939,9 @@ describe("every refusal the client receives", () => {
         gate,
       )(
         Effect.gen(function* () {
-          const count = yield* useQuery(LedgerCount, { tenant: "acme" });
+          const count = yield* QueryCache.use((cache) =>
+            cache.open(LedgerCount, { tenant: "acme" }),
+          );
           yield* firstState(count, QueryState.isReady);
           yield* ref(Ledger, book);
           const recorded = yield* statesUntilFailed(count.state.changes);
@@ -968,7 +979,9 @@ describe("every refusal the client receives", () => {
         quickReconnect,
       )(
         Effect.gen(function* () {
-          const count = yield* useQuery(LedgerCount, { tenant: "acme" });
+          const count = yield* QueryCache.use((cache) =>
+            cache.open(LedgerCount, { tenant: "acme" }),
+          );
           yield* firstState(count, QueryState.isReady);
           const ledger = yield* ref(Ledger, book);
           const recorded = yield* statesUntilFailed(count.state.changes);
@@ -1001,8 +1014,12 @@ describe("every refusal the client receives", () => {
         quickReconnect,
       )(
         Effect.gen(function* () {
-          const north = yield* useQuery(LedgerCount, { tenant: "north" });
-          const acme = yield* useQuery(LedgerCount, { tenant: "acme" });
+          const north = yield* QueryCache.use((cache) =>
+            cache.open(LedgerCount, { tenant: "north" }),
+          );
+          const acme = yield* QueryCache.use((cache) =>
+            cache.open(LedgerCount, { tenant: "acme" }),
+          );
           yield* firstState(north, QueryState.isReady);
           yield* firstState(acme, QueryState.isFailed);
 

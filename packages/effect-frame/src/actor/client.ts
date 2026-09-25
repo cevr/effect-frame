@@ -62,8 +62,6 @@ export {
   QueryCache,
   followQuery,
   runQuery,
-  useQuery,
-  layer as queryCacheLayer,
   type FollowedQuery,
   type QueryCacheService,
   type QueryEntry,

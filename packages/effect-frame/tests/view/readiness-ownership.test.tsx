@@ -8,9 +8,9 @@ import {
   implementQuery,
   query,
   spawn,
-  useQuery,
   Policies,
   Policy,
+  QueryCache,
 } from "effect-frame/actor";
 import type { QueryEntry, QueryFailure, QueryState, Source } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
@@ -192,7 +192,7 @@ const rowPage = (
             yield* Ref.update(setups, (all) => [...all, id]);
             yield* Deferred.succeed(started, void 0);
             yield* Effect.addFinalizer(() => Ref.update(closed, (all) => [...all, id]));
-            const entry = yield* useQuery(OwnershipQuery, { id });
+            const entry = yield* QueryCache.use((cache) => cache.open(OwnershipQuery, { id }));
             const value = yield* View.ready(entry.state, "");
             return <li id={`row-${id}`}>{View.bind(value)}</li>;
           }),
@@ -385,7 +385,9 @@ describe("readiness ownership", () => {
                     Effect.gen(function* () {
                       yield* Ref.update(setups, (count) => count + 1);
                       yield* Effect.addFinalizer(() => Ref.update(closed, (count) => count + 1));
-                      const entry = yield* useQuery(OwnershipQuery, { id: "failed" });
+                      const entry = yield* QueryCache.use((cache) =>
+                        cache.open(OwnershipQuery, { id: "failed" }),
+                      );
                       yield* Deferred.succeed(entryReady, entry);
                       const failed = yield* View.orErrored(entry.state);
                       const value = yield* View.ready(failed, "");
@@ -447,7 +449,9 @@ describe("readiness ownership", () => {
           View.loading({
             fallback: <p id="fallback">loading</p>,
             content: Effect.gen(function* () {
-              const entry = yield* useQuery(OwnershipQuery, { id: "portal" });
+              const entry = yield* QueryCache.use((cache) =>
+                cache.open(OwnershipQuery, { id: "portal" }),
+              );
               const value = yield* View.ready(entry.state, "");
               return (
                 <Portal into={target}>

@@ -162,7 +162,7 @@ const commandSurface = Effect.fn("Actor.commandSurface")(function* <C extends An
    * from before the first request until the command settles or this
    * reference closes, so the view shows stale content instead of a gap. An
    * Applied settlement delivers its captured refreshes first. A cache not
-   * built by `queryCacheLayer` (a user's own, or a wrapper) keeps the public
+   * built by `QueryCache.layer` (a user's own, or a wrapper) keeps the public
    * contract instead: the contract is invalidated when the command starts and
    * the reply's refreshes are applied. A client with no cache owns nothing.
    */

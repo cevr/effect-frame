@@ -12,7 +12,6 @@ import {
   implementTransparent,
   query,
   ref,
-  useQuery,
   Policies,
   Policy,
   batchedQuery,
@@ -141,7 +140,7 @@ describe("local query test transport", () => {
         View.loading({
           fallback: <p id="loading">loading</p>,
           content: Effect.gen(function* () {
-            const entry = yield* useQuery(Count, key);
+            const entry = yield* QueryCache.use((cache) => cache.open(Count, key));
             yield* Deferred.succeed(entryReady, entry);
             const state = yield* View.readyWithStale(entry.state, { count: -1 });
             return (
@@ -208,8 +207,8 @@ describe("local query test transport", () => {
   it.scoped.layer(testLayer)("keeps batch failures per key and releases cache scopes", () =>
     Effect.gen(function* () {
       rowBatchGroups = [];
-      const first = yield* useQuery(Rows, { id: 1 });
-      const second = yield* useQuery(Rows, { id: 2 });
+      const first = yield* QueryCache.use((cache) => cache.open(Rows, { id: 1 }));
+      const second = yield* QueryCache.use((cache) => cache.open(Rows, { id: 2 }));
       yield* Effect.all([settled(first.state), settled(second.state)], {
         concurrency: "unbounded",
       });
@@ -225,7 +224,7 @@ describe("local query test transport", () => {
       }
       expect(rowBatchGroups).toEqual([[1, 2]]);
 
-      const failed = yield* useQuery(Failure, {});
+      const failed = yield* QueryCache.use((cache) => cache.open(Failure, {}));
       yield* settled(failed.state);
       const failure = yield* failed.state.get;
       expect(failure._tag).toBe("Failed");
@@ -236,7 +235,7 @@ describe("local query test transport", () => {
       const cache = yield* QueryCache;
       expect((yield* cache.active).length).toBe(3);
       const scope = yield* Scope.make();
-      yield* Scope.provide(useQuery(Rows, { id: 3 }), scope);
+      yield* Scope.provide(cache.open(Rows, { id: 3 }), scope);
       expect((yield* cache.active).length).toBe(4);
       yield* Scope.close(scope, Exit.void);
       expect((yield* cache.active).length).toBe(3);

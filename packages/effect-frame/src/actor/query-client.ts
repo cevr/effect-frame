@@ -1316,9 +1316,18 @@ const make = (): Effect.Effect<QueryCacheService, never, Scope.Scope> =>
     return service;
   });
 
-export const layer: LayerType.Layer<QueryCache> = Layer.effect(QueryCache, make());
-
 export namespace QueryCache {
+  /**
+   * The client's query cache. Provide it once per root, beside the
+   * `ActorTransport` the cache reads through.
+   *
+   * @example
+   * ```ts
+   * const client = QueryCache.layer.pipe(Layer.provideMerge(HttpTransport.layer({ baseUrl })));
+   * ```
+   */
+  export const layer: LayerType.Layer<QueryCache> = Layer.effect(QueryCache, make());
+
   /**
    * Builds the real cache against an in-process host. The host owns all
    * handler behavior; this helper only composes the cache and transport.
@@ -1328,20 +1337,6 @@ export namespace QueryCache {
   ): LayerType.Layer<QueryCache | ActorTransport, E, R> =>
     Layer.merge(layer, ActorTransport.layerLocal(host));
 }
-
-/**
- * Declare one query and get its entry. The view-facing name; it is
- * `useQuery` in a React-shaped runtime and `ref`-shaped here, but it is the
- * same call: open the entry, get a `Source<QueryState<T>>`. The declaration
- * lasts as long as the enclosing `Scope`, which for a view is its setup.
- */
-export const useQuery = Effect.fn("useQuery")(function* <Q extends AnyQuery>(
-  contract: Q,
-  args: ArgsOf<Q>,
-) {
-  const cache = yield* QueryCache;
-  return yield* cache.open(contract, args);
-});
 
 /**
  * Read one query once, as a value. It declares the key for the

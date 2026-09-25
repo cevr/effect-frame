@@ -11,7 +11,6 @@ import {
   Streaming,
   implementQuery,
   query,
-  useQuery,
 } from "effect-frame/actor";
 import type { QueryFailure, QueryState } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
@@ -70,7 +69,7 @@ const SecretPage = () =>
     const scope = yield* View.loading({
       fallback: <p id="pending">loading</p>,
       content: Effect.gen(function* () {
-        const entry = yield* useQuery(Secret, { id: "a" });
+        const entry = yield* QueryCache.use((cache) => cache.open(Secret, { id: "a" }));
         return <p id="secret">{View.bind(entry.state, labelOf)}</p>;
       }),
     });

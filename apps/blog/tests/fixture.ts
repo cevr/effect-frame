@@ -1,7 +1,7 @@
 import { platformFetch } from "./dom-setup.js";
 
 import type { QueryKey, TransportService } from "effect-frame/actor/client";
-import { ActorTransport, CommandId, queryCacheLayer, ref } from "effect-frame/actor/client";
+import { ActorTransport, CommandId, ref, QueryCache } from "effect-frame/actor/client";
 import { Location } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
 import * as Prerender from "effect-frame/router/prerender";
@@ -341,7 +341,7 @@ export const watched = (inner: TransportService, held: ReadonlyArray<string> = [
 
 /** A client over `transport`: its own query cache. */
 export const clientOver = (transport: TransportService) =>
-  Effect.map(Layer.build(queryCacheLayer), (cache) =>
+  Effect.map(Layer.build(QueryCache.layer), (cache) =>
     Context.add(cache, ActorTransport, transport),
   );
 

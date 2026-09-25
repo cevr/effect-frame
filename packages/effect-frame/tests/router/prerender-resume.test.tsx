@@ -10,10 +10,9 @@ import {
   Policies,
   Policy,
   implementTransparent,
-  queryCacheLayer,
+  QueryCache,
 } from "effect-frame/actor";
 import { contract, ref, resumeCodec } from "effect-frame/actor/client";
-import type { QueryCache } from "effect-frame/actor";
 import type { Applied, SnapshotOf } from "effect-frame/actor/client";
 import { Location, Route, mount as mountRouter } from "effect-frame/router";
 import type { LocationService } from "effect-frame/router";
@@ -240,7 +239,7 @@ const buildNote = (
 const spyClient = (store: Context.Context<ActorTransport>, afters: Array<number>) =>
   Effect.gen(function* () {
     const transport = Context.get(store, ActorTransport);
-    const cache = yield* Layer.build(queryCacheLayer);
+    const cache = yield* Layer.build(QueryCache.layer);
     const spy: ActorTransport["Service"] = {
       ...transport,
       changes: (address, after) => {

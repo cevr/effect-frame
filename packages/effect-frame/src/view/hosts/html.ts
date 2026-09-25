@@ -1,5 +1,5 @@
 import type { ActorTransport } from "effect-frame/actor/client";
-import { QueryCache, Streaming, queryCacheLayer } from "effect-frame/actor/client";
+import { QueryCache, Streaming } from "effect-frame/actor/client";
 import {
   Context,
   Deferred,
@@ -442,7 +442,7 @@ export interface Document {
 export type CacheSource = Effect.Effect<QueryCache["Service"], never, Scope.Scope>;
 
 export const requestCache: CacheSource = Effect.map(
-  Layer.build(Layer.fresh(queryCacheLayer)),
+  Layer.build(Layer.fresh(QueryCache.layer)),
   (context) => Context.get(context, QueryCache),
 );
 

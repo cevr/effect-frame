@@ -201,11 +201,28 @@ const program = Effect.gen(function* () {
 - `before` runs parent first, before anything commits. It returns
   `Route.Continue` or `Route.redirect(segment, params, search)`.
 - A URL that only moves elsewhere is `Route.redirecting(name, segment, to)`.
-  It has no view and no mode: `to` answers the `Route.redirect`.
+  It has no view: `to` answers the `Route.redirect` before anything draws.
 - A view that can fail, and every `View.lazy` view, needs an `errored`
   handler. It receives a `Route.RouteFailure`.
 - Every segment view gets `params`, `search`, `data`, `href`,
   `updateSearch`, and `replaceSearch`. A layout also gets `outlet`.
+- A view written apart from its segment types its props from the segment:
+  `Route.PropsOf<typeof post>` for a leaf, and
+  `Route.LayoutPropsOf<typeof tenant, ChildR>` for a layout. A layout view
+  stays generic in `ChildR`, the services its children's views need, so
+  `Route.layout` can prove the outlet's requirements (a `View.loading`
+  around `props.outlet` provides `LoadingScope`). In a `.tsx` file the
+  generic needs its trailing comma:
+
+  ```tsx
+  export const TenantView = <ChildR,>(props: Route.LayoutPropsOf<typeof tenant, ChildR>) =>
+    Effect.map(View.loading({ fallback: <p>loading</p>, content: props.outlet }), (body) => (
+      <section>{body}</section>
+    ));
+  ```
+
+  Do not type props by hand: the props interfaces are not exported.
+
 - `link` takes a segment. `Link` draws `aria-current="page"`
   on the destination, and `aria-current="true"` on a segment the current URL
   continues below. Neither holds on not-found or on another route.

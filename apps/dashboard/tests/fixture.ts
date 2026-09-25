@@ -1,3 +1,4 @@
+import type { Route, LocationService } from "effect-frame/router";
 import type { AnyQueryImplementation } from "effect-frame/actor";
 import type { QueryKey, Refreshed, TransportService } from "effect-frame/actor/client";
 import {
@@ -8,7 +9,6 @@ import {
   QueryCache,
 } from "effect-frame/actor/client";
 import { Location, mount, NavigationBehavior } from "effect-frame/router";
-import type { AnyRoute, LocationService } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import { Context, Deferred, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
 import { hostWith } from "../src/host.server.js";
@@ -318,7 +318,7 @@ export const locationAt = (href: string) =>
 export const mountApp = Effect.fn("test.mountApp")(function* <R>(options: {
   readonly transport: TransportService;
   readonly href: string;
-  readonly routes: ReadonlyArray<AnyRoute<R>>;
+  readonly routes: ReadonlyArray<Route.AnyRoute<R>>;
 }) {
   const root = yield* install('<body><main id="app"></main></body>');
   const client = yield* Layer.build(

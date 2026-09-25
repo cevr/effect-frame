@@ -17,7 +17,7 @@ import {
   mount as mountRouter,
   NavigationBehavior,
 } from "effect-frame/router";
-import type { AnyRoute, LocationService } from "effect-frame/router";
+import type { LocationService } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import type { LazyModule, Node } from "effect-frame/view";
@@ -344,7 +344,7 @@ const makeRoot = Effect.acquireRelease(
 
 const origin = "http://frame.test";
 
-const mountApp = <R,>(app: AnyRoute<R>, root: HTMLElement, path: string) =>
+const mountApp = <R,>(app: Route.AnyRoute<R>, root: HTMLElement, path: string) =>
   Effect.gen(function* () {
     const location = yield* makeLocation(`${origin}${path}`);
     const page = yield* ViewTest.make({
@@ -397,7 +397,7 @@ const click = (root: HTMLElement, selector: string) =>
 type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
-type RouteServices<T> = T extends AnyRoute<infer R> ? R : never;
+type RouteServices<T> = T extends Route.AnyRoute<infer R> ? R : never;
 
 const fixtureProbes: Probes = {
   slow: Deferred.makeUnsafe<void>(),

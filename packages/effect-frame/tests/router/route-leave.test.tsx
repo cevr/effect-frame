@@ -16,7 +16,7 @@ import {
 import type { QueryCache, RemoteActorRef, Source, TransportService } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import { Location, Route, mount as mountRouter, NavigationBehavior } from "effect-frame/router";
-import type { AnyRoute, LocationService } from "effect-frame/router";
+import type { LocationService } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import * as Frame from "../../src/frame.js";
@@ -481,7 +481,7 @@ const makeRoot = Effect.acquireRelease(
   (created) => Effect.sync(() => created.remove()),
 );
 
-const mountApp = <R,>(app: AnyRoute<R>, root: HTMLElement, path: string) =>
+const mountApp = <R,>(app: Route.AnyRoute<R>, root: HTMLElement, path: string) =>
   Effect.gen(function* () {
     const location = yield* makeLocation(`${origin}${path}`);
     const logs: Array<string> = [];
@@ -564,7 +564,7 @@ const post2 = "tenant=t1,postId=2|tab=read";
 type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
-type RouteServices<T> = T extends AnyRoute<infer R> ? R : never;
+type RouteServices<T> = T extends Route.AnyRoute<infer R> ? R : never;
 
 const registered = Leave.onLeave(postSegment, (input) =>
   Effect.map(Effect.service(Policy), () => {

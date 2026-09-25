@@ -22,7 +22,7 @@ import {
   renderDocument,
   NavigationBehavior,
 } from "effect-frame/router";
-import type { AnyRoute, LocationService, NotFoundProps } from "effect-frame/router";
+import type { LocationService, NotFoundProps } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import { Context, Deferred, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
@@ -133,7 +133,7 @@ const twiceBranch = Route.layout(
 
 const modes: ReadonlyArray<{
   readonly mode: string;
-  readonly app: AnyRoute<ActorTransport | QueryCache>;
+  readonly app: Route.AnyRoute<ActorTransport | QueryCache>;
 }> = [
   { mode: "SSR", app: Route.ssr("seeded", counterBranch) },
   { mode: "Streamed", app: Route.streamed("seeded", counterBranch) },
@@ -194,7 +194,7 @@ const actorSeedsIn = (html: string): ReadonlyArray<Streaming.ActorSeed> => {
   return [...scripted, ...recorded];
 };
 
-const render = <R,>(routes: ReadonlyArray<AnyRoute<R>>, url: URL) =>
+const render = <R,>(routes: ReadonlyArray<Route.AnyRoute<R>>, url: URL) =>
   Effect.flatMap(
     renderDocument({ routes, notFound: NotFound, url, document: frame, closeWhen: Effect.never }),
     (outcome) => {

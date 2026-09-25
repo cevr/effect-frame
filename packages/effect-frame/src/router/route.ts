@@ -13,17 +13,13 @@
 export {
   PathRecord,
   SearchRecord,
-  SearchSchemaRejected,
   TemplateRejected,
   UrlValueRejected,
   matchPath,
-  mergeSearchRecord,
   parseTemplate,
-  printPath,
   printSearch,
   readSearch,
   search,
-  searchKeysOf,
   withDefault,
 } from "./codec.js";
 export type {
@@ -71,7 +67,6 @@ export type {
   Declaration,
   Declarations,
   DrivenAt,
-  LayoutProps,
   LayoutPropsOf,
   LeafOptions,
   ModeConstructor,
@@ -86,7 +81,6 @@ export type {
   RouteData,
   Segment,
   SegmentOptions,
-  SegmentProps,
   Tree,
   Values,
 } from "./branch.js";

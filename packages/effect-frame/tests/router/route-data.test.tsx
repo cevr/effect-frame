@@ -25,7 +25,6 @@ import {
   NavigationBehavior,
 } from "effect-frame/router";
 import type {
-  AnyRoute,
   DocumentOutcome,
   LocationService,
   NotFoundProps,
@@ -192,7 +191,7 @@ const clientApp = Route.client("client-app", branch);
 const postUrl = new URL(`${origin}/app/t1/posts/1`);
 
 const documentOf = <R,>(
-  routes: ReadonlyArray<AnyRoute<R>>,
+  routes: ReadonlyArray<Route.AnyRoute<R>>,
   url = postUrl,
   closeWhen: Effect.Effect<void> = Effect.never,
 ) => renderDocument({ routes, notFound: NotFound, url, document: frame, closeWhen });
@@ -208,7 +207,7 @@ const renderedOf = <R,>(outcome: DocumentOutcome<R>): Effect.Effect<RenderedDocu
 /** Render over one side, and fail the test on a redirect. */
 const renderIn = <R, S>(
   side: Context.Context<S>,
-  routes: ReadonlyArray<AnyRoute<R>>,
+  routes: ReadonlyArray<Route.AnyRoute<R>>,
   url = postUrl,
   closeWhen: Effect.Effect<void> = Effect.never,
 ) =>
@@ -217,7 +216,7 @@ const renderIn = <R, S>(
 /** The whole document of one render. */
 const htmlIn = <R, S>(
   side: Context.Context<S>,
-  routes: ReadonlyArray<AnyRoute<R>>,
+  routes: ReadonlyArray<Route.AnyRoute<R>>,
   url = postUrl,
 ) =>
   Effect.flatMap(renderIn(side, routes, url), (rendered) =>

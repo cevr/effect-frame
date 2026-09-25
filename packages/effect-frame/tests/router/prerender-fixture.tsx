@@ -1,7 +1,7 @@
 import { Streaming, runQuery, QueryCache } from "effect-frame/actor";
 import type { ActorTransport, QueryFailure, QueryState } from "effect-frame/actor";
 import { Route, renderDocument } from "effect-frame/router";
-import type { AnyRoute, NotFoundProps } from "effect-frame/router";
+import type { NotFoundProps } from "effect-frame/router";
 import * as Prerender from "effect-frame/router/prerender";
 import { View } from "effect-frame/view";
 import type { Context, Scope } from "effect";
@@ -98,7 +98,7 @@ export const pageDocument = (_page: Prerender.Page) =>
 export const clientBundle = 'console.log("client");';
 
 /** Build `routes` into `out` over `side`, with a generous limit. */
-export const buildInto = <Routes extends AnyRoute<unknown>, S>(
+export const buildInto = <Routes extends Route.AnyRoute<unknown>, S>(
   side: Context.Context<S>,
   routes: ReadonlyArray<Routes>,
   out: string,
@@ -195,7 +195,7 @@ export const linksIn = (html: string): ReadonlyArray<string> =>
  */
 export const routerFallback = (
   side: Context.Context<QueryCache | ActorTransport>,
-  routes: ReadonlyArray<AnyRoute<QueryCache | ActorTransport | Scope.Scope>>,
+  routes: ReadonlyArray<Route.AnyRoute<QueryCache | ActorTransport | Scope.Scope>>,
   calls: Array<string>,
 ): Prerender.WebHandler => {
   const handler: Prerender.WebHandler = (request) =>

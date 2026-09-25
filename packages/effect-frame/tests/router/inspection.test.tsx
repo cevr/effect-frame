@@ -3,7 +3,7 @@ import { registerDom } from "./dom-setup.js";
 registerDom();
 
 import { Location, Route, UrlState, mount, NavigationBehavior } from "effect-frame/router";
-import type { AnyRoute, LocationService } from "effect-frame/router";
+import type { LocationService } from "effect-frame/router";
 import type { Source } from "effect-frame/actor";
 import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
@@ -384,7 +384,7 @@ describe("Frame router inspection", () => {
           "counted",
           Route.leaf(baseSegment, () => Effect.succeed(<p>counted</p>)),
         );
-        const counted: AnyRoute<never> = {
+        const counted: Route.AnyRoute<never> = {
           ...base,
           enter: (url, navigation) => {
             enterCalls += 1;

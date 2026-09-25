@@ -26,7 +26,7 @@ import type {
 } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import { Location, Route, mount as mountRouter, NavigationBehavior } from "effect-frame/router";
-import type { AnyRoute, LocationService } from "effect-frame/router";
+import type { LocationService } from "effect-frame/router";
 import { Dom, Html, Await, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import * as Frame from "../../src/frame.js";
@@ -558,7 +558,7 @@ const makeRoot = Effect.acquireRelease(
 
 const origin = "http://frame.test";
 
-const mountApp = <R,>(app: AnyRoute<R>, root: HTMLElement, path: string) =>
+const mountApp = <R,>(app: Route.AnyRoute<R>, root: HTMLElement, path: string) =>
   Effect.gen(function* () {
     const location = yield* makeLocation(`${origin}${path}`);
     const page = yield* ViewTest.make({
@@ -633,7 +633,7 @@ const readyPage = (page: Effect.Success<ReturnType<typeof mountApp>>["page"], po
 type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
-type RouteServices<T> = T extends AnyRoute<infer R> ? R : never;
+type RouteServices<T> = T extends Route.AnyRoute<infer R> ? R : never;
 type PostData = Route.PropsOf<typeof postSegment>["data"];
 
 type TypedApp = ReturnType<typeof makeTree>;

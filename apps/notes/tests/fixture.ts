@@ -1,3 +1,4 @@
+import type { Route, LocationService } from "effect-frame/router";
 import { platformFetch } from "./dom-setup.js";
 
 import type {
@@ -10,7 +11,6 @@ import type {
 } from "effect-frame/actor/client";
 import { ActorTransport, HttpTransport, QueryCache } from "effect-frame/actor/client";
 import { Location, hydrate, mount, NavigationBehavior } from "effect-frame/router";
-import type { AnyRoute, LocationService } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import { Context, Deferred, Effect, Layer, Option, Predicate, Ref, Schema, Stream } from "effect";
 import { routes } from "../src/routes.js";
@@ -318,7 +318,7 @@ export const tappedHost = Effect.gen(function* () {
 export const mountApp = Effect.fn("test.mountApp")(function* <R>(options: {
   readonly transport: TransportService;
   readonly href: string;
-  readonly routes: ReadonlyArray<AnyRoute<R>>;
+  readonly routes: ReadonlyArray<Route.AnyRoute<R>>;
 }) {
   const root = yield* install('<body><main id="app"></main></body>');
   const client = yield* Layer.build(

@@ -4,7 +4,7 @@ registerDom();
 
 import type { Source } from "effect-frame/actor/client";
 import { Route } from "effect-frame/router";
-import type { PathRecord, Route as RouteTypes, SearchRecord } from "effect-frame/router";
+import type { Route as RouteTypes } from "effect-frame/router";
 import { View } from "effect-frame/view";
 import { Effect, Option, Predicate, Schema } from "effect";
 import { Arbitrary } from "effect/unstable/arbitrary";
@@ -84,8 +84,8 @@ const isRejected = Schema.is(Route.UrlValueRejected);
 
 /** Values as a URL carries them: path texts, and each search key's texts. */
 interface Encoded {
-  readonly params: PathRecord;
-  readonly search: SearchRecord;
+  readonly params: Route.PathRecord;
+  readonly search: Route.SearchRecord;
 }
 const loneSurrogate = /\p{Cs}/u;
 const segmentInDomain = (value: string) =>
@@ -104,7 +104,7 @@ const texts = (value: string | ReadonlyArray<string>): ReadonlyArray<string> => 
   return value;
 };
 
-/** An encoded search holds each key's values as a list (`SearchRecord`). */
+/** An encoded search holds each key's values as a list (`Route.SearchRecord`). */
 const inDomain = (encoded: Encoded): boolean =>
   Object.values(encoded.params).every((value) => texts(value).every(segmentInDomain)) &&
   Object.values(encoded.search).every((value) =>

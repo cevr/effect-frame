@@ -19,7 +19,17 @@ public model in `effect-frame/router` and `effect-frame/view`. Slice 5
 > A check answers `Route.redirect(segment, params, search)`, which prints
 > through the segment as `link` does; `Route.Redirect` carries the printed
 > `href`. A route that only redirects is `Route.redirecting(name, segment, to)`:
-> it has no view and no rendering mode.
+> it has no view, and its check answers before any mode is read.
+>
+> **Amended (same loop): one export path, and branded routes.** The route
+> types are exported only under `Route` (`Route.AnyRoute`,
+> `Route.PathRecord`, ...); the flat duplicates, `searchKeysOf`,
+> `mergeSearchRecord`, `printPath`, `SearchSchemaRejected`, `SegmentProps`,
+> `LayoutProps`, `isActive`, and the `UrlStateOptions`/`UrlStateState`/
+> `RouteLink` aliases are no longer public. A route value is branded with
+> its rendering mode, so only a mode constructor makes one, and `mount`
+> refuses two routes with one name or a route named `"not-found"`
+> (`Route.RouteNameRejected`).
 
 ## The model
 
@@ -202,16 +212,17 @@ written as a literal; only the constructors make them.
 ### Branches
 
 ```ts
-interface Route.SegmentProps<Params, Search, Data extends Declarations>
+// Not exported: a view names PropsOf or LayoutPropsOf, never these.
+interface SegmentProps<Params, Search, Data extends Declarations>
   extends RouteProps<Params, Search> {
   readonly data: RouteData<Data>;
 }
-interface Route.LayoutProps<Params, Search, Data extends Declarations, ChildR>
+interface LayoutProps<Params, Search, Data extends Declarations, ChildR>
   extends SegmentProps<Params, Search, Data> {
   readonly outlet: Effect.Effect<Node, never, ChildR>;
 }
 type Route.PropsOf<Seg>;             // SegmentProps of a segment
-type Route.LayoutPropsOf<Seg, ChildR>;
+type Route.LayoutPropsOf<Seg, ChildR>; // a layout view stays generic: <ChildR,>(props) => ...
 
 interface Route.Pending {
   readonly fallback: Node;
@@ -378,7 +389,7 @@ class View.LazyImportFailed // { message: string }
 | `Branch.leaf`, `Branch.layout`                                                       | `Route.leaf`, `Route.layout`                                     |
 | `Branch.route(name, tree)`                                                           | `Route.client(name, tree)`                                       |
 | `Branch.query`, `Branch.actor`                                                       | `Route.query`, `Route.actor`                                     |
-| `Branch.SegmentProps`, `LayoutProps`, `PropsOf`, `LayoutPropsOf`, `RouteData`        | the same names in `Route`                                        |
+| `Branch.PropsOf`, `LayoutPropsOf`, `RouteData`                                       | the same names in `Route`                                        |
 | `Branch.Pending`, `Recovery`, `Presentation`, `BranchRejected`                       | the same names in `Route`                                        |
 | `Check.target`, `Check.redirect`, `Check.Continue`                                   | `Route.target`, `Route.redirect`, `Route.Continue`               |
 | `Check.BeforeInput`, `Before`, `Verdict`, `Target`, `RouteFailure`, `NavigationKind` | the same names in `Route`                                        |

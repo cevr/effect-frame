@@ -17,7 +17,7 @@ import {
 import type { TransportService } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
 import { Location, Route, hydrate, renderDocument, NavigationBehavior } from "effect-frame/router";
-import type { AnyRoute, LocationService, NotFoundProps } from "effect-frame/router";
+import type { LocationService, NotFoundProps } from "effect-frame/router";
 import { For, View } from "effect-frame/view";
 import * as Driven from "effect-frame/view/driven";
 import { Context, Deferred, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
@@ -246,7 +246,7 @@ const wireLog = (): WireLog => ({ connects: [], sends: [], interrupted: [], hold
  * the driven leaf `Route.drivenAt` finds at the URL, as a server end would.
  */
 const wireOver = <R,>(
-  routes: ReadonlyArray<AnyRoute<R>>,
+  routes: ReadonlyArray<Route.AnyRoute<R>>,
   transport: TransportService,
   log: WireLog,
 ): Route.OpWireService => ({
@@ -282,7 +282,7 @@ const wireOver = <R,>(
 const hydratePage = (
   client: Context.Context<ActorTransport | QueryCache>,
   url: URL,
-  routes: ReadonlyArray<AnyRoute<ActorTransport | QueryCache | Location>>,
+  routes: ReadonlyArray<Route.AnyRoute<ActorTransport | QueryCache | Location>>,
   wire: Option.Option<Route.OpWireService>,
 ) =>
   Effect.gen(function* () {
@@ -305,7 +305,7 @@ const settle = Effect.gen(function* () {
   }
 });
 
-const firstChunk = <R,>(routes: ReadonlyArray<AnyRoute<R>>, url: URL) =>
+const firstChunk = <R,>(routes: ReadonlyArray<Route.AnyRoute<R>>, url: URL) =>
   Effect.flatMap(
     renderDocument({ routes, notFound: NotFound, url, document: frame, closeWhen: Effect.never }),
     (outcome) => {
@@ -316,7 +316,7 @@ const firstChunk = <R,>(routes: ReadonlyArray<AnyRoute<R>>, url: URL) =>
     },
   );
 
-const wholeDocument = <R,>(routes: ReadonlyArray<AnyRoute<R>>, url: URL) =>
+const wholeDocument = <R,>(routes: ReadonlyArray<Route.AnyRoute<R>>, url: URL) =>
   Effect.flatMap(
     renderDocument({ routes, notFound: NotFound, url, document: frame, closeWhen: Effect.never }),
     (outcome) => {

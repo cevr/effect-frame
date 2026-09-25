@@ -1,6 +1,6 @@
+import type { Route, Router } from "effect-frame/router";
 import * as Prerender from "effect-frame/router/prerender";
 import type { ActorTransport, QueryCache } from "effect-frame/actor/client";
-import type { AnyRoute, Router } from "effect-frame/router";
 import { BunRuntime } from "@effect/platform-bun";
 import { Effect } from "effect";
 import { blogDocument } from "./document.js";
@@ -41,7 +41,7 @@ export const bundleClient = Effect.gen(function* () {
   return parts.join("\n");
 });
 
-export interface BuildOptions<Routes extends AnyRoute<unknown>> {
+export interface BuildOptions<Routes extends Route.AnyRoute<unknown>> {
   readonly out: string;
   /** The routes the server mounts. The prerender ones are built. */
   readonly routes: ReadonlyArray<Routes>;
@@ -50,7 +50,7 @@ export interface BuildOptions<Routes extends AnyRoute<unknown>> {
 }
 
 /** Build the site into `out` over the services the server runs on. */
-export const buildSite = <Routes extends AnyRoute<unknown>>(options: BuildOptions<Routes>) =>
+export const buildSite = <Routes extends Route.AnyRoute<unknown>>(options: BuildOptions<Routes>) =>
   Prerender.build({
     routes: options.routes,
     notFound: NotFound,
@@ -61,7 +61,7 @@ export const buildSite = <Routes extends AnyRoute<unknown>>(options: BuildOption
   });
 
 /** A route the site mounts: what it reads is the host's and the query cache's. */
-export type SiteRoute = AnyRoute<QueryCache | ActorTransport | Router>;
+export type SiteRoute = Route.AnyRoute<QueryCache | ActorTransport | Router>;
 
 /** Build `routes` over `posts` into `out`, and say what it wrote. */
 export const main = (routes: ReadonlyArray<SiteRoute>, out: string) =>

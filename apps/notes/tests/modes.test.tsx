@@ -4,7 +4,7 @@ registerDom();
 
 import { ActorTransport, QueryCache } from "effect-frame/actor/client";
 import { Location, Route, hydrate, renderDocument, NavigationBehavior } from "effect-frame/router";
-import type { AnyRoute, RenderedDocument, Router } from "effect-frame/router";
+import type { RenderedDocument, Router } from "effect-frame/router";
 import { Context, Effect, Layer, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 import { inProcess } from "../src/notes.server.js";
@@ -25,7 +25,7 @@ const origin = "http://notes.test";
 const inbox = `${origin}/lists/inbox`;
 
 /** The list branch under one constructor, with what its views need. */
-type ListTree = AnyRoute<ActorTransport | QueryCache | Router>;
+type ListTree = Route.AnyRoute<ActorTransport | QueryCache | Router>;
 
 interface Mode {
   readonly name: string;

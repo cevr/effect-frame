@@ -71,7 +71,7 @@ domain is:
 - a search key or value is well-formed text.
 
 Inside the domain, `parse(href(params, search))` is the same values.
-Outside it, the printers (`href`, `hrefAt`, `hrefFrom`, `Route.printPath`,
+Outside it, the printers (`href`, `hrefAt`, `hrefFrom`,
 `Route.printSearch`, and every link and target that prints through them)
 die with `Route.UrlValueRejected { name, reason }`, where `reason` is
 `"empty segment"`, `"dot segment"`, or `"lone surrogate"`. They never write
@@ -179,7 +179,7 @@ Other`; the render does not follow it, and the browser's next request
     same values (see "The route domain"). The domain is not refined into
     each params Schema: the printers are the one place every href goes
     through, url-state included, and a Schema refinement would still need
-    them for `Route.printPath` and `Route.printSearch`.
+    them for the path printer and `Route.printSearch`.
 14. **Prerender is a fifth mode constructor (#86).** `Route.prerender`
     takes `inputs`, and a call without them does not compile. It registers
     `AwaitAll`, so a prerender URL with no built file renders through this

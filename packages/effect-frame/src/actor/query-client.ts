@@ -28,7 +28,16 @@ import type {
   QueryState,
   ResultOf,
 } from "./query.js";
-import { Failed, Loading, Ready, StreamEnded, canonicalize, keyOf, markStale } from "./query.js";
+import {
+  Failed,
+  Loading,
+  Ready,
+  StreamEnded,
+  canonicalize,
+  heldValue,
+  keyOf,
+  markStale,
+} from "./query.js";
 import type { Source } from "./source.js";
 import type { ActorSeed } from "./streaming.js";
 import type { Projection, Refreshed } from "./transport.js";
@@ -491,7 +500,14 @@ const makeSlot = Effect.fn("QueryCache.makeSlot")(function* (
         Predicate.isTagged(error, "Unauthorized") &&
         Option.contains(granted, ownership.principal());
       granted = Option.none();
-      const failed = write(() => Failed(error));
+      // A failed refresh keeps the value it replaces, unless the failure
+      // refuses the principal: a refused reader keeps nothing.
+      const failed = write((current) => {
+        if (Predicate.isTagged(error, "Unauthorized")) {
+          return Failed(error, Option.none());
+        }
+        return Failed(error, heldValue(current));
+      });
       if (revoked) {
         return Effect.andThen(failed, ownership.principalGone);
       }
@@ -995,7 +1011,7 @@ const makeDocument = (live: ReadonlySet<CacheSlot>): CacheDocument => {
           Array.from(table).filter(
             ([, seed]) => Option.isNone(seed.current) && Option.isNone(seed.held),
           ),
-          ([id]) => settle(id, Failed(StreamEnded.make({ key: id })), true),
+          ([id]) => settle(id, Failed(StreamEnded.make({ key: id }), Option.none()), true),
           { discard: true },
         ),
       ),
@@ -1069,6 +1085,13 @@ const decoderOf = <Q extends AnyQuery>(contract: Q) => {
   ): Effect.Effect<QueryState<ResultOf<Q>, QueryFailure>> => {
     if (state._tag === "Ready") {
       return Effect.map(Effect.orDie(decode(state.value)), (value) => Ready(value, state.stale));
+    }
+    if (state._tag === "Failed") {
+      const last = Option.match(state.last, {
+        onNone: () => Effect.succeed(Option.none<ResultOf<Q>>()),
+        onSome: (encoded) => Effect.map(Effect.orDie(decode(encoded)), Option.some),
+      });
+      return Effect.map(last, (held) => Failed(state.error, held));
     }
     return Effect.succeed(state);
   };

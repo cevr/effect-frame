@@ -611,63 +611,69 @@ describe("Query: the Dashboard shape", () => {
     }),
   );
 
-  withDashboard("a failed refresh answers RefreshFailed and does not undo the command", () =>
-    Effect.gen(function* () {
-      const revenue = yield* QueryCache.use((cache) => cache.open(Revenue, acme));
-      const funnel = yield* QueryCache.use((cache) => cache.open(Funnel, acme));
-      yield* Effect.all([settledEntry(revenue), settledEntry(funnel)]);
-      const book = yield* Actor.remote(OrderBook, acme);
-      const before = yield* book.state.get;
-      const mark = calls.length;
-      const commandId = id("order-funnel-down");
-      const message: PlaceOrder = { _tag: "PlaceOrder", sku: "gear", amount: 7 };
+  withDashboard(
+    "a failed refresh answers RefreshFailed, keeps the held value, and does not undo the command",
+    () =>
+      Effect.gen(function* () {
+        const revenue = yield* QueryCache.use((cache) => cache.open(Revenue, acme));
+        const funnel = yield* QueryCache.use((cache) => cache.open(Funnel, acme));
+        yield* Effect.all([settledEntry(revenue), settledEntry(funnel)]);
+        const held = yield* funnel.state.get;
+        const book = yield* Actor.remote(OrderBook, acme);
+        const before = yield* book.state.get;
+        const mark = calls.length;
+        const commandId = id("order-funnel-down");
+        const message: PlaceOrder = { _tag: "PlaceOrder", sku: "gear", amount: 7 };
 
-      funnelDown.current = true;
-      const applied = yield* Effect.ensuring(
-        book.call(message, { commandId, timeout: "1 second" }),
-        Effect.sync(() => {
-          funnelDown.current = false;
-        }),
-      );
+        funnelDown.current = true;
+        const applied = yield* Effect.ensuring(
+          book.call(message, { commandId, timeout: "1 second" }),
+          Effect.sync(() => {
+            funnelDown.current = false;
+          }),
+        );
 
-      // The command committed. Its reply carries the good refresh and the
-      // failed one side by side; the failure never became the command's.
-      expect(applied.state).toEqual({
-        count: before.count + 1,
-        revenue: before.revenue + 7,
-        lastSku: "gear",
-      });
-      const exchanges = calls.slice(mark);
-      expect(exchanges).toHaveLength(1);
-      const refreshed = exchanges[0]?.refreshed ?? [];
-      expect(refreshed.find((one) => keyOf(one.key) === keyOf(revenue.key))).toEqual({
-        _tag: "Refreshed",
-        key: revenue.key,
-        result: yield* Schema.encodeEffect(Revenue.result)({ total: before.revenue + 7 }),
-      });
-      expect(refreshed.find((one) => keyOf(one.key) === keyOf(funnel.key))).toMatchObject({
-        _tag: "RefreshFailed",
-        key: funnel.key,
-        error: { _tag: "QueryFailed", query: Funnel.name, detail: "funnel store is down" },
-      });
-      const failed = yield* funnel.state.get;
-      expect(failed._tag).toBe("Failed");
-      if (failed._tag === "Failed") {
-        expect(failed.error._tag).toBe("QueryFailed");
-      }
-      expect(yield* revenue.state.get).toEqual({
-        _tag: "Ready",
-        value: { total: before.revenue + 7 },
-        stale: false,
-      });
+        // The command committed. Its reply carries the good refresh and the
+        // failed one side by side; the failure never became the command's.
+        expect(applied.state).toEqual({
+          count: before.count + 1,
+          revenue: before.revenue + 7,
+          lastSku: "gear",
+        });
+        const exchanges = calls.slice(mark);
+        expect(exchanges).toHaveLength(1);
+        const refreshed = exchanges[0]?.refreshed ?? [];
+        expect(refreshed.find((one) => keyOf(one.key) === keyOf(revenue.key))).toEqual({
+          _tag: "Refreshed",
+          key: revenue.key,
+          result: yield* Schema.encodeEffect(Revenue.result)({ total: before.revenue + 7 }),
+        });
+        expect(refreshed.find((one) => keyOf(one.key) === keyOf(funnel.key))).toMatchObject({
+          _tag: "RefreshFailed",
+          key: funnel.key,
+          error: { _tag: "QueryFailed", query: Funnel.name, detail: "funnel store is down" },
+        });
+        // The refresh failed, and the entry keeps the value it held before.
+        const failed = yield* funnel.state.get;
+        expect(failed._tag).toBe("Failed");
+        expect(held._tag).toBe("Ready");
+        if (failed._tag === "Failed" && held._tag === "Ready") {
+          expect(failed.error._tag).toBe("QueryFailed");
+          expect(failed.last).toEqual(Option.some(held.value));
+        }
+        expect(yield* revenue.state.get).toEqual({
+          _tag: "Ready",
+          value: { total: before.revenue + 7 },
+          stale: false,
+        });
 
-      // The stored receipt still carries the commit: the same ID answers with
-      // it and applies nothing a second time.
-      const again = yield* book.send(message, { commandId });
-      const resettled = yield* again.settled;
-      expect(resettled).toMatchObject({ _tag: "Applied", revision: applied.revision });
-      expect(yield* book.state.get).toEqual(applied.state);
-    }),
+        // The stored receipt still carries the commit: the same ID answers with
+        // it and applies nothing a second time.
+        const again = yield* book.send(message, { commandId });
+        const resettled = yield* again.settled;
+        expect(resettled).toMatchObject({ _tag: "Applied", revision: applied.revision });
+        expect(yield* book.state.get).toEqual(applied.state);
+      }),
   );
 
   withDashboard("a command reference sends with no snapshot and no change stream", () =>

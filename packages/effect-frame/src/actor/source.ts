@@ -1,6 +1,6 @@
 import type { Duration, Equivalence, Scope } from "effect";
 import { Effect, Function, Option, Sink, Stream, SubscriptionRef } from "effect";
-import { Failed, Loading, Ready } from "./query.js";
+import { Failed, Loading, Ready, heldValue } from "./query.js";
 import type { QueryState } from "./query.js";
 
 /**
@@ -265,8 +265,8 @@ export const throttle = <A>(
  * Load the latest source value through an Effect that may fail, as a
  * `QueryState`. A new input interrupts the previous load. The source starts
  * Loading, carries a Ready value as stale while the next load runs, and
- * turns an expected failure into Failed. The loads run on a fiber in the
- * current scope.
+ * turns an expected failure into Failed, which keeps the value it held as
+ * `last`. The loads run on a fiber in the current scope.
  *
  * ```ts
  * const results = yield* Source.load(query, (q) => search(q));
@@ -283,14 +283,22 @@ export const load = <A, B, E, R>(
         Stream.fromEffect(
           Effect.gen(function* () {
             const previous = yield* SubscriptionRef.get(state);
+            const held = heldValue(previous);
             if (previous._tag === "Ready" && !previous.stale) {
               yield* SubscriptionRef.set(state, Ready(previous.value, true));
             } else if (previous._tag === "Failed") {
-              yield* SubscriptionRef.set(state, Loading());
+              // The value a failed load kept shows stale while the next runs.
+              yield* SubscriptionRef.set(
+                state,
+                Option.match(held, {
+                  onNone: () => Loading<B, E>(),
+                  onSome: (last) => Ready<B, E>(last, true),
+                }),
+              );
             }
             return yield* Effect.scoped(f(value)).pipe(
               Effect.map((result) => Ready<B, E>(result, false)),
-              Effect.catch((error) => Effect.succeed(Failed<B, E>(error))),
+              Effect.catch((error) => Effect.succeed(Failed<B, E>(error, held))),
             );
           }),
         ),

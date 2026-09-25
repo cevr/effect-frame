@@ -569,7 +569,17 @@ describe("readiness through context", () => {
                 {bound(value, (text) => text)}
               </h1>
             )}
-            failed={(error) => <p id="q-failed">{bound(error, (text) => text)}</p>}
+            failed={(error, last) => (
+              <div>
+                <p id="q-failed">{bound(error, (text) => text)}</p>
+                <p id="q-last">
+                  {bound(
+                    last,
+                    Option.getOrElse(() => "none"),
+                  )}
+                </p>
+              </div>
+            )}
           />,
         );
 
@@ -600,6 +610,8 @@ describe("readiness through context", () => {
       });
       expect(has(root, "#q-ready")).toBe(false);
       expect(textOf(root, "#q-failed")).toBe("boom");
+      // The failed refresh kept the value it replaced.
+      expect(textOf(root, "#q-last")).toBe("Alpha");
     }),
   );
 
@@ -1063,7 +1075,9 @@ describe("readiness on the server", () => {
 
   it.scoped("an already failed source renders Errored around Loading in one HTML frame", () =>
     Effect.gen(function* () {
-      const controlled = yield* ViewTest.fakeQuery(QueryState.Failed<string, string>("boom"));
+      const controlled = yield* ViewTest.fakeQuery(
+        QueryState.Failed<string, string>("boom", Option.none()),
+      );
       const Page = () =>
         View.errored({
           fallback: (error) => (

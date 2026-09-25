@@ -58,7 +58,10 @@ const cacheOf = (cells: ReadonlyMap<string, Held>): QueryCacheService => ({
               ),
             Failed: (failed) =>
               Effect.succeed(
-                QueryState.Failed<ResultOf<typeof contract>, QueryFailure>(failed.error),
+                QueryState.Failed<ResultOf<typeof contract>, QueryFailure>(
+                  failed.error,
+                  Option.none(),
+                ),
               ),
           }),
         );

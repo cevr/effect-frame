@@ -21,7 +21,7 @@ const hiddenState = (kind: Kind): State => {
   if (kind === "Loading") {
     return { _tag: "Loading" };
   }
-  return { _tag: "Failed", error: "error" };
+  return { _tag: "Failed", error: "error", last: Option.none() };
 };
 
 /** A boundary of either kind whose content waits on `state`. */

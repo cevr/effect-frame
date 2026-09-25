@@ -1,4 +1,4 @@
-import { Match, Schema } from "effect";
+import { Match, Option, Schema } from "effect";
 import { dual } from "effect/Function";
 import type { Pure } from "./contract.js";
 import { Unauthorized, Unreachable } from "./vocabulary.js";
@@ -184,7 +184,7 @@ export const keyOf = (key: QueryKey): string => `${key.query}@${key.version}/${k
  * at once. Readiness (`view/readiness.tsx`) reads this same union; the tags
  * and the field names are the coordination point and must not drift.
  */
-export type QueryState<A, E> = QueryLoading | QueryReady<A> | QueryFailedState<E>;
+export type QueryState<A, E> = QueryLoading | QueryReady<A> | QueryFailedState<A, E>;
 
 export interface QueryLoading {
   readonly _tag: "Loading";
@@ -196,9 +196,15 @@ export interface QueryReady<A> {
   readonly stale: boolean;
 }
 
-export interface QueryFailedState<E> {
+/**
+ * A failed read. `last` is the value the state held before the failure: a
+ * failed refresh keeps it, so a view can still draw it beside the error. It
+ * is `None` for a first read that failed, and after an `Unauthorized`.
+ */
+export interface QueryFailedState<A, E> {
   readonly _tag: "Failed";
   readonly error: E;
+  readonly last: Option.Option<A>;
 }
 
 export const isLoading = <A, E>(state: QueryState<A, E>): state is QueryLoading =>
@@ -207,7 +213,7 @@ export const isLoading = <A, E>(state: QueryState<A, E>): state is QueryLoading 
 export const isReady = <A, E>(state: QueryState<A, E>): state is QueryReady<A> =>
   state._tag === "Ready";
 
-export const isFailed = <A, E>(state: QueryState<A, E>): state is QueryFailedState<E> =>
+export const isFailed = <A, E>(state: QueryState<A, E>): state is QueryFailedState<A, E> =>
   state._tag === "Failed";
 
 /**
@@ -218,7 +224,7 @@ export const isFailed = <A, E>(state: QueryState<A, E>): state is QueryFailedSta
 export interface QueryStateCases<A, E, Out> {
   readonly Loading: (state: QueryLoading) => Out;
   readonly Ready: (state: QueryReady<A>) => Out;
-  readonly Failed: (state: QueryFailedState<E>) => Out;
+  readonly Failed: (state: QueryFailedState<A, E>) => Out;
 }
 
 /**
@@ -255,7 +261,22 @@ export const Ready = <A, E>(value: A, stale: boolean): QueryState<A, E> => ({
   stale,
 });
 
-export const Failed = <A, E>(error: E): QueryState<A, E> => ({ _tag: "Failed", error });
+export const Failed = <A, E>(error: E, last: Option.Option<A>): QueryState<A, E> => ({
+  _tag: "Failed",
+  error,
+  last,
+});
+
+/** The value a state holds: a Ready value, or the one a Failed state kept. */
+export const heldValue = <A, E>(state: QueryState<A, E>): Option.Option<A> => {
+  if (state._tag === "Ready") {
+    return Option.some(state.value);
+  }
+  if (state._tag === "Failed") {
+    return state.last;
+  }
+  return Option.none();
+};
 
 /** The constructors and guards under the type's own name. */
 export const QueryState = { Loading, Ready, Failed, isLoading, isReady, isFailed, match };

@@ -71,8 +71,8 @@ _Code_: the constructors above; the type `Route.RenderingMode` has the four docu
 _Avoid_: Strategy, target.
 
 **Query state**:
-What a client can observe about a query at one moment: loading, ready with a value that may be stale, or failed with an error. Never two of these at once.
-_Code_: `QueryState.Loading()`, `QueryState.Ready(value, stale)`, `QueryState.Failed(error)`, `QueryState.match`. `QueryState.Loading` is a state; `View.loading` is a readiness scope.
+What a client can observe about a query at one moment: loading, ready with a value that may be stale, or failed with an error and the last value it held. Never two of these at once: a failed refresh is failed, and keeps the value it replaced beside the error.
+_Code_: `QueryState.Loading()`, `QueryState.Ready(value, stale)`, `QueryState.Failed(error, last)`, `QueryState.match`. `QueryState.Loading` is a state; `View.loading` is a readiness scope.
 _Avoid_: isLoading, resource.
 
 **Server module**:

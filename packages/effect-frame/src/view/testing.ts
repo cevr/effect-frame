@@ -14,6 +14,8 @@ import {
   SubscriptionRef,
 } from "effect";
 import * as Frame from "../frame.js";
+// Relative: the held value of a state is the cache's rule, not a public name.
+import { heldValue } from "../actor/query.js";
 import type { Host, HostEvent, PropertyValue, StaticProps } from "./host.js";
 
 const DEFAULT_TIMEOUT: Duration.Input = "5 seconds";
@@ -625,6 +627,7 @@ export interface FakeQuery<Value, Error> {
   readonly resolve: (value: Value) => Effect.Effect<void>;
   /** Hold the current value and mark it stale, as a refetch does. */
   readonly refetch: Effect.Effect<void>;
+  /** Fail, keeping the value held before as `last`, as a failed refresh does. */
   readonly reject: (error: Error) => Effect.Effect<void>;
 }
 
@@ -657,6 +660,9 @@ export const fakeQuery: <Value, Error>(
         }),
       ),
     ),
-    reject: (error: Error) => SubscriptionRef.set(ref, QueryState.Failed<Value, Error>(error)),
+    reject: (error: Error) =>
+      SubscriptionRef.update(ref, (state) =>
+        QueryState.Failed<Value, Error>(error, heldValue(state)),
+      ),
   } satisfies FakeQuery<Value, Error>;
 });

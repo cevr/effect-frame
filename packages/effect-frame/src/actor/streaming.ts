@@ -173,7 +173,8 @@ const stateOf = (patch: Patch): Encoded =>
           Option.isSome(Option.fromNullishOr(patch.builtAt)) ||
             Option.isSome(Option.fromNullishOr(patch.stale)),
         ),
-      Error: (error) => Failed(error.error),
+      // A streamed failure is this client's first read: it holds no value.
+      Error: (error) => Failed(error.error, Option.none()),
     }),
   );
 

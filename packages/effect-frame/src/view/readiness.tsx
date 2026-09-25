@@ -533,7 +533,11 @@ export const errored = <E, R>(
 export interface AwaitProps<Value, Error> {
   readonly state: Source<QueryState<Value, Error>>;
   readonly loading: Node;
-  readonly failed: (error: Source<Error>) => Node;
+  /**
+   * `last` is the value held before the failure: `Some` after a failed
+   * refresh, `None` after a first read failed.
+   */
+  readonly failed: (error: Source<Error>, last: Source<Option.Option<Value>>) => Node;
   /** `stale` is `true` while a refresh is in flight and the value is the last one. */
   readonly ready: (value: Source<Value>, stale: Source<boolean>) => Node;
 }
@@ -566,7 +570,11 @@ export const Await = <Value, Error>(props: AwaitProps<Value, Error>): Node => (
           Source.select(found, (state) => state.value),
           Source.select(found, (state) => state.stale),
         ),
-      Failed: (found) => props.failed(Source.select(found, (state) => state.error)),
+      Failed: (found) =>
+        props.failed(
+          Source.select(found, (state) => state.error),
+          Source.select(found, (state) => state.last),
+        ),
     }}
   />
 );

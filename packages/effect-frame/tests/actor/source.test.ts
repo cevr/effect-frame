@@ -1,4 +1,4 @@
-import { Deferred, Effect, Exit, Fiber, Ref, Scope, Stream, SubscriptionRef } from "effect";
+import { Deferred, Effect, Exit, Fiber, Option, Ref, Scope, Stream, SubscriptionRef } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it, yieldFibers } from "effect-bun-test";
 import { Actor, QueryState, Source, Behavior, Value } from "effect-frame/actor/client";
@@ -175,7 +175,12 @@ describe("Effect-derived sources", () => {
 
       yield* cell.send(Value.Set(3));
       yield* yieldFibers;
-      expect(yield* derived.get).toEqual(QueryState.Failed("invalid"));
+      // The failed load keeps the value it replaced.
+      expect(yield* derived.get).toEqual({
+        _tag: "Failed",
+        error: "invalid",
+        last: Option.some("two"),
+      });
 
       expect(yield* Ref.get(calls)).toEqual([0, 1, 2, 3]);
       expect(Array.from(yield* Fiber.join(observed))).toEqual([
@@ -184,7 +189,7 @@ describe("Effect-derived sources", () => {
         QueryState.Ready("zero", true),
         QueryState.Ready("two", false),
         QueryState.Ready("two", true),
-        QueryState.Failed("invalid"),
+        QueryState.Failed("invalid", Option.some("two")),
       ] satisfies ReadonlyArray<QueryStateValue<string, string>>);
     }),
   );

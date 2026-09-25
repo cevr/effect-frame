@@ -19,6 +19,8 @@ export interface ForProps<Item> {
   readonly keyBy: (item: Item) => string;
   /** Each row receives a read-only source for its own keyed item. */
   readonly children: (item: Source<Item>) => Node;
+  /** Drawn while the list is empty, as `Show`'s `fallback` is while it hides. */
+  readonly fallback?: Node;
 }
 
 export const For = <Item>(props: ForProps<Item>): ForNode<Item> => ({
@@ -26,6 +28,7 @@ export const For = <Item>(props: ForProps<Item>): ForNode<Item> => ({
   each: props.each,
   keyBy: props.keyBy,
   setup: (item) => Effect.succeed(props.children(item)),
+  fallback: Option.getOrElse(Option.fromNullishOr(props.fallback), () => Empty),
 });
 
 export interface ListOptions<Item, R> {
@@ -61,7 +64,7 @@ export const list = <Item, R>(
     const setup = (item: Source<Item>) => Effect.provide(options.row(item), context);
     // oxlint-disable-next-line effect/noAs -- the row setup is the For node's setup with its context provided.
     const rows = setup as ForNode<Item>["setup"];
-    return { _tag: "For", each: options.each, keyBy: options.keyBy, setup: rows };
+    return { _tag: "For", each: options.each, keyBy: options.keyBy, setup: rows, fallback: Empty };
   });
 
 /**

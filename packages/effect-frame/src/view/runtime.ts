@@ -34,6 +34,7 @@ import type {
   RetainedNode,
   ShowNode,
 } from "./jsx-runtime.js";
+import { Empty } from "./jsx-runtime.js";
 import { repopulate } from "./form.js";
 import { PortalTargetRefused } from "./portal-target.js";
 import type { PortalTarget } from "./portal-target.js";
@@ -1619,7 +1620,22 @@ interface Row<HostNode, Item> {
 const planFor = <HostNode, Item>(
   renderer: Renderer<HostNode>,
   node: ForNode<Item>,
-): Build<HostNode> => buildFor(renderer, node, renderer.tracker.track(node.each));
+): Build<HostNode> => {
+  const rows = buildFor(renderer, node, renderer.tracker.track(node.each));
+  if (node.fallback._tag === "Empty") {
+    return rows;
+  }
+  // The fallback is a branch shown while the list is empty, before the
+  // rows: while it shows there are none, so the order never shows.
+  const empty: ShowNode<ReadonlyArray<Item>> = {
+    _tag: "Show",
+    when: node.each,
+    test: (items) => items.length === 0,
+    render: () => node.fallback,
+    fallback: Empty,
+  };
+  return sequence(renderer.host, [planShow(renderer, empty), rows]);
+};
 
 const buildFor =
   <HostNode, Item>(

@@ -56,6 +56,8 @@ export interface ForNode<Item = unknown> {
   // `ForNode<unknown>`, which is all the tree needs to know.
   keyBy(item: Item): string;
   setup(item: Source<Item>): Effect.Effect<Node, never, Scope.Scope>;
+  /** Drawn while the list has no rows. `Empty` draws nothing. */
+  readonly fallback: Node;
 }
 
 /**

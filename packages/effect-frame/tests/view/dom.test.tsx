@@ -256,6 +256,16 @@ interface PortalProps {
   readonly into: Element;
 }
 
+/** A keyed list that draws its fallback while it has no rows. */
+const TaskListOrNone = (props: ListProps) =>
+  Effect.succeed(
+    <ul>
+      <For each={props.tasks} keyBy={(task) => task.id} fallback={<li id="none">no tasks</li>}>
+        {(task) => <li>{View.bind(task, (value) => value.title)}</li>}
+      </For>
+    </ul>,
+  );
+
 /** A dialog drawn under another node, owned by the branch that opened it. */
 const WithPortal = (props: PortalProps) =>
   Effect.succeed(
@@ -304,6 +314,27 @@ describe("browser view", () => {
         },
       );
       expect(textOf(root, "#count")).toBe("2");
+    }),
+  );
+
+  it.scoped("a keyed list draws its fallback only while it is empty", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const tasks = yield* Actor.local(Behavior.value<ReadonlyArray<Task>>([]));
+      const page = yield* pageMount(root, TaskListOrNone, { tasks: tasks.state });
+      expect(titles(root)).toEqual(["no tasks"]);
+
+      yield* page.act(setTasks(tasks, [{ id: "a", title: "alpha" }]), {
+        label: "a row replaces the fallback",
+        until: (actualRoot) => titlesAt(actualRoot).join(",") === "alpha",
+      });
+      expect(titles(root)).toEqual(["alpha"]);
+
+      yield* page.act(setTasks(tasks, []), {
+        label: "the fallback returns with the last row gone",
+        until: (actualRoot) => titlesAt(actualRoot).join(",") === "no tasks",
+      });
+      expect(titles(root)).toEqual(["no tasks"]);
     }),
   );
 

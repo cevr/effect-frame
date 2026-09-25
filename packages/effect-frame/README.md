@@ -507,7 +507,7 @@ Bun.serve({
 | `View.attempt(setup, fallback)`           | yielded Effect | one setup's typed failure, handled in place                                  |
 | `View.lazy(load)`                         | a view         | a view imported on first use                                                 |
 | `View.attach(run)`, `Dom.attach(run)`     | `attach` prop  | a behaviour on the host node, for the element's lifetime                     |
-| `<For each keyBy>`                        | tag            | a keyed list of plain rows                                                   |
+| `<For each keyBy fallback?>`              | tag            | a keyed list of plain rows, and `fallback` while it has none                 |
 | `<Show when>`                             | tag            | a branch while a boolean source is true                                      |
 | `<Match on cases>`                        | tag            | one branch per tag of a union source                                         |
 | `<Await state loading failed ready>`      | tag            | all three states of a query in one place                                     |

@@ -30,16 +30,11 @@ export const Dashboard = Route.streamed(
   ),
 );
 
-const home = Route.segment("home", {
-  path: "/",
-  params: Schema.Struct({}),
-  before: () => Effect.succeed(Route.redirect(Route.target(overview, { tenant: demoTenant }, {}))),
-});
+const home = Route.segment("home", { path: "/", params: Schema.Struct({}) });
 
 /** `/`: a redirect to the demo tenant, answered before anything draws. */
-export const Home = Route.ssr(
-  "home",
-  Route.leaf(home, () => Effect.succeed(<p id="moved">moved to the dashboard</p>)),
+export const Home = Route.redirecting("home", home, () =>
+  Effect.succeed(Route.redirect(overview, { tenant: demoTenant }, {})),
 );
 
 export const routes = [Home, Dashboard];

@@ -1,46 +1,21 @@
 import type { TransportReadError, Unauthorized } from "effect-frame/actor";
 import { Option, Schema } from "effect";
 import type { Effect, Scope } from "effect";
-import type { AnyRoute } from "./codec.js";
+import type { AnyRoute, Linkable } from "./codec.js";
 import type { Router } from "./router.js";
 import type { Runtime as UrlStateRuntime } from "./url-state-runtime.js";
 
 /**
- * Route checks, typed targets, and the typed route failure
+ * Route checks, redirects, and the typed route failure
  * (`docs/design/route-checks.md`). The `Route` namespace exports the check
  * vocabulary; the registry (`register`, `read`, `Checker`) and
  * `redirectLimit` stay internal. See `docs/design/route-public.md`.
  *
  * A check describes one candidate transition. It runs before history,
  * declarations, and setup, so its answer is a value, not a side effect:
- * `Continue` or `Redirect` to a typed target. The router owns the traversal
+ * `Continue`, or `Redirect` to a segment. The router owns the traversal
  * because a redirect can leave the route that asked for it.
  */
-
-// ---------------------------------------------------------------------------
-// Targets
-// ---------------------------------------------------------------------------
-
-/** A printed destination that a typed constructor produced. */
-export interface Target {
-  readonly _tag: "Target";
-  readonly href: string;
-}
-
-/** Anything that prints its own params and search: a route or a segment. */
-export interface Printable<Params, Search> {
-  readonly href: (params: Params, search: Search) => string;
-}
-
-/**
- * A typed target. `NoInfer` keeps the destination's types in charge, so a
- * wrong param is an error here rather than a widened type.
- */
-export const target = <Params, Search>(
-  to: Printable<Params, Search>,
-  params: NoInfer<Params>,
-  search: NoInfer<Search>,
-): Target => ({ _tag: "Target", href: to.href(params, search) });
 
 // ---------------------------------------------------------------------------
 // Verdicts
@@ -50,9 +25,10 @@ export interface Continue {
   readonly _tag: "Continue";
 }
 
+/** Move to `href`, which a segment printed. See `redirect`. */
 export interface Redirect {
   readonly _tag: "Redirect";
-  readonly target: Target;
+  readonly href: string;
 }
 
 /** What a check answers. A union, so no check can answer both or neither. */
@@ -60,7 +36,31 @@ export type Verdict = Continue | Redirect;
 
 export const Continue: Continue = { _tag: "Continue" };
 
-export const redirect = (to: Target): Redirect => ({ _tag: "Redirect", target: to });
+/**
+ * Answer a check with a move to a segment, printed with its own codecs, as
+ * `link` takes a destination. `NoInfer` keeps the destination's types in
+ * charge, so a wrong param is an error here rather than a widened type.
+ *
+ * @example
+ * ```ts
+ * const tenant = Route.segment("tenant", {
+ *   path: "/app/:tenant",
+ *   params: Schema.Struct({ tenant: Schema.String }),
+ *   before: ({ url }) =>
+ *     Effect.map(isSignedIn, (signedIn) => {
+ *       if (signedIn) {
+ *         return Route.Continue;
+ *       }
+ *       return Route.redirect(login, {}, { next: url.pathname });
+ *     }),
+ * });
+ * ```
+ */
+export const redirect = <Params, Search>(
+  to: Linkable<Params, Search>,
+  params: NoInfer<Params>,
+  search: NoInfer<Search>,
+): Redirect => ({ _tag: "Redirect", href: to.href(params, search) });
 
 /** How the document is moving. The same kinds the router publishes. */
 export type NavigationKind = "initial" | "push" | "replace" | "pop";

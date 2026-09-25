@@ -515,11 +515,13 @@ export interface AnyRoute<R> {
 }
 
 /**
- * A typed link destination: a segment. It prints against the current URL,
+ * A typed destination of a link or a redirect: a segment. It prints, prints against the current URL,
  * reads the current search for a functional update, and says whether the
  * document is on it.
  */
 export interface Linkable<Params, Search> {
+  /** Prints. Total: a value of the Schema's own type always encodes. */
+  readonly href: (params: Params, search: Search) => string;
   /** Prints after carrying retained keys from the current URL. */
   readonly hrefAt: (current: URL, params: Params, search: Search) => string;
   /** The current URL's decoded search, or the codec's empty value. */

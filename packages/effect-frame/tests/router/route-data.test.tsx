@@ -478,7 +478,7 @@ const guardedBranch = (runs: Array<string>, name: string) =>
       before: () =>
         Effect.sync(() => {
           runs.push(name);
-          return Route.redirect(Route.target(loginSegment, {}, {}));
+          return Route.redirect(loginSegment, {}, {});
         }),
     }),
     (props) => Effect.succeed(<p id="guarded">{View.bind(props.data.label.state, labelOf)}</p>),
@@ -557,6 +557,34 @@ describe("a server request settles before its mode is chosen", () => {
         expect(outcome).toEqual({ _tag: "Redirect", location: new URL(`${origin}/login`) });
         expect(runs).toEqual(["guarded"]);
         // The source's data was never read, and the destination was not rendered here.
+        expect(control.calls).toEqual([]);
+      }),
+  );
+
+  it.scopedLive(
+    "a redirecting route answers Redirect with its target, and has no view to draw",
+    () =>
+      Effect.gen(function* () {
+        const control = makeControl({});
+        const server = yield* sideOf(control);
+        const asked: Array<string> = [];
+        const moved = Route.redirecting(
+          "moved",
+          Route.segment("moved", {
+            path: "/moved/:to",
+            params: Schema.Struct({ to: Schema.String }),
+          }),
+          ({ params, kind }) =>
+            Effect.sync(() => {
+              asked.push(`${params.to}:${kind}`);
+              return Route.redirect(loginSegment, {}, {});
+            }),
+        );
+        const outcome = yield* documentOf([moved, login], new URL(`${origin}/moved/x`)).pipe(
+          Effect.provideContext(server),
+        );
+        expect(outcome).toEqual({ _tag: "Redirect", location: new URL(`${origin}/login`) });
+        expect(asked).toEqual(["x:initial"]);
         expect(control.calls).toEqual([]);
       }),
   );

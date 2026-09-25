@@ -58,7 +58,15 @@ import { heldOf, holding } from "../actor/read-ahead.js";
 import { attempt } from "../view/attempt.js";
 import type { Definition as LazyDefinition, Ticket } from "../view/lazy.js";
 import { definitionOf as lazyDefinitionOf, withTicket } from "../view/lazy.js";
-import type { Before, Checker, NavigationKind, RouteFailure, Verdict } from "./check.js";
+import type {
+  Before,
+  BeforeInput,
+  Checker,
+  NavigationKind,
+  Redirect,
+  RouteFailure,
+  Verdict,
+} from "./check.js";
 import { Continue, register as registerChecks } from "./check.js";
 import type {
   AnyRoute,
@@ -2843,6 +2851,56 @@ export const streamed: ModeConstructor = modeConstructor("Streamed");
  * then writes one document and one seed.
  */
 export const awaitAll: ModeConstructor = modeConstructor("AwaitAll");
+
+/**
+ * A route that only redirects: its segment's URLs always move to `to`'s
+ * answer, before anything draws, on the server (a `303`) and in the
+ * browser alike. It has no view and no rendering mode, because it never
+ * renders. The segment's own `before` runs first, so a check that redirects
+ * elsewhere still wins. A segment that declares data is refused by the
+ * type: nothing would read it.
+ *
+ * @example
+ * ```ts
+ * const home = Route.segment("home", { path: "/", params: Schema.Struct({}) });
+ * export const Home = Route.redirecting("home", home, () =>
+ *   Effect.succeed(Route.redirect(lists, {}, {})),
+ * );
+ * ```
+ */
+export const redirecting = <const Name extends string, Params, Search, CheckR = never, R = never>(
+  name: Name,
+  seg: Segment<string, Params, Search, NoDeclarations, NoDeclarations, CheckR, true>,
+  to: (next: BeforeInput<Params, Search>) => Effect.Effect<Redirect, never, R>,
+): Tree<Name, CheckR | R> => {
+  const branch = leaf(seg, () =>
+    Effect.die(`Route.redirecting("${name}") drew its view; its check always redirects first`),
+  );
+  const runtime = runtimeOf(branch);
+  const segRuntime = segmentRuntimeOf(seg);
+  // Its mode is never read: a document settles the checks before it reads
+  // one, and this route's checks never continue.
+  const tree = mountTree<Name, never, CheckR | R, object>(name, branch, {}, "SSR");
+  const checks: Checker<CheckR | R> = (url, kind) =>
+    Option.match(matchUrl(runtime, url), {
+      onNone: () => Effect.succeed<Verdict>(Continue),
+      onSome: (matched) =>
+        Effect.flatMap(matched.check(url, kind), (verdict): Effect.Effect<Verdict, never, R> => {
+          if (verdict._tag === "Redirect") {
+            return Effect.succeed(verdict);
+          }
+          return Option.match(
+            segRuntime.decode(matched.outline.record, readSearch(url.searchParams)),
+            {
+              onNone: () => Effect.succeed<Verdict>(Continue),
+              onSome: (values) => to({ ...values, url, kind }),
+            },
+          );
+        }),
+    });
+  registerChecks(tree, checks);
+  return tree;
+};
 
 /**
  * A driven leaf's view and props at one URL, and the actor that drives it.

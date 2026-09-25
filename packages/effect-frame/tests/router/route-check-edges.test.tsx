@@ -49,7 +49,12 @@ interface Gate {
  * A denied id goes to sign-in.
  */
 /** The gated URL that points at itself. */
-const selfPath: Route.Printable<{}, {}> = { href: () => "/g/self" };
+const selfPath = Route.segment("self", { path: "/g/self", params: Schema.Struct({}) });
+
+const gateSegment = Route.segment("gate-target", {
+  path: "/g/:id",
+  params: Schema.Struct({ id: Schema.String }),
+});
 
 const makeApp = (gate: Gate) => {
   const segment = Route.segment("gate", {
@@ -62,10 +67,10 @@ const makeApp = (gate: Gate) => {
           yield* (yield* Router).navigate("/home");
         }
         if (params.id === "self") {
-          return Route.redirect(Route.target(selfPath, {}, {}));
+          return Route.redirect(selfPath, {}, {});
         }
         if (gate.denied.has(params.id)) {
-          return Route.redirect(Route.target(LoginSegment, {}, {}));
+          return Route.redirect(LoginSegment, {}, {});
         }
         return Route.Continue;
       }),
@@ -75,6 +80,13 @@ const makeApp = (gate: Gate) => {
     Route.leaf(segment, () => Effect.succeed(<p id="gate">gate</p>)),
   );
 };
+
+/** `/old/:id` only redirects: to the gated page of the same id. */
+const Old = Route.redirecting(
+  "old",
+  Route.segment("old", { path: "/old/:id", params: Schema.Struct({ id: Schema.String }) }),
+  ({ params }) => Effect.succeed(Route.redirect(gateSegment, { id: params.id }, {})),
+);
 
 const mountApp = (gate: Gate, initial: string) =>
   Effect.gen(function* () {
@@ -97,7 +109,7 @@ const mountApp = (gate: Gate, initial: string) =>
       root,
       setup: (host, mountRoot) =>
         mountRouter({
-          routes: [makeApp(gate), Login, Home],
+          routes: [makeApp(gate), Login, Home, Old],
           notFound: NotFound,
           host,
           root: mountRoot,
@@ -116,7 +128,7 @@ const mountApp = (gate: Gate, initial: string) =>
         Ref.set(current, new URL(`${origin}${path}`)),
         Queue.offer(pops, new URL(`${origin}${path}`)),
       );
-    return { page, router: page.setup, receipts: Receipt.of(page.setup), history, pop };
+    return { page, root, router: page.setup, receipts: Receipt.of(page.setup), history, pop };
   });
 
 const makeGate = (denied: ReadonlyArray<string> = []): Gate => ({
@@ -178,6 +190,24 @@ describe("route check edges", () => {
       expect(receipt).toMatchObject({ _tag: "Unchanged" });
       expect(receipt.url.pathname).toBe("/login");
       expect(history).toEqual([]);
+    }),
+  );
+
+  it.scoped("a redirecting route moves to its target, and the target's check runs", () =>
+    Effect.gen(function* () {
+      const gate = makeGate(["denied"]);
+      const { root, receipts, history } = yield* mountApp(gate, "/login");
+
+      const receipt = yield* receipts.navigate("/old/ok");
+      expect(receipt).toMatchObject({ _tag: "Committed" });
+      expect(receipt.url.pathname).toBe("/g/ok");
+      expect(history).toEqual(["push /g/ok"]);
+      expect(Option.isSome(Option.fromNullishOr(root.querySelector("#gate")))).toBe(true);
+
+      // The target's own check still runs, and may redirect further.
+      yield* receipts.navigate("/old/denied");
+      expect(history).toEqual(["push /g/ok", "push /login"]);
+      expect(gate.asked).toEqual(["ok:push", "denied:push"]);
     }),
   );
 

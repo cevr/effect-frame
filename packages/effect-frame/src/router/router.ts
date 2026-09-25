@@ -498,7 +498,7 @@ export const mount: <R, HostNode, N = R>(
       if (verdict._tag === "Continue") {
         return { url: candidate, target };
       }
-      const next = new URL(verdict.target.href, candidate);
+      const next = new URL(verdict.href, candidate);
       const visited = [...chain, next.href];
       if (chain.includes(next.href)) {
         return yield* Effect.die(RedirectCycle.make({ chain: visited, reason: "repeated" }));
@@ -1135,7 +1135,7 @@ export const settleRequest = <R>(
     if (verdict._tag === "Continue") {
       return { _tag: "Continue", url, route };
     }
-    const location = new URL(verdict.target.href, url);
+    const location = new URL(verdict.href, url);
     if (location.href === url.href) {
       return yield* Effect.die(
         RedirectCycle.make({ chain: [url.href, location.href], reason: "repeated" }),

@@ -149,7 +149,7 @@ const tenant = Route.segment("tenant", {
       if (yield* isSignedIn(params.tenant)) {
         return Route.Continue;
       }
-      return Route.redirect(Route.target(login, {}, { next: `${url.pathname}${url.search}` }));
+      return Route.redirect(login, {}, { next: `${url.pathname}${url.search}` });
     }),
 });
 
@@ -192,7 +192,9 @@ const program = Effect.gen(function* () {
 ```
 
 - `before` runs parent first, before anything commits. It returns
-  `Route.Continue` or `Route.redirect(Route.target(...))`.
+  `Route.Continue` or `Route.redirect(segment, params, search)`.
+- A URL that only moves elsewhere is `Route.redirecting(name, segment, to)`.
+  It has no view and no mode: `to` answers the `Route.redirect`.
 - A view that can fail, and every `View.lazy` view, needs an `errored`
   handler. It receives a `Route.RouteFailure`.
 - Every segment view gets `params`, `search`, `data`, `href`,

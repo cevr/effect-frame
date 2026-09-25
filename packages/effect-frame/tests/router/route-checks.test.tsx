@@ -358,7 +358,7 @@ const checkTenant = (next: Route.BeforeInput<{ readonly tenant: string }, {}>) =
       yield* Deferred.await(held.value.gate);
     }
     if ((yield* Ref.get(access.denied)).has(next.params.tenant)) {
-      return Route.redirect(Route.target(LoginRouteSegment, {}, { next: next.url.pathname }));
+      return Route.redirect(LoginRouteSegment, {}, { next: next.url.pathname });
     }
     return Route.Continue;
   });
@@ -395,8 +395,7 @@ function checkPost(
   return Effect.gen(function* () {
     yield* record({ segment: "post", ...next, url: next.url.href });
     const { tenant, postId } = next.params;
-    const to = (id: string) =>
-      Route.redirect(Route.target(postSegment, { tenant, postId: id }, { tab: "read" }));
+    const to = (id: string) => Route.redirect(postSegment, { tenant, postId: id }, { tab: "read" });
     if (postId === "loop-a") {
       return to("loop-b");
     }
@@ -710,15 +709,15 @@ const typedLeafServices: Equals<
   Source<RemoteActorRef<typeof Draft>>
 > = true;
 /** A segment prints its whole path with its own codecs. */
-const printed = Route.target(postSegment, { tenant: "t1", postId: "7" }, { tab: "edit" });
+const printed = Route.redirect(postSegment, { tenant: "t1", postId: "7" }, { tab: "edit" });
 
 // @effect-diagnostics missingEffectError:off
-// Thunks: a wrong target would fail to print if it ran.
-// @ts-expect-error A target's params are the destination's params.
-const missingParam = () => Route.target(postSegment, { tenant: "t1" }, { tab: "read" });
+// Thunks: a wrong redirect would fail to print if it ran.
+// @ts-expect-error A redirect's params are the destination's params.
+const missingParam = () => Route.redirect(postSegment, { tenant: "t1" }, { tab: "read" });
 
-// @ts-expect-error A flat route's target is checked against its own search type.
-const wrongSearch = () => Route.target(LoginRouteSegment, {}, { next: 1 });
+// @ts-expect-error A redirect is checked against its destination's search type.
+const wrongSearch = () => Route.redirect(LoginRouteSegment, {}, { next: 1 });
 
 // @ts-expect-error A view that can fail with E needs an errored handler.
 const unhandled = Route.leaf(postSegment, failingView);

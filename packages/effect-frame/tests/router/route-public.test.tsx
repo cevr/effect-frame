@@ -123,7 +123,7 @@ const tenant = Route.segment("tenant", {
       const access = yield* Access;
       yield* logEvent(`check:tenant:${params.tenant}`);
       if ((yield* Ref.get(access.denied)).has(params.tenant)) {
-        return Route.redirect(Route.target(login, {}, { next: url.pathname }));
+        return Route.redirect(login, {}, { next: url.pathname });
       }
       return Route.Continue;
     }),
@@ -419,15 +419,15 @@ const lazyProps: Equals<Parameters<typeof LazyPost>[0], Route.PropsOf<typeof pos
 /** A one-page route is a tree of one leaf. */
 const oneLeafExact: Equals<typeof LoginRoute, Route.Tree<"login", never>> = true;
 
-// 2. Invalid targets.
-const segmentTarget = Route.target(post, { tenant: "t1", postId: "7" }, { mode: "edit" });
-const loginTarget = Route.target(login, {}, { next: "/" });
-// @ts-expect-error A target needs every param of the destination.
-const missingParam = () => Route.target(post, { tenant: "t1" }, { mode: "read" });
+// 2. Invalid redirects.
+const segmentTarget = Route.redirect(post, { tenant: "t1", postId: "7" }, { mode: "edit" });
+const loginTarget = Route.redirect(login, {}, { next: "/" });
+// @ts-expect-error A redirect needs every param of the destination.
+const missingParam = () => Route.redirect(post, { tenant: "t1" }, { mode: "read" });
 // @ts-expect-error A param has the destination's decoded type.
-const wrongParam = () => Route.target(post, { tenant: "t1", postId: 7 }, { mode: "read" });
+const wrongParam = () => Route.redirect(post, { tenant: "t1", postId: 7 }, { mode: "read" });
 // @ts-expect-error A search field the destination does not decode.
-const wrongSearch = () => Route.target(login, {}, { back: "/" });
+const wrongSearch = () => Route.redirect(login, {}, { back: "/" });
 
 // 3. Lazy module props.
 const OtherView = (props: { readonly other: string }) => Effect.succeed(<p>{props.other}</p>);

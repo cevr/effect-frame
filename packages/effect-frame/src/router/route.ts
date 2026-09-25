@@ -56,6 +56,7 @@ export {
   leaf,
   prerender,
   query,
+  redirecting,
   segment,
   ssr,
   streamed,
@@ -90,16 +91,14 @@ export type {
   Values,
 } from "./branch.js";
 
-// Checks, typed targets, and route failures.
-export { CheckNavigation, Continue, RedirectCycle, redirect, target } from "./check.js";
+// Checks, redirects, and route failures.
+export { CheckNavigation, Continue, RedirectCycle, redirect } from "./check.js";
 export type {
   Before,
   BeforeInput,
   NavigationKind,
-  Printable,
   Redirect,
   RouteFailure,
-  Target,
   Verdict,
 } from "./check.js";
 

@@ -236,7 +236,7 @@ const checkTenant = (next: Route.BeforeInput<{ readonly tenant: string }, {}>) =
     const access = yield* Access;
     yield* logEvent(access.events, `check:tenant:${next.url.pathname}`);
     if ((yield* Ref.get(access.denied)).has(next.params.tenant)) {
-      return Route.redirect(Route.target(LoginRouteSegment, {}, { next: next.url.pathname }));
+      return Route.redirect(LoginRouteSegment, {}, { next: next.url.pathname });
     }
     return Route.Continue;
   });

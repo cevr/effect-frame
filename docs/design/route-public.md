@@ -14,6 +14,12 @@ public model in `effect-frame/router` and `effect-frame/view`. Slice 5
 > and it links, targets, and prints through its segment. The sections below
 > that describe the flat form record why it existed; they no longer
 > describe the surface.
+>
+> **Amended (same loop): `Route.target` and `Route.Printable` are deleted.**
+> A check answers `Route.redirect(segment, params, search)`, which prints
+> through the segment as `link` does; `Route.Redirect` carries the printed
+> `href`. A route that only redirects is `Route.redirecting(name, segment, to)`:
+> it has no view and no rendering mode.
 
 ## The model
 

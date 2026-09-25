@@ -42,10 +42,9 @@ export const Scratch = Route.client(
   Route.layout(shell, [Route.leaf(scratch, ScratchView)], BareShell),
 );
 
-/** `/`: a redirect, answered before anything draws. */
-export const Home = Route.ssr(
-  "home",
-  Route.leaf(home, () => Effect.succeed(<p id="moved">moved to the lists</p>)),
+/** `/`: a redirect to the lists, answered before anything draws. */
+export const Home = Route.redirecting("home", home, () =>
+  Effect.succeed(Route.redirect(index, {}, {})),
 );
 
 export const routes = [Home, Lists, List, Print, Scratch];

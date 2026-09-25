@@ -1,5 +1,5 @@
 import { Route } from "effect-frame/router";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import { notesBehavior } from "./behavior.js";
 import { Notes } from "./contract.js";
 import { Filter, ListCounts, ListIndex, ListName, keyOf } from "./queries.js";
@@ -76,9 +76,5 @@ export const print = Route.child(lists, "print", {
 /** A page with no server data: a local draft, drawn on the client only. */
 export const scratch = Route.child(shell, "scratch", { path: "scratch", params: NoParams });
 
-/** `/` has no page of its own: it sends the reader to the lists. */
-export const home = Route.segment("home", {
-  path: "/",
-  params: NoParams,
-  before: () => Effect.succeed(Route.redirect(Route.target(index, {}, {}))),
-});
+/** `/` has no page of its own: `Home` sends the reader to the lists. */
+export const home = Route.segment("home", { path: "/", params: NoParams });

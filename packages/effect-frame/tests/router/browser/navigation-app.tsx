@@ -101,7 +101,7 @@ const rows = Route.child(site, "rows", {
 const old = Route.child(site, "old", {
   path: "old",
   params: Schema.Struct({}),
-  before: () => Effect.succeed(Route.redirect(Route.target(page, { id: "1" }, { q: "" }))),
+  before: () => Effect.succeed(Route.redirect(page, { id: "1" }, { q: "" })),
 });
 
 const start = (): void => {

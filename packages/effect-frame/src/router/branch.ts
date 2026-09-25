@@ -376,13 +376,18 @@ export interface Values<Params, Search> {
   readonly search: Search;
 }
 
-/** Brands a segment value: only `Route.segment` and `Route.child` make one. */
+/**
+ * Brands a segment value and holds its runtime: only `Route.segment` and
+ * `Route.child` make one. The symbol is not public, so no caller can run a
+ * segment's check outside the router.
+ */
 const SegmentBrand: unique symbol = Symbol.for("effect-frame/router/Segment");
 
 /** The part of a segment every holder can read without its types. */
 export interface AnySegment {
   readonly _tag: "Segment";
-  readonly [SegmentBrand]: "Segment";
+  /** What the transition reads, with the segment's types erased. */
+  readonly [SegmentBrand]: SegmentRuntime<unknown, unknown, Declarations>;
   readonly name: string;
   readonly parent: Option.Option<AnySegment>;
 }
@@ -532,31 +537,15 @@ const typedParams = <Params>(runtime: ParamsRuntime): TypedParams<Params> => ({
   validate: (params) => Option.map(runtime.validate(params), restoredParams<Params>),
 });
 
-const segmentRuntimes = new WeakMap<AnySegment, SegmentRuntime<unknown, unknown, Declarations>>();
-
-/** The runtime `makeSegment` stored for a segment. */
+/** The runtime `makeSegment` put on a segment, at the segment's own types. */
 const segmentRuntimeOf = <Params, Search, Own extends Declarations>(
   seg: Segment<string, Params, Search, Own, Declarations, unknown>,
 ): SegmentRuntime<Params, Search, Own> =>
-  Option.getOrThrowWith(
-    Option.map(
-      Option.fromNullishOr(segmentRuntimes.get(seg)),
-      // oxlint-disable-next-line effect/noAs -- makeSegment stored this runtime under this segment with these types.
-      (runtime) => runtime as SegmentRuntime<Params, Search, Own>,
-    ),
-    () =>
-      BranchRejected.make({
-        segment: seg.name,
-        reason: "not a segment built by Route.segment or Route.child",
-      }),
-  );
+  // oxlint-disable-next-line effect/noAs -- makeSegment put this runtime on this segment with these types.
+  seg[SegmentBrand] as SegmentRuntime<Params, Search, Own>;
 
 /** A segment's own path parts. */
-const partsOf = (seg: AnySegment): ReadonlyArray<Part> =>
-  Option.match(Option.fromNullishOr(segmentRuntimes.get(seg)), {
-    onNone: () => [],
-    onSome: (runtime) => runtime.parts,
-  });
+const partsOf = (seg: AnySegment): ReadonlyArray<Part> => seg[SegmentBrand].parts;
 
 /**
  * Trees that hold each segment, by name. A segment is current only while
@@ -715,9 +704,7 @@ const makeSegment = <
 ): Segment<Name, Params, S["Type"], Own, Data, CheckR, Root, Inherited> => {
   const parts = Result.getOrThrowWith(parseTemplate(options.path), (rejected) => rejected);
   const params = paramsRuntime(
-    Option.flatMap(parent, (above) =>
-      Option.map(Option.fromNullishOr(segmentRuntimes.get(above)), (runtime) => runtime.params),
-    ),
+    Option.map(parent, (above) => above[SegmentBrand].params),
     Option.getOrElse(Option.fromNullishOr(options.params), (): ParamsCodec => NoParamsCodec),
   );
   // The whole params type is `Params`: the ancestors' and this segment's own.
@@ -738,9 +725,33 @@ const makeSegment = <
     searchKeys: Option.fromNullishOr(options.searchKeys),
     retain: Option.fromNullishOr(options.retain),
   });
+  const runtime: SegmentRuntime<Params, S["Type"], Own> = {
+    parts,
+    params,
+    print: (values) =>
+      Option.map(typed.validate(values), (valid) =>
+        printer.href(valid, printer.searchAt(prerenderBase)),
+      ),
+    searchUpdate: (current, values, deepest) => {
+      if (deepest) {
+        return printer.hrefFrom(current, values.params, values.search);
+      }
+      return printer.searchFrom(current, values.search);
+    },
+    check: (values, url, kind) => Option.map(before, (ask) => erase(ask({ ...values, url, kind }))),
+    decode: (record, searchRecord) =>
+      Option.flatMap(typed.decode(record), (decoded) =>
+        Option.flatMap(decodeSearch(searchRecord), (searchValue) =>
+          Option.some({ params: decoded, search: searchValue }),
+        ),
+      ),
+    signature: (record, values) =>
+      `${recordSignature(record)}${printSearch(encodeSearch(values.search))}`,
+    declare: data,
+  };
   const made: Segment<Name, Params, S["Type"], Own, Data, CheckR, Root, Inherited> = {
     _tag: "Segment",
-    [SegmentBrand]: "Segment",
+    [SegmentBrand]: runtime,
     name,
     parent,
     searchKeys: printer.searchKeys,
@@ -770,31 +781,6 @@ const makeSegment = <
     "~root": phantom<Root>(),
     "~inherited": phantom<Inherited>(),
   };
-  const runtime: SegmentRuntime<Params, S["Type"], Own> = {
-    parts,
-    params,
-    print: (values) =>
-      Option.map(typed.validate(values), (valid) =>
-        printer.href(valid, printer.searchAt(prerenderBase)),
-      ),
-    searchUpdate: (current, values, deepest) => {
-      if (deepest) {
-        return printer.hrefFrom(current, values.params, values.search);
-      }
-      return printer.searchFrom(current, values.search);
-    },
-    check: (values, url, kind) => Option.map(before, (ask) => erase(ask({ ...values, url, kind }))),
-    decode: (record, searchRecord) =>
-      Option.flatMap(typed.decode(record), (decoded) =>
-        Option.flatMap(decodeSearch(searchRecord), (searchValue) =>
-          Option.some({ params: decoded, search: searchValue }),
-        ),
-      ),
-    signature: (record, values) =>
-      `${recordSignature(record)}${printSearch(encodeSearch(values.search))}`,
-    declare: data,
-  };
-  segmentRuntimes.set(made, runtime);
   return made;
 };
 
@@ -1185,7 +1171,10 @@ interface MatchInput {
   readonly search: SearchRecord;
 }
 
-/** Brands a branch value: only `Route.leaf` and `Route.layout` make one. */
+/**
+ * Brands a branch value and holds its runtime: only `Route.leaf` and
+ * `Route.layout` make one. The symbol is not public.
+ */
 const BranchBrand: unique symbol = Symbol.for("effect-frame/router/Branch");
 
 /**
@@ -1195,7 +1184,8 @@ const BranchBrand: unique symbol = Symbol.for("effect-frame/router/Branch");
  */
 export interface Branch<Seg extends AnySegment, ViewR, DataR> {
   readonly _tag: "Branch";
-  readonly [BranchBrand]: "Branch";
+  /** What the transition reads, with its services erased; `runtimeOf` restores them. */
+  readonly [BranchBrand]: BranchRuntime<unknown>;
   readonly segment: Seg;
   /** Phantom: what the branch's views need. */
   readonly "~view": (_: never) => ViewR;
@@ -1222,26 +1212,14 @@ interface BranchRuntime<R> {
   readonly leaves: ReadonlyArray<Leaf>;
 }
 
-const runtimes = new WeakMap<object, BranchRuntime<unknown>>();
-
 /**
- * The runtime `makeBranch` stored for a branch. A constructor chose the
+ * The runtime `makeBranch` put on a branch. A constructor chose the
  * phantom `R` as a superset of what the runtime's instances need, so the
  * read keeps its services.
  */
 const runtimeOf = <R>(branch: AnyBranch<R>): BranchRuntime<R> =>
-  Option.getOrThrowWith(
-    Option.map(
-      Option.fromNullishOr(runtimes.get(branch)),
-      // oxlint-disable-next-line effect/noAs -- makeBranch stored this runtime under this branch; its constructor chose R.
-      (runtime) => runtime as BranchRuntime<R>,
-    ),
-    () =>
-      BranchRejected.make({
-        segment: branch.segment.name,
-        reason: "not a branch built by Route.leaf or Route.layout",
-      }),
-  );
+  // oxlint-disable-next-line effect/noAs -- makeBranch put this runtime on this branch; its constructor chose R.
+  branch[BranchBrand] as BranchRuntime<R>;
 
 export type ViewROf<B> = B extends Branch<AnySegment, infer R, unknown> ? R : never;
 export type DataROf<B> = B extends Branch<AnySegment, unknown, infer R> ? R : never;
@@ -2804,13 +2782,6 @@ const makeBranch = <
       });
     });
 
-  const made: Branch<Segment<Name, Params, Search, Own, Data, CheckR, Root>, ViewR, never> = {
-    _tag: "Branch",
-    [BranchBrand]: "Branch",
-    segment: seg,
-    "~view": phantom<ViewR>(),
-    "~data": phantom<never>(),
-  };
   const runtime: BranchRuntime<ViewServices<R>> = {
     match,
     searchKeys: [seg.searchKeys, ...childRuntimes.flatMap((below) => below.searchKeys)],
@@ -2823,7 +2794,13 @@ const makeBranch = <
     },
     leaves: leavesOf({ identity, driven }, childRuntimes),
   };
-  runtimes.set(made, runtime);
+  const made: Branch<Segment<Name, Params, Search, Own, Data, CheckR, Root>, ViewR, never> = {
+    _tag: "Branch",
+    [BranchBrand]: runtime,
+    segment: seg,
+    "~view": phantom<ViewR>(),
+    "~data": phantom<never>(),
+  };
   return made;
 };
 

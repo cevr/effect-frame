@@ -121,6 +121,53 @@
       }
     },
     {
+      "files": ["apps/*/src/**", "packages/effect-frame/examples/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "effect",
+                "importNames": [
+                  "Ref",
+                  "SubscriptionRef",
+                  "SynchronizedRef",
+                  "MutableRef",
+                  "TxRef",
+                  "TxSubscriptionRef"
+                ],
+                "message": "App and example state lives in an actor behind a contract: Actor.local(Behavior.value(initial)), changed by a message."
+              }
+            ],
+            "patterns": [
+              {
+                "group": [
+                  "effect/Ref",
+                  "effect/SubscriptionRef",
+                  "effect/SynchronizedRef",
+                  "effect/MutableRef",
+                  "effect/TxRef",
+                  "effect/TxSubscriptionRef"
+                ],
+                "message": "App and example state lives in an actor behind a contract: Actor.local(Behavior.value(initial)), changed by a message."
+              },
+              {
+                "group": [
+                  "**/*.server",
+                  "**/*.server.js",
+                  "**/*.server.jsx",
+                  "**/*.server.ts",
+                  "**/*.server.tsx"
+                ],
+                "message": "Only a server module or a server entry may import a server module. `bun run boundary` proves the whole graph."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "files": ["packages/host-durable-object/tests/sqlite-storage.ts"],
       "rules": {
         "effect/noAsyncFunction": "off",
@@ -311,6 +358,52 @@
       ],
       "rules": {
         "no-restricted-imports": "off"
+      }
+    },
+    {
+      "files": [
+        "apps/*/src/**/*.server.ts",
+        "apps/*/src/**/*.server.tsx",
+        "apps/*/src/**/server.ts",
+        "apps/*/src/**/server.tsx",
+        "packages/effect-frame/examples/**/*.server.ts",
+        "packages/effect-frame/examples/**/*.server.tsx",
+        "packages/effect-frame/examples/**/server.ts",
+        "packages/effect-frame/examples/**/server.tsx"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "effect",
+                "importNames": [
+                  "Ref",
+                  "SubscriptionRef",
+                  "SynchronizedRef",
+                  "MutableRef",
+                  "TxRef",
+                  "TxSubscriptionRef"
+                ],
+                "message": "App and example state lives in an actor behind a contract: Actor.local(Behavior.value(initial)), changed by a message."
+              }
+            ],
+            "patterns": [
+              {
+                "group": [
+                  "effect/Ref",
+                  "effect/SubscriptionRef",
+                  "effect/SynchronizedRef",
+                  "effect/MutableRef",
+                  "effect/TxRef",
+                  "effect/TxSubscriptionRef"
+                ],
+                "message": "App and example state lives in an actor behind a contract: Actor.local(Behavior.value(initial)), changed by a message."
+              }
+            ]
+          }
+        ]
       }
     }
   ],

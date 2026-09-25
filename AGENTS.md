@@ -49,6 +49,10 @@ The lint is strict and the rules are written down in `.oxlintrc.json`:
   and no top-level `Map`, `Set`, `WeakMap`, or `WeakSet` unless an array
   literal fills it. Carry data on the value it describes, or in an actor or
   a Scope (`frame/no-module-state`).
+- App and example code (`apps/*/src`, `packages/effect-frame/examples`)
+  holds state only in actors: it imports no `Ref`, `SubscriptionRef`,
+  `SynchronizedRef`, `MutableRef`, `TxRef`, or `TxSubscriptionRef`. Use
+  `Actor.local(Behavior.value(initial))` (`no-restricted-imports`).
 - No `null` or `undefined` checks: use `Option` (`effect/noNullish`).
 - No `typeof`: use `Predicate` (`effect/noRuntimeTypeof`).
 - No Node builtins, no globals, no `as`, no thrown errors outside a written

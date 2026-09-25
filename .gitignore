@@ -12,3 +12,4 @@ dist/
 packages/host-durable-object/fixture/worker.js
 packages/host-durable-object/fixture-contract/worker.js
 packages/host-durable-object/fixture-conformance/worker.js
+tooling/checks/consumer/generated/

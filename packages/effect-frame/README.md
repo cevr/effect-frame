@@ -719,7 +719,10 @@ export const App = Route.client(
 - Every move is `push` or `replace`: `router.push(href)`, a link's
   `link.push` and `link.replace`, a view's `pushSearch` and
   `replaceSearch`, and a `UrlState`'s `push` and `replace`, which take a
-  value or an updater of the latest value.
+  value or an updater of the latest value. `router.push` and
+  `router.replace` answer a `NavigationResult`: `Committed` at the final
+  URL after any redirect, `Unchanged` when nothing moved, or `Stayed` when
+  a leave check kept the page.
 - Each `data` binding has a `state` Source. A `Route.query` binding also has
   `refresh` and `override`. A `Route.actor` binding is `{ ref, state }`:
   `state` follows the reference the route holds now, and a send names it,

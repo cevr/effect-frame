@@ -30,7 +30,7 @@ import * as Inspection from "../inspection/registry.js";
 import type { NavigationKind } from "./check.js";
 import { CheckNavigation, RedirectCycle, read as readChecks, redirectLimit } from "./check.js";
 import type { NavigationResult } from "./receipt.js";
-import { Committed, Stayed, Unchanged, register as registerReceipts } from "./receipt.js";
+import { Committed, Stayed, Unchanged } from "./receipt.js";
 import type { LeaveKind, LeaveVerdict, Question } from "./leave-registry.js";
 import { Leave } from "./leave-registry.js";
 import type { Traversal } from "./traversal.js";
@@ -83,14 +83,19 @@ export interface RouterService {
    * `segment.href`, or uses `link`. `push` and `replace` are the router's
    * two moves, and neither is a default.
    *
+   * It answers what the request did, once it did it: `Committed` at the
+   * final URL after any redirect, `Unchanged` when nothing moved, or
+   * `Stayed` when a leave check kept the page. A request the router's
+   * close ends is interrupted.
+   *
    * ```ts
    * const router = yield* Router;
    * yield* router.push(post.href({ tenant: "t1", postId: "p1" }, {}));
    * ```
    */
-  readonly push: (href: string | UrlUpdater) => Effect.Effect<void>;
-  /** Move to a printed href and replace the current history entry. */
-  readonly replace: (href: string | UrlUpdater) => Effect.Effect<void>;
+  readonly push: (href: string | UrlUpdater) => Effect.Effect<NavigationResult>;
+  /** Move to a printed href and replace the current history entry. It answers as `push` does. */
+  readonly replace: (href: string | UrlUpdater) => Effect.Effect<NavigationResult>;
   /** Every navigation, the current one first. */
   readonly navigations: Source<Navigation>;
   /** The route the document is on, by name, with its URL. */
@@ -497,8 +502,8 @@ export const mount: <R, HostNode, N = R>(
     });
 
   const service: RouterService = {
-    push: (href) => Effect.asVoid(enqueue("push", href)),
-    replace: (href) => Effect.asVoid(enqueue("replace", href)),
+    push: (href) => Effect.flatMap(enqueue("push", href), received),
+    replace: (href) => Effect.flatMap(enqueue("replace", href), received),
     navigations: {
       get: Effect.map(SubscriptionRef.get(navigations), navigationOf),
       changes: Stream.map(SubscriptionRef.changes(navigations), navigationOf),
@@ -510,13 +515,9 @@ export const mount: <R, HostNode, N = R>(
   };
 
   const navigation: RouteNavigation = {
-    push: (href, instance) => Effect.asVoid(enqueue("push", href, instance)),
-    replace: (href, instance) => Effect.asVoid(enqueue("replace", href, instance)),
-  };
-  registerReceipts(service, {
     push: (href, instance) => Effect.flatMap(enqueue("push", href, instance), received),
     replace: (href, instance) => Effect.flatMap(enqueue("replace", href, instance), received),
-  });
+  };
 
   /**
    * The Router a check sees: it reads where the document is, but it cannot

@@ -9,6 +9,7 @@ import type { Shell } from "./landing.js";
 import type { Asker } from "./leave-registry.js";
 import type { Checker } from "./check.js";
 import type { AnySegment } from "./branch.js";
+import type { NavigationResult } from "./receipt.js";
 import type { RenderingMode } from "./rendering-mode.js";
 
 /**
@@ -208,10 +209,19 @@ export interface RouteInstance {
   readonly _tag: "RouteInstance";
 }
 
-/** The router operations a mounted route gives to its own view. */
+/**
+ * The router operations a mounted route gives to its own view. A request
+ * from an instance that is no longer mounted is `Unchanged`.
+ */
 export interface RouteNavigation {
-  readonly push: (href: string | UrlUpdater, owner?: RouteInstance) => Effect.Effect<void>;
-  readonly replace: (href: string | UrlUpdater, owner?: RouteInstance) => Effect.Effect<void>;
+  readonly push: (
+    href: string | UrlUpdater,
+    owner?: RouteInstance,
+  ) => Effect.Effect<NavigationResult>;
+  readonly replace: (
+    href: string | UrlUpdater,
+    owner?: RouteInstance,
+  ) => Effect.Effect<NavigationResult>;
 }
 
 /** A functional update over one route's decoded search value. */
@@ -841,7 +851,7 @@ export const mergeSearchRecord = (
   return merged;
 };
 
-/** Return the encoded key metadata registered for a search codec. */
+/** The encoded keys a search codec names itself (see `inferredSearchKeys`). */
 export const searchKeysOf = (schema: SearchCodec): SearchKeyInfo =>
   declaredSearchKeys(schema, Option.none());
 

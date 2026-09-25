@@ -17,13 +17,12 @@ import {
 } from "effect-frame/actor";
 import type { RemoteActorRef, Source, TransportService } from "effect-frame/actor";
 import { Location, Route, mount as mountRouter, NavigationBehavior } from "effect-frame/router";
-import type { LocationService } from "effect-frame/router";
+import type { LocationService, NavigationResult } from "effect-frame/router";
 import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import * as Frame from "../../src/frame.js";
 import * as LeaveBranch from "../../src/router/leave-branch.js";
 import * as Leave from "../../src/router/leave.js";
-import * as Receipt from "../../src/router/receipt.js";
 import * as Traversal from "../../src/router/traversal.js";
 import { withCapabilities } from "../../src/router/landing.js";
 import {
@@ -509,7 +508,7 @@ const mountApp = <R,>(app: Route.AnyRoute<R>, root: HTMLElement, path: string) =
           Effect.provideService(Logger.CurrentLoggers, new Set([collector])),
         ),
     });
-    return { page, router: page.setup, receipts: Receipt.of(page.setup), location, logs };
+    return { page, router: page.setup, location, logs };
   });
 
 const textAt = (root: globalThis.Node, selector: string): string => {
@@ -543,7 +542,7 @@ const readyPost = (page: Page, tenant: string, postId: string) =>
       textAt(actual, "#tenant-param") === tenant,
   });
 
-const pathOf = (result: Receipt.NavigationResult): string =>
+const pathOf = (result: NavigationResult): string =>
   `${result._tag} ${result.url.pathname}${result.url.search}`;
 
 const callsOf = Effect.fn("LeaveTest.callsOf")(function* (id: string) {
@@ -619,11 +618,7 @@ describe("private scoped leave checks", () => {
       Effect.gen(function* () {
         const root = yield* makeRoot;
         const policy = yield* Policy;
-        const { page, router, receipts, location } = yield* mountApp(
-          makeApp(),
-          root,
-          "/app/t1/posts/1",
-        );
+        const { page, router, location } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
         yield* readyPost(page, "t1", "1");
         const postElement = root.querySelector("#post");
         const draft = root.querySelector("#draft");
@@ -635,7 +630,7 @@ describe("private scoped leave checks", () => {
         draft.setSelectionRange(3, 7);
 
         yield* setMode("post#1", "stay");
-        const stayed = yield* receipts.push("/app/t1/posts/2");
+        const stayed = yield* router.push("/app/t1/posts/2");
         expect(pathOf(stayed)).toBe("Stayed /app/t1/posts/1");
         // The unchanged layout is not asked; the post is asked with its next values.
         expect(policy.asked).toEqual([`post#1:${post1}->${post2}:/app/t1/posts/2:push`]);
@@ -655,7 +650,7 @@ describe("private scoped leave checks", () => {
         expect(policy.posts).toEqual(["post#1"]);
 
         yield* setMode("post#1", "leave");
-        const left = yield* receipts.push("/app/t1/posts/2");
+        const left = yield* router.push("/app/t1/posts/2");
         expect(pathOf(left)).toBe("Committed /app/t1/posts/2");
         yield* readyPost(page, "t1", "2");
         expect(location.history).toEqual(["push /app/t1/posts/2"]);
@@ -672,17 +667,17 @@ describe("private scoped leave checks", () => {
       Effect.gen(function* () {
         const root = yield* makeRoot;
         const policy = yield* Policy;
-        const { page, receipts, location } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
+        const { page, router, location } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
         yield* readyPost(page, "t1", "1");
         yield* setMode("post#1", "refine");
 
-        const refined = yield* receipts.replace("/app/t1/posts/1?tab=comments");
+        const refined = yield* router.replace("/app/t1/posts/1?tab=comments");
         expect(pathOf(refined)).toBe("Committed /app/t1/posts/1?tab=comments");
         yield* page.waitFor({
           label: "the comments tab",
           until: (actual) => textAt(actual, "#post-tab") === "comments",
         });
-        const refused = yield* receipts.push("/app/t1/posts/2?tab=comments");
+        const refused = yield* router.push("/app/t1/posts/2?tab=comments");
         expect(pathOf(refused)).toBe("Stayed /app/t1/posts/1?tab=comments");
         expect(policy.asked).toEqual([
           `post#1:${post1}->tenant=t1,postId=1|tab=comments:/app/t1/posts/1?tab=comments:replace`,
@@ -699,18 +694,18 @@ describe("private scoped leave checks", () => {
       Effect.gen(function* () {
         const root = yield* makeRoot;
         const policy = yield* Policy;
-        const { page, receipts, location } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
+        const { page, router, location } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
         yield* readyPost(page, "t1", "1");
 
         // The post refuses: the tenant layout is never asked.
         yield* setMode("post#1", "stay");
-        expect(pathOf(yield* receipts.push("/app/t2/posts/1"))).toBe("Stayed /app/t1/posts/1");
+        expect(pathOf(yield* router.push("/app/t2/posts/1"))).toBe("Stayed /app/t1/posts/1");
         expect(policy.asked.map((one) => one.split(":")[0])).toEqual(["post#1"]);
 
         // The post permits; the layout is asked next, and refuses.
         yield* setMode("post#1", "leave");
         yield* setMode("tenant:t1", "stay");
-        expect(pathOf(yield* receipts.push("/app/t2/posts/1"))).toBe("Stayed /app/t1/posts/1");
+        expect(pathOf(yield* router.push("/app/t2/posts/1"))).toBe("Stayed /app/t1/posts/1");
         expect(policy.asked.map((one) => one.split(":")[0])).toEqual([
           "post#1",
           "post#1",
@@ -720,7 +715,7 @@ describe("private scoped leave checks", () => {
 
         // Both permit: one commit.
         yield* setMode("tenant:t1", "leave");
-        expect(pathOf(yield* receipts.push("/app/t2/posts/1"))).toBe("Committed /app/t2/posts/1");
+        expect(pathOf(yield* router.push("/app/t2/posts/1"))).toBe("Committed /app/t2/posts/1");
         yield* readyPost(page, "t2", "1");
         expect(location.history).toEqual(["push /app/t2/posts/1"]);
       }),
@@ -732,15 +727,15 @@ describe("private scoped leave checks", () => {
       Effect.gen(function* () {
         const root = yield* makeRoot;
         const policy = yield* Policy;
-        const { page, receipts, location } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
+        const { page, router, location } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
         yield* readyPost(page, "t1", "1");
         yield* setMode("post#1", "dialog");
 
-        const first = yield* Effect.forkChild(receipts.push("/app/t1/posts/2"));
+        const first = yield* Effect.forkChild(router.push("/app/t1/posts/2"));
         const firstPrompt = yield* Queue.take(policy.prompts);
         expect(hasAt(document.body, `#dialog-${String(firstPrompt.question)}`)).toBe(true);
 
-        const second = yield* Effect.forkChild(receipts.push("/app/t1/posts/3"));
+        const second = yield* Effect.forkChild(router.push("/app/t1/posts/3"));
         // The first prompt is interrupted: its dialog Scope closed.
         expect(pathOf(yield* Fiber.join(first))).toBe("Unchanged /app/t1/posts/1");
         const secondPrompt = yield* Queue.take(policy.prompts);
@@ -770,10 +765,10 @@ describe("private scoped leave checks", () => {
       Effect.gen(function* () {
         const root = yield* makeRoot;
         const policy = yield* Policy;
-        const { page, receipts, location } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
+        const { page, router, location } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
         yield* readyPost(page, "t1", "1");
         yield* setMode("post#1", "dialog");
-        const moving = yield* Effect.forkChild(receipts.push("/app/t2/posts/1"));
+        const moving = yield* Effect.forkChild(router.push("/app/t2/posts/1"));
         const prompt = yield* Queue.take(policy.prompts);
 
         yield* page.close;
@@ -801,12 +796,12 @@ describe("private scoped leave checks", () => {
         const root = yield* makeRoot;
         const policy = yield* Policy;
         const wire = yield* Wire;
-        const { page, receipts } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
+        const { page, router } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
         yield* readyPost(page, "t1", "1");
         const key = (postId: string) => Schema.encodeSync(Draft.key)({ tenant: "t1", postId });
 
         yield* setMode("post#1", "dialog");
-        const moving = yield* Effect.forkChild(receipts.push("/app/t1/posts/2"));
+        const moving = yield* Effect.forkChild(router.push("/app/t1/posts/2"));
         const prompt = yield* Queue.take(policy.prompts);
         yield* click(root, "#send");
         expect(yield* Queue.take(wire.commands)).toBe(key("1"));
@@ -817,7 +812,7 @@ describe("private scoped leave checks", () => {
         expect(yield* Queue.take(wire.commands)).toBe(key("1"));
 
         yield* setMode("post#1", "leave");
-        expect(pathOf(yield* receipts.push("/app/t1/posts/2"))).toBe("Committed /app/t1/posts/2");
+        expect(pathOf(yield* router.push("/app/t1/posts/2"))).toBe("Committed /app/t1/posts/2");
         yield* readyPost(page, "t1", "2");
         yield* click(root, "#send");
         expect(yield* Queue.take(wire.commands)).toBe(key("2"));
@@ -830,11 +825,11 @@ describe("private scoped leave checks", () => {
       Effect.gen(function* () {
         const root = yield* makeRoot;
         const policy = yield* Policy;
-        const { page, receipts } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
+        const { page, router } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
         yield* readyPost(page, "t1", "1");
 
         // The first post exits: it is asked with no next values.
-        expect(pathOf(yield* receipts.push("/app/t1/settings"))).toBe("Committed /app/t1/settings");
+        expect(pathOf(yield* router.push("/app/t1/settings"))).toBe("Committed /app/t1/settings");
         expect(policy.asked).toEqual([`post#1:${post1}->exit:/app/t1/settings:push`]);
         yield* page.waitFor({
           label: "settings",
@@ -843,25 +838,25 @@ describe("private scoped leave checks", () => {
 
         // Its check would now refuse everything. A new instance replaces it.
         yield* setMode("post#1", "stay");
-        yield* receipts.push("/app/t1/posts/1");
+        yield* router.push("/app/t1/posts/1");
         yield* readyPost(page, "t1", "1");
         expect(policy.posts).toEqual(["post#1", "post#2"]);
 
-        expect(pathOf(yield* receipts.push("/app/t1/settings"))).toBe("Committed /app/t1/settings");
+        expect(pathOf(yield* router.push("/app/t1/settings"))).toBe("Committed /app/t1/settings");
         expect(policy.asked).toEqual([
           `post#1:${post1}->exit:/app/t1/settings:push`,
           `post#2:${post1}->exit:/app/t1/settings:push`,
         ]);
 
         // A setup that registered and then failed leaves no check behind.
-        yield* receipts.push("/app/t1/posts/bad");
+        yield* router.push("/app/t1/posts/bad");
         yield* page.waitFor({
           label: "the failed post",
           until: (actual) => hasAt(actual, "#post-errored"),
         });
         expect(policy.posts).toEqual(["post#1", "post#2", "post#3"]);
         yield* setMode("post#3", "stay");
-        expect(pathOf(yield* receipts.push("/app/t1/settings"))).toBe("Committed /app/t1/settings");
+        expect(pathOf(yield* router.push("/app/t1/settings"))).toBe("Committed /app/t1/settings");
         expect(policy.asked).toHaveLength(2);
       }),
   );
@@ -872,15 +867,15 @@ describe("private scoped leave checks", () => {
       Effect.gen(function* () {
         const root = yield* makeRoot;
         const policy = yield* Policy;
-        const { page, receipts } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
+        const { page, router } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
         yield* readyPost(page, "t1", "1");
 
         yield* setMode("post#1", "stay");
-        yield* receipts.push("/app/t1/posts/2");
+        yield* router.push("/app/t1/posts/2");
         expect(policy.closed).toEqual(["post#1#1"]);
 
         yield* setMode("post#1", "dialog");
-        const held = yield* Effect.forkChild(receipts.push("/app/t1/posts/2"));
+        const held = yield* Effect.forkChild(router.push("/app/t1/posts/2"));
         const prompt = yield* Queue.take(policy.prompts);
         expect(policy.closed).toEqual(["post#1#1"]);
         yield* Deferred.succeed(prompt.answer, Leave.Leave);
@@ -888,7 +883,7 @@ describe("private scoped leave checks", () => {
         expect(policy.closed).toEqual(["post#1#1", "post#1#2"]);
 
         yield* setMode("post#1", "leave");
-        yield* receipts.push("/app/t1/posts/3");
+        yield* router.push("/app/t1/posts/3");
         expect(policy.closed).toEqual(["post#1#1", "post#1#2", "post#1#3"]);
         // The view's own Scope is untouched: the same instance still shows.
         yield* readyPost(page, "t1", "3");
@@ -947,7 +942,7 @@ describe("private scoped leave checks", () => {
       Effect.gen(function* () {
         const root = yield* makeRoot;
         const policy = yield* Policy;
-        const { page, receipts, location } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
+        const { page, router, location } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
         yield* readyPost(page, "t1", "1");
         yield* setMode("post#1", "die");
 
@@ -968,7 +963,7 @@ describe("private scoped leave checks", () => {
         expect(policy.closed).toHaveLength(2);
 
         yield* setMode("post#1", "leave");
-        expect(pathOf(yield* receipts.push("/app/t1/posts/2"))).toBe("Committed /app/t1/posts/2");
+        expect(pathOf(yield* router.push("/app/t1/posts/2"))).toBe("Committed /app/t1/posts/2");
         yield* readyPost(page, "t1", "2");
       }),
   );
@@ -979,18 +974,29 @@ describe("private scoped leave checks", () => {
       Effect.gen(function* () {
         const root = yield* makeRoot;
         const policy = yield* Policy;
-        const { page, receipts, location } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
+        // The route's own navigation, as the router hands it to `enter`.
+        const app = makeApp();
+        let navigation = Option.none<Route.RouteNavigation>();
+        const capturing: typeof app = {
+          ...app,
+          enter: (url, given) => {
+            navigation = Option.fromNullishOr(given);
+            return app.enter(url, given);
+          },
+        };
+        const { page, router, location } = yield* mountApp(capturing, root, "/app/t1/posts/1");
         yield* readyPost(page, "t1", "1");
         yield* setMode("post#1", "dialog");
-        const moving = yield* Effect.forkChild(receipts.push("/app/t1/posts/2"));
+        const routeNavigation = Option.getOrThrow(navigation);
+        const moving = yield* Effect.forkChild(router.push("/app/t1/posts/2"));
         const prompt = yield* Queue.take(policy.prompts);
 
         // A url-state write that changes nothing, a same-URL request, and a
         // stale instance's request: none of them is a newer intent.
-        const unchanged = yield* Effect.forkChild(receipts.replace((current) => current.href));
-        const same = yield* Effect.forkChild(receipts.push("/app/t1/posts/1"));
+        const unchanged = yield* Effect.forkChild(router.replace((current) => current.href));
+        const same = yield* Effect.forkChild(router.push("/app/t1/posts/1"));
         const stale = yield* Effect.forkChild(
-          receipts.push("/app/t1/posts/9", { _tag: "RouteInstance" }),
+          routeNavigation.push("/app/t1/posts/9", { _tag: "RouteInstance" }),
         );
         yield* Effect.yieldNow;
         expect(policy.closed).toEqual([]);
@@ -1056,14 +1062,14 @@ describe("private scoped leave checks", () => {
       Effect.gen(function* () {
         const root = yield* makeRoot;
         const policy = yield* Policy;
-        const { page, receipts, location } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
+        const { page, router, location } = yield* mountApp(makeApp(), root, "/app/t1/posts/1");
         yield* readyPost(page, "t1", "1");
         yield* setMode("post#1", "dialog");
         const back = yield* makeTraversal(location, "/app/t1/posts/2", "precommit");
         yield* location.traversals.offer(back.traversal);
         const first = yield* Queue.take(policy.prompts);
 
-        const pushing = yield* Effect.forkChild(receipts.push("/app/t1/posts/3"));
+        const pushing = yield* Effect.forkChild(router.push("/app/t1/posts/3"));
         expect(yield* Deferred.await(back.answered)).toBe(false);
         yield* Deferred.await(back.finished);
         const second = yield* Queue.take(policy.prompts);
@@ -1082,14 +1088,14 @@ describe("private scoped leave checks", () => {
       Effect.gen(function* () {
         const root = yield* makeRoot;
         const policy = yield* Policy;
-        const { page, receipts, location, logs } = yield* mountApp(
+        const { page, router, location, logs } = yield* mountApp(
           makeApp(),
           root,
           "/app/t1/posts/1",
         );
         yield* readyPost(page, "t1", "1");
         yield* setMode("post#1", "dialog");
-        const pushing = yield* Effect.forkChild(receipts.push("/app/t1/posts/2"));
+        const pushing = yield* Effect.forkChild(router.push("/app/t1/posts/2"));
         const prompt = yield* Queue.take(policy.prompts);
 
         yield* Ref.set(location.current, new URL(`${origin}/app/t1/posts/5`));
@@ -1149,9 +1155,10 @@ describe("private scoped leave checks", () => {
         expect(policy.closed).toEqual([`post#1#${String(prompt.question)}`]);
         expect(policy.asked).toHaveLength(1);
 
-        // The closed router's admission refuses a command; history stays.
+        // The closed router's admission refuses a command: it reaches no
+        // result, so it is interrupted, and history stays.
         const after = yield* Effect.exit(router.push("/app/t1/posts/3"));
-        expect(Exit.isSuccess(after)).toBe(true);
+        expect(Exit.hasInterrupts(after)).toBe(true);
         expect(location.history).toEqual(["traverse /app/t1/posts/2"]);
       }),
   );

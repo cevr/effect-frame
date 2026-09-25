@@ -29,3 +29,4 @@ export {
   type RenderedDocument,
 } from "./document.js";
 export { hydrate, type HydrateOptions } from "./hydrate.js";
+export type { NavigationResult } from "./receipt.js";

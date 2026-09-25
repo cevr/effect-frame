@@ -11,7 +11,6 @@ import {
 } from "effect-frame/router";
 import { Dom } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
-import * as Receipt from "../../src/router/receipt.js";
 import { Cause, Effect, Exit, Option, Queue, Ref, Result, Schema, Stream } from "effect";
 import { describe, expect, it } from "effect-bun-test";
 
@@ -136,7 +135,7 @@ const mountApp = (gate: Gate, initial: string, app: Route.AnyRoute<Router> = mak
         Ref.set(current, new URL(`${origin}${path}`)),
         Queue.offer(pops, new URL(`${origin}${path}`)),
       );
-    return { page, root, router: page.setup, receipts: Receipt.of(page.setup), history, pop };
+    return { page, root, router: page.setup, history, pop };
   });
 
 const makeGate = (denied: ReadonlyArray<string> = []): Gate => ({
@@ -155,9 +154,9 @@ describe("route check edges", () => {
     Effect.gen(function* () {
       const gate = makeGate(["deny"]);
       const guarded = makeApp(gate);
-      const { receipts, history } = yield* mountApp(gate, "/home", { ...guarded });
+      const { router, history } = yield* mountApp(gate, "/home", { ...guarded });
 
-      const receipt = yield* receipts.push("/g/deny");
+      const receipt = yield* router.push("/g/deny");
       expect(receipt).toMatchObject({ _tag: "Committed" });
       expect(receipt.url.pathname).toBe("/login");
       expect(history).toEqual(["push /login"]);
@@ -168,13 +167,13 @@ describe("route check edges", () => {
   it.scoped("a check that tries to move dies, and the router keeps serving", () =>
     Effect.gen(function* () {
       const gate = makeGate();
-      const { receipts, history } = yield* mountApp(gate, "/login");
+      const { router, history } = yield* mountApp(gate, "/login");
 
-      const moved = yield* Effect.exit(receipts.push("/g/nav"));
+      const moved = yield* Effect.exit(router.push("/g/nav"));
       expect(moved.pipe(defectOf)).toMatchObject({ _tag: "CheckNavigation", href: "/home" });
       expect(history).toEqual([]);
 
-      const next = yield* receipts.push("/g/ok");
+      const next = yield* router.push("/g/ok");
       expect(next).toMatchObject({ _tag: "Committed" });
       expect(history).toEqual(["push /g/ok"]);
     }),
@@ -184,8 +183,8 @@ describe("route check edges", () => {
     Effect.gen(function* () {
       const gate = makeGate();
       const { page, router, history, pop } = yield* mountApp(gate, "/login");
-      yield* Receipt.of(router).push("/g/a");
-      yield* Receipt.of(router).push("/g/b");
+      yield* router.push("/g/a");
+      yield* router.push("/g/b");
       gate.denied.add("a");
 
       // Back to /g/a, which the principal has since lost.
@@ -206,9 +205,9 @@ describe("route check edges", () => {
   it.scoped("a redirect back to the current URL is Unchanged and moves no history", () =>
     Effect.gen(function* () {
       const gate = makeGate(["deny"]);
-      const { receipts, history } = yield* mountApp(gate, "/login");
+      const { router, history } = yield* mountApp(gate, "/login");
 
-      const receipt = yield* receipts.push("/g/deny");
+      const receipt = yield* router.push("/g/deny");
       expect(receipt).toMatchObject({ _tag: "Unchanged" });
       expect(receipt.url.pathname).toBe("/login");
       expect(history).toEqual([]);
@@ -218,16 +217,16 @@ describe("route check edges", () => {
   it.scoped("a redirecting route moves to its target, and the target's check runs", () =>
     Effect.gen(function* () {
       const gate = makeGate(["denied"]);
-      const { root, receipts, history } = yield* mountApp(gate, "/login");
+      const { root, router, history } = yield* mountApp(gate, "/login");
 
-      const receipt = yield* receipts.push("/old/ok");
+      const receipt = yield* router.push("/old/ok");
       expect(receipt).toMatchObject({ _tag: "Committed" });
       expect(receipt.url.pathname).toBe("/g/ok");
       expect(history).toEqual(["push /g/ok"]);
       expect(Option.isSome(Option.fromNullishOr(root.querySelector("#gate")))).toBe(true);
 
       // The target's own check still runs, and may redirect further.
-      yield* receipts.push("/old/denied");
+      yield* router.push("/old/denied");
       expect(history).toEqual(["push /g/ok", "push /login"]);
       expect(gate.asked).toEqual(["ok:push", "denied:push"]);
     }),

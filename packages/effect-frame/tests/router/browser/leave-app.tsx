@@ -14,7 +14,6 @@ import * as LeaveBranch from "../../../src/router/leave-branch.js";
 import { browserCommit } from "../../../src/router/browser-commit.js";
 import type { Precommit } from "../../../src/router/browser-commit.js";
 import * as Leave from "../../../src/router/leave.js";
-import * as Receipt from "../../../src/router/receipt.js";
 
 export interface LeaveConfig {
   readonly precommit: Precommit;
@@ -145,12 +144,11 @@ const start = (): void => {
       Effect.provideService(Location, location),
       Effect.provideService(Logger.CurrentLoggers, new Set([collector])),
     );
-    const receipts = Receipt.of(router);
     const context = yield* Effect.context<never>();
     control.navigate = (href) =>
       Effect.runPromiseWith(context)(
         Effect.map(
-          receipts.push(href),
+          router.push(href),
           (result) => `${result._tag} ${result.url.pathname}${result.url.search}`,
         ),
       );

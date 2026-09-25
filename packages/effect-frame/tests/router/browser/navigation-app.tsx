@@ -28,7 +28,6 @@ import {
 import { Dom, View } from "effect-frame/view";
 import { ViewTest } from "effect-frame/view/testing";
 import { Deferred, Duration, Effect, Exit, Layer, Option, Schema, SubscriptionRef } from "effect";
-import * as Receipt from "../../../src/router/receipt.js";
 
 export interface NavConfig {
   /** `none` removes the Navigation API before the router mounts. */
@@ -367,12 +366,11 @@ const start = (): void => {
       ),
     }).pipe(Effect.provideService(Location, location));
     yield* followLinks(document, router);
-    const receipts = Receipt.of(router);
     const context = yield* Effect.context<never>();
     control.navigate = (href) =>
       Effect.runPromiseWith(context)(
         Effect.map(
-          receipts.push(href),
+          router.push(href),
           (result) => `${result._tag} ${result.url.pathname}${result.url.search}${result.url.hash}`,
         ),
       );

@@ -24,53 +24,57 @@ const directory = new Map([
   ["globex", { name: "Globex", plan: "enterprise" }],
 ]);
 
-export const TenantInfoLive = implementQuery(TenantInfo, ({ tenant }) =>
-  Effect.gen(function* () {
-    const found = Option.fromNullishOr(directory.get(tenant));
-    if (Option.isNone(found)) {
-      return yield* Effect.fail(`no tenant ${tenant}`);
-    }
-    const alerts = yield* ref(Alerts, { tenant });
-    const snapshot = yield* alerts.state.get;
-    return { ...found.value, alerts: snapshot.items.filter((item) => !item.acked).length };
-  }).pipe(Effect.scoped),
-);
-
-export const RevenueLive = implementQuery(Revenue, (args) =>
-  Effect.map(ordersOf(args.tenant), (orders) => {
-    const totals = new Map<number, number>();
-    for (const order of orders.filter(within(Option.fromNullishOr(args.range)))) {
-      if (order.status === "fulfilled") {
-        totals.set(order.day, (totals.get(order.day) ?? 0) + order.amount);
+export const TenantInfoLive = implementQuery(TenantInfo, {
+  run: ({ tenant }) =>
+    Effect.gen(function* () {
+      const found = Option.fromNullishOr(directory.get(tenant));
+      if (Option.isNone(found)) {
+        return yield* Effect.fail(`no tenant ${tenant}`);
       }
-    }
-    const points = [...totals.entries()]
-      .map(([day, total]) => ({ day, total }))
-      .toSorted((left, right) => left.day - right.day);
-    return { points };
-  }),
-);
+      const alerts = yield* ref(Alerts, { tenant });
+      const snapshot = yield* alerts.state.get;
+      return { ...found.value, alerts: snapshot.items.filter((item) => !item.acked).length };
+    }).pipe(Effect.scoped),
+});
 
-export const OrderListLive = implementQuery(OrderList, (args) =>
-  Effect.map(ordersOf(args.tenant), (orders) => ({
-    rows: orders.filter(within(Option.fromNullishOr(args.range))),
-  })),
-);
+export const RevenueLive = implementQuery(Revenue, {
+  run: (args) =>
+    Effect.map(ordersOf(args.tenant), (orders) => {
+      const totals = new Map<number, number>();
+      for (const order of orders.filter(within(Option.fromNullishOr(args.range)))) {
+        if (order.status === "fulfilled") {
+          totals.set(order.day, (totals.get(order.day) ?? 0) + order.amount);
+        }
+      }
+      const points = [...totals.entries()]
+        .map(([day, total]) => ({ day, total }))
+        .toSorted((left, right) => left.day - right.day);
+      return { points };
+    }),
+});
 
-export const FunnelLive = implementQuery(Funnel, (args) =>
-  Effect.map(ordersOf(args.tenant), (orders) => {
-    const shown = orders.filter(within(Option.fromNullishOr(args.range)));
-    const count = (status: string) => shown.filter((order) => order.status === status).length;
-    return {
-      stages: [
-        { name: "placed", count: shown.length },
-        { name: "open", count: count("open") },
-        { name: "fulfilled", count: count("fulfilled") },
-        { name: "cancelled", count: count("cancelled") },
-      ],
-    };
-  }),
-);
+export const OrderListLive = implementQuery(OrderList, {
+  run: (args) =>
+    Effect.map(ordersOf(args.tenant), (orders) => ({
+      rows: orders.filter(within(Option.fromNullishOr(args.range))),
+    })),
+});
+
+export const FunnelLive = implementQuery(Funnel, {
+  run: (args) =>
+    Effect.map(ordersOf(args.tenant), (orders) => {
+      const shown = orders.filter(within(Option.fromNullishOr(args.range)));
+      const count = (status: string) => shown.filter((order) => order.status === status).length;
+      return {
+        stages: [
+          { name: "placed", count: shown.length },
+          { name: "open", count: count("open") },
+          { name: "fulfilled", count: count("fulfilled") },
+          { name: "cancelled", count: count("cancelled") },
+        ],
+      };
+    }),
+});
 
 /**
  * How long the latency scan takes. It is the deliberately slow card: the
@@ -87,17 +91,19 @@ const latency: ReadonlyArray<Latency> = [
   { endpoint: "GET /search", ms: 610 },
 ];
 
-export const SlowestLive = implementQuery(Slowest, () =>
-  Effect.andThen(Effect.flatMap(ScanTime, Effect.sleep), Effect.succeed({ rows: latency })),
-);
+export const SlowestLive = implementQuery(Slowest, {
+  run: () =>
+    Effect.andThen(Effect.flatMap(ScanTime, Effect.sleep), Effect.succeed({ rows: latency })),
+});
 
-export const OrderDetailLive = implementQuery(OrderDetail, ({ tenant }) =>
-  Effect.map(ordersOf(tenant), (orders) => ({
-    rows: orders
-      .filter((order) => order.status === "open")
-      .toSorted((left, right) => right.day - left.day),
-  })),
-);
+export const OrderDetailLive = implementQuery(OrderDetail, {
+  run: ({ tenant }) =>
+    Effect.map(ordersOf(tenant), (orders) => ({
+      rows: orders
+        .filter((order) => order.status === "open")
+        .toSorted((left, right) => right.day - left.day),
+    })),
+});
 
 /** Every handler the host serves. A test taps these, as it taps the transport. */
 export const queries = [

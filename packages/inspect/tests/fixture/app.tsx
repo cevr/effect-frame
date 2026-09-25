@@ -105,14 +105,15 @@ export const start = (
   };
   window.__fixture = fixture;
 
-  const HeldLive = implementQuery(HeldQuery, ({ id }) =>
-    Effect.gen(function* () {
-      fixture.resolverStarts += 1;
-      yield* Deferred.await(gate);
-      fixture.resolverFinished += 1;
-      return `book ${id}`;
-    }),
-  );
+  const HeldLive = implementQuery(HeldQuery, {
+    run: ({ id }) =>
+      Effect.gen(function* () {
+        fixture.resolverStarts += 1;
+        yield* Deferred.await(gate);
+        fixture.resolverFinished += 1;
+        return `book ${id}`;
+      }),
+  });
 
   const book = Route.client("book", {
     path: "/books/:id",

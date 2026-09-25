@@ -223,12 +223,13 @@ const start = (): void => {
   };
   const rowsLayer = QueryTest.layer({
     queries: [
-      implementQuery(Rows, () =>
-        Effect.andThen(
-          Effect.suspend(() => Deferred.await(rowsGate)),
-          Effect.succeed({ height: 6000 }),
-        ),
-      ),
+      implementQuery(Rows, {
+        run: () =>
+          Effect.andThen(
+            Effect.suspend(() => Deferred.await(rowsGate)),
+            Effect.succeed({ height: 6000 }),
+          ),
+      }),
     ],
   }).pipe(
     Layer.provide(Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }))),

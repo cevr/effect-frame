@@ -15,7 +15,7 @@ import { DraftLive, PostBodyLive, PostIndexLive, fromDirectory } from "./posts.s
  * so a build reads the store the server serves (#23 §2.2). A server module.
  */
 
-export const ReactionsLive = implementTransparent(Reactions, reactionsBehavior);
+export const ReactionsLive = implementTransparent(Reactions, { behavior: reactionsBehavior });
 
 /** The actor and the queries in this process, over in-memory mailboxes. */
 export const host: Layer.Layer<ActorTransport, never, PostSource> = ActorHost.layer({

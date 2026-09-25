@@ -62,15 +62,17 @@ class Ticks extends Context.Service<Ticks, Queue.Queue<number>>()(
 ) {}
 
 const ClockedLive = implementTransparent(Clocked, {
-  initial: 0,
-  open: () =>
-    Effect.gen(function* () {
-      const ticks = yield* Ticks;
-      return {
-        apply: (state: number, message: Add) => Effect.succeed(state + message.amount),
-        changes: Stream.fromQueue(ticks),
-      };
-    }),
+  behavior: {
+    initial: 0,
+    open: () =>
+      Effect.gen(function* () {
+        const ticks = yield* Ticks;
+        return {
+          apply: (state: number, message: Add) => Effect.succeed(state + message.amount),
+          changes: Stream.fromQueue(ticks),
+        };
+      }),
+  },
 });
 
 const policies = { public: Policy.allowAll };

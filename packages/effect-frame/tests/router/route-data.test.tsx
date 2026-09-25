@@ -1073,7 +1073,7 @@ const secretLabel = "classified-label";
 
 const guarded = Layer.build(
   QueryTest.layer({
-    queries: [implementQuery(Secret, () => Effect.succeed({ label: secretLabel }))],
+    queries: [implementQuery(Secret, { run: () => Effect.succeed({ label: secretLabel }) })],
   }).pipe(
     Layer.provide(Layer.succeed(Policies, Policies.of({ member: Policy.authenticated }))),
     Layer.orDie,

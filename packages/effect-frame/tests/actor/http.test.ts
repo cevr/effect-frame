@@ -47,7 +47,7 @@ const counterBehavior = Behavior.reducer<number, Add, Refused>({
     ),
 });
 
-const CounterLive = implementTransparent(Counter, counterBehavior);
+const CounterLive = implementTransparent(Counter, { behavior: counterBehavior });
 
 const id = Schema.decodeSync(CommandId);
 const add = (amount: number): Add => ({ _tag: "Add", amount });

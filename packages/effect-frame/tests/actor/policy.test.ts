@@ -49,7 +49,7 @@ const Totals = query("Totals", {
   policy: "finance",
   depends: [],
 });
-const TotalsLive = implementQuery(Totals, () => Effect.succeed(0));
+const TotalsLive = implementQuery(Totals, { run: () => Effect.succeed(0) });
 
 const withTable = (table: PolicyTable) => Layer.succeed(Policies, table);
 
@@ -74,7 +74,7 @@ describe("a required policy table", () => {
     Effect.gen(function* () {
       const exit = yield* build(
         ActorHost.layer({
-          implementations: [implementTransparent(Guarded, counting)],
+          implementations: [implementTransparent(Guarded, { behavior: counting })],
           store: ActorHost.memoryStore,
         }).pipe(Layer.provide(withTable({}))),
       );
@@ -90,8 +90,8 @@ describe("a required policy table", () => {
       const exit = yield* build(
         ActorHost.layer({
           implementations: [
-            implementTransparent(Guarded, counting),
-            implementTransparent(Audited, counting),
+            implementTransparent(Guarded, { behavior: counting }),
+            implementTransparent(Audited, { behavior: counting }),
           ],
           queries: [TotalsLive],
           store: ActorHost.memoryStore,
@@ -107,7 +107,7 @@ describe("a required policy table", () => {
 
   it.effect("allow-all must be named", () =>
     Effect.gen(function* () {
-      const OpenLive = implementTransparent(Open, counting);
+      const OpenLive = implementTransparent(Open, { behavior: counting });
 
       // No table entry: `public` is a name like any other, not a built-in.
       const refused = yield* build(

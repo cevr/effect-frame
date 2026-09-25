@@ -41,16 +41,15 @@ const bundleOnce = (): Promise<string> => {
 type NoteSnapshot = { readonly count: number };
 type NoteMessage = { readonly _tag: "Add"; readonly amount: number };
 
-const NoteLive = implementTransparent(
-  Note,
-  Behavior.reducer<NoteSnapshot, NoteMessage>({
+const NoteLive = implementTransparent(Note, {
+  behavior: Behavior.reducer<NoteSnapshot, NoteMessage>({
     initial: { count: 0 },
     reduce: (state, message) =>
       Match.type<NoteMessage>().pipe(
         Match.tagsExhaustive({ Add: (add) => ({ count: state.count + add.amount }) }),
       )(message),
   }),
-);
+});
 
 const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
 const commandId = Schema.decodeSync(CommandId);

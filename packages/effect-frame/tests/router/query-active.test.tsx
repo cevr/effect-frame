@@ -69,10 +69,12 @@ const Draft = contract("ActiveDraft", {
   message: Schema.Union([SetText]),
 });
 
-const DraftLive = implementTransparent(
-  Draft,
-  Behavior.reducer<string, SetText>({ initial: "", reduce: (_state, message) => message.text }),
-);
+const DraftLive = implementTransparent(Draft, {
+  behavior: Behavior.reducer<string, SetText>({
+    initial: "",
+    reduce: (_state, message) => message.text,
+  }),
+});
 
 interface Held {
   readonly gate: Deferred.Deferred<void>;
@@ -101,11 +103,13 @@ const hold = Effect.fn("ActiveTest.hold")(function* (id: string) {
   return held;
 });
 
-const TenantLive = implementQuery(Tenant, ({ tenant }) => pass(`tenant:${tenant}`));
-const PostLive = implementQuery(Post, ({ tenant, postId }) => pass(`post:${tenant}/${postId}`));
-const CommentsLive = implementQuery(Comments, ({ tenant, postId }) =>
-  pass(`comments:${tenant}/${postId}`),
-);
+const TenantLive = implementQuery(Tenant, { run: ({ tenant }) => pass(`tenant:${tenant}`) });
+const PostLive = implementQuery(Post, {
+  run: ({ tenant, postId }) => pass(`post:${tenant}/${postId}`),
+});
+const CommentsLive = implementQuery(Comments, {
+  run: ({ tenant, postId }) => pass(`comments:${tenant}/${postId}`),
+});
 
 const draftKey = (tenant: string, postId: string): string =>
   Schema.encodeSync(Draft.key)({ tenant, postId });

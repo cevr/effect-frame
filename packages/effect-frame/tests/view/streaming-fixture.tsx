@@ -63,23 +63,24 @@ export const sideOf = (control: Control): Effect.Effect<Side, never, Scope.Scope
   Layer.build(
     QueryTest.layer({
       queries: [
-        implementQuery(Label, (args) =>
-          Effect.gen(function* () {
-            control.calls.push(args.id);
-            yield* Option.match(Option.fromNullishOr(control.gates.get(args.id)), {
-              onNone: () => Effect.void,
-              onSome: Deferred.await,
-            }).pipe(
-              Effect.onInterrupt(() => Effect.sync(() => void control.interrupted.push(args.id))),
-            );
-            return {
-              label: Option.getOrElse(
-                Option.fromNullishOr(control.labels.get(args.id)),
-                () => "none",
-              ),
-            };
-          }),
-        ),
+        implementQuery(Label, {
+          run: (args) =>
+            Effect.gen(function* () {
+              control.calls.push(args.id);
+              yield* Option.match(Option.fromNullishOr(control.gates.get(args.id)), {
+                onNone: () => Effect.void,
+                onSome: Deferred.await,
+              }).pipe(
+                Effect.onInterrupt(() => Effect.sync(() => void control.interrupted.push(args.id))),
+              );
+              return {
+                label: Option.getOrElse(
+                  Option.fromNullishOr(control.labels.get(args.id)),
+                  () => "none",
+                ),
+              };
+            }),
+        }),
       ],
     }).pipe(Layer.provide(publicPolicies), Layer.orDie),
   );

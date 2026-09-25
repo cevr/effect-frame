@@ -31,7 +31,7 @@ Ask: `command("name", { args, result, policy, affects: [Contracts or queries] })
 
 `View.list` now lets every row open a query. SvelteKit `query.batch` groups same-tick calls into one request and hands the resolver an array. Without it, a list of 50 rows is 50 HTTP round trips.
 
-The frame now has a declared variant. `query.batched(name, { args, result, policy, depends })` marks the client contract, and `Query.batched(contract, { resolve })` supplies one server resolver. The resolver receives all valid, authorized arguments and returns one per-argument Effect, so one key can fail without discarding its neighbors. The client cache uses Effect `RequestResolver`; its default `Effect.yieldNow` delay collects opens made in one scheduler turn, then sends `POST /actors/query/batch` once. The response is aligned to the input keys and carries a `Refreshed` or `RefreshFailed` result for each key. Command single-flight refreshes use the same host batch path.
+The frame now has a declared variant. `batchedQuery(name, { args, result, policy, depends })` marks the client contract, and `implementBatchedQuery(contract, { resolve })` supplies one server resolver. The resolver receives all valid, authorized arguments and returns one per-argument Effect, so one key can fail without discarding its neighbors. The client cache uses Effect `RequestResolver`; its default `Effect.yieldNow` delay collects opens made in one scheduler turn, then sends `POST /actors/query/batch` once. The response is aligned to the input keys and carries a `Refreshed` or `RefreshFailed` result for each key. Command single-flight refreshes use the same host batch path.
 
 ### B3. Typed links and typed navigation
 
@@ -156,7 +156,7 @@ Tests today drive a real host through the HTTP transport, or build `QueryState` 
 
 Ask: `QueryCache.layerTest({ [contract.name]: (args) => Effect<Result> })` and `ActorTransport.layerLocal(host)`, so a view test names its data in the test.
 
-Resolution: `ActorTransport.layerLocal(host)` is the in-process transport boundary. `QueryTest.layer({ queries: [implementQuery(...), Query.batched(...)], implementations })` composes that transport with the real `QueryCache` and host. The query descriptors remain the canonical server implementations, so argument, result, and service requirements stay typed. A view test can therefore exercise readiness, controls, batching, failures, actor invalidation, and scope release without HTTP.
+Resolution: `ActorTransport.layerLocal(host)` is the in-process transport boundary. `QueryTest.layer({ queries: [implementQuery(...), implementBatchedQuery(...)], implementations })` composes that transport with the real `QueryCache` and host. The query descriptors remain the canonical server implementations, so argument, result, and service requirements stay typed. A view test can therefore exercise readiness, controls, batching, failures, actor invalidation, and scope release without HTTP.
 
 ## Band C: small, but people will ask
 

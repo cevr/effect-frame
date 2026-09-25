@@ -75,18 +75,19 @@ const Search = query("ViewTestingSearch", {
 let searchGate: Option.Option<Deferred.Deferred<void>> = Option.none();
 let searchResolved: Option.Option<Deferred.Deferred<void>> = Option.none();
 
-const SearchLive = implementQuery(Search, () =>
-  Effect.gen(function* () {
-    const gate = searchGate;
-    if (Option.isSome(gate)) {
-      yield* Deferred.await(gate.value);
-    }
-    if (Option.isSome(searchResolved)) {
-      yield* Deferred.succeed(searchResolved.value, void 0);
-    }
-    return "first-row";
-  }),
-);
+const SearchLive = implementQuery(Search, {
+  run: () =>
+    Effect.gen(function* () {
+      const gate = searchGate;
+      if (Option.isSome(gate)) {
+        yield* Deferred.await(gate.value);
+      }
+      if (Option.isSome(searchResolved)) {
+        yield* Deferred.succeed(searchResolved.value, void 0);
+      }
+      return "first-row";
+    }),
+});
 
 const searchLayer = QueryTest.layer({ queries: [SearchLive] }).pipe(Layer.provide(policies));
 

@@ -43,9 +43,8 @@ const Note = contract("Note", {
   message: NoteMessage,
 });
 
-const NoteLive = implementTransparent(
-  Note,
-  Behavior.reducer<NoteSnapshot, NoteMessage>({
+const NoteLive = implementTransparent(Note, {
+  behavior: Behavior.reducer<NoteSnapshot, NoteMessage>({
     initial: { count: 0, title: "untitled" },
     reduce: (state, message) =>
       Match.type<NoteMessage>().pipe(
@@ -55,7 +54,7 @@ const NoteLive = implementTransparent(
         }),
       )(message),
   }),
-);
+});
 
 const id = Schema.decodeSync(CommandId);
 const Resume = resumeCodec(Note);

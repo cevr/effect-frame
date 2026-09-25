@@ -73,7 +73,7 @@ const heldBehavior = {
     }),
 };
 
-const HeldCounterLive = implementTransparent(HeldCounter, heldBehavior);
+const HeldCounterLive = implementTransparent(HeldCounter, { behavior: heldBehavior });
 
 const id = Schema.decodeSync(CommandId);
 const address = {
@@ -82,15 +82,16 @@ const address = {
   key: '"one"',
 };
 
-const CounterValueLive = implementQuery(CounterValue, () =>
-  Effect.gen(function* () {
-    const control = yield* AdmissionControl;
-    yield* Ref.update(control.queryReads, (reads) => reads + 1);
-    const transport = yield* ActorTransport;
-    const projection = yield* transport.snapshot(address);
-    return yield* Schema.decodeEffect(HeldCounter.snapshot)(projection.snapshot);
-  }),
-);
+const CounterValueLive = implementQuery(CounterValue, {
+  run: () =>
+    Effect.gen(function* () {
+      const control = yield* AdmissionControl;
+      yield* Ref.update(control.queryReads, (reads) => reads + 1);
+      const transport = yield* ActorTransport;
+      const projection = yield* transport.snapshot(address);
+      return yield* Schema.decodeEffect(HeldCounter.snapshot)(projection.snapshot);
+    }),
+});
 
 const appLayer = QueryCache.layerTest(
   ActorHost.make({

@@ -89,10 +89,12 @@ const Draft = contract("NestedDraft", {
   message: Schema.Union([SetText]),
 });
 
-const DraftLive = implementTransparent(
-  Draft,
-  Behavior.reducer<string, SetText>({ initial: "", reduce: (_state, message) => message.text }),
-);
+const DraftLive = implementTransparent(Draft, {
+  behavior: Behavior.reducer<string, SetText>({
+    initial: "",
+    reduce: (_state, message) => message.text,
+  }),
+});
 
 interface Held {
   readonly gate: Deferred.Deferred<void>;
@@ -124,13 +126,13 @@ const serve = Effect.fn("NestedTest.serve")(function* (id: string) {
   return `value:${id}`;
 });
 
-const TenantLive = implementQuery(TenantInfo, ({ tenant }) => serve(`tenant:${tenant}`));
-const PostLive = implementQuery(PostBody, ({ tenant, postId }) =>
-  serve(`post:${tenant}/${postId}`),
-);
-const CommentsLive = implementQuery(Comments, ({ tenant, postId }) =>
-  serve(`comments:${tenant}/${postId}`),
-);
+const TenantLive = implementQuery(TenantInfo, { run: ({ tenant }) => serve(`tenant:${tenant}`) });
+const PostLive = implementQuery(PostBody, {
+  run: ({ tenant, postId }) => serve(`post:${tenant}/${postId}`),
+});
+const CommentsLive = implementQuery(Comments, {
+  run: ({ tenant, postId }) => serve(`comments:${tenant}/${postId}`),
+});
 
 /**
  * The wire under the real host: it records every command's address, counts

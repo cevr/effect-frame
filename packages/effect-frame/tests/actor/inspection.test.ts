@@ -360,7 +360,7 @@ describe("Frame.inspect actor and query records", () => {
   it.scoped("keeps identical actor and query names independent after one root closes", () =>
     Effect.gen(function* () {
       const rootLayer = QueryTest.layer({
-        queries: [implementQuery(SameRootQuery, () => Effect.succeed(1))],
+        queries: [implementQuery(SameRootQuery, { run: () => Effect.succeed(1) })],
       }).pipe(Layer.provide(policies), Layer.provideMerge(makeFrame("same-root")));
       const openRoot = Effect.gen(function* () {
         const rootScope = yield* Scope.make();
@@ -409,21 +409,23 @@ describe("Frame.inspect actor and query records", () => {
   it.scoped.layer(
     QueryTest.layer({
       queries: [
-        implementQuery(Blocked, () =>
-          Effect.gen(function* () {
-            blockedReads += 1;
-            const control = yield* InspectionControl;
-            yield* Deferred.succeed(control.started, void 0);
-            yield* Deferred.await(control.gate);
-            return { value: "ready" };
-          }),
-        ),
-        implementQuery(Concurrent, () =>
-          Effect.sync(() => {
-            concurrentReads += 1;
-            return 1;
-          }),
-        ),
+        implementQuery(Blocked, {
+          run: () =>
+            Effect.gen(function* () {
+              blockedReads += 1;
+              const control = yield* InspectionControl;
+              yield* Deferred.succeed(control.started, void 0);
+              yield* Deferred.await(control.gate);
+              return { value: "ready" };
+            }),
+        }),
+        implementQuery(Concurrent, {
+          run: () =>
+            Effect.sync(() => {
+              concurrentReads += 1;
+              return 1;
+            }),
+        }),
       ],
     }).pipe(
       Layer.provide(policies),
@@ -470,12 +472,13 @@ describe("Frame.inspect actor and query records", () => {
   it.scoped.layer(
     QueryTest.layer({
       queries: [
-        implementQuery(Failed, () =>
-          Effect.sync(() => {
-            failedReads += 1;
-            return Effect.fail("inspection failure");
-          }).pipe(Effect.flatten),
-        ),
+        implementQuery(Failed, {
+          run: () =>
+            Effect.sync(() => {
+              failedReads += 1;
+              return Effect.fail("inspection failure");
+            }).pipe(Effect.flatten),
+        }),
       ],
     }).pipe(Layer.provide(policies), Layer.provideMerge(makeFrame("query-failure"))),
   )("samples failure, removes the owner, and reacquires a fresh slot", () =>
@@ -508,7 +511,9 @@ describe("Frame.inspect actor and query records", () => {
 
   it.scoped.layer(
     QueryTest.layer({
-      queries: [implementQuery(Lifecycle, () => Effect.succeed({ value: lifecycleValue }))],
+      queries: [
+        implementQuery(Lifecycle, { run: () => Effect.succeed({ value: lifecycleValue }) }),
+      ],
     }).pipe(
       Layer.provide(policies),
       Layer.provideMerge(TestClock.layer()),
@@ -576,12 +581,13 @@ describe("Frame.inspect actor and query records", () => {
   it.scoped.layer(
     QueryTest.layer({
       queries: [
-        implementQuery(Concurrent, () =>
-          Effect.sync(() => {
-            concurrentReads += 1;
-            return 1;
-          }),
-        ),
+        implementQuery(Concurrent, {
+          run: () =>
+            Effect.sync(() => {
+              concurrentReads += 1;
+              return 1;
+            }),
+        }),
       ],
     }).pipe(Layer.provide(policies), Layer.provideMerge(makeFrame("query-ownership"))),
   )("deduplicates concurrent first declarations and releases the RcMap entry", () =>

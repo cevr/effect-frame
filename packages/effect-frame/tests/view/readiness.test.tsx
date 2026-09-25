@@ -116,30 +116,31 @@ class ReadinessFixtures extends Context.Service<ReadinessFixtures, ReadinessFixt
   "effect-frame/tests/view/readiness.test/ReadinessFixtures",
 ) {}
 
-const ReadinessLive = implementQuery(ReadinessQuery, ({ id }) =>
-  Effect.gen(function* () {
-    const fixtures = yield* ReadinessFixtures;
-    const response = yield* Ref.get(fixtures.responses).pipe(
-      Effect.map(
-        (responses): ReadinessResponse => responses.get(id) ?? { _tag: "Ready", value: id },
-      ),
-    );
-    if (response._tag === "Pending") {
-      yield* Deferred.await(response.gate);
-      const afterGate = yield* Ref.get(fixtures.responses).pipe(
-        Effect.map((responses): ReadinessResponse => responses.get(id) ?? response),
+const ReadinessLive = implementQuery(ReadinessQuery, {
+  run: ({ id }) =>
+    Effect.gen(function* () {
+      const fixtures = yield* ReadinessFixtures;
+      const response = yield* Ref.get(fixtures.responses).pipe(
+        Effect.map(
+          (responses): ReadinessResponse => responses.get(id) ?? { _tag: "Ready", value: id },
+        ),
       );
-      if (afterGate._tag === "Failed") {
-        return yield* Effect.fail(afterGate.error);
+      if (response._tag === "Pending") {
+        yield* Deferred.await(response.gate);
+        const afterGate = yield* Ref.get(fixtures.responses).pipe(
+          Effect.map((responses): ReadinessResponse => responses.get(id) ?? response),
+        );
+        if (afterGate._tag === "Failed") {
+          return yield* Effect.fail(afterGate.error);
+        }
+        return afterGate.value;
       }
-      return afterGate.value;
-    }
-    if (response._tag === "Failed") {
-      return yield* Effect.fail(response.error);
-    }
-    return response.value;
-  }),
-);
+      if (response._tag === "Failed") {
+        return yield* Effect.fail(response.error);
+      }
+      return response.value;
+    }),
+});
 
 const readinessLayer = QueryTest.layer({ queries: [ReadinessLive] }).pipe(
   Layer.provide(policies),

@@ -52,13 +52,12 @@ const heldForm = (gate: Deferred.Deferred<void>) => {
     message: Schema.Union([Note]),
   });
   type HeldState = Schema.Schema.Type<typeof Held.snapshot>;
-  const HeldLive = implementTransparent(
-    Held,
-    Behavior.reducer<HeldState, Schema.Schema.Type<typeof Note>>({
+  const HeldLive = implementTransparent(Held, {
+    behavior: Behavior.reducer<HeldState, Schema.Schema.Type<typeof Note>>({
       initial: { notes: [] },
       reduce: (state, note) => ({ notes: [...state.notes, note.text] }),
     }),
-  );
+  });
   const HeldPage = (_props: NoProps) =>
     Effect.gen(function* () {
       const notes = yield* ref(Held, heldKey);

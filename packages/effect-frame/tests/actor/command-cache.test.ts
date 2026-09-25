@@ -109,28 +109,31 @@ const heldBehavior = {
     }),
 };
 
-const CounterLive = implementTransparent(Counter, heldBehavior);
+const CounterLive = implementTransparent(Counter, { behavior: heldBehavior });
 
-const CounterValueLive = implementQuery(CounterValue, (key) =>
-  Effect.gen(function* () {
-    const control = yield* Control;
-    yield* Ref.update(control.reads, (reads) => reads + 1);
-    const transport = yield* ActorTransport;
-    const projection = yield* transport.snapshot({
-      contract: Counter.name,
-      version: Counter.version,
-      key: yield* Effect.orDie(Schema.encodeEffect(Counter.key)(key)),
-    });
-    const hold = yield* Ref.get(control.readHold);
-    if (Option.isSome(hold)) {
-      yield* Deferred.succeed(hold.value.reached, void 0);
-      yield* Deferred.await(hold.value.release);
-    }
-    return yield* Schema.decodeEffect(Counter.snapshot)(projection.snapshot);
-  }),
-);
+const CounterValueLive = implementQuery(CounterValue, {
+  run: (key) =>
+    Effect.gen(function* () {
+      const control = yield* Control;
+      yield* Ref.update(control.reads, (reads) => reads + 1);
+      const transport = yield* ActorTransport;
+      const projection = yield* transport.snapshot({
+        contract: Counter.name,
+        version: Counter.version,
+        key: yield* Effect.orDie(Schema.encodeEffect(Counter.key)(key)),
+      });
+      const hold = yield* Ref.get(control.readHold);
+      if (Option.isSome(hold)) {
+        yield* Deferred.succeed(hold.value.reached, void 0);
+        yield* Deferred.await(hold.value.release);
+      }
+      return yield* Schema.decodeEffect(Counter.snapshot)(projection.snapshot);
+    }),
+});
 
-const UnrelatedLive = implementQuery(Unrelated, (key) => Effect.succeed(`unrelated:${key}`));
+const UnrelatedLive = implementQuery(Unrelated, {
+  run: (key) => Effect.succeed(`unrelated:${key}`),
+});
 
 /** The real in-process host, with its send reply held while the test asks. */
 const heldTransport = Effect.gen(function* () {

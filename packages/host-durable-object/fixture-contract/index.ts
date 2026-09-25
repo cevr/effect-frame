@@ -59,10 +59,9 @@ const reduceCounter = (state: number, message: CounterMessage): number => {
   return state + message.amount;
 };
 
-const CounterLive = implementTransparent(
-  Counter,
-  Behavior.reducer<number, CounterMessage>({ initial: 0, reduce: reduceCounter }),
-);
+const CounterLive = implementTransparent(Counter, {
+  behavior: Behavior.reducer<number, CounterMessage>({ initial: 0, reduce: reduceCounter }),
+});
 
 // ---------------------------------------------------------------------------
 // Upload: a machine whose task is real work

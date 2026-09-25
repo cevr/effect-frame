@@ -80,8 +80,8 @@ const concurrentBehavior: Behavior<number, Add> = {
     }),
 };
 
-const Hosted = implementTransparent(Counter, hostedBehavior);
-const Concurrent = implementTransparent(Counter, concurrentBehavior);
+const Hosted = implementTransparent(Counter, { behavior: hostedBehavior });
+const Concurrent = implementTransparent(Counter, { behavior: concurrentBehavior });
 const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
 const hostedLayer = ActorHost.layer({
   implementations: [Hosted],
@@ -119,7 +119,7 @@ const hostedNumberImplementation = (message: Schema.Codec<number, string>) =>
       snapshot: Schema.Finite,
       message,
     }),
-    hostedNumberBehavior,
+    { behavior: hostedNumberBehavior },
   );
 
 const hostedPayload = '"1"';

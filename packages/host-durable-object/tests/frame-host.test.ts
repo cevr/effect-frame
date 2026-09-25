@@ -32,10 +32,12 @@ const Counter = contract("Counter", {
   message: Schema.Union([Add]),
 });
 
-const CounterLive = implementTransparent(
-  Counter,
-  Behavior.reducer<number, Add>({ initial: 0, reduce: (state, message) => state + message.amount }),
-);
+const CounterLive = implementTransparent(Counter, {
+  behavior: Behavior.reducer<number, Add>({
+    initial: 0,
+    reduce: (state, message) => state + message.amount,
+  }),
+});
 
 const FrameHost = defineFrameHost({
   implementations: [CounterLive],
@@ -73,10 +75,12 @@ const Guarded = contract("Guarded", {
   message: Schema.Union([Add]),
 });
 
-const GuardedLive = implementTransparent(
-  Guarded,
-  Behavior.reducer<number, Add>({ initial: 0, reduce: (state, message) => state + message.amount }),
-);
+const GuardedLive = implementTransparent(Guarded, {
+  behavior: Behavior.reducer<number, Add>({
+    initial: 0,
+    reduce: (state, message) => state + message.amount,
+  }),
+});
 
 /** The members this object admits. Only the object's own layer provides it. */
 class Members extends Context.Service<Members, ReadonlySet<string>>()(
@@ -149,7 +153,7 @@ const timedBehavior: Behavior.Behavior<number, Add> = {
     ),
 };
 
-const TimedLive = implementTransparent(Timed, timedBehavior);
+const TimedLive = implementTransparent(Timed, { behavior: timedBehavior });
 
 const TimedHost = defineFrameHost({
   implementations: [TimedLive],

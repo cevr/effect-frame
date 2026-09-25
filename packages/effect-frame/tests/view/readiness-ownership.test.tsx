@@ -69,36 +69,37 @@ class Fixtures extends Context.Service<Fixtures, FixturesService>()(
 
 const readyDefault = (id: string): Response => ({ _tag: "Ready", value: id });
 
-const OwnershipLive = implementQuery(OwnershipQuery, ({ id }) =>
-  Effect.gen(function* () {
-    const fixtures = yield* Fixtures;
-    const response = yield* Ref.get(fixtures.responses).pipe(
-      Effect.map((responses): Response =>
-        Option.getOrElse(Option.fromNullishOr(responses.get(id)), () => readyDefault(id)),
-      ),
-    );
-    if (response._tag === "Pending") {
-      yield* Option.match(response.started, {
-        onNone: () => Effect.void,
-        onSome: (started) => Deferred.succeed(started, void 0),
-      });
-      yield* Deferred.await(response.gate);
-      const afterGate = yield* Ref.get(fixtures.responses).pipe(
-        Effect.map((responses) =>
-          Option.getOrElse(Option.fromNullishOr(responses.get(id)), () => response),
+const OwnershipLive = implementQuery(OwnershipQuery, {
+  run: ({ id }) =>
+    Effect.gen(function* () {
+      const fixtures = yield* Fixtures;
+      const response = yield* Ref.get(fixtures.responses).pipe(
+        Effect.map((responses): Response =>
+          Option.getOrElse(Option.fromNullishOr(responses.get(id)), () => readyDefault(id)),
         ),
       );
-      if (afterGate._tag === "Failed") {
-        return yield* Effect.fail(afterGate.error);
+      if (response._tag === "Pending") {
+        yield* Option.match(response.started, {
+          onNone: () => Effect.void,
+          onSome: (started) => Deferred.succeed(started, void 0),
+        });
+        yield* Deferred.await(response.gate);
+        const afterGate = yield* Ref.get(fixtures.responses).pipe(
+          Effect.map((responses) =>
+            Option.getOrElse(Option.fromNullishOr(responses.get(id)), () => response),
+          ),
+        );
+        if (afterGate._tag === "Failed") {
+          return yield* Effect.fail(afterGate.error);
+        }
+        return afterGate.value;
       }
-      return afterGate.value;
-    }
-    if (response._tag === "Failed") {
-      return yield* Effect.fail(response.error);
-    }
-    return response.value;
-  }),
-);
+      if (response._tag === "Failed") {
+        return yield* Effect.fail(response.error);
+      }
+      return response.value;
+    }),
+});
 
 const ownershipLayer = QueryTest.layer({ queries: [OwnershipLive] }).pipe(
   Layer.provide(policies),

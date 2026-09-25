@@ -45,7 +45,7 @@ const counterBehavior = Behavior.reducer<number, CounterMessage>({
     )(message),
 });
 
-const CounterLive = implementTransparent(Counter, counterBehavior);
+const CounterLive = implementTransparent(Counter, { behavior: counterBehavior });
 
 // A contract whose snapshot hides part of the state.
 const Secret = contract("Secret", {

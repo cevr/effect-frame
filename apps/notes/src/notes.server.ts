@@ -13,7 +13,7 @@ import { ListCountsLive, ListIndexLive } from "./queries.server.js";
  * (`behavior.ts`), because the page predicts with it.
  */
 
-export const NotesLive = implementTransparent(Notes, notesBehavior);
+export const NotesLive = implementTransparent(Notes, { behavior: notesBehavior });
 
 /** The actors and queries run in this process, over in-memory mailboxes. */
 export const inProcess: Layer.Layer<ActorTransport> = ActorHost.layer({

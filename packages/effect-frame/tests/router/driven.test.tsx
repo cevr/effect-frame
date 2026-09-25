@@ -61,10 +61,12 @@ const Room = contract("DrivenRoom", {
   message: Schema.Union([Add]),
 });
 
-const RoomLive = implementTransparent(
-  Room,
-  Behavior.reducer<number, Add>({ initial: 0, reduce: (state, message) => state + message.amount }),
-);
+const RoomLive = implementTransparent(Room, {
+  behavior: Behavior.reducer<number, Add>({
+    initial: 0,
+    reduce: (state, message) => state + message.amount,
+  }),
+});
 
 /** The driven view: a count, and a button whose handler runs on the server. */
 const RoomView = (params: { readonly room: string }) =>
@@ -105,13 +107,12 @@ const Lineup = contract("DrivenLineup", {
   message: Schema.Union([Rotate]),
 });
 
-const LineupLive = implementTransparent(
-  Lineup,
-  Behavior.reducer<ReadonlyArray<string>, Rotate>({
+const LineupLive = implementTransparent(Lineup, {
+  behavior: Behavior.reducer<ReadonlyArray<string>, Rotate>({
     initial: ["a", "b", "c"],
     reduce: (state) => [...state.slice(1), ...state.slice(0, 1)],
   }),
-);
+});
 
 const LineupView = (params: { readonly room: string }) =>
   Effect.gen(function* () {
@@ -206,7 +207,9 @@ const locationAt = (href: string): Effect.Effect<LocationService> =>
 const sharedHost = (title: Deferred.Deferred<void>) =>
   Layer.build(
     QueryTest.layer({
-      queries: [implementQuery(Label, () => Effect.as(Deferred.await(title), { label: "Rooms" }))],
+      queries: [
+        implementQuery(Label, { run: () => Effect.as(Deferred.await(title), { label: "Rooms" }) }),
+      ],
       implementations: [RoomLive, LineupLive],
     }).pipe(
       Layer.provide(Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }))),

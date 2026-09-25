@@ -133,16 +133,15 @@ const Note = contract("PrerenderNote", {
   message: Add,
 });
 
-const NoteLive = implementTransparent(
-  Note,
-  Behavior.reducer<NoteSnapshot, NoteMessage>({
+const NoteLive = implementTransparent(Note, {
+  behavior: Behavior.reducer<NoteSnapshot, NoteMessage>({
     initial: { count: 0 },
     reduce: (state, message) =>
       Match.type<NoteMessage>().pipe(
         Match.tagsExhaustive({ Add: (add) => ({ count: state.count + add.amount }) }),
       )(message),
   }),
-);
+});
 
 const Resume = resumeCodec(Note);
 const bakedId = "baked-note";

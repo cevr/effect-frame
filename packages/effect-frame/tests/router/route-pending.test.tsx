@@ -89,10 +89,10 @@ const serve = Effect.fn("PendingTest.serve")(function* (id: string) {
   return `value:${id}`;
 });
 
-const TenantLive = implementQuery(TenantInfo, ({ tenant }) => serve(`tenant:${tenant}`));
-const PostLive = implementQuery(PostBody, ({ tenant, postId }) =>
-  serve(`post:${tenant}/${postId}`),
-);
+const TenantLive = implementQuery(TenantInfo, { run: ({ tenant }) => serve(`tenant:${tenant}`) });
+const PostLive = implementQuery(PostBody, {
+  run: ({ tenant, postId }) => serve(`post:${tenant}/${postId}`),
+});
 
 // ---------------------------------------------------------------------------
 // The navigation access service a check needs, and one ordered event log

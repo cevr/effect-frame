@@ -21,16 +21,18 @@ export {
   type AnyImplementation,
   type HostedInstance,
   type ImplementOptions,
+  type ImplementTransparentOptions,
 } from "./implement.js";
 export * as ActorHost from "./host.js";
 export * as HttpServer from "./http/server.js";
 // The Query primitive's server half.
 export {
-  Query,
+  implementBatchedQuery,
   implementQuery,
   type AnyQueryImplementation,
   type BatchedQueryImplementation,
   type BatchedQueryOptions,
+  type ImplementQueryOptions,
   type QueryBatchResult,
   type QueryImplementation,
 } from "./query-host.js";

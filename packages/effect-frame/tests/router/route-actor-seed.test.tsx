@@ -57,7 +57,7 @@ const counterBehavior = Behavior.reducer<number, Add>({
   reduce: (state, message) => state + message.amount,
 });
 
-const CounterLive = implementTransparent(Counter, counterBehavior);
+const CounterLive = implementTransparent(Counter, { behavior: counterBehavior });
 
 const counterSegment = Route.segment("counter", {
   path: "/counter/:id",

@@ -7,4 +7,4 @@ import { Orders } from "./contract.js";
  * fails `bun run boundary`. The reducer is browser safe (`behavior.ts`),
  * because the page predicts a `Fulfil` with it.
  */
-export const OrdersLive = implementTransparent(Orders, ordersBehavior);
+export const OrdersLive = implementTransparent(Orders, { behavior: ordersBehavior });

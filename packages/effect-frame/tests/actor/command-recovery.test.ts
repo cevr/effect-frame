@@ -30,19 +30,21 @@ let applies = 0;
 
 /** The first host never finishes a turn. The second host applies at once. */
 const CounterLive = implementTransparent(Counter, {
-  initial: 0,
-  open: () =>
-    Effect.succeed({
-      apply: (state: number, amount: number) =>
-        Effect.suspend(() => {
-          if (life === 1) {
-            return Effect.never;
-          }
-          applies += 1;
-          return Effect.succeed(state + amount);
-        }),
-      changes: Stream.empty,
-    }),
+  behavior: {
+    initial: 0,
+    open: () =>
+      Effect.succeed({
+        apply: (state: number, amount: number) =>
+          Effect.suspend(() => {
+            if (life === 1) {
+              return Effect.never;
+            }
+            applies += 1;
+            return Effect.succeed(state + amount);
+          }),
+        changes: Stream.empty,
+      }),
+  },
 });
 
 const hostOver = (store: Context.Context<MailboxStore>) =>

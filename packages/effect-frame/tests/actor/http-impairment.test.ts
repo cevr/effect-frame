@@ -32,16 +32,15 @@ const Counter = contract("ImpairedCounter", {
 });
 
 let applies = 0;
-const CounterLive = implementTransparent(
-  Counter,
-  Behavior.reducer<number, Add>({
+const CounterLive = implementTransparent(Counter, {
+  behavior: Behavior.reducer<number, Add>({
     initial: 0,
     reduce: (state, message) => {
       applies += 1;
       return state + message.amount;
     },
   }),
-);
+});
 
 type Impairment = "pass" | "lose-reply" | "refuse" | "hang";
 

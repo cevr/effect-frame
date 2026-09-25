@@ -82,10 +82,9 @@ const reduce = (state: NotesSnapshot, message: NotesMessage): NotesSnapshot =>
     }),
   )(message);
 
-const NotesLive = implementTransparent(
-  Notes,
-  Behavior.reducer<NotesSnapshot, NotesMessage>({ initial: { notes: [] }, reduce }),
-);
+const NotesLive = implementTransparent(Notes, {
+  behavior: Behavior.reducer<NotesSnapshot, NotesMessage>({ initial: { notes: [] }, reduce }),
+});
 
 const id = Schema.decodeSync(CommandId);
 

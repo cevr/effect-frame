@@ -67,15 +67,16 @@ const servePage = async (mode: Mode): Promise<PageServer> => {
   const scope = Effect.runSync(Scope.make());
   const layer = QueryTest.layer({
     queries: [
-      implementQuery(Label, (args) =>
-        Effect.gen(function* () {
-          reads.push(args.id);
-          const nth = reads.length;
-          if (mode !== "await-all") yield* Deferred.await(gate);
-          if (mode === "split") return { label: largeLabel };
-          return { label: `label ${String(nth)}` };
-        }),
-      ),
+      implementQuery(Label, {
+        run: (args) =>
+          Effect.gen(function* () {
+            reads.push(args.id);
+            const nth = reads.length;
+            if (mode !== "await-all") yield* Deferred.await(gate);
+            if (mode === "split") return { label: largeLabel };
+            return { label: `label ${String(nth)}` };
+          }),
+      }),
     ],
   });
   const context: Context.Context<QueryCache | ActorTransport> = await Effect.runPromise(

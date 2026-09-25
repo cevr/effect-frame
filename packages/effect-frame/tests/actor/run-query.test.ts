@@ -31,13 +31,14 @@ let titleReads = 0;
 
 const layer = QueryTest.layer({
   queries: [
-    implementQuery(Titles, (args) =>
-      Effect.sync(() => {
-        titleReads += 1;
-        return [`${args.prefix}-a`, `${args.prefix}-b`];
-      }),
-    ),
-    implementQuery(Broken, () => Effect.fail("the store is down")),
+    implementQuery(Titles, {
+      run: (args) =>
+        Effect.sync(() => {
+          titleReads += 1;
+          return [`${args.prefix}-a`, `${args.prefix}-b`];
+        }),
+    }),
+    implementQuery(Broken, { run: () => Effect.fail("the store is down") }),
   ],
 }).pipe(Layer.provide(policies));
 

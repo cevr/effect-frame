@@ -6,7 +6,7 @@ import {
   Behavior,
   CommandId,
   QueryCache,
-  Query as HostQuery,
+  implementBatchedQuery,
   contract,
   implementQuery,
   implementTransparent,
@@ -15,6 +15,7 @@ import {
   useQuery,
   Policies,
   Policy,
+  batchedQuery,
 } from "effect-frame/actor";
 import type { QueryEntry, QueryFailure, QueryState, Source } from "effect-frame/actor";
 import { QueryTest } from "effect-frame/actor/testing";
@@ -37,13 +38,12 @@ const Counter = contract("QueryTestCounter", {
   message: Schema.Union([Increment]),
 });
 
-const CounterLive = implementTransparent(
-  Counter,
-  Behavior.reducer<number, Increment>({
+const CounterLive = implementTransparent(Counter, {
+  behavior: Behavior.reducer<number, Increment>({
     initial: 0,
     reduce: (state, message) => state + message.amount,
   }),
-);
+});
 
 const Count = query("QueryTestCount", {
   version: 1,
@@ -53,7 +53,7 @@ const Count = query("QueryTestCount", {
   depends: [Counter],
 });
 
-const Rows = query.batched("QueryTestRows", {
+const Rows = batchedQuery("QueryTestRows", {
   version: 1,
   policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
@@ -78,18 +78,19 @@ let rowBatchGroups: ReadonlyArray<ReadonlyArray<number>> = [];
 
 const testLayer = QueryTest.layer({
   queries: [
-    implementQuery(Count, (args) =>
-      Effect.gen(function* () {
-        const counter = yield* ref(Counter, args);
-        const state = yield* counter.state.get;
-        const control = countControl.current;
-        if (Option.isSome(control)) {
-          yield* Deferred.await(control.value.gate);
-        }
-        return { count: state };
-      }),
-    ),
-    HostQuery.batched(Rows, {
+    implementQuery(Count, {
+      run: (args) =>
+        Effect.gen(function* () {
+          const counter = yield* ref(Counter, args);
+          const state = yield* counter.state.get;
+          const control = countControl.current;
+          if (Option.isSome(control)) {
+            yield* Deferred.await(control.value.gate);
+          }
+          return { count: state };
+        }),
+    }),
+    implementBatchedQuery(Rows, {
       resolve: (args) => {
         rowBatchGroups = [...rowBatchGroups, args.map((arg) => arg.id)];
         return Effect.succeed((arg: (typeof args)[number]) => {
@@ -100,7 +101,7 @@ const testLayer = QueryTest.layer({
         });
       },
     }),
-    implementQuery(Failure, () => Effect.fail("expected failure")),
+    implementQuery(Failure, { run: () => Effect.fail("expected failure") }),
   ],
   implementations: [CounterLive],
 }).pipe(Layer.provide(policies));

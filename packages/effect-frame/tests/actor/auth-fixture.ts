@@ -106,8 +106,10 @@ export const Session = contract("Session", {
 export const sessionLive = (opened: Ref.Ref<number>) => {
   const machine = Behavior.machine(sessionMachine);
   return implementTransparent<typeof Session, never>(Session, {
-    initial: machine.initial,
-    open: (state) => Effect.tap(machine.open(state), () => Ref.update(opened, (n) => n + 1)),
+    behavior: {
+      initial: machine.initial,
+      open: (state) => Effect.tap(machine.open(state), () => Ref.update(opened, (n) => n + 1)),
+    },
   });
 };
 
@@ -126,10 +128,9 @@ export const Ledger = contract("Ledger", {
   message: Schema.Union([Entry]),
 });
 
-export const LedgerLive = implementTransparent(
-  Ledger,
-  Behavior.reducer<number, Entry>({ initial: 0, reduce: (count) => count + 1 }),
-);
+export const LedgerLive = implementTransparent(Ledger, {
+  behavior: Behavior.reducer<number, Entry>({ initial: 0, reduce: (count) => count + 1 }),
+});
 
 /** How many entries a tenant's ledgers hold. A read, behind the same rule. */
 export const LedgerCount = query("LedgerCount", {
@@ -141,9 +142,10 @@ export const LedgerCount = query("LedgerCount", {
 });
 
 /** The entries in the tenant's book, read through the host under the caller's principal. */
-export const LedgerCountLive = implementQuery(LedgerCount, (args) =>
-  Effect.flatMap(ref(Ledger, { tenant: args.tenant, id: "book" }), (book) => book.state.get),
-);
+export const LedgerCountLive = implementQuery(LedgerCount, {
+  run: (args) =>
+    Effect.flatMap(ref(Ledger, { tenant: args.tenant, id: "book" }), (book) => book.state.get),
+});
 
 const decodeLedgerKey = Schema.decodeUnknownOption(Ledger.key);
 const decodeCountArgs = Schema.decodeUnknownOption(LedgerCount.args);

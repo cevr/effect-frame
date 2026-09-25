@@ -35,7 +35,7 @@ const reducer = Behavior.reducer<ShelfState, Note>({
   initial: { notes: [] },
   reduce: (state, note) => ({ notes: [...state.notes, note.text] }),
 });
-const ShelfLive = implementTransparent(Shelf, reducer);
+const ShelfLive = implementTransparent(Shelf, { behavior: reducer });
 
 const ShelfPage = (_props: NoProps) =>
   Effect.gen(function* () {

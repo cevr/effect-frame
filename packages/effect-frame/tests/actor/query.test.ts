@@ -19,9 +19,10 @@ import {
   Policies,
   Policy,
   PolicyNamesMissing,
-  Query,
+  implementBatchedQuery,
   implementQuery,
   implementTransparent,
+  batchedQuery,
 } from "effect-frame/actor";
 import {
   Authenticated,
@@ -76,9 +77,8 @@ const OrderBook = contract("OrderBook", {
   message: Schema.Union([PlaceOrder]),
 });
 
-const OrderBookLive = implementTransparent(
-  OrderBook,
-  Behavior.reducer<OrderBookState, PlaceOrder>({
+const OrderBookLive = implementTransparent(OrderBook, {
+  behavior: Behavior.reducer<OrderBookState, PlaceOrder>({
     initial: { count: 0, revenue: 0, lastSku: "" },
     reduce: (state, message) => ({
       count: state.count + 1,
@@ -86,7 +86,7 @@ const OrderBookLive = implementTransparent(
       lastSku: message.sku,
     }),
   }),
-);
+});
 
 /** A second actor nothing on the dashboard depends on, to prove the scope. */
 const Ping = Schema.TaggedStruct("Ping", {});
@@ -97,13 +97,12 @@ const Heartbeat = contract("Heartbeat", {
   snapshot: Schema.Finite,
   message: Schema.Union([Ping]),
 });
-const HeartbeatLive = implementTransparent(
-  Heartbeat,
-  Behavior.reducer<number, Schema.Schema.Type<typeof Ping>>({
+const HeartbeatLive = implementTransparent(Heartbeat, {
+  behavior: Behavior.reducer<number, Schema.Schema.Type<typeof Ping>>({
     initial: 0,
     reduce: (state) => state + 1,
   }),
-);
+});
 
 // ---------------------------------------------------------------------------
 // The queries: three reads, two of which depend on the order book
@@ -150,7 +149,7 @@ const Counted = query("Counted", {
 });
 
 /** A declared batch query used by the wire, cache, authorization, and refresh rows. */
-const BatchedLookup = query.batched("BatchedLookup", {
+const BatchedLookup = batchedQuery("BatchedLookup", {
   version: 1,
   args: Schema.Struct({ tenant: Schema.String, id: Schema.Finite }),
   result: Schema.Struct({ id: Schema.Finite, round: Schema.Finite }),
@@ -159,7 +158,7 @@ const BatchedLookup = query.batched("BatchedLookup", {
 });
 
 /** A chronology probe: its first read waits while a command refresh fails. */
-const Chronology = query.batched("Chronology", {
+const Chronology = batchedQuery("Chronology", {
   version: 1,
   args: Schema.Struct({ tenant: Schema.String, id: Schema.Finite }),
   result: Schema.Finite,
@@ -198,22 +197,24 @@ const readBook = (tenant: string) =>
     return yield* book.state.get;
   });
 
-const RevenueLive = implementQuery(Revenue, (args) =>
-  Effect.andThen(
-    countRun(Revenue.name),
-    Effect.map(readBook(args.tenant), (state) => ({ total: state.revenue })),
-  ),
-);
+const RevenueLive = implementQuery(Revenue, {
+  run: (args) =>
+    Effect.andThen(
+      countRun(Revenue.name),
+      Effect.map(readBook(args.tenant), (state) => ({ total: state.revenue })),
+    ),
+});
 
-const TopSkuLive = implementQuery(TopSku, (args) =>
-  Effect.andThen(
-    countRun(TopSku.name),
-    Effect.map(readBook(args.tenant), (state) => ({
-      sku: state.lastSku,
-      orders: state.count,
-    })),
-  ),
-);
+const TopSkuLive = implementQuery(TopSku, {
+  run: (args) =>
+    Effect.andThen(
+      countRun(TopSku.name),
+      Effect.map(readBook(args.tenant), (state) => ({
+        sku: state.lastSku,
+        orders: state.count,
+      })),
+    ),
+});
 
 /** A dependent whose handler a test can make throw, to fail one refresh. */
 const Funnel = query("Funnel", {
@@ -226,16 +227,17 @@ const Funnel = query("Funnel", {
 
 const funnelDown = { current: false };
 
-const FunnelLive = implementQuery(Funnel, (args) =>
-  Effect.gen(function* () {
-    yield* countRun(Funnel.name);
-    if (funnelDown.current) {
-      return yield* Effect.fail("funnel store is down");
-    }
-    const state = yield* readBook(args.tenant);
-    return { orders: state.count };
-  }),
-);
+const FunnelLive = implementQuery(Funnel, {
+  run: (args) =>
+    Effect.gen(function* () {
+      yield* countRun(Funnel.name);
+      if (funnelDown.current) {
+        return yield* Effect.fail("funnel store is down");
+      }
+      const state = yield* readBook(args.tenant);
+      return { orders: state.count };
+    }),
+});
 
 /**
  * Record arguments encode in the order the caller spelled them, so only the
@@ -249,41 +251,43 @@ const Pair = query("Pair", {
   depends: [],
 });
 
-const PairLive = implementQuery(Pair, (args) =>
-  Effect.as(countRun(Pair.name), `${args["a"]}${args["b"]}`),
-);
+const PairLive = implementQuery(Pair, {
+  run: (args) => Effect.as(countRun(Pair.name), `${args["a"]}${args["b"]}`),
+});
 
 const rates = new Map<string, number>([["USDEUR", 0.92]]);
 
 /** A test may hold every rate read open, to observe a value in flight. */
 const rateGate = { current: Option.none<Deferred.Deferred<void>>() };
 
-const ExchangeRateLive = implementQuery(ExchangeRate, (args) =>
-  Effect.andThen(
-    Effect.suspend(() =>
-      Option.match(rateGate.current, { onNone: () => Effect.void, onSome: Deferred.await }),
+const ExchangeRateLive = implementQuery(ExchangeRate, {
+  run: (args) =>
+    Effect.andThen(
+      Effect.suspend(() =>
+        Option.match(rateGate.current, { onNone: () => Effect.void, onSome: Deferred.await }),
+      ),
+      Effect.succeed({
+        rate: Option.getOrElse(Option.fromNullishOr(rates.get(args.pair)), () => 1),
+      }),
     ),
-    Effect.succeed({
-      rate: Option.getOrElse(Option.fromNullishOr(rates.get(args.pair)), () => 1),
-    }),
-  ),
-);
+});
 
-const UnpolicedLive = implementQuery(Unpoliced, () => Effect.succeed(1));
+const UnpolicedLive = implementQuery(Unpoliced, { run: () => Effect.succeed(1) });
 
 let reads = 0;
-const CountedLive = implementQuery(Counted, () =>
-  Effect.sync(() => {
-    reads += 1;
-    return reads;
-  }),
-);
+const CountedLive = implementQuery(Counted, {
+  run: () =>
+    Effect.sync(() => {
+      reads += 1;
+      return reads;
+    }),
+});
 
 let batchCalls = 0;
 let lastBatchIds: ReadonlyArray<number> = [];
 const batchGate = { current: Option.none<Deferred.Deferred<void>>() };
 const batchStarted = { current: Option.none<Deferred.Deferred<void>>() };
-const BatchedLookupLive = Query.batched(BatchedLookup, {
+const BatchedLookupLive = implementBatchedQuery(BatchedLookup, {
   resolve: (args) =>
     Effect.gen(function* () {
       const started = batchStarted.current;
@@ -316,7 +320,7 @@ interface ChronologyControl {
 
 const chronologyControl = { current: Option.none<ChronologyControl>() };
 
-const ChronologyLive = Query.batched(Chronology, {
+const ChronologyLive = implementBatchedQuery(Chronology, {
   resolve: () =>
     Effect.gen(function* () {
       const control = chronologyControl.current;

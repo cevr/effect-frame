@@ -326,7 +326,7 @@ const draftLabel = "unpublished-draft";
 
 const guarded = Layer.build(
   QueryTest.layer({
-    queries: [implementQuery(Draft, () => Effect.succeed({ label: draftLabel }))],
+    queries: [implementQuery(Draft, { run: () => Effect.succeed({ label: draftLabel }) })],
   }).pipe(
     Layer.provide(Layer.succeed(Policies, Policies.of({ member: Policy.authenticated }))),
     Layer.orDie,

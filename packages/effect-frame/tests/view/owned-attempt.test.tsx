@@ -66,22 +66,23 @@ class Fixtures extends Context.Service<Fixtures, FixturesService>()(
 ) {}
 
 /** A real QueryTest handler: an id with a held entry blocks until its gate. */
-const AttemptLive = implementQuery(AttemptQuery, ({ id }) =>
-  Effect.gen(function* () {
-    const fixtures = yield* Fixtures;
-    yield* Ref.update(fixtures.calls, (calls) => {
-      const next = new Map(calls);
-      next.set(id, Option.getOrElse(Option.fromNullishOr(calls.get(id)), () => 0) + 1);
-      return next;
-    });
-    const held = Option.fromNullishOr((yield* Ref.get(fixtures.held)).get(id));
-    if (Option.isSome(held)) {
-      yield* Deferred.succeed(held.value.started, void 0);
-      yield* Deferred.await(held.value.gate);
-    }
-    return `value:${id}`;
-  }),
-);
+const AttemptLive = implementQuery(AttemptQuery, {
+  run: ({ id }) =>
+    Effect.gen(function* () {
+      const fixtures = yield* Fixtures;
+      yield* Ref.update(fixtures.calls, (calls) => {
+        const next = new Map(calls);
+        next.set(id, Option.getOrElse(Option.fromNullishOr(calls.get(id)), () => 0) + 1);
+        return next;
+      });
+      const held = Option.fromNullishOr((yield* Ref.get(fixtures.held)).get(id));
+      if (Option.isSome(held)) {
+        yield* Deferred.succeed(held.value.started, void 0);
+        yield* Deferred.await(held.value.gate);
+      }
+      return `value:${id}`;
+    }),
+});
 
 const makeFixtures = Effect.gen(function* () {
   return Fixtures.of({

@@ -103,7 +103,22 @@ const makeQuery = <
   raw: { args: options.args, result: options.result },
 });
 
-export function query<
+/**
+ * Declares a query the host reads one key at a time. The server half is
+ * `implementQuery`.
+ *
+ * @example
+ * ```ts
+ * const Totals = query("Totals", {
+ *   version: 1,
+ *   args: Schema.Struct({ tenant: Schema.String }),
+ *   result: Schema.Finite,
+ *   policy: "tenantMember",
+ *   depends: [Ledger],
+ * });
+ * ```
+ */
+export const query = <
   const Name extends string,
   Args extends Pure,
   Result extends Pure,
@@ -111,29 +126,33 @@ export function query<
 >(
   name: Name,
   options: QueryOptions<Args, Result, Policy>,
-): QueryContract<Name, Args, Result, Policy, "single"> {
-  return makeQuery(name, options, "single");
-}
+): QueryContract<Name, Args, Result, Policy, "single"> => makeQuery(name, options, "single");
 
 /**
- * Declares that this query is served by one resolver for a collected set of
- * arguments. The server implementation is still supplied separately with
- * `Query.batched`; keeping the marker on the client contract makes the
- * transport choice visible to a reader and to the cache.
+ * Declares a query that one resolver serves for a collected set of
+ * arguments. The server half is `implementBatchedQuery`. The mode is on the
+ * client contract, so a reader and the cache both see the transport choice.
+ *
+ * @example
+ * ```ts
+ * const Rows = batchedQuery("Rows", {
+ *   version: 1,
+ *   args: Schema.String,
+ *   result: Row,
+ *   policy: "public",
+ *   depends: [Table],
+ * });
+ * ```
  */
-export namespace query {
-  export function batched<
-    const Name extends string,
-    Args extends Pure,
-    Result extends Pure,
-    const Policy extends string,
-  >(
-    name: Name,
-    options: QueryOptions<Args, Result, Policy>,
-  ): QueryContract<Name, Args, Result, Policy, "batched"> {
-    return makeQuery(name, options, "batched");
-  }
-}
+export const batchedQuery = <
+  const Name extends string,
+  Args extends Pure,
+  Result extends Pure,
+  const Policy extends string,
+>(
+  name: Name,
+  options: QueryOptions<Args, Result, Policy>,
+): QueryContract<Name, Args, Result, Policy, "batched"> => makeQuery(name, options, "batched");
 
 // ---------------------------------------------------------------------------
 // Cache key

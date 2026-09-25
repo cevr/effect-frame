@@ -30,13 +30,15 @@ const Counter = contract("CommandEventCounter", {
 
 /** Each turn waits on a real timer, so a starved scheduler would never finish it. */
 const CounterLive = implementTransparent(Counter, {
-  initial: 0,
-  open: () =>
-    Effect.succeed({
-      apply: (state: number, amount: number) =>
-        Effect.as(Effect.sleep("30 millis"), state + amount),
-      changes: Stream.empty,
-    }),
+  behavior: {
+    initial: 0,
+    open: () =>
+      Effect.succeed({
+        apply: (state: number, amount: number) =>
+          Effect.as(Effect.sleep("30 millis"), state + amount),
+        changes: Stream.empty,
+      }),
+  },
 });
 
 interface Requests {

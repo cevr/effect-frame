@@ -63,16 +63,31 @@ export type AnyQueryImplementation<R> =
   | QueryImplementation<SingleQuery, R | ActorTransport | Scope.Scope>
   | BatchedQueryImplementation<BatchedQuery, R | ActorTransport | Scope.Scope>;
 
+export interface ImplementQueryOptions<Q extends SingleQuery, E, R> {
+  /** Reads one decoded argument. Its own error reaches the client as `QueryFailed`. */
+  readonly run: (args: ArgsOf<Q>) => Effect.Effect<ResultOf<Q>, E, R>;
+}
+
 /**
+ * The server half of a query declared with `query`.
+ *
  * `ActorTransport` and `Scope` are supplied by the host, so they leave the
  * implementation's requirements: a handler may open an actor reference, and
  * the reference lives exactly as long as the one read. That is what lets one
  * host own both halves with no cycle and no second instance set.
+ *
+ * @example
+ * ```ts
+ * const TotalsLive = implementQuery(Totals, {
+ *   run: ({ tenant }) => Effect.succeed(totalFor(tenant)),
+ * });
+ * ```
  */
 export const implementQuery = <Q extends SingleQuery, E, R>(
   contract: Q,
-  handler: (args: ArgsOf<Q>) => Effect.Effect<ResultOf<Q>, E, R>,
+  options: ImplementQueryOptions<Q, E, R>,
 ): QueryImplementation<Q, R> => {
+  const handler = options.run;
   const decodeArgs = Schema.decodeEffect(contract.args);
   const encodeResult = Schema.encodeEffect(contract.result);
   return {
@@ -113,11 +128,17 @@ const failed = <E>(contract: AnyQuery, error: E): QueryFailed =>
   QueryFailed.make({ query: contract.name, detail: String(error) });
 
 /**
- * Builds a declared batched query. `Query.batched(contract, { resolve })` is
- * the server spelling; the contract itself carries the client-side marker
- * made by `query.batched(...)`.
+ * The server half of a query declared with `batchedQuery`: one resolver for
+ * every argument collected in one request.
+ *
+ * @example
+ * ```ts
+ * const RowsLive = implementBatchedQuery(Rows, {
+ *   resolve: (ids) => Effect.succeed((id) => Effect.succeed(rowFor(id))),
+ * });
+ * ```
  */
-export const batched = <Q extends BatchedQuery, E, R>(
+export const implementBatchedQuery = <Q extends BatchedQuery, E, R>(
   contract: Q,
   options: BatchedQueryOptions<Q, E, R>,
 ): BatchedQueryImplementation<Q, R> => {
@@ -196,9 +217,6 @@ export const batched = <Q extends BatchedQuery, E, R>(
 
   return { contract, mode: "batched", runBatch };
 };
-
-/** The server-facing namespace named by issue #54. */
-export const Query = { batched };
 
 // ---------------------------------------------------------------------------
 // The query host

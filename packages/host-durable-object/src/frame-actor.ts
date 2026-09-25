@@ -67,7 +67,7 @@ const CounterContract = contract("FrameActorCounter", {
   message: Add,
 });
 
-const CounterLive = implementTransparent(CounterContract, counter);
+const CounterLive = implementTransparent(CounterContract, { behavior: counter });
 
 // ---------------------------------------------------------------------------
 // The hosted runtime

@@ -10,15 +10,14 @@ import { Alerts, Memo, alertsMachine, pinnedAlert } from "./contract.js";
  * so its handle settles `Rejected` and nothing commits. The memo lives
  * beside them; no query depends on it. Server modules.
  */
-export const AlertsLive = implementTransparent(
-  Alerts,
-  Behavior.machine(alertsMachine, {
+export const AlertsLive = implementTransparent(Alerts, {
+  behavior: Behavior.machine(alertsMachine, {
     refuse: (ack) =>
       Option.as(
         Option.liftPredicate(ack, (one) => one.id === pinnedAlert),
         Refused.make({ reason: "pinned" }),
       ),
   }),
-);
+});
 
-export const MemoLive = implementTransparent(Memo, memoBehavior);
+export const MemoLive = implementTransparent(Memo, { behavior: memoBehavior });

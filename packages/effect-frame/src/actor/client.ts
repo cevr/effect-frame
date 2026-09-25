@@ -39,6 +39,7 @@ export {
   StreamEnded,
   UnknownQuery,
   canonicalize,
+  batchedQuery,
   keyOf,
   query,
   type AnyQuery,

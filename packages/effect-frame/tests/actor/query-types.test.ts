@@ -4,11 +4,12 @@ import {
   Behavior,
   Policies,
   Policy,
-  Query,
+  implementBatchedQuery,
   contract,
   implementQuery,
   implementTransparent,
   query,
+  batchedQuery,
 } from "effect-frame/actor";
 import { ref } from "effect-frame/actor/client";
 import { QueryTest } from "effect-frame/actor/testing";
@@ -33,13 +34,12 @@ const Probe = contract("ApplicationServiceProbe", {
   message: Schema.Union([ProbeMessage]),
 });
 
-const ProbeLive = implementTransparent(
-  Probe,
-  Behavior.reducer<number, ProbeMessage>({
+const ProbeLive = implementTransparent(Probe, {
+  behavior: Behavior.reducer<number, ProbeMessage>({
     initial: 7,
     reduce: (state) => state,
   }),
-);
+});
 
 const Single = query("ApplicationServiceSingle", {
   version: 1,
@@ -49,7 +49,7 @@ const Single = query("ApplicationServiceSingle", {
   depends: [],
 });
 
-const Batched = query.batched("ApplicationServiceBatch", {
+const Batched = batchedQuery("ApplicationServiceBatch", {
   version: 1,
   policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
@@ -67,11 +67,11 @@ const ActorReading = query("ActorReading", {
 
 const batchReleases = { current: 0 };
 
-const SingleLive = implementQuery(Single, () =>
-  Effect.map(Effect.service(ApplicationValue), (service) => ({ value: service.value })),
-);
+const SingleLive = implementQuery(Single, {
+  run: () => Effect.map(Effect.service(ApplicationValue), (service) => ({ value: service.value })),
+});
 
-const BatchedLive = Query.batched(Batched, {
+const BatchedLive = implementBatchedQuery(Batched, {
   resolve: () =>
     Effect.acquireRelease(
       Effect.map(
@@ -86,22 +86,25 @@ const BatchedLive = Query.batched(Batched, {
     ),
 });
 
-const ActorReadingLive = implementQuery(ActorReading, (args) =>
-  Effect.gen(function* () {
-    const actor = yield* ref(Probe, { id: args.id });
-    return yield* actor.state.get;
-  }),
-);
+const ActorReadingLive = implementQuery(ActorReading, {
+  run: (args) =>
+    Effect.gen(function* () {
+      const actor = yield* ref(Probe, { id: args.id });
+      return yield* actor.state.get;
+    }),
+});
 
-const TestLayerQuery = implementQuery(Single, () =>
-  Effect.map(Effect.service(ApplicationValue), (service) => ({ value: service.value })),
-);
+const TestLayerQuery = implementQuery(Single, {
+  run: () => Effect.map(Effect.service(ApplicationValue), (service) => ({ value: service.value })),
+});
 
-// @ts-expect-error A handler receives the contract's decoded argument shape.
-implementQuery(Single, (args: { readonly wrong: string }) => Effect.succeed({ value: args.wrong }));
+implementQuery(Single, {
+  // @ts-expect-error A handler receives the contract's decoded argument shape.
+  run: (args: { readonly wrong: string }) => Effect.succeed({ value: args.wrong }),
+});
 
 // @ts-expect-error A handler returns the contract's declared result shape.
-implementQuery(Single, () => Effect.succeed({ value: "wrong" }));
+implementQuery(Single, { run: () => Effect.succeed({ value: "wrong" }) });
 
 const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
 

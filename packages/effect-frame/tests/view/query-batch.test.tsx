@@ -6,15 +6,15 @@ import {
   ActorHost,
   Behavior,
   HttpServer,
-  Query,
+  implementBatchedQuery,
   QueryCache,
   Value,
-  query,
   queryCacheLayer,
   spawn,
   useQuery,
   Policies,
   Policy,
+  batchedQuery,
 } from "effect-frame/actor";
 import type { Source } from "effect-frame/actor";
 import { HttpTransport } from "effect-frame/actor/client";
@@ -26,7 +26,7 @@ import { describe, expect, it } from "effect-bun-test";
 /** The one policy table: every contract and query here declares `public`. */
 const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
 
-const RowQuery = query.batched("ViewListRow", {
+const RowQuery = batchedQuery("ViewListRow", {
   version: 1,
   policy: "public",
   args: Schema.Struct({ id: Schema.Finite }),
@@ -56,7 +56,7 @@ let batchAborts = 0;
 let singleRequests = 0;
 let lastBatchIds: ReadonlyArray<number> = [];
 
-const RowLive = Query.batched(RowQuery, {
+const RowLive = implementBatchedQuery(RowQuery, {
   resolve: (args) =>
     Effect.gen(function* () {
       const control = batchControl.current;

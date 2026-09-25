@@ -121,11 +121,24 @@ export const implement = <C extends AnyContract, State, R = never>(
   open: openInstance(options, contract),
 });
 
+export interface ImplementTransparentOptions<C extends AnyContract, R> {
+  readonly behavior: Behavior<SnapshotOf<C>, MessageOf<C>, R, Refused>;
+}
+
 /**
  * The common case: the snapshot is the state and both share one schema.
+ *
+ * @example
+ * ```ts
+ * const CounterLive = implementTransparent(Counter, { behavior: Behavior.value(0) });
+ * ```
  */
 export const implementTransparent = <C extends AnyContract, R = never>(
   contract: C,
-  behavior: Behavior<SnapshotOf<C>, MessageOf<C>, R, Refused>,
+  options: ImplementTransparentOptions<C, R>,
 ): ActorImplementation<C, SnapshotOf<C>, R> =>
-  implement(contract, { behavior, state: contract.snapshot, snapshot: (state) => state });
+  implement(contract, {
+    behavior: options.behavior,
+    state: contract.snapshot,
+    snapshot: (state) => state,
+  });

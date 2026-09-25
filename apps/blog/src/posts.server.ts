@@ -166,33 +166,36 @@ const bodyOf = (post: Post): PostBodyValue => ({
 });
 
 /** Every published post, newest first. */
-export const PostIndexLive = implementQuery(PostIndex, () =>
-  Effect.gen(function* () {
-    const source = yield* PostSource;
-    const posts = yield* source.all;
-    return posts
-      .filter((post) => !post.draft)
-      .toSorted(newestFirst)
-      .map(summaryOf);
-  }),
-);
+export const PostIndexLive = implementQuery(PostIndex, {
+  run: () =>
+    Effect.gen(function* () {
+      const source = yield* PostSource;
+      const posts = yield* source.all;
+      return posts
+        .filter((post) => !post.draft)
+        .toSorted(newestFirst)
+        .map(summaryOf);
+    }),
+});
 
 /** One published post. A draft is missing here: only `Draft` reads it. */
-export const PostBodyLive = implementQuery(PostBody, (args) =>
-  Effect.gen(function* () {
-    const source = yield* PostSource;
-    const post = yield* source.one(args.slug);
-    if (post.draft) {
-      return yield* PostMissing.make({ slug: args.slug });
-    }
-    return bodyOf(post);
-  }),
-);
+export const PostBodyLive = implementQuery(PostBody, {
+  run: (args) =>
+    Effect.gen(function* () {
+      const source = yield* PostSource;
+      const post = yield* source.one(args.slug);
+      if (post.draft) {
+        return yield* PostMissing.make({ slug: args.slug });
+      }
+      return bodyOf(post);
+    }),
+});
 
 /** Any post, draft or not. Its policy admits editors only. */
-export const DraftLive = implementQuery(Draft, (args) =>
-  Effect.gen(function* () {
-    const source = yield* PostSource;
-    return bodyOf(yield* source.one(args.slug));
-  }),
-);
+export const DraftLive = implementQuery(Draft, {
+  run: (args) =>
+    Effect.gen(function* () {
+      const source = yield* PostSource;
+      return bodyOf(yield* source.one(args.slug));
+    }),
+});

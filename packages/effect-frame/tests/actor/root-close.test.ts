@@ -22,17 +22,18 @@ describe("QueryTest root ownership", () => {
       let released = 0;
       const layer = QueryTest.layer({
         queries: [
-          implementQuery(RootCloseQuery, () =>
-            Effect.gen(function* () {
-              yield* Effect.addFinalizer<never>(() =>
-                Effect.sync(() => {
-                  released += 1;
-                }),
-              );
-              yield* Deferred.succeed(started, void 0);
-              return yield* Effect.never;
-            }),
-          ),
+          implementQuery(RootCloseQuery, {
+            run: () =>
+              Effect.gen(function* () {
+                yield* Effect.addFinalizer<never>(() =>
+                  Effect.sync(() => {
+                    released += 1;
+                  }),
+                );
+                yield* Deferred.succeed(started, void 0);
+                return yield* Effect.never;
+              }),
+          }),
         ],
       }).pipe(
         Layer.provide(Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }))),

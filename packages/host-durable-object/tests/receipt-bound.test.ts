@@ -39,10 +39,12 @@ const Counter = contract("BoundCounter", {
   message: Schema.Union([Add]),
 });
 
-const CounterLive = implementTransparent(
-  Counter,
-  Behavior.reducer<number, Add>({ initial: 0, reduce: (state, message) => state + message.amount }),
-);
+const CounterLive = implementTransparent(Counter, {
+  behavior: Behavior.reducer<number, Add>({
+    initial: 0,
+    reduce: (state, message) => state + message.amount,
+  }),
+});
 
 const policies = Policies.of({ public: Policy.allowAll });
 

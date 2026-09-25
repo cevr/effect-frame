@@ -74,9 +74,8 @@ const reduce = (state: TasksSnapshot, message: TasksMessage): TasksSnapshot =>
 /** The one title the behavior refuses: the host answers it `Refused`. */
 export const refusedTitle = "reject-me";
 
-export const TasksLive = implementTransparent(
-  Tasks,
-  Behavior.reducer<TasksSnapshot, TasksMessage, Refused>({
+export const TasksLive = implementTransparent(Tasks, {
+  behavior: Behavior.reducer<TasksSnapshot, TasksMessage, Refused>({
     initial: { tasks: [], tags: [] },
     reduce,
     refuse: (message) =>
@@ -88,7 +87,7 @@ export const TasksLive = implementTransparent(
         Refused.make({ reason: "that title is refused" }),
       ),
   }),
-);
+});
 
 /**
  * A second contract whose one member has a required redacted field. A
@@ -114,13 +113,12 @@ export const Vault = contract("Vault", {
 
 export const vault = { vault: "main" };
 
-export const VaultLive = implementTransparent(
-  Vault,
-  Behavior.reducer<VaultSnapshot, Schema.Schema.Type<typeof Unlock>>({
+export const VaultLive = implementTransparent(Vault, {
+  behavior: Behavior.reducer<VaultSnapshot, Schema.Schema.Type<typeof Unlock>>({
     initial: { unlocks: [] },
     reduce: (state, unlock) => ({ unlocks: [...state.unlocks, unlock.label] }),
   }),
-);
+});
 
 /** What reached the transport: every send, in order, and a lost-reply switch. */
 export interface Wire {

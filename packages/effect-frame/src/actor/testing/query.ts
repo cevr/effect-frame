@@ -7,7 +7,7 @@ import { QueryCache } from "../query-client.js";
 import type { ActorTransport } from "../transport.js";
 
 export interface LayerOptions<R> {
-  /** Canonical `implementQuery` and `Query.batched` descriptors. */
+  /** Canonical `implementQuery` and `implementBatchedQuery` descriptors. */
   readonly queries: ReadonlyArray<AnyQueryImplementation<R>>;
   /** Optional real actors for command-driven invalidation tests. */
   readonly implementations?: ReadonlyArray<AnyImplementation<R>>;

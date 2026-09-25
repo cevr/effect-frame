@@ -64,15 +64,16 @@ class BlockControl extends Context.Service<
   }
 >()("effect-frame/tests/view/testing-inspection.test/BlockControl") {}
 
-const BlockedLive = implementQuery(BlockedQuery, () =>
-  Effect.gen(function* () {
-    const control = yield* BlockControl;
-    yield* Ref.update(control.reads, (reads) => reads + 1);
-    yield* Deferred.succeed(control.started, void 0);
-    yield* Deferred.await(control.gate);
-    return "ready";
-  }),
-);
+const BlockedLive = implementQuery(BlockedQuery, {
+  run: () =>
+    Effect.gen(function* () {
+      const control = yield* BlockControl;
+      yield* Ref.update(control.reads, (reads) => reads + 1);
+      yield* Deferred.succeed(control.started, void 0);
+      yield* Deferred.await(control.gate);
+      return "ready";
+    }),
+});
 
 const SearchPage = () =>
   View.loading({

@@ -52,10 +52,12 @@ const PostBody = queryContract("PublicPostBody", {
   depends: [],
 });
 
-const TenantLive = implementQuery(TenantInfo, ({ tenant }) => Effect.succeed(`Tenant ${tenant}`));
-const PostLive = implementQuery(PostBody, ({ tenant, postId }) =>
-  Effect.succeed(`Post ${tenant}/${postId}`),
-);
+const TenantLive = implementQuery(TenantInfo, {
+  run: ({ tenant }) => Effect.succeed(`Tenant ${tenant}`),
+});
+const PostLive = implementQuery(PostBody, {
+  run: ({ tenant, postId }) => Effect.succeed(`Post ${tenant}/${postId}`),
+});
 
 // ---------------------------------------------------------------------------
 // The application's navigation access service and one ordered event log

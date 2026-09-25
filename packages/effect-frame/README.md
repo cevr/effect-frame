@@ -592,7 +592,9 @@ missing`.
   reports `"wrap the handler with View.event(handler)"`. A handler that
   reads its event is `View.event((event) => ...)`; one that reads none is
   the Effect itself, `View.event(addPane)`, run once per event. Either way
-  the Effect cannot fail: a view has no place to return a failure.
+  the Effect cannot fail: a view has no place to return a failure. A write
+  to a local actor fits as it is: `send` and `modify` return a handle and
+  never fail, and a stopped actor is a `Rejected` state of that handle.
 - `View.submit` has the host suppress the default action first. A form's
   `onSubmit` takes only that kind, `View.submit` or a `View.form` binding's
   `submit`, so a form never posts natively by mistake. A view writes no

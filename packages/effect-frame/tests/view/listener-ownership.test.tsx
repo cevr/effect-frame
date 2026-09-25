@@ -261,11 +261,7 @@ const idOf = (node: Node): string => {
 const recordWith = (
   events: LocalActorRef<ReadonlyArray<string>, SetValue<ReadonlyArray<string>>>,
   label: string,
-): Effect.Effect<void> =>
-  modify(events, (labels) => [...labels, label]).pipe(
-    Effect.catchTag("ActorStopped", () => Effect.void),
-    Effect.asVoid,
-  );
+): Effect.Effect<void> => Effect.asVoid(modify(events, (labels) => [...labels, label]));
 
 describe("view listener ownership", () => {
   it.scoped("turns over Show listeners while siblings and replacement branches stay live", () =>

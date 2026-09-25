@@ -206,14 +206,17 @@ describe("scoped view test harness", () => {
 
       expect(countText(root)).toBe("0");
       const applied = yield* page.act(
-        modify(count, (value) => value + 1),
+        Effect.flatMap(
+          modify(count, (value) => value + 1),
+          (handle) => handle.settled,
+        ),
         {
           label: "counter shows one",
           until: (actualRoot) => countText(actualRoot) === "1",
         },
       );
 
-      expect(applied.state).toBe(1);
+      expect(applied).toMatchObject({ _tag: "Applied", state: 1 });
       expect(countText(root)).toBe("1");
       yield* page.close;
       yield* page.close;

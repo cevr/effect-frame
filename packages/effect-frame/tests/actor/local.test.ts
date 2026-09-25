@@ -21,7 +21,8 @@ import {
   committedRevision,
   modify,
 } from "effect-frame/actor";
-import type { CommandSettled } from "effect-frame/actor";
+import type { CommandHandle, CommandSettled } from "effect-frame/actor";
+import { View } from "effect-frame/view";
 
 const CounterState = State({
   Counting: { count: Schema.Finite },
@@ -107,8 +108,11 @@ describe("local actor", () => {
             ),
         }),
       );
-      const failed = yield* Effect.flip(modify(count, (n) => n - 1));
-      expect(failed).toEqual(Refused.make({ reason: "negative" }));
+      const refused = yield* modify(count, (n) => n - 1);
+      expect(yield* refused.settled).toEqual({
+        _tag: "Rejected",
+        reason: Refused.make({ reason: "negative" }),
+      });
       expect(yield* count.applied.get).toEqual({ revision: committedRevision(0), state: 0 });
     }),
   );
@@ -127,7 +131,11 @@ describe("local actor", () => {
       const count = yield* Actor.local(Behavior.value(0));
       yield* Effect.forEach(
         Array.from({ length: 50 }, (_, index) => index),
-        () => modify(count, (n) => n + 1),
+        () =>
+          Effect.flatMap(
+            modify(count, (n) => n + 1),
+            (handle) => handle.settled,
+          ),
         { concurrency: 10, discard: true },
       );
       expect(yield* count.state.get).toBe(50);
@@ -310,6 +318,24 @@ describe("local actor", () => {
       expect(callFailure._tag).toBe("ActorStopped");
     }),
   );
+
+  it.effect(
+    "a view handler that modifies a stopped actor compiles and gets a Rejected handle",
+    () =>
+      Effect.gen(function* () {
+        const scope = yield* Scope.make();
+        const count = yield* Actor.local(Behavior.value(0)).pipe(Scope.provide(scope));
+        yield* Scope.close(scope, Exit.void);
+        // A handler has no error channel: modify fits it with no catch.
+        const bump: Effect.Effect<CommandHandle<number, "local">> = modify(count, (n) => n + 1);
+        const handler = View.event(bump);
+        expect(handler._tag).toBe("Prepared");
+        const handle = yield* bump;
+        expect(yield* handle.settled).toEqual({ _tag: "Rejected", reason: ActorStopped.make() });
+        const derived = yield* count.derive((n) => Value.Set(n + 1));
+        expect(yield* derived.state.get).toEqual({ _tag: "Rejected", reason: ActorStopped.make() });
+      }),
+  );
 });
 
 describe("source combinators", () => {
@@ -395,7 +421,7 @@ describe("source products and followers", () => {
       );
       yield* yieldFibers;
       yield* cell.send(Value.Set(1));
-      yield* modify(cell, (value) => value + 1);
+      yield* (yield* modify(cell, (value) => value + 1)).settled;
       yield* yieldFibers;
       expect(seen).toEqual([0, 1, 2]);
 

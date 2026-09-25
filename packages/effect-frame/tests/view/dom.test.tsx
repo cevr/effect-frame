@@ -37,12 +37,7 @@ const Counter = (_props: NoProps) =>
     return (
       <div>
         <span id="count">{View.bind(Source.select(count.state, (n) => String(n)))}</span>
-        <button
-          id="up"
-          onClick={View.event(
-            modify(count, (n) => n + 1).pipe(Effect.catchTag("ActorStopped", () => Effect.void)),
-          )}
-        >
+        <button id="up" onClick={View.event(modify(count, (n) => n + 1))}>
           up
         </button>
       </div>
@@ -53,7 +48,7 @@ const Counter = (_props: NoProps) =>
 const EffectCounter = (_props: NoProps) =>
   Effect.gen(function* () {
     const count = yield* Actor.local(Behavior.value(0));
-    const up = modify(count, (n) => n + 1).pipe(Effect.catchTag("ActorStopped", () => Effect.void));
+    const up = modify(count, (n) => n + 1);
     return (
       <div>
         <span id="count">{View.bind(count.state, String)}</span>
@@ -944,14 +939,7 @@ const CountedRows = (props: CountedRowsProps) =>
           return (
             <li>
               <span class="title">{View.bind(task, (value) => value.title)}</span>
-              <button
-                class="tap"
-                onClick={View.event(
-                  modify(clicks, (n) => n + 1).pipe(
-                    Effect.catchTag("ActorStopped", () => Effect.void),
-                  ),
-                )}
-              >
+              <button class="tap" onClick={View.event(modify(clicks, (n) => n + 1))}>
                 {View.bind(clicks.state, String)}
               </button>
             </li>

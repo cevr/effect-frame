@@ -42,12 +42,8 @@ const Benchmark = (props: BenchmarkProps) =>
       Effect.gen(function* () {
         state = next;
         window.__benchVersion = (window.__benchVersion ?? 0) + 1;
-        yield* rows
-          .call(Value.Set(next.rows))
-          .pipe(Effect.catchTag("ActorStopped", () => Effect.void));
-        yield* selected
-          .call(Value.Set(next.selected))
-          .pipe(Effect.catchTag("ActorStopped", () => Effect.void));
+        yield* (yield* rows.send(Value.Set(next.rows))).settled;
+        yield* (yield* selected.send(Value.Set(next.selected))).settled;
         yield* Effect.sync(() =>
           queueMicrotask(() => {
             if (typeof window.__benchCommit === "function") window.__benchCommit();

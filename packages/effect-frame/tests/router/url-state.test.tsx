@@ -327,9 +327,7 @@ const ReusableClaims = (_props: Route.RouteProps<{}, {}>) =>
   Effect.gen(function* () {
     const items = yield* Actor.local(Behavior.value<ReadonlyArray<string>>(["first"]));
     reusableItems = Option.some((next) =>
-      Effect.asVoid(
-        Effect.catchTag(items.call(Value.Set(next)), "ActorStopped", () => Effect.void),
-      ),
+      Effect.flatMap(items.send(Value.Set(next)), (handle) => Effect.asVoid(handle.settled)),
     );
     const rows = yield* View.list({
       each: items.state,

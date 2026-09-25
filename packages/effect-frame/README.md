@@ -15,15 +15,22 @@ work from the published package too.
 ## Rules an app follows
 
 - A view is a function of its props that returns an Effect:
-  `(props) => Effect.gen(function* () { ... })`. It runs once per mounted
-  identity. A change moves only what binds the source that changed.
+  `(props) => Effect.gen(function* () { ... })`, or an arrow over one
+  Effect when it yields nothing else, such as `Effect.succeed(<p>…</p>)`.
+  It runs once per mounted identity. A change moves only what binds the
+  source that changed.
 - A view names the props it is given, even a page that reads none: a leaf
   types them `Route.PropsOf<typeof segment>`, a layout
   `Route.LayoutPropsOf<typeof segment, ChildR>`. The Effect language
   service's `lazyEffect` rule refuses an exported view with no parameter,
   `() => Effect.gen(...)`.
-- A child view is a function the parent yields, never a JSX tag. A
-  PascalCase JSX tag is one of `For`, `Show`, `Match`, `Portal` or `Await`.
+- A PascalCase JSX tag is a framework tag: `For`, `Show`, `Match`,
+  `Portal`, `Await`, or the router's `Link`. A child view is a function the
+  parent yields, never a tag. A synchronous helper that returns a node is
+  called as a function, `Row(props)`, never written as a tag.
+- In an app of more than one file, the segments live in `segments.ts`, a
+  file with no view: the views name the segments, the tree names the
+  views, and neither imports the other's file back.
 - A contract, a query, and a behavior are browser safe. The server half of
   an actor or query (`implementTransparent`, `implementQuery`), the host,
   the policy table, and the HTTP handler live in `*.server.ts` files.

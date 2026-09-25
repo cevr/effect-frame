@@ -181,9 +181,10 @@ export const submit: Submit = (work: HandlerWork): Prepared<"submit"> => ({
  *
  * A parent composes a child with `yield* Child(props)`, which runs in the
  * parent's own context, so the child's `E` and `R` are visible at the one
- * place they enter. A view is never a JSX tag: a tag is a synchronous
- * function or an intrinsic name, and the runtime runs no Effect found in a
- * tree. `View.bind`, `View.event` and `View.submit` are plain functions,
+ * place they enter. A view is never a JSX tag: a PascalCase tag is a
+ * framework tag (`For`, `Show`, `Match`, `Portal`, `Await`, the router's
+ * `Link`), a synchronous helper is called as a function, and the runtime
+ * runs no Effect found in a tree. `View.bind`, `View.event` and `View.submit` are plain functions,
  * so a plain function that returns a `Node` needs nothing from the view
  * that calls it.
  *

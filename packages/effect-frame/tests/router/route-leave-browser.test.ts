@@ -9,8 +9,8 @@ import { describe, expect, it } from "bun:test";
 import * as H from "./browser/harness.js";
 
 /** Each engine, probed once before the proofs are declared. Absent: undefined. */
-const chrome = await H.capabilities("chrome");
-const webkit = await H.capabilities("webkit");
+const chrome = await H.capabilities("chrome", "leave checks");
+const webkit = await H.capabilities("webkit", "leave checks");
 
 /** One bundle for the file, built when the first proof needs it. */
 let bundled: Promise<string> | undefined;

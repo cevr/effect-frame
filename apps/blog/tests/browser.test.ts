@@ -5,8 +5,8 @@
  * `id` was minted by the server into the built page; hydration adopts it,
  * and an adopted id counts as supplied, so the first press is not predicted.
  * It is sent over the transport, the page does not navigate, and the count
- * moves once the server confirms it. The harness is the Notes one, with its
- * CI rule: under CI, a missing Chrome fails the file.
+ * moves once the server confirms it. The harness is the Notes one, with the
+ * shared browser rule: under CI, a missing Chrome fails the file.
  */
 import { afterAll, describe, expect, it } from "bun:test";
 import { BunServices } from "@effect/platform-bun";
@@ -44,7 +44,7 @@ afterAll(async () => {
 
 const available = new Map<Engine, boolean>();
 for (const engine of engines) {
-  available.set(engine, await hasNavigation(engine, server.url));
+  available.set(engine, await hasNavigation(engine, server.url, `the Blog island in ${engine}`));
 }
 
 const hearts = `document.getElementById("hearts").textContent`;

@@ -11,8 +11,8 @@ import * as H from "./browser/harness.js";
 
 const engines: ReadonlyArray<H.Engine> = ["chrome", "webkit"];
 const capabilities = {
-  chrome: await H.capabilities("chrome"),
-  webkit: await H.capabilities("webkit"),
+  chrome: await H.capabilities("chrome", "navigation behavior"),
+  webkit: await H.capabilities("webkit", "navigation behavior"),
 };
 
 let bundled: Promise<string> | undefined;

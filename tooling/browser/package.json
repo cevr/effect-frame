@@ -1,0 +1,14 @@
+{
+  "name": "@effect-frame/test-browser",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The one rule for the real-browser proofs: which browser runs them, and what happens when it is missing.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test tests/"
+  }
+}

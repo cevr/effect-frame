@@ -1,38 +1,18 @@
 /* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNullish, effect/noNewError, effect/noNewPromise, effect/noRuntimeTypeof, effect/noTryCatch, effect/noThrowStatement, effect/noNodeBuiltinImport, no-await-in-loop -- this harness owns the real browser, the page server, and bundling for the route slice 5 browser proof. */
-import { existsSync } from "node:fs";
+import type { Engine } from "@effect-frame/test-browser";
+import { backendOf, requireBrowser } from "@effect-frame/test-browser";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
 
 /**
- * The real-browser harness for the leave proof. It follows
- * `packages/inspect/tests/harness.ts`: WebKit on macOS through Bun.WebView,
- * and a system Chrome where one exists (on macOS too, so both engines run).
- * An engine that is absent is `undefined`, and its proofs skip.
+ * The real-browser harness for the leave proof: WebKit on macOS through
+ * Bun.WebView, and a system Chrome where one exists (on macOS too, so both
+ * engines run). `@effect-frame/test-browser` finds them, and says what
+ * happens when one is missing.
  */
 
-export type Engine = "webkit" | "chrome";
-
-const chromePath = (): string | undefined => {
-  const found = Bun.which("google-chrome") ?? Bun.which("chromium") ?? undefined;
-  if (found !== undefined) return found;
-  const mac = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-  if (process.platform === "darwin" && existsSync(mac)) return mac;
-  return undefined;
-};
-
-export const backendOf = (
-  engine: Engine,
-): Bun.WebView.ConstructorOptions["backend"] | undefined => {
-  if (engine === "webkit") {
-    if (process.platform === "darwin") return { type: "webkit", stderr: "ignore" };
-    return undefined;
-  }
-  const path = chromePath();
-  if (path === undefined) return undefined;
-  return { type: "chrome", url: false, path, stderr: "ignore" };
-};
-
-export const hasEngine = (engine: Engine): boolean => backendOf(engine) !== undefined;
+export type { Engine } from "@effect-frame/test-browser";
+export { backendOf } from "@effect-frame/test-browser";
 
 /** Bundle a fixture entry in this directory for the browser. */
 export const bundle = async (entry = "leave-app.tsx"): Promise<string> => {
@@ -105,9 +85,16 @@ export interface Capabilities {
   readonly agent: string;
 }
 
-/** Probe an engine once, so proofs can branch or skip on what it really has. */
-export const capabilities = async (engine: Engine): Promise<Capabilities | undefined> => {
-  if (!hasEngine(engine)) return undefined;
+/**
+ * Probe an engine once, so proofs can branch or skip on what it really has.
+ * An engine that is missing fails the file under CI (`requireBrowser`), and
+ * otherwise answers `undefined` after one line naming `suites`.
+ */
+export const capabilities = async (
+  engine: Engine,
+  suites: string,
+): Promise<Capabilities | undefined> => {
+  if (requireBrowser(engine, suites) === undefined) return undefined;
   const server = await serve("", {});
   const view = await open(engine, `${server.origin}/probe`);
   try {

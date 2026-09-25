@@ -30,8 +30,8 @@ import * as H from "./browser/harness.js";
 import type { PrerenderWindow } from "./browser/prerender-app.js";
 import { NotFound, Note, Resume, bakedId, noteRoute } from "./browser/prerender-page.js";
 
-const chrome = await H.capabilities("chrome");
-const webkit = await H.capabilities("webkit");
+const chrome = await H.capabilities("chrome", "a prerendered page");
+const webkit = await H.capabilities("webkit", "a prerendered page");
 
 let bundled: Promise<string> | undefined;
 const bundleOnce = (): Promise<string> => {

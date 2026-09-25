@@ -1,4 +1,6 @@
 /* oxlint-disable effect/noAsyncFunction, effect/noGlobals, effect/noNewError, effect/noNullish, effect/noThrowStatement, effect/noTernary, effect/noNodeBuiltinImport, no-await-in-loop -- this harness owns the real browser, the page server, and bundling for the transport proof. */
+import type { Engine } from "@effect-frame/test-browser";
+import { backendOf, requireBrowser } from "@effect-frame/test-browser";
 import { Effect, Exit, Scope } from "effect";
 import { resolve } from "node:path";
 import * as Gateway from "../src/gateway.js";
@@ -92,23 +94,19 @@ export const servePage = (bundleText: string): PageServer => {
 };
 
 /**
- * The browser the proof drives: WebKit on macOS, where Bun.WebView ships it,
- * or a system Chrome elsewhere. `undefined` when neither exists, so the
- * browser proofs skip instead of failing on a host without a browser.
+ * The browser the proofs drive: WebKit on macOS, where Bun.WebView ships
+ * it, or a system Chrome elsewhere.
  */
-const browserBackend = (): Bun.WebView.ConstructorOptions["backend"] | undefined => {
-  if (process.platform === "darwin") return { type: "webkit", stderr: "ignore" };
-  const chrome = Bun.which("google-chrome") ?? Bun.which("chromium") ?? undefined;
-  if (chrome === undefined) return undefined;
-  return { type: "chrome", url: false, path: chrome, stderr: "ignore" };
-};
+const engine: Engine = process.platform === "darwin" ? "webkit" : "chrome";
 
-const backend = browserBackend();
-
-/** Whether this host can run the real-browser proofs. */
-export const hasBrowser = backend !== undefined;
+/**
+ * Whether this host runs the real-browser proofs named by `suites`. Under
+ * CI a missing browser fails the file; elsewhere one line names the skip.
+ */
+export const hasBrowser = (suites: string): boolean => requireBrowser(engine, suites) !== undefined;
 
 export const openView = async (url: string): Promise<Bun.WebView> => {
+  const backend = backendOf(engine);
   if (backend === undefined) throw new Error("no browser backend on this host");
   const view = new Bun.WebView({ backend });
   await view.navigate(url);

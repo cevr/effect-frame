@@ -50,7 +50,10 @@ afterAll(async () => {
 
 const available = new Map<Engine, boolean>();
 for (const engine of engines) {
-  available.set(engine, await hasNavigation(engine, live.server.url));
+  available.set(
+    engine,
+    await hasNavigation(engine, live.server.url, `Notes navigation in ${engine}`),
+  );
 }
 
 const read = <A>(view: Bun.WebView, expression: string): Promise<A> => view.evaluate<A>(expression);

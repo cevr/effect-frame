@@ -24,8 +24,8 @@ import { HttpEffect } from "effect/unstable/http";
 import * as H from "../router/browser/harness.js";
 import { Label, Page, TallPage } from "./browser/streaming-page.js";
 
-const chrome = await H.capabilities("chrome");
-const webkit = await H.capabilities("webkit");
+const chrome = await H.capabilities("chrome", "streamed documents");
+const webkit = await H.capabilities("webkit", "streamed documents");
 
 let bundled: Promise<string> | undefined;
 const bundleOnce = (): Promise<string> => {

@@ -24,6 +24,9 @@
   "dependencies": {
     "effect-frame": "workspace:*"
   },
+  "devDependencies": {
+    "@effect-frame/test-browser": "workspace:*"
+  },
   "peerDependencies": {
     "effect": "catalog:"
   }

@@ -103,6 +103,9 @@ const inspectRaw = (running: H.RunningGateway, root: string, deadline: string) =
     running.readToken,
   );
 
+/** The two real-browser protocol proofs: refused origins, and truncated text. */
+const browser = H.hasBrowser("the real-browser protocol proofs (origin refusal, truncation)");
+
 describe("inspection protocol failures are explicit", () => {
   it("rejects reader requests with bad versions, bodies, capabilities, origins, and hosts", async () => {
     const running = await gateway();
@@ -296,7 +299,7 @@ describe("inspection protocol failures are explicit", () => {
     }
   }, 20_000);
 
-  it.skipIf(!H.hasBrowser)(
+  it.skipIf(!browser)(
     "refuses a real browser on the wrong origin or capability and reports oversized snapshots",
     async () => {
       const devBundle = await H.bundle("main.dev.tsx");
@@ -355,7 +358,7 @@ describe("inspection protocol failures are explicit", () => {
     30_000,
   );
 
-  it.skipIf(!H.hasBrowser)(
+  it.skipIf(!browser)(
     "labels truncated text and keeps JSON complete",
     async () => {
       const devBundle = await H.bundle("main.dev.tsx");

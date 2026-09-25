@@ -117,7 +117,9 @@ const recordIds = (snapshot: Snapshot) => ({
   queries: snapshot.queries.map((record) => [record.id, record.cacheId, record.key, record.state]),
 });
 
-describe.skipIf(!H.hasBrowser)("live Frame inspection over a browser-originated socket", () => {
+const suite = "live Frame inspection over a browser-originated socket";
+
+describe.skipIf(!H.hasBrowser(suite))(suite, () => {
   it("1. reads a held local-host query from the same browser root as direct inspection", async () => {
     const r = await rig();
     try {

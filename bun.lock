@@ -30,6 +30,7 @@
         "effect-frame": "workspace:*",
       },
       "devDependencies": {
+        "@effect-frame/test-browser": "workspace:*",
         "@effect-frame/toolchain-checks": "workspace:*",
         "@happy-dom/global-registrator": "20.14.5",
         "happy-dom": "20.14.5",
@@ -61,6 +62,7 @@
         "effect-frame": "workspace:*",
       },
       "devDependencies": {
+        "@effect-frame/test-browser": "workspace:*",
         "@effect-frame/toolchain-checks": "workspace:*",
         "@happy-dom/global-registrator": "20.14.5",
         "@opentui/core": "0.5.11",
@@ -78,6 +80,7 @@
         "effect-machine": "0.27.0",
       },
       "devDependencies": {
+        "@effect-frame/test-browser": "workspace:*",
         "@effect/platform-bun": "catalog:",
         "@happy-dom/global-registrator": "20.14.5",
         "@opentui/core": "0.5.11",
@@ -114,9 +117,16 @@
       "dependencies": {
         "effect-frame": "workspace:*",
       },
+      "devDependencies": {
+        "@effect-frame/test-browser": "workspace:*",
+      },
       "peerDependencies": {
         "effect": "catalog:",
       },
+    },
+    "tooling/browser": {
+      "name": "@effect-frame/test-browser",
+      "version": "0.0.0",
     },
     "tooling/checks": {
       "name": "@effect-frame/toolchain-checks",
@@ -209,6 +219,8 @@
     "@effect-frame/host-durable-object": ["@effect-frame/host-durable-object@workspace:packages/host-durable-object"],
 
     "@effect-frame/inspect": ["@effect-frame/inspect@workspace:packages/inspect"],
+
+    "@effect-frame/test-browser": ["@effect-frame/test-browser@workspace:tooling/browser"],
 
     "@effect-frame/toolchain-checks": ["@effect-frame/toolchain-checks@workspace:tooling/checks"],
 

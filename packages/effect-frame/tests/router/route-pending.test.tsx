@@ -27,6 +27,7 @@ import { ViewTest } from "effect-frame/view/testing";
 import type { LazyModule, Node } from "effect-frame/view";
 import * as Frame from "../../src/frame.js";
 import {
+  Cause,
   Clock,
   Context,
   Deferred,
@@ -37,6 +38,7 @@ import {
   Option,
   Queue,
   Ref,
+  Result,
   Schema,
   Scope,
 } from "effect";
@@ -302,6 +304,8 @@ interface Probes {
   readonly pendingShown: Array<string>;
   /** Each time `errored` was built. */
   readonly erroredBuilt: Array<string>;
+  /** The exit the layout's scope closed with: the mount's, when the mount closes. */
+  readonly layoutClosed: Deferred.Deferred<Exit.Exit<unknown, unknown>>;
 }
 
 const makeProbes = Effect.gen(function* () {
@@ -312,6 +316,7 @@ const makeProbes = Effect.gen(function* () {
     slow: yield* Deferred.make<void>(),
     pendingShown: [],
     erroredBuilt: [],
+    layoutClosed: yield* Deferred.make<Exit.Exit<unknown, unknown>>(),
   };
   return probes;
 });
@@ -393,6 +398,7 @@ const makeApp = (probes: Probes, importer: Importer, events: Ref.Ref<ReadonlyArr
     ],
     (props) =>
       Effect.gen(function* () {
+        yield* Effect.addFinalizer((exit) => Deferred.succeed(probes.layoutClosed, exit));
         const body = yield* View.loading({
           fallback: <p id="child-loading">loading child</p>,
           content: Effect.map(props.outlet, (outlet) => <div id="outlet">{outlet}</div>),
@@ -423,6 +429,7 @@ const makePlainApp = (probes: Probes, events: Ref.Ref<ReadonlyArray<string>>) =>
     (props) =>
       Effect.gen(function* () {
         yield* Ref.update(events, (all) => [...all, "layout"]);
+        yield* Effect.addFinalizer((exit) => Deferred.succeed(probes.layoutClosed, exit));
         const body = yield* View.loading({
           fallback: <p id="child-loading">loading child</p>,
           content: Effect.map(props.outlet, (outlet) => <div id="outlet">{outlet}</div>),
@@ -617,6 +624,13 @@ const pathOf = (result: NavigationResult): string =>
  * The entered post's presentation is live: its region settled the layout's
  * Loading, so the outlet is drawn and the Loading fallback is gone.
  */
+/** The defect an exit failed with, when it failed with one. */
+const defectOf = (exit: Exit.Exit<unknown, unknown>): Option.Option<unknown> =>
+  Exit.match(exit, {
+    onSuccess: () => Option.none(),
+    onFailure: (cause) => Result.getSuccess(Cause.findDefect(cause)),
+  });
+
 const regionLive = (page: Page) =>
   page.waitFor({
     label: "the entered post's presentation region",
@@ -1129,7 +1143,7 @@ describe("private route pending and lazy views", () => {
       }),
   );
   it.scoped.layer(frameLayer("pending-defect"))(
-    "8. a setup defect removes the fallback at once and leaves the enclosing Loading settled",
+    "8. a setup defect removes the fallback at once and closes the mount with the defect",
     () =>
       Effect.gen(function* () {
         const root = yield* makeRoot;
@@ -1147,28 +1161,19 @@ describe("private route pending and lazy views", () => {
         yield* TestClock.adjust(PendingAfter);
         yield* pendingVisible(page);
         yield* Deferred.succeed(probes.slow, void 0);
-        // No clock movement: the fallback goes, and the layout's Loading
-        // does not fall back to its own fallback forever.
-        yield* page.waitFor({
-          label: "the settled region after a defect",
-          until: (actual) =>
-            !hasAt(actual, "#post-pending") &&
-            hasAt(actual, "#outlet") &&
-            !hasAt(actual, "#child-loading"),
-        });
+        // No clock movement: the defect reaches the mount, which closes
+        // with it and takes the fallback and the layout down.
+        const closed = yield* Deferred.await(probes.layoutClosed);
+        expect(closed.pipe(defectOf)).toEqual(Option.some("post setup defect"));
         expect(yield* Queue.take(probes.postClosed)).toBe("slow-boom");
+        expect(hasAt(root, "#post-pending")).toBe(false);
         expect(hasAt(root, "#post-errored")).toBe(false);
         expect(probes.erroredBuilt).toEqual([]);
-
-        // The Frame and the layout stay alive: the next entry sets up.
-        yield* router.push("/app/t1");
-        yield* router.push("/app/t1/posts/3");
-        yield* postVisible(page, "3");
       }),
   );
 
   it.scoped.layer(frameLayer("pending-defect-plain"))(
-    "8b. without pending, a setup defect still leaves the enclosing Loading settled",
+    "8b. without pending, a setup defect closes the mount with the defect too",
     () =>
       Effect.gen(function* () {
         const root = yield* makeRoot;
@@ -1187,16 +1192,10 @@ describe("private route pending and lazy views", () => {
           until: (actual) => hasAt(actual, "#outlet") && !hasAt(actual, "#child-loading"),
         });
         yield* Deferred.succeed(probes.slow, void 0);
-        yield* page.waitFor({
-          label: "the settled region after a defect",
-          until: (actual) => hasAt(actual, "#outlet") && !hasAt(actual, "#child-loading"),
-        });
+        const closed = yield* Deferred.await(probes.layoutClosed);
+        expect(closed.pipe(defectOf)).toEqual(Option.some("post setup defect"));
         expect(yield* Queue.take(probes.postClosed)).toBe("slow-boom");
         expect(probes.erroredBuilt).toEqual([]);
-
-        yield* router.push("/app/t1");
-        yield* router.push("/app/t1/posts/3");
-        yield* postVisible(page, "3");
       }),
   );
 

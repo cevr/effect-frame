@@ -2015,10 +2015,14 @@ const commitSlot = Effect.fn("Branch.commitSlot")(function* <R>(slot: Slot<R>, p
   }
 });
 
-/** What a pending presentation draws: nothing yet, the fallback, or the view. */
+/**
+ * What a pending presentation draws: nothing yet, the fallback, the view,
+ * or the defect the setup died with. The defect is a row whose setup dies
+ * with it, so it reaches the mount as any row's defect does.
+ */
 interface Shown {
-  readonly key: "fallback" | "view";
-  readonly node: Node;
+  readonly key: "fallback" | "view" | "defect";
+  readonly draw: Effect.Effect<Node>;
 }
 
 /**
@@ -2059,7 +2063,8 @@ const sleepUntil = (deadline: number): Effect.Effect<void> =>
  * - Once shown, a successful setup is drawn at `shown + atLeast` at the
  *   earliest, where `shown` is the Clock read just after the fallback was
  *   set. A typed failure's `errored` node is drawn at once.
- * - A defect removes the fallback at once and fails the presenting fiber.
+ * - A defect removes the fallback at once and goes to a row that dies with
+ *   it: the mount's scope closes with the defect, as for any row.
  * - Closing the view Scope interrupts both fibers: nothing waits for
  *   `atLeast`, and nothing late is drawn.
  *
@@ -2086,11 +2091,11 @@ const presentWith = <R>(
           Exit.match(exit, {
             onSuccess: (node) =>
               Effect.andThen(
-                SubscriptionRef.set(shown, [{ key: "view", node }]),
+                SubscriptionRef.set(shown, [{ key: "view", draw: Effect.succeed(node) }]),
                 Deferred.succeed(drawn, !failed()),
               ),
             onFailure: (cause) =>
-              Effect.andThen(SubscriptionRef.set(shown, []), Effect.failCause(cause)),
+              SubscriptionRef.set(shown, [{ key: "defect", draw: Effect.failCause(cause) }]),
           });
         // Read here, in setup, so the deadline does not wait for the fiber.
         const begin = Math.max(startedAt, yield* Clock.currentTimeMillis);
@@ -2101,7 +2106,9 @@ const presentWith = <R>(
             if (Option.isSome(early)) {
               return yield* finish(early.value);
             }
-            yield* SubscriptionRef.set(shown, [{ key: "fallback", node: options.fallback }]);
+            yield* SubscriptionRef.set(shown, [
+              { key: "fallback", draw: Effect.succeed(options.fallback) },
+            ]);
             // The fallback is this instance's shell: nothing below it draws yet.
             yield* Deferred.succeed(drawn, false);
             const holdUntil = (yield* Clock.currentTimeMillis) + Duration.toMillis(options.atLeast);
@@ -2119,7 +2126,7 @@ const presentWith = <R>(
         return yield* View.list({
           each: Source.fromSubscriptionRef(shown),
           keyBy: (one) => one.key,
-          row: (item) => Effect.map(item.get, (one) => one.node),
+          row: (item) => Effect.flatMap(item.get, (one) => one.draw),
         });
       }),
   });

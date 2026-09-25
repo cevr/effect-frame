@@ -1,5 +1,6 @@
 import type { Source } from "effect-frame/actor";
 import {
+  Cause,
   Effect,
   Equal,
   Exit,
@@ -238,13 +239,20 @@ interface Tracker {
   readonly within: <A>(scope: Scope.Scope, build: () => A) => A;
   /**
    * Run an Effect on a fiber of its own, in the context captured at mount,
-   * and interrupt it when `scope` closes. The fiber starts at once: an
+   * and interrupt it when `scope` closes. A setup, a behaviour and a
+   * finalizer go through here. The fiber starts at once: an
    * effect with no suspension completes before this returns. The scope owns
    * the fiber before the fiber starts, so a closed scope cannot start it.
    * The fiber runs outside every reactive owner, even the part that runs
    * before this returns: an Effect is not a computation, so a signal it
    * writes (a readiness hold, a binding's value) is a write from outside
    * the graph. A build it lands re-enters its own owner by name.
+   *
+   * The Effect cannot fail, so the fiber ends in a success, an interrupt or
+   * a defect. A defect goes to `refuse`: a row whose setup dies fails the
+   * mount, or closes it once the mount is live, instead of leaving an empty
+   * row that nothing reports. An interrupt only is the scope closing (the
+   * row left, or the mount closed) and reports nothing.
    */
   readonly run: (effect: Effect.Effect<unknown>, scope: Scope.Scope) => void;
   /**
@@ -266,19 +274,25 @@ interface Tracker {
   /** The scope current at the call: the branch or row being built. */
   readonly scope: () => Scope.Scope;
   /**
-   * Report a defect a build met, since a build never throws. While the mount
-   * builds, the mount fails with it. Once the mount is live, a branch or row
-   * that meets one closes the mount's scope with it: the view's owner sees
-   * the defect, and the rest of the process keeps running.
+   * Report a defect a build or a setup met, as the `Cause` it ended with,
+   * since a build never throws and a fiber's exit is otherwise seen by no
+   * one: a Portal the host refuses, or a row's or branch's setup that died.
+   * While the mount builds, the mount fails with the first one. Once the
+   * mount is live, it closes the mount's scope with that cause: the view's
+   * owner sees the defect, and the rest of the process keeps running.
    */
-  readonly refuse: (defect: PortalTargetRefused) => void;
+  readonly refuse: (cause: Cause.Cause<never>) => void;
 }
 
 /** What only the mount reads from its tracker: how its first build ended. */
 interface MountTracker extends Tracker {
   /** The first defect the mount's own build reported. */
-  readonly refusal: () => Option.Option<PortalTargetRefused>;
-  /** The mount is live: from now on a defect closes the mount's scope. */
+  readonly refusal: () => Option.Option<Cause.Cause<never>>;
+  /**
+   * The mount is live: from now on a defect closes the mount's scope. A
+   * defect a setup fiber reported after the mount read `refusal` closes it
+   * here, so none is lost between the two.
+   */
   readonly settle: () => void;
 }
 
@@ -914,15 +928,32 @@ const makeTracker = Effect.fn("View.makeTracker")(function* (
     return value;
   };
 
-  let refusal: Option.Option<PortalTargetRefused> = Option.none();
+  let refusal: Option.Option<Cause.Cause<never>> = Option.none();
   let live = false;
-  const refuse = (defect: PortalTargetRefused): void => {
+  const closeMount = (cause: Cause.Cause<never>): void =>
+    void runFork(Scope.close(mountScope, Exit.failCause(cause)));
+  const refuse = (cause: Cause.Cause<never>): void => {
     if (live) {
-      void runFork(Scope.close(mountScope, Exit.die(defect)));
+      closeMount(cause);
       return;
     }
-    refusal = Option.orElse(refusal, () => Option.some(defect));
+    refusal = Option.orElse(refusal, () => Option.some(cause));
   };
+
+  // A setup's fiber is forked and never joined, so its exit is seen here or
+  // nowhere. An interrupt only is its scope closing, which is how a row
+  // leaves; anything else is a defect, since the Effect cannot fail.
+  const run = (effect: Effect.Effect<unknown>, scope: Scope.Scope): void =>
+    runOwned(
+      Effect.onError(effect, (cause) =>
+        Effect.sync(() => {
+          if (!Cause.hasInterruptsOnly(cause)) {
+            refuse(cause);
+          }
+        }),
+      ),
+      scope,
+    );
 
   return {
     track,
@@ -939,7 +970,7 @@ const makeTracker = Effect.fn("View.makeTracker")(function* (
     commit,
     afterCommit: (task) => void pending.push(task),
     scope: () => current,
-    run: runOwned,
+    run,
     handle: (handler) => {
       const scope = current;
       return (event) => runOwned(handler(event), scope);
@@ -948,6 +979,7 @@ const makeTracker = Effect.fn("View.makeTracker")(function* (
     refusal: () => refusal,
     settle: () => {
       live = true;
+      Option.match(refusal, { onNone: () => {}, onSome: closeMount });
     },
   } satisfies MountTracker;
 });
@@ -1624,7 +1656,7 @@ const planPortal = <HostNode>(
   return () => {
     const { host, tracker } = renderer;
     Option.match(resolvePortal(host, portal.into), {
-      onNone: () => tracker.refuse(refusedPortal(host, portal.into)),
+      onNone: () => tracker.refuse(Cause.die(refusedPortal(host, portal.into))),
       onSome: (into) => {
         const inner: Slot<HostNode> = { nodes: [] };
         children(into, inner, () => {});
@@ -1891,7 +1923,7 @@ export const mountView = Effect.fn("View.mount")(function* <Props, E, R, HostNod
             Effect.flatMap((close) =>
               Option.match(tracker.refusal(), {
                 onNone: () => Effect.succeed(close),
-                onSome: (defect) => Effect.die(defect),
+                onSome: (cause) => Effect.failCause(cause),
               }),
             ),
           ),

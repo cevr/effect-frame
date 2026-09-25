@@ -38,7 +38,10 @@ export interface ListOptions<Item, R> {
    * One view per row, run in a scope of its own that closes when the row
    * leaves: a row may spawn actors, follow queries and add finalizers, as a
    * view's setup does. It cannot fail, because a row has no place to return
-   * a failure to; handle errors inside it.
+   * a failure to; handle errors inside it. A defect it dies with fails the
+   * mount while the mount builds, and closes the mount's scope with that
+   * defect after. The row's scope closing while the setup runs interrupts
+   * it, which is not a defect.
    */
   readonly row: (item: Source<Item>) => Effect.Effect<Node, never, R | Scope.Scope>;
 }

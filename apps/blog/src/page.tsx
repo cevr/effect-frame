@@ -86,23 +86,21 @@ export const PostView = (props: PostProps) =>
     // A failed read goes to the nearest `Errored`; a built page has none.
     const body = yield* View.ready(yield* View.orErrored(props.data.body.state), empty);
     const opened = (reactions: RemoteActorRef<typeof Reactions>) =>
-      Effect.map(props.params.get, (params): ReadonlyArray<Opened> => [
-        { slug: params.slug, reactions },
-      ]);
+      Effect.map(props.params.get, (params): Opened => ({ slug: params.slug, reactions }));
     const blocks = yield* View.list({
       each: Source.select(body, placed),
       keyBy: (one: Placed) => one.key,
       row: BlockView,
     });
     // One island per post: a move to another post opens a new one.
-    const island = yield* View.list({
-      each: Source.mapEffect(props.data.reactions, opened),
-      keyBy: (one: Opened) => one.slug,
-      row: (one) =>
+    const island = yield* View.keyed(
+      Source.mapEffect(props.data.reactions, opened),
+      (one) => one.slug,
+      (one) =>
         Effect.flatMap(one.get, (current) =>
           Island({ slug: current.slug, reactions: current.reactions }),
         ),
-    });
+    );
     return (
       <article id="post">
         <h1 id="title">{View.bind(body, (value) => value.title)}</h1>

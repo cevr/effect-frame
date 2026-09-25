@@ -302,6 +302,44 @@ describe("browser view", () => {
     }),
   );
 
+  it.scoped("a keyed region runs its row again when the key changes, and only then", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRoot;
+      const task = yield* spawn(Behavior.value<Task>({ id: "a", title: "alpha" }));
+      const setups = yield* Ref.make<ReadonlyArray<string>>([]);
+      const Region = (props: { readonly task: Source<Task> }) =>
+        Effect.gen(function* () {
+          const region = yield* View.keyed(
+            props.task,
+            (one) => one.id,
+            (item) =>
+              Effect.gen(function* () {
+                const first = yield* item.get;
+                yield* Ref.update(setups, (all) => [...all, first.id]);
+                return <p id="region">{View.bind(item, (one) => one.title)}</p>;
+              }),
+          );
+          return <section>{region}</section>;
+        });
+      const page = yield* pageMount(root, Region, { task: task.state });
+      expect(textOf(root, "#region")).toBe("alpha");
+      const first = root.querySelector("#region");
+
+      yield* page.act(task.call(Value.Set({ id: "a", title: "alpha 2" })), {
+        label: "the same key updates the row in place",
+        until: (actualRoot) => textAt(actualRoot, "#region") === "alpha 2",
+      });
+      expect(root.querySelector("#region")).toBe(first);
+
+      yield* page.act(task.call(Value.Set({ id: "b", title: "beta" })), {
+        label: "a new key sets the row up again",
+        until: (actualRoot) => textAt(actualRoot, "#region") === "beta",
+      });
+      expect(root.querySelector("#region")).not.toBe(first);
+      expect(yield* Ref.get(setups)).toEqual(["a", "b"]);
+    }),
+  );
+
   it.scoped("replacing an item under one key updates that row in place", () =>
     Effect.gen(function* () {
       const root = yield* makeRoot;

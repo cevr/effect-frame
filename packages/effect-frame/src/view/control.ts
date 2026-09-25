@@ -1,4 +1,4 @@
-import type { Source } from "effect-frame/actor";
+import { Source } from "effect-frame/actor/client";
 import { Context, Effect, Option, Predicate, Scope } from "effect";
 import type { ForNode, MatchNode, Node, PortalNode, ShowNode } from "./jsx-runtime.js";
 import { Empty } from "./jsx-runtime.js";
@@ -58,6 +58,29 @@ export const list = <Item, R>(
     const rows = setup as ForNode<Item>["setup"];
     return { _tag: "For", each: options.each, keyBy: options.keyBy, setup: rows };
   });
+
+/**
+ * A keyed region with one row. The row's setup runs once per key: a new
+ * value under the same key reaches the row through its `item` source, and a
+ * value with a new key closes the row's scope and runs the setup again.
+ * Use it where a region must be built again for a new identity, such as a
+ * form that prints its actor's address, while the view around it stays.
+ *
+ * ```ts
+ * const body = yield* View.keyed(
+ *   props.data.notes,
+ *   (notes) => notes.key,
+ *   (notes) => Effect.flatMap(notes.get, (current) => ListBody({ notes: current })),
+ * );
+ * return <article>{body}</article>;
+ * ```
+ */
+export const keyed = <Item, R>(
+  source: Source<Item>,
+  keyBy: (item: Item) => string,
+  row: (item: Source<Item>) => Effect.Effect<Node, never, R | Scope.Scope>,
+): Effect.Effect<ForNode<Item>, never, Exclude<R, Scope.Scope>> =>
+  list({ each: Source.select(source, (item): ReadonlyArray<Item> => [item]), keyBy, row });
 
 /** The plain form: a boolean source, shown while it is `true`. */
 export interface ShowProps {

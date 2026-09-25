@@ -146,18 +146,16 @@ export const ListView = (props: ListProps) =>
     // The route publishes its params and its reference together, so the pair
     // read here always names one list.
     const opened = (notes: RemoteActorRef<typeof Notes>) =>
-      Effect.map(props.params.get, (params): ReadonlyArray<Opened> => [
-        { name: params.list, notes },
-      ]);
+      Effect.map(props.params.get, (params): Opened => ({ name: params.list, notes }));
     // One body per list: a new list is a new body over the route's new reference.
-    const body = yield* View.list({
-      each: Source.mapEffect(props.data.notes, opened),
-      keyBy: (one: Opened) => one.name,
-      row: (one) =>
+    const body = yield* View.keyed(
+      Source.mapEffect(props.data.notes, opened),
+      (one) => one.name,
+      (one) =>
         Effect.flatMap(one.get, (current) =>
           ListBody({ name: current.name, notes: current.notes, filter }),
         ),
-    });
+    );
     return (
       <article id="list-page">
         <h1 id="list-name">{View.bind(props.params, (params) => params.list)}</h1>

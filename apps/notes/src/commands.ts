@@ -1,8 +1,7 @@
 import type { LocalActorRef, RemoteActorRef, SetValue } from "effect-frame/actor/client";
 import { Generated, Value } from "effect-frame/actor/client";
 import { Effect } from "effect";
-import type { NotesMessage } from "./contract.js";
-import { Notes } from "./contract.js";
+import type { Notes, NotesMessage } from "./contract.js";
 
 export type NotesRef = RemoteActorRef<typeof Notes>;
 
@@ -41,5 +40,5 @@ export const addNote = Effect.fn("Notes.addNote")(function* (notes: NotesRef, te
   if (trimmed.length === 0) {
     return;
   }
-  yield* Generated.send(notes, Notes, { _tag: "Add", text: trimmed });
+  yield* Generated.send(notes, { _tag: "Add", text: trimmed });
 });

@@ -437,7 +437,7 @@ describe("optimistic sends (#19, #67)", () => {
         ActorTransport,
         wire.transport,
       );
-      const handle = yield* Generated.send(list, List, append("a"));
+      const handle = yield* Generated.send(list, append("a"));
       expect(yield* handle.state.get).toEqual({ _tag: "Sent" });
       expect(yield* list.displayed.get).toEqual({
         revision: { _tag: "Provisional", base: 0, depth: 1 },
@@ -466,7 +466,7 @@ describe("optimistic sends (#19, #67)", () => {
           return list.send(message, options);
         },
       };
-      const first = yield* Generated.send(wrapping, List, append("a"));
+      const first = yield* Generated.send(wrapping, append("a"));
       yield* first.settled;
       expect(yield* list.state.get).toEqual([stamped("a", 1)]);
 

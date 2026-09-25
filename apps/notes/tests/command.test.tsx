@@ -199,8 +199,8 @@ describe("the compose form's command", () => {
               resume: Option.none(),
               behavior: notesBehavior,
             });
-            const a = yield* Generated.send(notes, Notes, { _tag: "Add", text: "a" });
-            const b = yield* Generated.send(notes, Notes, { _tag: "Add", text: "b" });
+            const a = yield* Generated.send(notes, { _tag: "Add", text: "a" });
+            const b = yield* Generated.send(notes, { _tag: "Add", text: "b" });
             expect(yield* counts.state.get).toEqual({
               _tag: "Ready",
               value: { total: 0, done: 0 },

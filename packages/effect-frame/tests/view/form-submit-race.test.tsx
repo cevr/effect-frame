@@ -63,8 +63,6 @@ const heldForm = (gate: Deferred.Deferred<void>) => {
       const notes = yield* Actor.remote(Held, heldKey);
       const note = yield* View.form({
         ref: notes,
-        contract: Held,
-        key: heldKey,
         message: Note,
         typed: ["text"],
         endpoint: "/actors",

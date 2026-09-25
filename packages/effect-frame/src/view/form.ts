@@ -2,9 +2,8 @@ import type {
   AnyContract,
   CommandId,
   IdentifiedCommandHandle,
-  KeyOf,
   MessageOf,
-  RemoteActorRef,
+  RemoteCommandRef,
   SnapshotOf,
 } from "effect-frame/actor";
 import { CommandId as CommandIdSchema, Form, Generated, Wire } from "effect-frame/actor/client";
@@ -24,9 +23,12 @@ import type { PlainPost, Prepared } from "./view.js";
  * native post and sends the same message over the transport instead.
  */
 export interface CommandForm<C extends AnyContract, M, Typed extends string> {
-  readonly ref: RemoteActorRef<C>;
-  readonly contract: C;
-  readonly key: KeyOf<C>;
+  /**
+   * The actor this form commands. Its address (`ref.contract`, `ref.key`)
+   * is the plain post's address too, so the post and the scripted send
+   * always reach one actor. A command-only reference is enough.
+   */
+  readonly ref: RemoteCommandRef<C>;
   /**
    * The message member this form sends: one `TaggedStruct` of the
    * contract's union. A member field that no input carries, no mark
@@ -119,12 +121,13 @@ export const form = <C extends AnyContract, M extends Member<C>, const Typed ext
 ): Effect.Effect<FormBinding> =>
   Effect.gen(function* () {
     const member = yield* onlyMember(options.message);
-    const key = yield* Form.encodeKey(options.contract, options.key);
+    const contract = options.ref.contract;
+    const key = yield* Form.encodeKey(contract, options.ref.key);
     const identity = Option.getOrElse(Option.fromNullishOr(options.name), () => member.tag);
     const context = Option.filter(
       yield* Effect.serviceOption(Form.FormContext),
       (issues) =>
-        issues.contract === options.contract.name && issues.key === key && issues.form === identity,
+        issues.contract === contract.name && issues.key === key && issues.form === identity,
     );
     const commandId = yield* Option.match(context, {
       onNone: () => Form.freshCommandId,
@@ -156,8 +159,8 @@ export const form = <C extends AnyContract, M extends Member<C>, const Typed ext
       method: "post",
       hidden: [
         [Form.frameworkFields.command, commandId],
-        [Form.frameworkFields.contract, options.contract.name],
-        [Form.frameworkFields.version, String(options.contract.version)],
+        [Form.frameworkFields.contract, contract.name],
+        [Form.frameworkFields.version, String(contract.version)],
         [Form.frameworkFields.key, key],
         [Form.frameworkFields.returnTo, options.returnTo],
         [Form.frameworkFields.form, identity],
@@ -208,8 +211,8 @@ const scriptedSend = <C extends AnyContract, M, Typed extends string>(
     // mints its own. A submit that does not decode releases the permit and
     // leaves the id unspent for the next one.
     const deciding = yield* Semaphore.make(1);
-    const decodeTree = Schema.decodeUnknownEffect(options.contract.raw.message);
-    const asMessage = Schema.decodeUnknownEffect(Schema.toType(options.contract.message));
+    const decodeTree = Schema.decodeUnknownEffect(options.ref.contract.raw.message);
+    const asMessage = Schema.decodeUnknownEffect(Schema.toType(options.ref.contract.message));
     const onSend = Option.fromNullishOr(options.onSend);
 
     const identify = (fields: Form.FormFields) =>

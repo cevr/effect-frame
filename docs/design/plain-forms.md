@@ -45,7 +45,7 @@ const Tag = Schema.TaggedStruct("Tag", {
 2. `Generated` takes a required string codec only. A number does not
    compile.
 3. `Generated.Input<M>` is the message without its generated keys.
-   `Generated.send(ref, contract, input)` mints the command id, fills each
+   `Generated.send(ref, input)` mints the command id, fills each
    generated field, decodes the message, and sends it under that id. The
    author never writes a generated value. `ref.send` does not change, so
    the command lifecycle files stay as they are (#19).
@@ -167,8 +167,6 @@ const Compose = (props: { readonly notes: NotesRef }) =>
   Effect.gen(function* () {
     const add = yield* View.form({
       ref: props.notes,
-      contract: Notes,
-      key: demoKey,
       message: Add,
       typed: ["text"],
       endpoint: "/actors",
@@ -208,9 +206,10 @@ const Compose = (props: { readonly notes: NotesRef }) =>
 - `View.submit(handler)` stays for a form that posts no command. A command
   form uses `View.form`. It is an Effect that runs in setup, because
   minting is effectful.
-- `View.form` takes `ref`, `contract`, and `key` together. A ref does not
-  expose its contract or key, and `ref.ts` stays unchanged for the #19
-  merge.
+- `View.form` takes `ref` alone. A remote reference carries its address
+  (`ref.contract`, `ref.key`), and the plain post's hidden `$contract`,
+  `$version` and `$key` come from it, so the post and the scripted send
+  always reach one actor.
 - The scripted path uses `Generated.send` semantics. The type of `ref.send`
   does not change.
 - The route derives the principal from the request with the same

@@ -5,10 +5,10 @@ import type { Route } from "effect-frame/router";
 import { For, View } from "effect-frame/view";
 import { Effect, Option, Scope } from "effect";
 import { dispatch, writeDraft } from "./commands.js";
-import type { Note } from "./contract.js";
-import { Add, Notes } from "./contract.js";
+import type { Note, Notes } from "./contract.js";
+import { Add } from "./contract.js";
 import type { Filter, ListName } from "./queries.js";
-import { keyOf, shows } from "./queries.js";
+import { shows } from "./queries.js";
 import { list } from "./segments.js";
 
 /**
@@ -47,7 +47,6 @@ const filtered = (
 
 const ListBody = (props: BodyProps) =>
   Effect.gen(function* () {
-    const key = keyOf(props.name);
     // The route's reference predicts with the behavior (#19): an add shows at once.
     const notes = props.notes;
     const draft = yield* Actor.local(Behavior.value(""));
@@ -63,8 +62,6 @@ const ListBody = (props: BodyProps) =>
     const here = yield* (yield* Router).current.get;
     const compose = yield* View.form({
       ref: notes,
-      contract: Notes,
-      key,
       message: Add,
       typed: ["text"],
       endpoint: "/actors",

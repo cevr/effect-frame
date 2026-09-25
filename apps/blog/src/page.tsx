@@ -4,8 +4,8 @@ import { Router } from "effect-frame/router";
 import type { Route } from "effect-frame/router";
 import { View } from "effect-frame/view";
 import { Effect } from "effect";
-import type { Slug } from "./contract.js";
-import { Heart, Reactions } from "./contract.js";
+import type { Slug, Reactions } from "./contract.js";
+import { Heart } from "./contract.js";
 import type { Block, PostBodyValue } from "./queries.js";
 import type { post } from "./segments.js";
 
@@ -57,8 +57,6 @@ const Island = (props: IslandProps) =>
     const here = yield* (yield* Router).current.get;
     const heart = yield* View.form({
       ref: props.reactions,
-      contract: Reactions,
-      key: { slug: props.slug },
       message: Heart,
       typed: [],
       endpoint: "/actors",

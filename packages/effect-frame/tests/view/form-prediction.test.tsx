@@ -52,8 +52,6 @@ const ShelfPage = (_props: NoProps) =>
     });
     const note = yield* View.form({
       ref: shelf,
-      contract: Shelf,
-      key: shelfKey,
       message: Note,
       typed: ["text"],
       endpoint: "/actors",

@@ -215,8 +215,6 @@ export const TasksPage = (_props: NoProps) =>
     const draft = yield* Actor.local(Behavior.value(""));
     const add = yield* View.form({
       ref: tasks,
-      contract: Tasks,
-      key: board,
       message: AddTask,
       typed: ["title", "done", "note"],
       endpoint: "/actors",
@@ -224,8 +222,6 @@ export const TasksPage = (_props: NoProps) =>
     });
     const tag = yield* View.form({
       ref: tasks,
-      contract: Tasks,
-      key: board,
       message: Tag,
       typed: ["label"],
       endpoint: "/actors",
@@ -276,8 +272,6 @@ export const VaultPage = (_props: NoProps) =>
     const vaults = yield* Actor.remote(Vault, vault);
     const unlock = yield* View.form({
       ref: vaults,
-      contract: Vault,
-      key: vault,
       message: Unlock,
       typed: ["label", "_pin"],
       endpoint: "/actors",

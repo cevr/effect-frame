@@ -46,8 +46,6 @@ const AddPage = (props: PageProps) =>
     const tasks = yield* Actor.remote(Tasks, board);
     const add = yield* View.form({
       ref: tasks,
-      contract: Tasks,
-      key: board,
       message: AddTask,
       typed: ["title", "done", "note"],
       endpoint: actorPrefix,

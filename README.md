@@ -417,8 +417,6 @@ const Compose = (props: { readonly notes: RemoteActorRef<typeof Notes> }) =>
   Effect.gen(function* () {
     const add = yield* View.form({
       ref: props.notes,
-      contract: Notes,
-      key: { tenant: "demo", list: "inbox" },
       message: Add,
       typed: ["text", "pinned"],
       endpoint: "/actors",
@@ -456,7 +454,7 @@ const forms = HttpServer.form({
   lost reply, and 400 or 415 before any send. An `Unauthorized` anonymous
   post answers 303 to `login` with `next`; every other refusal is a 403
   with the page.
-- `Generated.send(ref, contract, input)` sends from code. The input omits
+- `Generated.send(ref, input)` sends from code. The input omits
   every generated field.
 - A refused page must carry its issues to the client. On the server, embed
   `Form.encodeIssues` under `Form.issuesScriptId` when `FormContext` is

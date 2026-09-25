@@ -1,7 +1,7 @@
 import { Effect, Option, Random, Schema, SchemaAST } from "effect";
 import { freshCommandId, mintedFor } from "./command-id.js";
 import type { AnyContract, SnapshotOf } from "./contract.js";
-import type { RemoteActorRef } from "./ref.js";
+import type { RemoteCommandRef } from "./ref.js";
 import type { CommandId, IdentifiedCommandHandle } from "./vocabulary.js";
 
 /**
@@ -188,14 +188,20 @@ const readTag = Schema.decodeUnknownEffect(TaggedInput);
  * Send a message whose generated fields the send supplies (the
  * scripted case). The send mints the command id, derives every generated
  * value from it or beside it, and sends both together, so the author never
- * writes the id a note is created under.
+ * writes the id a note is created under. The contract is the reference's
+ * own.
+ *
+ * @example
+ * ```ts
+ * const handle = yield* Generated.send(notes, { _tag: "Add", text: "hello" });
+ * ```
  */
 export const send = <C extends AnyContract>(
-  ref: RemoteActorRef<C>,
-  contract: C,
+  ref: RemoteCommandRef<C>,
   input: Input<C["raw"]["message"]>,
 ): Effect.Effect<IdentifiedCommandHandle<SnapshotOf<C>, "remote">> =>
   Effect.gen(function* () {
+    const contract = ref.contract;
     const tagged = yield* Effect.orDie(readTag(input));
     const member = yield* Option.match(memberNamed(contract.raw.message.ast, tagged._tag), {
       onNone: () => Effect.die(`${contract.name} has no message ${tagged._tag}`),

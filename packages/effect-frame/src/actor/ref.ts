@@ -27,11 +27,29 @@ import type {
   Refused,
 } from "./vocabulary.js";
 
-export type RemoteActorRef<C extends AnyContract> = ActorRef<SnapshotOf<C>, MessageOf<C>, "remote">;
+/**
+ * A reference to an actor a host serves. It carries its address: the
+ * contract and the key it was opened for. A form or a generated send reads
+ * the address from the reference, so the plain post and the scripted send
+ * can never name two different actors.
+ */
+export type RemoteActorRef<C extends AnyContract> = ActorRef<
+  SnapshotOf<C>,
+  MessageOf<C>,
+  "remote"
+> & {
+  readonly contract: C;
+  readonly key: KeyOf<C>;
+};
 
-/** The command half of a remote reference: `send` and `call`, and no state. */
+/**
+ * The command half of a remote reference: `send` and `call`, the address,
+ * and no state. A full `RemoteActorRef` is one too.
+ */
 export interface RemoteCommandRef<C extends AnyContract> {
   readonly kind: "remote";
+  readonly contract: C;
+  readonly key: KeyOf<C>;
   readonly send: RemoteActorRef<C>["send"];
   readonly call: RemoteActorRef<C>["call"];
 }
@@ -291,7 +309,7 @@ export const remoteCommands = Effect.fn("Actor.remoteCommands")(function* <C ext
     display: Option.none(),
     refuses: () => false,
   });
-  const commands: RemoteCommandRef<C> = { kind: "remote", ...surface };
+  const commands: RemoteCommandRef<C> = { kind: "remote", contract, key, ...surface };
   return commands;
 });
 
@@ -358,6 +376,8 @@ export const remote = Effect.fn("Actor.remote")(function* <C extends AnyContract
   });
   const reference: RemoteActorRef<C> = {
     kind: "remote",
+    contract,
+    key,
     applied: appliedSource,
     displayed,
     state: select(displayed, (shown) => shown.state),

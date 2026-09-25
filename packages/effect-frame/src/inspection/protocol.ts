@@ -95,8 +95,30 @@ export const RootSelector = Schema.String.check(
   Schema.isPattern(NO_CONTROL),
 );
 
-/** A reader deadline in milliseconds. It is always finite: 1 to 30000. */
-export const DeadlineMillis = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 30_000 }));
+/**
+ * The longest deadline a reader may ask for, in milliseconds. The gateway
+ * and the reader quote it; `DeadlineMillis` is built from it.
+ *
+ * ```ts
+ * const help = `--deadline <ms>  1..${Protocol.maxDeadlineMillis}`;
+ * ```
+ */
+export const maxDeadlineMillis = 30_000;
+
+/**
+ * The host names that count as loopback. The attachment dials only these,
+ * and the reader calls only these.
+ *
+ * ```ts
+ * if (!Protocol.loopbackHosts.includes(url.hostname)) return yield* refuse(url);
+ * ```
+ */
+export const loopbackHosts: ReadonlyArray<string> = ["127.0.0.1", "localhost"];
+
+/** A reader deadline in milliseconds. It is always finite: 1 to `maxDeadlineMillis`. */
+export const DeadlineMillis = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: maxDeadlineMillis }),
+);
 
 // ---------------------------------------------------------------------------
 // Reader API

@@ -19,7 +19,7 @@ import type { RpcClientError } from "effect/unstable/rpc/RpcClientError";
 import { Socket } from "effect/unstable/socket";
 import type { ServerWebSocket } from "bun";
 import { Protocol } from "effect-frame/inspection";
-import { MAX_DEADLINE_MILLIS, MAX_REQUEST_BYTES, statusOf } from "./limits.js";
+import { MAX_REQUEST_BYTES, statusOf } from "./limits.js";
 
 export interface GatewayOptions {
   /** The one application origin allowed to attach roots. */
@@ -297,12 +297,12 @@ const requestError = (body: unknown): Protocol.GatewayError => {
     return {
       _tag: "InvalidDeadline",
       deadlineMillis: deadline.value.deadlineMillis,
-      maximum: MAX_DEADLINE_MILLIS,
+      maximum: Protocol.maxDeadlineMillis,
     };
   }
   return {
     _tag: "MalformedRequest",
-    detail: "body must be {version, root: selector, deadlineMillis: 1..30000}",
+    detail: `body must be {version, root: selector, deadlineMillis: 1..${Protocol.maxDeadlineMillis}}`,
   };
 };
 

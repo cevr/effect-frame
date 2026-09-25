@@ -1,4 +1,4 @@
-/* oxlint-disable effect/noGlobals, effect/noNullish -- this module is the argv boundary of the effect-frame executable: URL parsing, AbortSignal, and raw argv. */
+/* oxlint-disable effect/noNullish -- this module is the argv boundary of the effect-frame executable: raw argv reads undefined past its end. */
 /**
  * The `effect-frame` executable's commands.
  *
@@ -11,9 +11,9 @@
  * variable, the default state directory, SIGINT, and the streams, and exits
  * with the code `main` returns.
  */
-import { Effect, Option, Schema } from "effect";
-import { Protocol } from "effect-frame/inspection";
+import { Effect, Option } from "effect";
 import * as Capabilities from "./capabilities.js";
+import { Help, Invalid, invalid, readFlags, type FlagSpec } from "./flags.js";
 import * as Gateway from "./gateway.js";
 import * as Reader from "./reader.js";
 import { exitCodeOf, untilInterrupted, type ExitCode } from "./signals.js";
@@ -84,30 +84,10 @@ interface GatewayArgs {
   readonly stateDir: string;
 }
 
-class Invalid extends Schema.TaggedError<Invalid>()("Invalid", { message: Schema.String }) {}
-class Help extends Schema.TaggedError<Help>()("Help", {}) {}
-
-const invalid = (message: string) => Effect.fail(Invalid.make({ message }));
-
-const GATEWAY_FLAGS = new Set(["--origin", "--port", "--state-dir"]);
-
-const readGatewayFlags = Effect.fn("InspectCli.readGatewayFlags")(function* (
-  rest: ReadonlyArray<string>,
-) {
-  const values = new Map<string, string>();
-  for (let index = 0; index < rest.length; index += 1) {
-    const flag = rest[index] ?? "";
-    if (!GATEWAY_FLAGS.has(flag)) return yield* invalid(`unknown flag '${flag.slice(0, 32)}'`);
-    const value = rest[index + 1];
-    if (value === undefined || value.startsWith("--")) {
-      return yield* invalid(`${flag} needs a value`);
-    }
-    if (values.has(flag)) return yield* invalid(`${flag} given twice`);
-    values.set(flag, value);
-    index += 1;
-  }
-  return values;
-});
+const GATEWAY_FLAGS: FlagSpec = {
+  values: new Set(["--origin", "--port", "--state-dir"]),
+  switches: new Set(),
+};
 
 /** The exact browser `Origin` value: scheme, host, and port, and nothing else. */
 const readOrigin = (raw: Option.Option<string>) =>
@@ -167,7 +147,7 @@ const parseGateway = Effect.fn("InspectCli.parseGateway")(function* (
   io: Io,
 ) {
   if (rest.includes("--help") || rest.includes("-h")) return yield* Help.make({});
-  const values = yield* readGatewayFlags(rest);
+  const { values } = yield* readFlags(rest, GATEWAY_FLAGS);
   const origin = yield* readOrigin(Option.fromNullishOr(values.get("--origin")));
   const port = yield* readPort(Option.fromNullishOr(values.get("--port")));
   const stateDir = yield* Option.match(Option.fromNullishOr(values.get("--state-dir")), {
@@ -285,9 +265,7 @@ const reader = (io: Io): Effect.Effect<ExitCode> =>
 const misuse = (io: Io, message: string): Effect.Effect<ExitCode> =>
   Effect.sync((): ExitCode => {
     if (io.argv.includes("--json")) {
-      io.stdout(
-        `${JSON.stringify({ _tag: "Error", version: Protocol.wire.version, error: { _tag: "InvalidArguments", message } })}\n`,
-      );
+      io.stdout(Reader.errorDocument({ _tag: "InvalidArguments", message }));
     }
     io.stderr(`error: ${message}\n\n${HELP}`);
     return 2;

@@ -16,7 +16,8 @@
  */
 import { Effect, Match, Option, Result, Schema } from "effect";
 import { Protocol } from "effect-frame/inspection";
-import { DEFAULT_DEADLINE_MILLIS, MAX_DEADLINE_MILLIS } from "./limits.js";
+import { Help, Invalid, invalid, readFlags, type FlagSpec } from "./flags.js";
+import { DEFAULT_DEADLINE_MILLIS } from "./limits.js";
 import { InterruptSignal, exitCodeOf, untilInterrupted, type ExitCode } from "./signals.js";
 import { escapeText } from "./text.js";
 
@@ -62,6 +63,16 @@ export const Document = Schema.Union([
 ]);
 export type Document = Schema.Schema.Type<typeof Document>;
 
+const encodeDocument = Schema.encodeSync(Document);
+
+/** One `--json` document, encoded through `Document`, on its own line. */
+export const printDocument = (document: Document): string =>
+  `${JSON.stringify(encodeDocument(document))}\n`;
+
+/** The `--json` error document for a reader-side failure. */
+export const errorDocument = (error: ClientError): string =>
+  printDocument({ _tag: "Error", version: Protocol.wire.version, error });
+
 export const HELP = `Read a live Frame root through an effect-frame gateway.
 
 Usage:
@@ -73,7 +84,7 @@ Flags:
   --url <gateway>      Loopback gateway, for example http://127.0.0.1:4318
   --root <selector>    Exact root ID, unique ID prefix, or exact root name
   --json               Print exactly one versioned JSON document on stdout
-  --deadline <ms>      Finite deadline, 1..${MAX_DEADLINE_MILLIS} (default ${DEFAULT_DEADLINE_MILLIS})
+  --deadline <ms>      Finite deadline, 1..${Protocol.maxDeadlineMillis} (default ${DEFAULT_DEADLINE_MILLIS})
   --token-file <path>  Read capability file (else ${TOKEN_ENV})
   --max-text <chars>   Longest value shown in text output (default 160)
   -h, --help           Show this help
@@ -102,14 +113,10 @@ interface Parsed {
   readonly maxText: number;
 }
 
-class Invalid extends Schema.TaggedError<Invalid>()("Invalid", { message: Schema.String }) {}
-class Help extends Schema.TaggedError<Help>()("Help", {}) {}
-
-const invalid = (message: string) => Effect.fail(Invalid.make({ message }));
-
-const FLAGS_WITH_VALUES = new Set(["--url", "--root", "--deadline", "--token-file", "--max-text"]);
-// The gateway binds 127.0.0.1 only.
-const LOOPBACK = new Set(["127.0.0.1", "localhost"]);
+const READER_FLAGS: FlagSpec = {
+  values: new Set(["--url", "--root", "--deadline", "--token-file", "--max-text"]),
+  switches: new Set(["--json"]),
+};
 
 const integerFlag = (
   values: ReadonlyMap<string, string>,
@@ -127,27 +134,6 @@ const integerFlag = (
     },
   });
 
-const readFlags = Effect.fn("InspectionCli.readFlags")(function* (rest: ReadonlyArray<string>) {
-  const values = new Map<string, string>();
-  let json = false;
-  for (let index = 0; index < rest.length; index += 1) {
-    const flag = rest[index] ?? "";
-    if (flag === "--json") {
-      json = true;
-      continue;
-    }
-    if (!FLAGS_WITH_VALUES.has(flag)) return yield* invalid(`unknown flag '${flag.slice(0, 32)}'`);
-    const value = rest[index + 1];
-    if (value === undefined || value.startsWith("--")) {
-      return yield* invalid(`${flag} needs a value`);
-    }
-    if (values.has(flag)) return yield* invalid(`${flag} given twice`);
-    values.set(flag, value);
-    index += 1;
-  }
-  return { values, json };
-});
-
 const readUrl = (raw: Option.Option<string>) =>
   Effect.gen(function* () {
     if (Option.isNone(raw)) return yield* invalid("--url is required");
@@ -155,7 +141,11 @@ const readUrl = (raw: Option.Option<string>) =>
       try: () => new URL(raw.value),
       catch: () => Invalid.make({ message: "--url does not parse" }),
     });
-    if (url.protocol !== "http:" || !LOOPBACK.has(url.hostname) || url.port === "") {
+    if (
+      url.protocol !== "http:" ||
+      !Protocol.loopbackHosts.includes(url.hostname) ||
+      url.port === ""
+    ) {
       return yield* invalid("--url must be http://<loopback>:<port>");
     }
     return url;
@@ -190,14 +180,15 @@ const parse = Effect.fn("InspectionCli.parse")(function* (argv: ReadonlyArray<st
   if (command !== "roots" && command !== "inspect") {
     return yield* invalid(`unknown command '${command.slice(0, 32)}'; expected roots or inspect`);
   }
-  const { values, json } = yield* readFlags(rest);
+  const { values, switches } = yield* readFlags(rest, READER_FLAGS);
+  const json = switches.has("--json");
   const url = yield* readUrl(Option.fromNullishOr(values.get("--url")));
   const root = yield* readRoot(command, Option.fromNullishOr(values.get("--root")));
   const deadlineMillis = yield* integerFlag(
     values,
     "--deadline",
     DEFAULT_DEADLINE_MILLIS,
-    MAX_DEADLINE_MILLIS,
+    Protocol.maxDeadlineMillis,
   );
   const maxText = yield* integerFlag(values, "--max-text", 160, 100_000);
   return {
@@ -391,16 +382,10 @@ const result = (exitCode: CliResult["exitCode"], stdout: string, stderr: string)
 const render = (parsed: Parsed, response: Protocol.ReaderResponse): CliResult =>
   Match.value(response).pipe(
     Match.tagsExhaustive({
-      Error: (reply) =>
-        result(1, parsed.json ? `${JSON.stringify(reply)}\n` : "", errorText(reply.error)),
-      Roots: (reply) =>
-        result(0, parsed.json ? `${JSON.stringify(reply)}\n` : rootsText(reply), ""),
+      Error: (reply) => result(1, parsed.json ? printDocument(reply) : "", errorText(reply.error)),
+      Roots: (reply) => result(0, parsed.json ? printDocument(reply) : rootsText(reply), ""),
       Inspection: (reply) =>
-        result(
-          0,
-          parsed.json ? `${JSON.stringify(reply)}\n` : inspectText(reply, parsed.maxText),
-          "",
-        ),
+        result(0, parsed.json ? printDocument(reply) : inspectText(reply, parsed.maxText), ""),
     }),
   );
 
@@ -410,10 +395,7 @@ const failure = (
   json: boolean,
   error: ClientError,
   stderr: string = errorText(error),
-): CliResult => {
-  const body = { _tag: "Error", version: Protocol.wire.version, error };
-  return result(exitCode, json ? `${JSON.stringify(body)}\n` : "", stderr);
-};
+): CliResult => result(exitCode, json ? errorDocument(error) : "", stderr);
 
 const execute = (parsed: Parsed, environment: CliEnvironment) =>
   Effect.gen(function* () {

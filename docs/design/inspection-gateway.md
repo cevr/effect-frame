@@ -274,8 +274,8 @@ them (26 tests in `packages/inspect`, 13 in `effect-frame`'s
     ID. Text output contains none of those code points and shows their
     `\u{..}` forms; `--json` keeps the raw strings. An endless chunked
     request body gets `MalformedRequest` ("request body too large") after
-    less than 64 KiB is sent. `MAX_DEADLINE_MILLIS` accepts and 1 above it
-    fails the `DeadlineMillis` schema.
+    less than 64 KiB is sent. The gateway, the reader and `DeadlineMillis`
+    all read the bound from `Protocol.maxDeadlineMillis`.
 
 ## Limits
 
@@ -304,6 +304,7 @@ three dependency classes:
   source `packages/effect-frame/src/inspection/`). Exports: `Protocol` (a
   namespace: `wire` and its type `Wire`, `SnapshotTooLarge`, `Inspect`,
   `RootRpcs`, `RootId`, `RootName`, `RootSelector`, `DeadlineMillis`,
+  `maxDeadlineMillis`, `loopbackHosts`,
   `RootInfo`, `InspectRequest`, `GatewayError`, `RootsResponse`,
   `InspectResponse`, `ErrorResponse`, `ReaderResponse`), `attachGateway`,
   `defaultRetry`, `defaultOpenTimeout`, `InvalidAttachOptions`, and the types
@@ -362,11 +363,11 @@ effect-frame inspect --url <gateway> --root <id|prefix|name> [--json]
   workflow publishes only through npm OIDC, and `NPM_TOKEN` is empty, so the
   first publish needs the owner to create the npm package and add a Trusted
   Publisher. Its README says so.
-- The reader limits (`DEFAULT_DEADLINE_MILLIS`, `MAX_DEADLINE_MILLIS`,
+- The reader limits (`DEFAULT_DEADLINE_MILLIS` and
   `MAX_REQUEST_BYTES`, in `packages/inspect/src/limits.ts`), `statusOf`, text
   escaping (`packages/inspect/src/text.ts`), and reader-side errors
-  (`Reader.ClientError`, `Reader.Document`) live in `packages/inspect`. A test
-  ties `MAX_DEADLINE_MILLIS` to the `DeadlineMillis` schema. They
+  (`Reader.ClientError`, `Reader.Document`) live in `packages/inspect`. The
+  deadline bound and the loopback hosts are `Protocol` constants. They
   describe the executable's output, not the wire between browser and gateway.
 - The internal record registry `packages/effect-frame/src/inspection.ts`
   stays internal; only `src/inspection/index.ts` is exported.

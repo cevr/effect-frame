@@ -35,7 +35,14 @@ import {
 import { NetAddress } from "effect/unstable/net";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { Socket, SocketServer } from "effect/unstable/socket";
-import { RootId, RootName, RootRpcs, wire, type SnapshotTooLarge } from "./protocol.js";
+import {
+  RootId,
+  RootName,
+  RootRpcs,
+  loopbackHosts,
+  wire,
+  type SnapshotTooLarge,
+} from "./protocol.js";
 import * as Frame from "../frame.js";
 
 export type AttachStatus =
@@ -92,7 +99,6 @@ export class InvalidAttachOptions extends Schema.TaggedError<InvalidAttachOption
  */
 const STABLE_CONNECTION_MILLIS = 1_000;
 
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost"]);
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{16,256}$/;
 
 const invalid = (detail: string) => InvalidAttachOptions.make({ detail });
@@ -103,7 +109,7 @@ const gatewayAddress = Effect.fn("InspectionAttach.gatewayAddress")(function* (u
     catch: () => invalid("gateway URL does not parse"),
   });
   if (parsed.protocol !== "ws:") return yield* invalid("gateway URL must use ws:");
-  if (!LOOPBACK_HOSTS.has(parsed.hostname)) {
+  if (!loopbackHosts.includes(parsed.hostname)) {
     return yield* invalid("gateway URL must be 127.0.0.1 or localhost");
   }
   const port = Number(parsed.port);

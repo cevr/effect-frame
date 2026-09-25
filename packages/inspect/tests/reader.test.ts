@@ -6,7 +6,7 @@
 import { describe, expect, it } from "bun:test";
 import { Effect, Schema } from "effect";
 import { Protocol } from "effect-frame/inspection";
-import { MAX_DEADLINE_MILLIS, statusOf } from "../src/limits.js";
+import { statusOf } from "../src/limits.js";
 import * as Reader from "../src/reader.js";
 
 const OSC = "\u001b]0;pwned\u0007";
@@ -96,12 +96,6 @@ describe("reader text view", () => {
 });
 
 describe("private limits", () => {
-  it("keep the reader deadline bound equal to the public schema bound", () => {
-    const deadline = Schema.is(Protocol.DeadlineMillis);
-    expect(deadline(MAX_DEADLINE_MILLIS)).toBe(true);
-    expect(deadline(MAX_DEADLINE_MILLIS + 1)).toBe(false);
-  });
-
   it("map every gateway error to one HTTP status", () => {
     const errors: ReadonlyArray<[Protocol.GatewayError, number]> = [
       [{ _tag: "UnsupportedProtocolVersion", received: "2", supported: [1] }, 400],

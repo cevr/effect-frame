@@ -1,12 +1,10 @@
 /**
  * Reader and gateway limits that are not part of the public wire contract.
- * `Protocol.DeadlineMillis` holds the deadline bound on the wire; a test
- * keeps `MAX_DEADLINE_MILLIS` equal to it.
+ * The deadline bound is on the wire: `Protocol.maxDeadlineMillis`.
  */
 import type { Protocol } from "effect-frame/inspection";
 
 export const DEFAULT_DEADLINE_MILLIS = 5_000;
-export const MAX_DEADLINE_MILLIS = 30_000;
 
 /** Reader request bodies are tiny; a larger one is refused as it arrives. */
 export const MAX_REQUEST_BYTES = 4_096;

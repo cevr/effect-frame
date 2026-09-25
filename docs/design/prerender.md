@@ -1,5 +1,9 @@
 # Prerender
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 This note records how #86 builds the prerender design of #23: the inputs a
 prerender route lists, the build that renders them, the server that answers
 with what the build wrote, and how a loaded page resumes. It lists the

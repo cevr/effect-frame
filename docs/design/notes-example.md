@@ -1,5 +1,9 @@
 # Notes: one page in every rendering mode (#37)
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 Notes is the example that runs one list page in every rendering mode. It
 builds the Notes section of #25 §1. Each acceptance row there is now a test
 in `bun run gate`. The rows are in `acceptance.md`, under "Notes — every

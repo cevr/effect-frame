@@ -1,5 +1,9 @@
 # Effect Frame: full-stack interface sketches
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 Date: 2026-09-18. Reconciled from the Codex design session (05:20–06:57 UTC) and the command contract in [Define one command contract across local and durable actors](https://github.com/cevr/effect-frame/issues/5).
 
 These are interface sketches, not an implementation. `effect-frame/*` is a placeholder module path. `View`, `Actor`, `Behavior`, `Route`, and `MailboxStore` are proposed interfaces. Their code has not passed a type check. Domain schemas and small selectors are omitted where they do not affect the interface.

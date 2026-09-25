@@ -1,5 +1,9 @@
 # Blog: prerender, typed links, one client island (#38)
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 Blog is the example that builds its pages before anyone asks for them. It
 builds the Blog section of #25 §2 on the prerender design of #23
 (`prerender.md`). Each acceptance row there, and each #23 row, has a test

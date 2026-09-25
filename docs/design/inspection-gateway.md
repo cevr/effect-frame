@@ -1,5 +1,9 @@
 # Live inspection gateway
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 Status: public boundary for #58. The browser half ships as the
 `effect-frame/inspection` subpath of `effect-frame` (minor Changeset). The
 gateway and the reader ship as the `effect-frame` executable of the new

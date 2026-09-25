@@ -1,5 +1,9 @@
 # Declared route data and the rendering modes
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 This note records how #36 finishes the package half of #18: declared route
 data on the server, the rendering-mode constructors, and the server
 document the router renders. It builds on the nested transition

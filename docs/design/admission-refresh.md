@@ -1,5 +1,9 @@
 # Command admission and query refresh
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 An actor `send` acknowledges mailbox admission before behavior application can
 finish. When its receipt has no committed revision, the host returns an empty
 refresh list. Dependent query entries therefore remain ready and stale until

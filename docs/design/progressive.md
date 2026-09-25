@@ -1,5 +1,9 @@
 # Progressive layer: charting baseline
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 Date: 2026-09-18. This document records the decisions settled while charting the second Wayfinder map. Each row names the principle that decided it, when one did. Principles live in `~/Developer/personal/dotfiles/principles/`. Tickets on the map refine these rows; they do not reopen them.
 
 ## Destination

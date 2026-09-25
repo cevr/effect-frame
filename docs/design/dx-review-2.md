@@ -1,5 +1,9 @@
 # DX review 2: effect-frame against Solid, React, Octane, SvelteKit remote functions, and TanStack Router
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 Goal restated: an actor model, declarative, and explicit. Every dependency is a value the reader can see. Implicit tracking won when humans wrote the code. Explicit models are better for agents and for review.
 
 This review sorts the gaps into three bands. Band A is designed but not built. Band B is not in the design and matters. Band C is small.

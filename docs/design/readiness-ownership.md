@@ -1,5 +1,9 @@
 # Readiness ownership boundary
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 `Loading` and `Errored` now retain the content producer while they present a
 fallback. The immediate children Effect still runs once and provides the real
 readiness service. The runtime starts the content tree in its own Solid owner

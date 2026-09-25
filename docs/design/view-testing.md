@@ -1,5 +1,9 @@
 # Scoped view testing
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 `ViewTest.make` mounts a view through the production `Host` and `mount`
 runtime. It returns the setup value, mounted root, two wait helpers, and an
 idempotent close operation.

@@ -1,5 +1,9 @@
 # Public route surface
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 This note records the public nested-route surface for issue #55 and the
 layout part of #36. It promotes the private route slices 2, 3, and 4
 (`nested-transition.md`, `route-checks.md`, `route-pending.md`) to one

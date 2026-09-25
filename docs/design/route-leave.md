@@ -1,5 +1,9 @@
 # Route leave checks and browser commit (private proof)
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 This note records route execution slice 5: scoped leave checks, the `Stayed`
 receipt, and a browser `Location` that lets the router answer a Back or
 Forward before it commits. All of it is private. `src/router/leave.ts`,

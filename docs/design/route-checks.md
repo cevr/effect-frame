@@ -1,5 +1,9 @@
 # Route checks and errors
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 This note records route execution slice 3: typed route targets, `before`
 checks, redirect traversal, navigation receipts, and typed route failures.
 The slice was private when it landed. Targets, `before`, `redirect`,

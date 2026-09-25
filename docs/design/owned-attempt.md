@@ -1,5 +1,9 @@
 # Owned attempt
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 This note records the first route-boundary slice: `View.attempt` and the
 proofs of its lifetime. The helper was proved privately first, then exported
 as `View.attempt` from `effect-frame/view`. No route constructor or route

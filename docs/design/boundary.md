@@ -1,5 +1,9 @@
 # The server/client boundary
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 Date: 2026-09-22. This document is the rule text for the file convention that
 separates server code from client code, and the build rule that enforces it.
 It refines the `Server/client boundary` row of `docs/design/progressive.md`

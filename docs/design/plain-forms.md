@@ -1,5 +1,9 @@
 # Plain forms and generated fields
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 This note records how #21 (plain-form command submission without
 JavaScript) and #32 (message values that no form field carries) are built.
 It lists the decisions that the tickets left to the build and the places

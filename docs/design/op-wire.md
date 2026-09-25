@@ -1,5 +1,9 @@
 # The op wire
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 This note records how #87 builds the server-driven op wire that #15
 decided, and reconnect over it as #27 decided. It lists the decisions that
 the tickets left to the build, and the places where the build differs from

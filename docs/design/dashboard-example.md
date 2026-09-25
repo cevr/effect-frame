@@ -1,5 +1,9 @@
 # Dashboard: many queries, one live stream, single flight at width (#40)
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 Dashboard is the example that runs many queries under one live stream and
 proves that a command's cost is exact at width. It builds the Dashboard
 section of #25 §4. Each acceptance row under "Dashboard — many queries, one

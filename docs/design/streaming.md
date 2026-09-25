@@ -1,5 +1,9 @@
 # Streamed documents
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 This note records how #22 (streaming SSR, serialized pending queries, and
 hydration order) is built. It lists the decisions that the ticket left to
 the build and the places where the build differs from the ticket text. The

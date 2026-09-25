@@ -1,5 +1,9 @@
 # Delivery: packages, loops, and migration
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 Date: 2026-09-18. This document closes the four "Not yet specified" items of the
 [map](https://github.com/cevr/effect-frame/issues/1) that are not the end-to-end
 example: the build and development loop, the state and protocol migration

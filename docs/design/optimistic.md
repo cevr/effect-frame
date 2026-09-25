@@ -1,5 +1,9 @@
 # Optimistic sends
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 This note records unit 3 of [#19](https://github.com/cevr/effect-frame/issues/19):
 provisional revisions on a remote reference. It follows the selective-receipt
 rule that [#67](https://github.com/cevr/effect-frame/issues/67) accepted.

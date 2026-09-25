@@ -1,5 +1,9 @@
 # Route pending and lazy views
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 This note records route execution slice 4: timed route setup presentation
 and lazy views on the same transition owner as slices 2 and 3. The slice was
 private when it landed. `Route.Pending` and `View.lazy` are now public (see

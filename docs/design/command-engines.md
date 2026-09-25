@@ -1,5 +1,9 @@
 # Command engines and handles
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 ## Engines (unit 1)
 
 `Actor.spawn` opens the private local engine. It owns one behavior turn, one

@@ -1,5 +1,9 @@
 # Authorization and revocation
 
+> Decision record: it explains a choice as of its day, and its code may be
+> out of date. The reference is [the package README](../../packages/effect-frame/README.md)
+> and the JSDoc.
+
 Date: 2026-09-23. This file records what ticket #85 built from the decided
 designs of [#20](https://github.com/cevr/effect-frame/issues/20) (one
 required policy model for actors and queries) and

@@ -39,6 +39,29 @@ import {
 } from "./streaming-fixture.js";
 
 /**
+ * Read a document as its chunks arrive. `until` pulls chunks until `done`
+ * holds of the text so far and returns that text, so a proof releases a
+ * query only once it has seen the chunk it waits on, not after a sleep.
+ */
+const readerOf = <E,>(stream: Stream.Stream<string, E>) =>
+  Effect.map(Stream.toPull(stream), (pull) => {
+    let html = "";
+    return {
+      until: (done: (text: string) => boolean) =>
+        Effect.gen(function* () {
+          while (!done(html)) {
+            html += (yield* Effect.orDie(pull)).join("");
+          }
+          return html;
+        }),
+    };
+  });
+
+const hasShell = (html: string): boolean => html.includes(bootstrap);
+
+const hasEnded = (html: string): boolean => html.includes("</html>");
+
+/**
  * Streamed documents (#22). The server writes the shell, a placeholder per
  * query, then a patch per query as it settles, then `Closed`. The client
  * seeds its cache from the records and hydrates. Each proof below names the
@@ -175,14 +198,13 @@ describe("a streamed document, record order", () => {
       // `a` settles while the shell renders; `b` and `c` settle after it.
       const control = makeControl({ a: "Alpha", b: "Beta", c: "Gamma" }, ["b", "c"]);
       const server = yield* sideOf(control);
-      const chunks = yield* Effect.forkChild(
-        collect(streamOf(server, ["a", "b", "c"], noLimit, ["a"])),
-      );
-      yield* Effect.sleep("20 millis");
+      const response = yield* readerOf(streamOf(server, ["a", "b", "c"], noLimit, ["a"]));
+      // The shell is read while `b` and `c` are held, so both are patched later.
+      yield* response.until(hasShell);
       yield* release(control, "c");
-      yield* Effect.sleep("20 millis");
+      yield* response.until((text) => positionOf(text, "Patch", idOf("c")) >= 0);
       yield* release(control, "b");
-      const html = (yield* Fiber.join(chunks)).join("");
+      const html = yield* response.until(hasEnded);
 
       for (const id of ["a", "b", "c"]) {
         const placeholder = positionOf(html, "Placeholder", idOf(id));
@@ -267,10 +289,10 @@ describe("a streamed document, on the client", () => {
         const heldServer = yield* sideOf(serverControl);
         // `a` is held past the shell, so the shell draws its fallback; its
         // patch is in the document before the client reads it.
-        const chunks = yield* Effect.forkChild(collect(streamOf(heldServer, ["a"])));
-        yield* Effect.sleep("20 millis");
+        const response = yield* readerOf(streamOf(heldServer, ["a"]));
+        yield* response.until(hasShell);
         yield* release(serverControl, "a");
-        const html = (yield* Fiber.join(chunks)).join("");
+        const html = yield* response.until(hasEnded);
         expect(html).toContain('<p id="pending-a">loading a</p>');
 
         const clientControl = makeControl({});
@@ -424,14 +446,12 @@ describe("a streamed document with nested boundaries", () => {
     Effect.gen(function* () {
       const serverControl = makeControl({ outer: "Outer", inner: "Inner" }, ["inner"]);
       const server = yield* sideOf(serverControl);
-      const chunks = yield* Effect.forkChild(
-        collect(
-          Html.renderToStream(Nested, {}, frame, noLimit).pipe(Stream.provideContext(server)),
-        ),
+      const response = yield* readerOf(
+        Html.renderToStream(Nested, {}, frame, noLimit).pipe(Stream.provideContext(server)),
       );
-      yield* Effect.sleep("20 millis");
+      yield* response.until(hasShell);
       yield* release(serverControl, "inner");
-      const html = (yield* Fiber.join(chunks)).join("");
+      const html = yield* response.until(hasEnded);
       // Each boundary has its own marks: the inner one drew its fallback.
       expect(html).toContain(
         '<!--frame-boundary:fallback--><p id="pending-inner">inner</p><!--/frame-boundary-->',
@@ -465,12 +485,12 @@ describe("a streamed document that ends early", () => {
         const serverControl = makeControl({ a: "Alpha" }, ["a"]);
         const server = yield* sideOf(serverControl);
         const stop = yield* Deferred.make<void>();
-        const chunks = yield* Effect.forkChild(
-          collect(streamOf(server, ["a"], { closeWhen: Deferred.await(stop) })),
+        const response = yield* readerOf(
+          streamOf(server, ["a"], { closeWhen: Deferred.await(stop) }),
         );
-        yield* Effect.sleep("20 millis");
+        yield* response.until(hasShell);
         yield* Deferred.succeed(stop, void 0);
-        const html = (yield* Fiber.join(chunks)).join("");
+        const html = yield* response.until(hasEnded);
         expect(recordsIn(html).at(-1)).toEqual({ _tag: "Closed", patched: [] });
 
         const clientControl = makeControl({ a: "Alpha, read again" }, ["a"]);

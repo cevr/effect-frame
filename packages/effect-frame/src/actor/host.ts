@@ -18,11 +18,11 @@ import { ContractMismatch, UnknownContract } from "./vocabulary.js";
 export interface HostOptions<R> {
   readonly implementations: ReadonlyArray<AnyImplementation<R>>;
   /**
-   * The mailbox store for one address. Omitted, every actor gets a fresh
-   * in-memory store: right for a host that serves queries alone or for a
-   * test, and a host whose actors must survive a restart names its store.
+   * The mailbox store for one address. Required: a host whose actors must
+   * survive a restart names its durable store, and a test or a host that
+   * keeps nothing across a restart names `ActorHost.memoryStore`.
    */
-  readonly store?: (address: Address) => LayerType.Layer<MailboxStore>;
+  readonly store: (address: Address) => LayerType.Layer<MailboxStore>;
   /**
    * The queries this host serves. They are built here and not in a
    * layer beside this one, because a query handler reads actors through
@@ -106,7 +106,7 @@ const build = <R>(
       actors.resolved.map((resolved) => [resolved.entry.contract.name, resolved]),
     );
     const instances = new Map<string, HostedInstance>();
-    const store = options.store ?? (() => MailboxStore.layerMemory);
+    const store = options.store;
 
     const find = (
       address: Address,
@@ -250,6 +250,22 @@ const build = <R>(
   });
 
 /**
+ * A fresh in-memory mailbox store for each address. Nothing it holds
+ * survives the process: pass it as `store` for a test, or for a host whose
+ * actors keep nothing across a restart.
+ *
+ * @example
+ * ```ts
+ * const host = ActorHost.layer({
+ *   implementations: [CounterLive],
+ *   store: ActorHost.memoryStore,
+ * }).pipe(Layer.provide(policies));
+ * ```
+ */
+export const memoryStore = (_address: Address): LayerType.Layer<MailboxStore> =>
+  MailboxStore.layerMemory;
+
+/**
  * Hosts implementations in this process and serves them as the transport.
  * The same layer works for a server and for a test that keeps the client
  * and the server in one runtime.
@@ -264,9 +280,3 @@ export const layer = <R>(
       ),
     ),
   );
-
-export const layerMemory = <R>(
-  implementations: ReadonlyArray<AnyImplementation<R>>,
-  queries?: ReadonlyArray<AnyQueryImplementation<R>>,
-): LayerType.Layer<ActorTransport | Recovery, PolicyNamesMissing, R | Policies> =>
-  layer({ implementations, queries });

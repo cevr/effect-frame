@@ -71,7 +71,10 @@ const id = Schema.decodeSync(CommandId);
 const add = (amount: number): CounterMessage => ({ _tag: "Add", amount });
 const alice = { tenant: "acme", id: "alice" };
 
-const host = ActorHost.layerMemory([CounterLive, SecretLive]);
+const host = ActorHost.layer({
+  implementations: [CounterLive, SecretLive],
+  store: ActorHost.memoryStore,
+});
 /** These rows are not about authorization: every caller may use a counter, by name. */
 const openTable: PolicyTable = { counter: Policy.allowAll };
 const withHost = it.scoped.layer(Layer.provide(host, Layer.succeed(Policies, openTable)));

@@ -1,6 +1,6 @@
 import type { Layer as LayerType } from "effect";
 import type { AnyImplementation } from "../implement.js";
-import { make as makeHost } from "../host.js";
+import { make as makeHost, memoryStore } from "../host.js";
 import type { Policies, PolicyNamesMissing } from "../policy.js";
 import type { AnyQueryImplementation } from "../query-host.js";
 import { QueryCache } from "../query-client.js";
@@ -25,5 +25,6 @@ export const layer = <R>(
     makeHost({
       implementations: options.implementations ?? [],
       queries: options.queries,
+      store: memoryStore,
     }),
   );

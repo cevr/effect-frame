@@ -44,7 +44,10 @@ const ledgerBehavior = Behavior.reducer<Snapshot, Message>({
 });
 
 const store = Layer.build(
-  ActorHost.layerMemory([implementTransparent(Ledger, ledgerBehavior)]).pipe(
+  ActorHost.layer({
+    implementations: [implementTransparent(Ledger, ledgerBehavior)],
+    store: ActorHost.memoryStore,
+  }).pipe(
     Layer.provide(
       Layer.succeed(
         Policies,

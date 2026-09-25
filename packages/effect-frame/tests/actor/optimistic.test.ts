@@ -98,9 +98,10 @@ const pass = (held: Option.Option<Gate>) =>
 const policies = { public: Policy.allowAll };
 
 const heldWire = Effect.fn("OptimisticTest.heldWire")(function* () {
-  const real = yield* ActorHost.make({ implementations: [ListLive] }).pipe(
-    Effect.provideService(Policies, policies),
-  );
+  const real = yield* ActorHost.make({
+    implementations: [ListLive],
+    store: ActorHost.memoryStore,
+  }).pipe(Effect.provideService(Policies, policies));
   const sendGates = new Map<string, Gate>();
   const callGates = new Map<string, Gate>();
   const refused = new Set<string>();
@@ -621,9 +622,10 @@ describe("a machine behavior (#19)", () => {
       expect(Predicate.hasProperty(counterBehavior, "predict")).toBe(false);
       expect(Predicate.hasProperty(predicting, "predict")).toBe(true);
       expect(reducerPredicts).toBe(true);
-      const real = yield* ActorHost.make({ implementations: [CounterLive] }).pipe(
-        Effect.provideService(Policies, policies),
-      );
+      const real = yield* ActorHost.make({
+        implementations: [CounterLive],
+        store: ActorHost.memoryStore,
+      }).pipe(Effect.provideService(Policies, policies));
       const held = yield* gate;
       const heldCall = yield* gate;
       const transport: TransportService = {

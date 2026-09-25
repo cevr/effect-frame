@@ -71,9 +71,10 @@ describe("a required policy table", () => {
   it.effect("a host whose table lacks a named policy fails to build", () =>
     Effect.gen(function* () {
       const exit = yield* build(
-        ActorHost.layerMemory([implementTransparent(Guarded, counting)]).pipe(
-          Layer.provide(withTable({})),
-        ),
+        ActorHost.layer({
+          implementations: [implementTransparent(Guarded, counting)],
+          store: ActorHost.memoryStore,
+        }).pipe(Layer.provide(withTable({}))),
       );
       expect(Exit.isFailure(exit)).toBe(true);
       expect(exit.pipe(missingOf)).toEqual([
@@ -85,10 +86,14 @@ describe("a required policy table", () => {
   it.effect("the failure names every missing policy, not the first", () =>
     Effect.gen(function* () {
       const exit = yield* build(
-        ActorHost.layerMemory(
-          [implementTransparent(Guarded, counting), implementTransparent(Audited, counting)],
-          [TotalsLive],
-        ).pipe(Layer.provide(withTable({ unrelated: Policy.allowAll }))),
+        ActorHost.layer({
+          implementations: [
+            implementTransparent(Guarded, counting),
+            implementTransparent(Audited, counting),
+          ],
+          queries: [TotalsLive],
+          store: ActorHost.memoryStore,
+        }).pipe(Layer.provide(withTable({ unrelated: Policy.allowAll }))),
       );
       expect(exit.pipe(missingOf)).toEqual([
         { subject: "actor", name: "Guarded", policy: "missing" },
@@ -104,7 +109,9 @@ describe("a required policy table", () => {
 
       // No table entry: `public` is a name like any other, not a built-in.
       const refused = yield* build(
-        ActorHost.layerMemory([OpenLive]).pipe(Layer.provide(withTable({}))),
+        ActorHost.layer({ implementations: [OpenLive], store: ActorHost.memoryStore }).pipe(
+          Layer.provide(withTable({})),
+        ),
       );
       expect(refused.pipe(missingOf)).toEqual([
         { subject: "actor", name: "Open", policy: "public" },
@@ -113,9 +120,10 @@ describe("a required policy table", () => {
       // Registered by name, it serves every caller.
       const served = yield* Effect.scoped(
         Effect.gen(function* () {
-          const host = yield* ActorHost.make({ implementations: [OpenLive] }).pipe(
-            Effect.provideService(Policies, { public: Policy.allowAll }),
-          );
+          const host = yield* ActorHost.make({
+            implementations: [OpenLive],
+            store: ActorHost.memoryStore,
+          }).pipe(Effect.provideService(Policies, { public: Policy.allowAll }));
           const counter = yield* ref(Open, "anyone").pipe(
             Effect.provideService(ActorTransport, host),
           );

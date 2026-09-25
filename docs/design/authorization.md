@@ -57,13 +57,13 @@ from those designs, and why.
 
 ### Validation at construction (#20 §3)
 
-- `ActorHost.make`, `ActorHost.layer`, and `ActorHost.layerMemory` read
+- `ActorHost.make` and `ActorHost.layer` read
   `Policies` before they build anything. When the table lacks any declared
   name, they fail with `PolicyNamesMissing`, which lists every miss
   (actor or query, declaring name, policy name).
-- `PolicyMissing` stays in the query wire vocabulary. It is unreachable
-  through `ActorHost.layer`. It is the refusal of a host whose table was
-  assembled another way.
+- `PolicyMissing` stays in the query wire vocabulary, so the wire does not
+  change. No host produces it: the host resolves every declared name to its
+  rule when it builds, and a check reads the resolved rule.
 
 ### The principal (#20 §1)
 

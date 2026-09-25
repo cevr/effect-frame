@@ -83,11 +83,17 @@ const concurrentBehavior: Behavior<number, Add> = {
 const Hosted = implementTransparent(Counter, hostedBehavior);
 const Concurrent = implementTransparent(Counter, concurrentBehavior);
 const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }));
-const hostedLayer = ActorHost.layerMemory([Hosted]).pipe(
+const hostedLayer = ActorHost.layer({
+  implementations: [Hosted],
+  store: ActorHost.memoryStore,
+}).pipe(
   Layer.provide(Layer.succeed(HostValue, HostValue.of({ amount: 10 }))),
   Layer.provide(policies),
 );
-const concurrentLayer = ActorHost.layerMemory([Concurrent]).pipe(Layer.provide(policies));
+const concurrentLayer = ActorHost.layer({
+  implementations: [Concurrent],
+  store: ActorHost.memoryStore,
+}).pipe(Layer.provide(policies));
 const id = Schema.decodeSync(CommandId);
 const localSpawnEffect = spawn(localBehavior);
 const localSpawnRequirements: Equals<

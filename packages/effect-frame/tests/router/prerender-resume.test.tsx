@@ -190,7 +190,10 @@ const policies = Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }
 
 /** A fresh actor store: a new host with nothing committed. */
 const freshStore = Layer.build(
-  ActorHost.layerMemory([NoteLive]).pipe(Layer.provide(policies), Layer.orDie),
+  ActorHost.layer({ implementations: [NoteLive], store: ActorHost.memoryStore }).pipe(
+    Layer.provide(policies),
+    Layer.orDie,
+  ),
 );
 
 const commandId = Schema.decodeSync(CommandId);

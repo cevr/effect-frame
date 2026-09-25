@@ -89,7 +89,12 @@ const serveBuilt = async (): Promise<Served> => {
   const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
     Effect.runPromise(Scope.provide(effect, scope));
   const store: Context.Context<ActorTransport> = await run(
-    Layer.build(ActorHost.layerMemory([NoteLive]).pipe(Layer.provide(policies), Layer.orDie)),
+    Layer.build(
+      ActorHost.layer({ implementations: [NoteLive], store: ActorHost.memoryStore }).pipe(
+        Layer.provide(policies),
+        Layer.orDie,
+      ),
+    ),
   );
   await run(Effect.provideContext(add("before-build"), store));
   const handler = await run(

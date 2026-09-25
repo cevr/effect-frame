@@ -346,6 +346,7 @@ export const serveHost = (makePrincipal: MakePrincipal) =>
     const host = yield* ActorHost.make({
       implementations: [sessionLive(sessionsOpened), LedgerLive],
       queries: [LedgerCountLive],
+      store: ActorHost.memoryStore,
     }).pipe(Effect.provideService(Policies, policies));
     const principal = yield* makePrincipal(follows).pipe(
       Effect.provideService(ActorTransport, host),

@@ -103,14 +103,26 @@ const testLayerWithApplicationRequirement = QueryTest.layer({
   queries: [TestLayerQuery],
 }).pipe(Layer.provide(policies));
 
-const host = ActorHost.layerMemory([ProbeLive], [SingleLive, BatchedLive, ActorReadingLive]).pipe(
+const host = ActorHost.layer({
+  implementations: [ProbeLive],
+  queries: [SingleLive, BatchedLive, ActorReadingLive],
+  store: ActorHost.memoryStore,
+}).pipe(
   Layer.provide(Layer.succeed(ApplicationValue, ApplicationValue.of({ value: 40 }))),
   Layer.provide(policies),
 );
 
-const hostWithoutApplicationValue = ActorHost.layerMemory([], [SingleLive]).pipe(
-  Layer.provide(policies),
-);
+const hostWithoutApplicationValue = ActorHost.layer({
+  implementations: [],
+  queries: [SingleLive],
+  store: ActorHost.memoryStore,
+}).pipe(Layer.provide(policies));
+
+// A host names its mailbox store: there is no in-memory default to lose
+// durability to.
+// @ts-expect-error `store` is required
+const hostWithoutStore = ActorHost.layer({ implementations: [ProbeLive] });
+void hostWithoutStore;
 type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 

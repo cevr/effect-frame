@@ -22,7 +22,7 @@ export const actors = [OrdersLive, AlertsLive, MemoLive];
 export const hostWith = (
   served: ReadonlyArray<AnyQueryImplementation<never>>,
 ): Layer.Layer<ActorTransport> =>
-  ActorHost.layerMemory(actors, served).pipe(
+  ActorHost.layer({ implementations: actors, queries: served, store: ActorHost.memoryStore }).pipe(
     Layer.provide(policies),
     // Every name the contracts and the queries declare is in the table; a miss is a bug here.
     Layer.orDie,

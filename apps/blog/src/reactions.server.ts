@@ -18,10 +18,11 @@ import { DraftLive, PostBodyLive, PostIndexLive, fromDirectory } from "./posts.s
 export const ReactionsLive = implementTransparent(Reactions, reactionsBehavior);
 
 /** The actor and the queries in this process, over in-memory mailboxes. */
-export const host: Layer.Layer<ActorTransport, never, PostSource> = ActorHost.layerMemory(
-  [ReactionsLive],
-  [PostIndexLive, PostBodyLive, DraftLive],
-).pipe(
+export const host: Layer.Layer<ActorTransport, never, PostSource> = ActorHost.layer({
+  implementations: [ReactionsLive],
+  queries: [PostIndexLive, PostBodyLive, DraftLive],
+  store: ActorHost.memoryStore,
+}).pipe(
   Layer.provide(policies),
   // Every name the contract and the queries declare is in the table; a miss is a bug here.
   Layer.orDie,

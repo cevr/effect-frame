@@ -94,7 +94,7 @@ const policy = (settings: Partial<CommandPolicySettings>): CommandPolicySettings
 
 const serve = Effect.gen(function* () {
   const app = HttpServer.toWebHandler(
-    ActorHost.layerMemory([CounterLive]).pipe(
+    ActorHost.layer({ implementations: [CounterLive], store: ActorHost.memoryStore }).pipe(
       Layer.provide(Layer.succeed(Policies, Policies.of({ public: Policy.allowAll }))),
     ),
     { principal: HttpServer.anonymous },

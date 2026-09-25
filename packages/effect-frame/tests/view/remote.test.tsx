@@ -222,7 +222,11 @@ const TitledByNumber = (props: PageProps) =>
     return <div id="titled" title={title} />;
   });
 
-const withHost = it.scoped.layer(ActorHost.layerMemory([NotesLive]).pipe(Layer.provide(policies)));
+const withHost = it.scoped.layer(
+  ActorHost.layer({ implementations: [NotesLive], store: ActorHost.memoryStore }).pipe(
+    Layer.provide(policies),
+  ),
+);
 
 // ---------------------------------------------------------------------------
 // Harness

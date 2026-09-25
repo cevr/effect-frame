@@ -76,7 +76,7 @@ const ClockedLive = implementTransparent(Clocked, {
 const policies = { public: Policy.allowAll };
 
 const host = Effect.provideServiceEffect(
-  ActorHost.make({ implementations: [ClockedLive] }),
+  ActorHost.make({ implementations: [ClockedLive], store: ActorHost.memoryStore }),
   Ticks,
   Queue.unbounded<number>(),
 ).pipe(Effect.provideService(Policies, policies));
@@ -140,7 +140,7 @@ describe("the change stream (#29)", () => {
     Effect.gen(function* () {
       const ticks = yield* Queue.unbounded<number>();
       const transport = yield* Effect.provideService(
-        ActorHost.make({ implementations: [ClockedLive] }),
+        ActorHost.make({ implementations: [ClockedLive], store: ActorHost.memoryStore }),
         Ticks,
         ticks,
       ).pipe(Effect.provideService(Policies, policies));

@@ -645,7 +645,9 @@ const tenantMember = Policy.of(
 // Allow-all exists only by name.
 const policies = Layer.succeed(Policies, Policies.of({ tenantMember, public: Policy.allowAll }));
 
-const host = ActorHost.layer({ implementations, queries }).pipe(Layer.provide(policies));
+const host = ActorHost.layer({ implementations, queries, store: ActorHost.memoryStore }).pipe(
+  Layer.provide(policies),
+);
 
 // The principal is derived once per request, and followed on a connection.
 // One subscription per session, shared by every connection on it.

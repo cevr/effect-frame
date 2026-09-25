@@ -16,10 +16,11 @@ import { ListCountsLive, ListIndexLive } from "./queries.server.js";
 export const NotesLive = implementTransparent(Notes, notesBehavior);
 
 /** The actors and queries run in this process, over in-memory mailboxes. */
-export const inProcess: Layer.Layer<ActorTransport> = ActorHost.layerMemory(
-  [NotesLive],
-  [ListIndexLive, ListCountsLive],
-).pipe(
+export const inProcess: Layer.Layer<ActorTransport> = ActorHost.layer({
+  implementations: [NotesLive],
+  queries: [ListIndexLive, ListCountsLive],
+  store: ActorHost.memoryStore,
+}).pipe(
   Layer.provide(policies),
   // Every name the contract and the queries declare is in the table; a miss is a bug here.
   Layer.orDie,

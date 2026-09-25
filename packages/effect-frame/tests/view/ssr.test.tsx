@@ -149,7 +149,11 @@ const hydrate = (main: HTMLElement, key: string, onClose: Effect.Effect<void> = 
     return { page, report };
   });
 
-const withHost = it.scoped.layer(ActorHost.layerMemory([NoteLive]).pipe(Layer.provide(policies)));
+const withHost = it.scoped.layer(
+  ActorHost.layer({ implementations: [NoteLive], store: ActorHost.memoryStore }).pipe(
+    Layer.provide(policies),
+  ),
+);
 
 describe("server render and hydration", () => {
   it.scoped("the server host never runs a behaviour", () =>

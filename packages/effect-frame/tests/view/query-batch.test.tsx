@@ -74,7 +74,11 @@ const RowLive = Query.batched(RowQuery, {
     }),
 });
 
-const hostLayer = ActorHost.layerMemory([], [RowLive]).pipe(Layer.provide(policies));
+const hostLayer = ActorHost.layer({
+  implementations: [],
+  queries: [RowLive],
+  store: ActorHost.memoryStore,
+}).pipe(Layer.provide(policies));
 
 const inProcess = Layer.unwrap(
   Effect.gen(function* () {

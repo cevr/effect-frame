@@ -365,9 +365,9 @@ const acme = { tenant: "acme" };
 // mutated. A second host would have opened a second set of instances.
 // ---------------------------------------------------------------------------
 
-const hostLayer = ActorHost.layerMemory(
-  [OrderBookLive, HeartbeatLive],
-  [
+const hostLayer = ActorHost.layer({
+  implementations: [OrderBookLive, HeartbeatLive],
+  queries: [
     RevenueLive,
     TopSkuLive,
     ExchangeRateLive,
@@ -377,7 +377,8 @@ const hostLayer = ActorHost.layerMemory(
     FunnelLive,
     PairLive,
   ],
-).pipe(Layer.provide(policies));
+  store: ActorHost.memoryStore,
+}).pipe(Layer.provide(policies));
 
 let batchRequests = 0;
 /** Actor reads over the wire: snapshot requests and change streams opened. */
@@ -762,9 +763,11 @@ describe("Query: the Dashboard shape", () => {
       // Refused before it serves anything: the host does not build (#20 §3).
       const refused = yield* Effect.flip(
         Effect.scoped(
-          ActorHost.make({ implementations: [], queries: [UnpolicedLive] }).pipe(
-            Effect.provideService(Policies, table),
-          ),
+          ActorHost.make({
+            implementations: [],
+            queries: [UnpolicedLive],
+            store: ActorHost.memoryStore,
+          }).pipe(Effect.provideService(Policies, table)),
         ),
       );
       expect(refused).toEqual(
@@ -1262,6 +1265,7 @@ describe("Query: one policy for actors and queries", () => {
       const host = yield* ActorHost.make({
         implementations: [OrderBookLive],
         queries: [RevenueLive],
+        store: ActorHost.memoryStore,
       }).pipe(Effect.provideService(Policies, { "tenant-member": memberOfTenant }));
       const order = yield* Effect.orDie(
         Schema.encodeEffect(OrderBook.message)({ _tag: "PlaceOrder", sku: "bolt", amount: 3 }),

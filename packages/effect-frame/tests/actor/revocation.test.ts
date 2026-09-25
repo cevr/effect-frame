@@ -1051,9 +1051,10 @@ describe("an adapter keeps its derivation's requirements", () => {
   it.scopedLive("toWebHandler serves a derivation that reads sessions through its own host", () =>
     Effect.gen(function* () {
       const opened = yield* Ref.make(0);
-      const host = ActorHost.layer({ implementations: [sessionLive(opened), LedgerLive] }).pipe(
-        Layer.provide(Layer.succeed(Policies, Policies.of(policies))),
-      );
+      const host = ActorHost.layer({
+        implementations: [sessionLive(opened), LedgerLive],
+        store: ActorHost.memoryStore,
+      }).pipe(Layer.provide(Layer.succeed(Policies, Policies.of(policies))));
       // The derivation needs `ActorTransport`; the adapter supplies it from its own layer.
       const web = yield* Effect.acquireRelease(
         Effect.sync(() => HttpServer.toWebHandler(host, { principal: snapshotPrincipal })),

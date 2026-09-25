@@ -213,6 +213,7 @@ const remoteOwner = Effect.fn("CommandOwnerTest.remoteOwner")(function* (
 ) {
   const real = yield* ActorHost.make({
     implementations: [implementTransparent(Counter, behavior)],
+    store: ActorHost.memoryStore,
   }).pipe(Effect.provideService(Policies, policies));
   const wire = impaired(real);
   const owner = yield* Commands.make(remoteCommands(wire.transport, address, decode));
@@ -548,6 +549,7 @@ describe("private command owner", () => {
       const lifetime = yield* Scope.make();
       const host = yield* ActorHost.make({
         implementations: [implementTransparent(Counter, counter.behavior)],
+        store: ActorHost.memoryStore,
       }).pipe(Effect.provideService(Policies, allowGuarded));
       const wire = impaired(host);
       let interrupted = 0;
@@ -614,6 +616,7 @@ describe("private command owner", () => {
       const lifetime = yield* Scope.make();
       const host = yield* ActorHost.make({
         implementations: [implementTransparent(Counter, counter.behavior)],
+        store: ActorHost.memoryStore,
       }).pipe(Effect.provideService(Policies, allowGuarded));
       const wire = impaired(host);
       const owner = yield* Commands.make(remoteCommands(wire.transport, address, decode)).pipe(

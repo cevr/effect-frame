@@ -64,7 +64,10 @@ const heldHost = (gate: Deferred.Deferred<void>, sent: Ref.Ref<ReadonlyArray<str
   Layer.effect(
     ActorTransport,
     Effect.gen(function* () {
-      const real = yield* ActorHost.make({ implementations: [ShelfLive] });
+      const real = yield* ActorHost.make({
+        implementations: [ShelfLive],
+        store: ActorHost.memoryStore,
+      });
       const transport: TransportService = {
         ...real,
         send: (address, commandId, payload, active) =>

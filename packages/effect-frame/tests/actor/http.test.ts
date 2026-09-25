@@ -65,7 +65,10 @@ const acmeKeys: Policy = {
 
 const acmeOnly = Layer.succeed(Policies, Policies.of({ counter: acmeKeys }));
 
-const hostLayer = Layer.provide(ActorHost.layerMemory([CounterLive]), acmeOnly);
+const hostLayer = Layer.provide(
+  ActorHost.layer({ implementations: [CounterLive], store: ActorHost.memoryStore }),
+  acmeOnly,
+);
 
 /** Each in-process response's path and status, newest last. */
 const answered: Array<{ readonly path: string; readonly status: number }> = [];
@@ -297,7 +300,7 @@ describe("the principal over a real socket", () => {
     Effect.gen(function* () {
       const app = HttpServer.toWebHandler(
         Layer.provide(
-          ActorHost.layerMemory([CounterLive]),
+          ActorHost.layer({ implementations: [CounterLive], store: ActorHost.memoryStore }),
           Layer.succeed(Policies, Policies.of({ counter: tenantMember })),
         ),
         { principal: fromHeader },
